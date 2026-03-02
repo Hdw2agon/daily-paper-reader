@@ -1055,8 +1055,48 @@ window.SubscriptionsSmartQuery = (function () {
     `;
   };
 
+  const renderDraftInputField = (kind, idx, field, value, placeholder) => {
+    return `
+      <input
+        type="text"
+        class="dpr-inline-draft-input"
+        data-draft-input="1"
+        data-kind="${escapeHtml(kind)}"
+        data-index="${idx}"
+        data-field="${escapeHtml(field)}"
+        value="${escapeHtml(normalizeText(value || ''))}"
+        placeholder="${escapeHtml(placeholder || '')}"
+      />
+    `;
+  };
+
   const renderEditableSlot = (kind, idx, item, isChat) => {
     const meta = getEditableMeta(kind);
+    if (isChat) {
+      return `
+        <div class="dpr-cloud-item dpr-inline-slot dpr-inline-slot-chat">
+          <div class="dpr-inline-slot-fields">
+            ${renderDraftInputField(kind, idx, meta.primary, item[meta.primary], meta.primaryPlaceholder)}
+            ${renderDraftInputField(
+              kind,
+              idx,
+              meta.secondary,
+              item[meta.secondary],
+              meta.secondaryPlaceholder,
+            )}
+          </div>
+          <button
+            type="button"
+            class="dpr-inline-slot-add dpr-inline-slot-add-side"
+            data-action="append-draft-slot"
+            data-kind="${kind}"
+            data-index="${idx}"
+          >
+            +
+          </button>
+        </div>
+      `;
+    }
     const wrapperClass = isChat ? 'dpr-cloud-item dpr-inline-slot' : 'dpr-pick-card dpr-inline-slot';
     return `
       <div class="${wrapperClass}">
@@ -1459,13 +1499,17 @@ window.SubscriptionsSmartQuery = (function () {
     const kwSection = hasKeywordSection
       ? `<div class="dpr-chat-result-block">
            <div class="dpr-modal-group-title">关键词（用于召回）</div>
-           <div class="dpr-cloud-grid dpr-cloud-grid-keywords">${kwHtml}</div>
+           <div class="dpr-chat-slot-area ${hasKeywords ? 'has-candidates' : 'draft-only'}">
+             <div class="dpr-cloud-grid dpr-cloud-grid-keywords">${kwHtml}</div>
+           </div>
          </div>`
       : '';
     const intentSection = hasIntentSection
       ? `<div class="dpr-chat-result-block">
            <div class="dpr-modal-group-title">意图Query（用于意图召回与最终打分）</div>
-           <div class="dpr-cloud-grid dpr-cloud-grid-intent">${intentHtml}</div>
+           <div class="dpr-chat-slot-area ${hasIntentQueries ? 'has-candidates' : 'draft-only'}">
+             <div class="dpr-cloud-grid dpr-cloud-grid-intent">${intentHtml}</div>
+           </div>
          </div>`
       : '';
     const mixedHtml = `${kwSection}${hasKeywords && hasIntentQueries ? '<div class="dpr-chat-divider"></div>' : ''}${intentSection}`;
@@ -1799,6 +1843,17 @@ window.SubscriptionsSmartQuery = (function () {
     list[idx]._selected = selected;
   };
 
+  const handleModalInput = (e) => {
+    const target = e.target;
+    if (!target || !target.matches) return;
+    if (!target.matches('input[data-draft-input="1"]')) return;
+    if (!modalState) return;
+    const kind = target.getAttribute('data-kind') || '';
+    const idx = Number(target.getAttribute('data-index'));
+    const field = target.getAttribute('data-field') || '';
+    applyDraftSlotValue(kind, idx, field, target.value, modalState);
+  };
+
   const handleModalKeydown = (e) => {
     if (!e || e.target?.id !== 'dpr-chat-desc-input') return;
     if (e.key !== 'Enter') return;
@@ -1923,6 +1978,7 @@ window.SubscriptionsSmartQuery = (function () {
       modalPanel._boundClick = true;
       modalPanel.addEventListener('click', handleModalClick);
       modalPanel.addEventListener('change', handleModalChange);
+      modalPanel.addEventListener('input', handleModalInput);
       modalPanel.addEventListener('keydown', handleModalKeydown);
     }
   };

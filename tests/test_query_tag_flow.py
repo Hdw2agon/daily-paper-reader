@@ -67,13 +67,44 @@ class QueryTagFlowTest(unittest.TestCase):
             }
         }
         reqs = self.refine_mod.build_user_requirements(config, [])
-        self.assertEqual(len(reqs), 3)
+        self.assertEqual(len(reqs), 4)
         self.assertEqual(reqs[0]["tag"], "query:sr")
         self.assertTrue(reqs[1]["tag"].startswith("query:sr"))
         self.assertTrue(reqs[2]["tag"].startswith("query:sr"))
+        self.assertEqual(reqs[3]["tag"], "query:sr:composite")
         req_texts = [r["query"] for r in reqs]
         self.assertIn("symbolic regression with reinforcement learning", req_texts)
         self.assertIn("equation discovery for physical systems", req_texts)
+        self.assertIn("Papers central to", reqs[3]["query"])
+        self.assertEqual(reqs[3]["kind"], "composite")
+
+    def test_build_user_requirements_adds_profile_composite_requirement(self):
+        config = {
+            "subscriptions": {
+                "intent_profiles": [
+                    {
+                        "tag": "SCI",
+                        "description": "科学发现",
+                        "enabled": True,
+                        "keywords": [
+                            {"keyword": "model discovery", "query": "llm based model discovery", "enabled": True},
+                            {"keyword": "equation discovery", "query": "scientific equation discovery", "enabled": True},
+                        ],
+                        "intent_queries": [
+                            {"query": "scientific discovery via embodied actions", "enabled": True},
+                        ],
+                    }
+                ]
+            }
+        }
+
+        reqs = self.refine_mod.build_user_requirements(config, [])
+        composite = [item for item in reqs if item.get("kind") == "composite"]
+        self.assertEqual(len(composite), 1)
+        self.assertEqual(composite[0]["tag"], "query:sci:composite")
+        self.assertIn("llm based model discovery", composite[0]["query"].lower())
+        self.assertIn("scientific equation discovery", composite[0]["query"].lower())
+        self.assertIn("embodied actions", composite[0]["query"].lower())
 
     def test_build_scored_papers_fallback_match_tag(self):
         papers = [{"id": "p-1", "title": "t", "abstract": "a"}]

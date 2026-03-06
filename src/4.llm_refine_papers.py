@@ -8,7 +8,7 @@ import random
 import re
 import time
 from datetime import datetime, timezone
-from typing import Any, Dict, List
+from typing import Any, Callable, Dict, List
 
 from llm import BltClient
 from subscription_plan import build_pipeline_inputs
@@ -22,6 +22,7 @@ CONFIG_FILE = os.path.join(ROOT_DIR, "config.yaml")
 
 DEFAULT_FILTER_MODEL = os.getenv("BLT_FILTER_MODEL") or "gemini-3-flash-preview-nothinking"
 DEFAULT_FILTER_CONCURRENCY = 4
+MAX_FILTER_RETRIES = 3
 
 
 def log(message: str) -> None:
@@ -66,6 +67,38 @@ def load_config() -> Dict[str, Any]:
         return {}
 
 
+def _norm_text(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _as_bool(value: Any, default: bool = True) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    lowered = _norm_text(value).lower()
+    if lowered in {"0", "false", "no", "off"}:
+        return False
+    if lowered in {"1", "true", "yes", "on"}:
+        return True
+    return default
+
+
+def _unique_keep_order(items: List[str]) -> List[str]:
+    seen: set[str] = set()
+    output: List[str] = []
+    for item in items:
+        text = _norm_text(item)
+        if not text:
+            continue
+        key = text.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        output.append(text)
+    return output
+
+
 def unique_tagged(items: List[Dict[str, str]], tag_key: str = "tag") -> List[Dict[str, str]]:
     seen = set()
     result: List[Dict[str, str]] = []
@@ -101,6 +134,81 @@ def _normalize_query_tag(raw_tag: str, query_text: str, idx: int) -> str:
     return f"query:{_slug(query_text, fallback=f'q{idx}')}"
 
 
+def _collect_profile_composite_clauses(profile: Dict[str, Any]) -> List[str]:
+    clauses: List[str] = []
+
+    for item in profile.get("keywords") or []:
+        if isinstance(item, dict) and not _as_bool(item.get("enabled"), True):
+            continue
+        if isinstance(item, dict):
+            text = _norm_text(
+                item.get("query")
+                or item.get("keyword")
+                or item.get("text")
+                or item.get("expr")
+                or ""
+            )
+        else:
+            text = _norm_text(item)
+        if text:
+            clauses.append(text)
+
+    for item in profile.get("intent_queries") or []:
+        if isinstance(item, dict) and not _as_bool(item.get("enabled"), True):
+            continue
+        if isinstance(item, dict):
+            text = _norm_text(
+                item.get("query")
+                or item.get("text")
+                or item.get("keyword")
+                or item.get("expr")
+                or ""
+            )
+        else:
+            text = _norm_text(item)
+        if text:
+            clauses.append(text)
+
+    return _unique_keep_order(clauses)
+
+
+def _build_profile_composite_requirement(
+    profile: Dict[str, Any],
+    index: int,
+    seen_queries: set[str],
+) -> Dict[str, str] | None:
+    if not isinstance(profile, dict) or not _as_bool(profile.get("enabled"), True):
+        return None
+
+    clauses = _collect_profile_composite_clauses(profile)
+    if len(clauses) < 2:
+        return None
+
+    tag = _norm_text(profile.get("tag") or f"profile-{index + 1}")
+    description = _norm_text(profile.get("description") or tag)
+    focus_label = description or tag
+    composite_query = (
+        f"Papers central to {focus_label}, especially work that connects or combines: "
+        f"{'; '.join(clauses[:10])}."
+    )
+    lowered = composite_query.lower()
+    if lowered in seen_queries:
+        return None
+    seen_queries.add(lowered)
+
+    composite_tag = f"query:{_slug(tag, fallback=f'profile-{index + 1}')}:" "composite"
+    return {
+        "id": f"req-composite-{_slug(tag, fallback=f'profile-{index + 1}')}",
+        "query": composite_query,
+        "tag": composite_tag,
+        "kind": "composite",
+        "description_en": (
+            f"Find papers central to the combined {focus_label} theme. "
+            f"Consider these signals together: {'; '.join(clauses[:8])}"
+        ),
+    }
+
+
 def build_user_requirements(
     config: Dict[str, Any],
     fallback_queries: List[Dict[str, Any]],
@@ -132,9 +240,17 @@ def build_user_requirements(
                 "id": f"req-{len(requirements) + 1}",
                 "query": text,
                 "tag": tag,
+                "kind": "direct",
                 "description_en": f"Find papers relevant to this user requirement: {text}",
             }
         )
+
+    profiles = (((config or {}).get("subscriptions") or {}).get("intent_profiles") or [])
+    if isinstance(profiles, list):
+        for idx, profile in enumerate(profiles):
+            composite_req = _build_profile_composite_requirement(profile, idx, seen)
+            if composite_req:
+                requirements.append(composite_req)
 
     if not requirements:
         for q in fallback_queries:
@@ -158,6 +274,7 @@ def build_user_requirements(
                     "id": f"req-{len(requirements) + 1}",
                     "query": text,
                     "tag": tag,
+                    "kind": "fallback",
                     "description_en": f"Find papers relevant to this user requirement: {text}",
                 }
             )
@@ -190,6 +307,7 @@ def call_filter(
     docs: List[Dict[str, str]],
     debug_dir: str,
     debug_tag: str,
+    retry_note: str = "",
 ) -> List[Dict[str, Any]]:
     def strip_wrappers(text: str) -> str:
         cleaned = (text or "").strip()
@@ -343,8 +461,11 @@ def call_filter(
     for idx, req in enumerate(all_requirements, start=1):
         desc = (req.get("description_en") or req.get("query") or "").strip()
         req_tag = (req.get("tag") or "").strip()
+        req_kind = (req.get("kind") or "").strip()
         if desc:
-            if req_tag:
+            if req_tag and req_kind:
+                req_lines.append(f"{idx}. {desc} [tag={req_tag}; type={req_kind}]")
+            elif req_tag:
                 req_lines.append(f"{idx}. {desc} [tag={req_tag}]")
             else:
                 req_lines.append(f"{idx}. {desc}")
@@ -362,7 +483,10 @@ def call_filter(
         "2) Reject Literal Matching: Do NOT score high just because the same word appears.\n"
         "3) Reward Conceptual Equivalence: If wording differs but goals/methods are equivalent, score as high relevance.\n"
         "4) Reward Enabling Methods: If a paper provides a generally applicable method/tool that directly supports requirement tasks, do not under-score it.\n"
-        "5) Be strict only when mismatch is substantive (different task objective, incompatible setting, or no reusable method).\n\n"
+        "5) Be strict only when mismatch is substantive (different task objective, incompatible setting, or no reusable method).\n"
+        "6) Some requirements may be profile-level composite requirements built from multiple keywords. "
+        "Use them when a paper is clearly central to the overall theme but does not fit a narrower requirement cleanly.\n"
+        "7) Do not over-score generic LLM-for-science or infrastructure papers under a composite requirement unless they materially advance the core task.\n\n"
         "Papers:\n"
         f"{json.dumps(docs, ensure_ascii=False)}\n\n"
         "Output JSON format example:\n"
@@ -387,6 +511,8 @@ def call_filter(
         "If unrelated, use evidence_en=\"not relevant\", evidence_cn=\"不相关\", "
         "tldr_en=\"not relevant\", tldr_cn=\"不相关\", score 0, matched_requirement_index=0."
     )
+    if retry_note:
+        user_prompt += f"\n\nRetry correction note:\n{retry_note}"
 
     resp = client.chat(
         messages=[
@@ -423,10 +549,210 @@ def call_filter(
     return results
 
 
+def _coerce_score(value: Any) -> float:
+    try:
+        score = float(value)
+    except Exception:
+        score = 0.0
+    return max(0.0, min(10.0, score))
+
+
+def _coerce_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except Exception:
+        return default
+
+
+def _normalize_filter_result_item(item: Dict[str, Any]) -> Dict[str, Any]:
+    legacy = _norm_text(item.get("evidence"))
+    evidence_en = _norm_text(item.get("evidence_en") or legacy)
+    evidence_cn = _norm_text(item.get("evidence_cn") or legacy or evidence_en)
+    score = _coerce_score(item.get("score"))
+    tldr_en = _norm_text(item.get("tldr_en")) or ("not relevant" if score <= 0 else evidence_en)
+    tldr_cn = _norm_text(item.get("tldr_cn")) or ("不相关" if score <= 0 else (evidence_cn or tldr_en))
+    return {
+        "id": _norm_text(item.get("id")),
+        "matched_requirement_index": _coerce_int(item.get("matched_requirement_index"), 0),
+        "evidence_en": evidence_en,
+        "evidence_cn": evidence_cn,
+        "tldr_en": tldr_en,
+        "tldr_cn": tldr_cn,
+        "score": score,
+    }
+
+
+def validate_filter_results(
+    batch_docs: List[Dict[str, str]],
+    results: Any,
+) -> List[Dict[str, Any]]:
+    expected_ids = [_norm_text(doc.get("id")) for doc in batch_docs if _norm_text(doc.get("id"))]
+    if not expected_ids:
+        return []
+    if not isinstance(results, list):
+        raise ValueError("results must be a list")
+
+    expected_set = set(expected_ids)
+    normalized_by_id: Dict[str, Dict[str, Any]] = {}
+    problems: List[str] = []
+
+    for idx, item in enumerate(results, start=1):
+        if not isinstance(item, dict):
+            problems.append(f"item#{idx}: not an object")
+            continue
+        normalized = _normalize_filter_result_item(item)
+        pid = normalized["id"]
+        if not pid:
+            problems.append(f"item#{idx}: missing id")
+            continue
+        if pid not in expected_set:
+            problems.append(f"item#{idx}: unexpected id={pid}")
+            continue
+        if pid in normalized_by_id:
+            problems.append(f"item#{idx}: duplicate id={pid}")
+            continue
+        normalized_by_id[pid] = normalized
+
+    missing_ids = [pid for pid in expected_ids if pid not in normalized_by_id]
+    if missing_ids:
+        problems.append(f"missing ids={','.join(missing_ids)}")
+
+    if problems:
+        raise ValueError("; ".join(problems))
+
+    return [normalized_by_id[pid] for pid in expected_ids]
+
+
+def build_filter_retry_note(
+    batch_docs: List[Dict[str, str]],
+    attempt: int,
+    error: Exception | None,
+) -> str:
+    expected_ids = [_norm_text(doc.get("id")) for doc in batch_docs if _norm_text(doc.get("id"))]
+    previous_error = _norm_text(error) or "unknown validation error"
+    return (
+        f"Retry attempt {attempt}. The previous output was invalid: {previous_error}. "
+        f"You must return exactly {len(expected_ids)} results for these ids only: {', '.join(expected_ids)}. "
+        "Every id must appear once. Do not omit ids. Do not repeat ids. "
+        "Keep matched_requirement_index as an integer and score within 0-10."
+    )
+
+
+def recover_filter_results(
+    batch_docs: List[Dict[str, str]],
+    runner: Callable[[List[Dict[str, str]], int, str], List[Dict[str, Any]]],
+    max_attempts: int = MAX_FILTER_RETRIES,
+    debug_tag: str = "batch",
+) -> List[Dict[str, Any]]:
+    if not batch_docs:
+        return []
+
+    last_error: Exception | None = None
+    for attempt in range(1, max(1, max_attempts) + 1):
+        retry_note = build_filter_retry_note(batch_docs, attempt, last_error) if last_error else ""
+        try:
+            raw_results = runner(batch_docs, attempt, retry_note)
+            return validate_filter_results(batch_docs, raw_results)
+        except Exception as exc:
+            last_error = exc
+            log(f"[WARN] filter {debug_tag} attempt {attempt}/{max_attempts} invalid: {exc}")
+
+    if len(batch_docs) == 1:
+        raise ValueError(f"{debug_tag} failed after {max_attempts} attempts: {last_error}")
+
+    mid = max(1, len(batch_docs) // 2)
+    left_docs = batch_docs[:mid]
+    right_docs = batch_docs[mid:]
+    log(
+        f"[WARN] filter {debug_tag} split recovery: "
+        f"{len(left_docs)} + {len(right_docs)} docs"
+    )
+    return recover_filter_results(
+        left_docs,
+        runner,
+        max_attempts=max_attempts,
+        debug_tag=f"{debug_tag}_left",
+    ) + recover_filter_results(
+        right_docs,
+        runner,
+        max_attempts=max_attempts,
+        debug_tag=f"{debug_tag}_right",
+    )
+
+
 def _make_filter_client(api_key: str, model: str, max_output_tokens: int) -> BltClient:
     client = BltClient(api_key=api_key, model=model)
     client.kwargs.update({"temperature": 0.1, "max_tokens": max_output_tokens})
     return client
+
+
+def _make_filter_runner(
+    client: BltClient,
+    all_requirements: List[Dict[str, str]],
+    debug_dir: str,
+    base_tag: str,
+) -> Callable[[List[Dict[str, str]], int, str], List[Dict[str, Any]]]:
+    def _runner(
+        docs: List[Dict[str, str]],
+        attempt: int,
+        retry_note: str,
+    ) -> List[Dict[str, Any]]:
+        return call_filter(
+            client,
+            all_requirements=all_requirements,
+            docs=docs,
+            debug_dir=debug_dir,
+            debug_tag=f"{base_tag}_attempt_{attempt:02d}",
+            retry_note=retry_note,
+        )
+
+    return _runner
+
+
+def merge_filter_result(
+    merged: Dict[str, Dict[str, Any]],
+    item: Dict[str, Any],
+    requirement_by_index: Dict[int, Dict[str, str]],
+) -> None:
+    pid = _norm_text(item.get("id") or item.get("paper_id"))
+    if not pid:
+        return
+
+    score = _coerce_score(item.get("score"))
+    evidence_en = _norm_text(item.get("evidence_en"))
+    evidence_cn = _norm_text(item.get("evidence_cn"))
+    tldr_en = _norm_text(item.get("tldr_en"))
+    tldr_cn = _norm_text(item.get("tldr_cn"))
+    legacy = _norm_text(item.get("evidence"))
+    if not evidence_en:
+        evidence_en = legacy
+    if not evidence_cn:
+        evidence_cn = legacy or evidence_en
+    if not tldr_en:
+        tldr_en = "not relevant" if score <= 0 else evidence_en
+    if not tldr_cn:
+        tldr_cn = "不相关" if score <= 0 else (evidence_cn or tldr_en)
+
+    matched_idx = _coerce_int(item.get("matched_requirement_index"), 0)
+    matched_req = requirement_by_index.get(matched_idx) if matched_idx > 0 else None
+    matched_tag = _norm_text((matched_req or {}).get("tag"))
+    matched_id = _norm_text((matched_req or {}).get("id"))
+    matched_query = _norm_text((matched_req or {}).get("query"))
+
+    prev = merged.get(pid)
+    if (prev is None) or (score > float(prev.get("score", 0))):
+        merged[pid] = {
+            "paper_id": pid,
+            "score": score,
+            "evidence_en": evidence_en,
+            "evidence_cn": evidence_cn,
+            "canonical_evidence": evidence_cn or evidence_en or legacy,
+            "tldr_en": tldr_en,
+            "tldr_cn": tldr_cn,
+            "matched_requirement_id": matched_id,
+            "matched_query_tag": matched_tag,
+            "matched_query_text": matched_query,
+        }
 
 
 def _filter_batch(
@@ -439,14 +765,19 @@ def _filter_batch(
     debug_dir: str,
 ) -> tuple[int, List[Dict[str, str]], List[Dict[str, Any]]]:
     client = _make_filter_client(api_key, filter_model, max_output_tokens)
+    runner = _make_filter_runner(
+        client,
+        all_requirements=all_requirements,
+        debug_dir=debug_dir,
+        base_tag=f"batch_{batch_idx:03d}",
+    )
     return (
         batch_idx,
         batch,
-        call_filter(
-            client,
-            all_requirements=all_requirements,
-            docs=batch,
-            debug_dir=debug_dir,
+        recover_filter_results(
+            batch,
+            runner,
+            max_attempts=MAX_FILTER_RETRIES,
             debug_tag=f"batch_{batch_idx:03d}",
         ),
     )
@@ -539,6 +870,7 @@ def process_file(
     pending = {}
     max_workers = max(1, filter_concurrency)
     total_batches = len(batches)
+    failed_docs: List[Dict[str, str]] = []
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         for idx, batch in enumerate(batches, start=1):
             log(f"[INFO] filter batch {idx}/{total_batches} dispatch docs={len(batch)}")
@@ -558,55 +890,45 @@ def process_file(
                 _, batch_docs, results = future.result()
             except Exception as exc:
                 log(f"[WARN] filter batch {idx}/{total_batches} failed: {exc}")
+                failed_docs.extend(batch)
                 continue
             log(f"[INFO] filter batch {idx}/{total_batches} docs={len(batch_docs)} completed")
-            batch_ids = {str(d.get("id")) for d in batch_docs}
             for item in results:
-                pid = str(item.get("id", "")).strip()
-                if pid not in batch_ids:
-                    continue
-                try:
-                    score = float(item.get("score", 0))
-                except Exception:
-                    score = 0.0
-                # 新字段：中英双语 evidence（兼容旧字段 evidence）
-                evidence_en = str(item.get("evidence_en") or "").strip()
-                evidence_cn = str(item.get("evidence_cn") or "").strip()
-                tldr_en = str(item.get("tldr_en") or "").strip()
-                tldr_cn = str(item.get("tldr_cn") or "").strip()
-                legacy = str(item.get("evidence", "")).strip()
-                if not evidence_en:
-                    evidence_en = legacy
-                if not evidence_cn:
-                    evidence_cn = legacy or evidence_en
-                if not tldr_en:
-                    tldr_en = "not relevant" if score <= 0 else evidence_en
-                if not tldr_cn:
-                    tldr_cn = "不相关" if score <= 0 else (evidence_cn or tldr_en)
+                merge_filter_result(merged, item, requirement_by_index)
 
-                try:
-                    matched_idx = int(item.get("matched_requirement_index") or 0)
-                except Exception:
-                    matched_idx = 0
-                matched_req = requirement_by_index.get(matched_idx) if matched_idx > 0 else None
-                matched_tag = str((matched_req or {}).get("tag") or "").strip()
-                matched_id = str((matched_req or {}).get("id") or "").strip()
-                matched_query = str((matched_req or {}).get("query") or "").strip()
-
-                prev = merged.get(pid)
-                if (prev is None) or (score > float(prev.get("score", 0))):
-                    merged[pid] = {
-                        "paper_id": pid,
-                        "score": score,
-                        "evidence_en": evidence_en,
-                        "evidence_cn": evidence_cn,
-                        "canonical_evidence": evidence_cn or evidence_en or legacy,
-                        "tldr_en": tldr_en,
-                        "tldr_cn": tldr_cn,
-                        "matched_requirement_id": matched_id,
-                        "matched_query_tag": matched_tag,
-                        "matched_query_text": matched_query,
-                    }
+    missing_docs = [doc for doc in docs if _norm_text(doc.get("id")) not in merged]
+    if failed_docs or missing_docs:
+        recovery_map = {
+            _norm_text(doc.get("id")): doc
+            for doc in (failed_docs + missing_docs)
+            if _norm_text(doc.get("id"))
+        }
+        recovery_docs = list(recovery_map.values())
+        recovery_client = _make_filter_client(api_key, filter_model, max_output_tokens)
+        log(
+            f"[WARN] start missing-doc recovery: failed_batches_docs={len(failed_docs)} "
+            f"| missing_after_merge={len(missing_docs)} | recover_docs={len(recovery_docs)}"
+        )
+        for index, doc in enumerate(recovery_docs, start=1):
+            doc_id = _norm_text(doc.get("id")) or f"missing-{index}"
+            runner = _make_filter_runner(
+                recovery_client,
+                all_requirements=user_requirements,
+                debug_dir=debug_dir,
+                base_tag=f"recover_{_slug(doc_id, fallback=f'doc-{index}')}",
+            )
+            try:
+                recovered_results = recover_filter_results(
+                    [doc],
+                    runner,
+                    max_attempts=MAX_FILTER_RETRIES,
+                    debug_tag=f"recover_{doc_id}",
+                )
+            except Exception as exc:
+                log(f"[WARN] single-doc recovery failed for {doc_id}: {exc}")
+                continue
+            for item in recovered_results:
+                merge_filter_result(merged, item, requirement_by_index)
 
     if not merged:
         log("[WARN] no llm results returned.")

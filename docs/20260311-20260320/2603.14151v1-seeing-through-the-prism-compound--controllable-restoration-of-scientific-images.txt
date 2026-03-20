@@ -1,0 +1,687 @@
+Title: Seeing Through the PRISM: Compound & Controllable Restoration of Scientific Images
+
+URL Source: https://arxiv.org/pdf/2603.14151v1
+
+Published Time: Tue, 17 Mar 2026 03:22:52 GMT
+
+Number of Pages: 35
+
+Markdown Content:
+Published as a conference paper at ICLR 2026 
+
+# SEEING THROUGH THE PRISM: C OMPOUND &CONTROLLABLE RESTORATION OF SCIENTIFIC IMAGES 
+
+Rupa Kurinchi-Vendhan ∗
+
+, Pratyusha Sharma, Antonio Torralba, Sara Beery 
+
+Massachusetts Institute of Technology 
+
+## ABSTRACT 
+
+Scientific and environmental imagery often suffer from complex mixtures of noise related to the sensor and the environment. Existing restoration methods typically remove one degradation at a time, leading to cascading artifacts, overcorrection, or loss of meaningful signal. In scientific applications, restoration must be able to simultaneously handle compound degradations while allowing experts to selectively remove subsets of distortions without erasing important features. To address these challenges, we present PRISM (Precision Restoration with Interpretable 
+
+Separation of Mixtures). PRISM is a prompted conditional diffusion framework which combines compound-aware supervision over mixed degradations with a weighted contrastive disentanglement objective that aligns primitives and their mixtures in the latent space. This compositional geometry enables high-fidelity joint removal of overlapping distortions while also allowing flexible, targeted fixes through natural language prompts. Across microscopy, wildlife monitoring, remote sensing, and urban weather datasets, PRISM outperforms state-of-the-art baselines on complex compound degradations, including zero-shot mixtures not seen during training. Importantly, we show that selective restoration significantly improves downstream scientific accuracy in several domains over standard “black-box” restoration. These results establish PRISM as a generalizable and controllable framework for high-fidelity restoration in domains where scientific utility is a priority. Our code and dataset are available at this link .
+
+Figure 1: Expert-in-the-Loop Restoration with PRISM. PRISM enables robust compound restoration and zero-shot handling of unseen mixtures. It supports both automatic restoration and prompt-driven, selective correction for scientific analysis. 
+
+> ∗
+
+Corresponding author: rupak272@mit.edu 
+
+1
+
+> arXiv:2603.14151v1 [cs.CV] 14 Mar 2026
+
+Published as a conference paper at ICLR 2026 
+
+## 1 INTRODUCTION 
+
+Scientific and environmental imagery is rarely affected by a single degradation. Instead, images typically suffer from compounding effects that vary across datasets and collection settings: underwater images combine low light, scattering, and wavelength-dependent absorption effects (Akkaynak & Treibitz, 2018; Chiang & Chen, 2011), while satellite imagery suffers from overlapping sensor noise, haze, and cloud occlusions (King et al., 2013; Ahmad et al., 2019). Specialized single-distortion models (e.g., for dehazing or removing clouds) enable domain experts to preprocess noisy data before conducting analysis. These approaches are often carefully hand-crafted for specific datasets and distortion types, making them brittle when degradations occur unpredictably, especially in scientific settings where ground truth is unavailable and the underlying distortions are not known a priori. For example, camera trap data may be affected by combinations of motion blur, weather, and lighting that can vary across images from the same deployment, making single-distortion pipelines ineffective. While this has motivated generalist “all-in-one” models (Li et al., 2020; Potlapalli et al., 2023b), current frameworks perform sequential/iterative removal of single distortions, which may lead to cascading artifacts and indiscriminately remove errors, erasing signals that should be preserved. In scientific applications, restoration must preserve signals critical for precision and analysis, not just aesthetics. Aggressive restoration can inadvertently introduce more error: denoising may erase faint galaxies in astronomy data (Starck et al., 2002), and super-resolution can hallucinate subcellular structures in microscopy images (Christensen, 2022). Few models let experts control these tradeoffs. We argue that restoration in scientific contexts requires three principles: simultaneous over sequential correction , precision over aesthetics , and in some cases, control over automation . We introduce PRISM, a conditional diffusion framework that simultaneously disentangles compound degradations and enables expert-guided, precision restoration. Figure 1 shows example use-cases of PRISM across scientific domains, demonstrating how our approach enables robust and interactive mixed degradation removal, how automated restoration can infer distortion types from an input image, and how expert prompts can selectively target distortions while preserving critical features. Our contributions are: 1. A principled embedding design for compound degradations, combining weighted con-trastive learning with compound-aware supervision. The resulting structured, composi-tional latent space yields separable embeddings for primitives and their mixtures, enabling both automated compound restoration and selective distortion-specific control; 2. A novel benchmark for scientific utility spanning remote sensing, ecology, biomedical, and urban domains—including our newly-introduced Rooftop Cityscapes dataset—that reflects the needs of scientific workflows by evaluating task fidelity rather than perceptual quality; 3. A systematic study showing that controllability is not a convenience but a necessity .Selective, distortion-specific guidance significantly improves downstream scientific accuracy under compound degradations. 
+
+## 2 RELATED WORKS 
+
+2.1 RESTORATION IN SCIENTIFIC DOMAINS 
+
+Restoration has long been important for scientific imaging: early astronomy corrected photographic plates (Gull & Daniell, 1978), while biomedical imaging relied on denoising and deblurring for diagnostics (Buades et al., 2005; Dabov et al., 2007). Modern deep learning pipelines destripe astronomical surveys (Liu et al., 2025; Vojtekova et al., 2021) and denoise MRI images (Yan et al., 2024; Manjón & Coupe, 2018; Kidoh et al., 2020). While effective within their target domains, these methods typically assume that degradations are fixed, known, and well represented at training time. In practice, scientific images often exhibit compound degradations. Domain-specific models such as Sea-Thru (Akkaynak & Treibitz, 2019) for underwater image correction explicitly model these effects, but rely on tailored, paired datasets which can limit their generalization when conditions deviate beyond their assumptions. 2Published as a conference paper at ICLR 2026 Additionally, cleaner data is not always better: scientific restoration often requires targeted improve-ments rather than blanket restoration. In microscopy, Lu et al. (2025) show that over-denoising can erase weak but biologically meaningful structures; in underwater monitoring, Cecilia & Murugan (2022) find that generic denoisers oversmooth fine-scale marine features critical for ecological inter-pretation. These findings motivate restoration frameworks that can handle compound effects while allowing experts to control which degradations are addressed. 2.2 HANDLING COMPOUND DEGRADATIONS 
+
+To address compound corruptions, several works propose shared-backbone or “all-in-one” architec-tures that jointly train on multiple degradation types, including All-WeatherNet (Li et al., 2020), TransRestorer (Chen et al., 2021), and SmartAssign (Wang et al., 2023). More recent universal models such as MT-Restore (Chen et al., 2022b), All-in-OneNet (Li et al., 2022b), and PatchDif-fuser (Özdenizci & Legenstein, 2023) improve flexibility by expanding training coverage across degradation categories. These approaches use single-distortion removal for compositional restoration which may introduce unwanted artifacts or propagating errors from one stage to the next. Composite approaches, including OneRestore (Guo et al., 2024) and AllRestorer (Mao et al., 2024), explicitly model interactions between degradations rather than treating them independently, leading to im-proved performance on benchmark mixtures seen during training. Although these methods improve robustness to mixtures observed during training, they do not explicitly enforce a compositional latent structure that guarantees predictable behavior when selectively conditioning on subsets of degradations. Research in disentangled representation learning suggests that factorized latent structures significantly improve generalization to novel combinations of known components (Burgess et al., 2018; Lake et al., 2017), particularly when architectures are designed to maintain the independence of these latent features as they transition through successive layers (Liang et al., 2025; Träuble et al., 2021). Our approach builds on this theory by aligning degradation mixtures with their primitives in the latent space to enable generalization to unseen data. 2.3 CONDITIONAL DIFFUSION AND PROMPT -G UIDED RESTORATION 
+
+Closely related methods on blind image restoration (BIR) handle cases where degradation types and severities are unknown at test time. Early GAN-based approaches such as BSRGAN (Zhang et al., 2021) and Real-ESRGAN (Wang et al., 2021) simulate diverse degradation pipelines to improve robustness under real-world conditions. Diffusion-based restoration more broadly extends conditional modeling with higher fidelity and stochastic control (Ho et al., 2020; Dhariwal & Nichol, 2021; Rombach et al., 2022). More recent diffusion-based BIR methods, including StableSR (Nagar et al., 2023) and DiffBIR (Lin et al., 2024), leverage pretrained diffusion priors to generate realistic and high-fidelity restorations without requiring explicit degradation labels. These models demonstrate strong perceptual quality and robustness to complex degradations. However, they rely on learned image priors and do not explicitly use semantic information from vision-language representations. Prompt-guided approaches offer a more flexible interface for controlling restoration behavior. Meth-ods such as PromptIR (Potlapalli et al., 2023b), demonstrate that conditioning on auxiliary text improves all-in-one restoration across a fixed vocabulary of degradation categories. DiffPlugin (Liu et al., 2024), MPerceiver (Ai et al., 2024), and AutoDIR (Jiang et al., 2024) introduce text- and image-conditioned diffusion models for universal image restoration. However, in these approaches, degradations are not explicitly disentangled in the model’s latent space. As a result, removing one distortion may modify the image in unexpected ways, limiting reliable partial restoration. We distinguish between prompt-conditioned restoration and structurally controllable restoration: the former allows specifying tasks, whereas the latter requires a representation in which degradation factors are disentangled enough to support predictable, selective intervention. In parallel, several works adapted vision–language models for restoration by fine-tuning CLIP representations to be degradation-aware. DA-CLIP aligns image embeddings with textual degradation descriptions, improving robustness and downstream restoration performance under domain shift (Luo et al., 2023; 2024). AutoDIR further introduces a semantic-agnostic loss that encourages CLIP to distinguish clean from degraded images based on quality-related cues rather than semantic content, biasing the encoder toward degradation-sensitive features (Jiang et al., 2024). These works primarily 3Published as a conference paper at ICLR 2026 focus on aligning representations to individual distortion types rather than enforcing compositional structure that supports systematic generalization to unseen mixtures. A recent survey by Jiang et al. (2025) highlights limited support for real-world compound degradations and appropriate evaluation protocols. Existing methods also lack compositional structure for stable joint correction and distortion-specific control. We address these gaps by modeling degradations compositionally and introducing a mixed degradations benchmark and a downstream scientific task evaluation, which together assess structural generalization and practical utility under realistic compound settings. 
+
+## 3 METHODS 
+
+PRISM combines compound-aware supervision with contrastive latent disentanglement to enable robust and controllable restoration under mixed degradations. 3.1 BUILDING A DATASET OF COMPOUND DEGRADATIONS 
+
+We construct a synthetic dataset from diverse scientific domains: ImageNet (Deng et al., 2009), Sentinel-2 patches from Sen12MS (Schmitt et al., 2019), iWildCam 2022 (Beuving et al., 2022), EUVP underwater imagery (Islam et al., 2020), CityScapes (Cordts et al., 2016), BioSR microscopy slides (Gong et al., 2021), Brain Tumor MRI (Nickparvar, 2021), and high-resolution Subaru/HSC sky surveys (Miao et al., 2024). Across these datasets, we sample 2M clean images that serve as the ground truth targets during training. See Appendix B for more details. 
+
+Compound-Aware Supervision. Each image is degraded by up to three distortions sampled from a library including geometric warping, blur, photometric shifts and weather effects, etc. We apply a maximum of three distortions per image to capture challenging compound cases while maintaining enough of the original semantic content (see Table 9 in Appendix E). Each image is distorted by a composition of multiple augmentations. Following prior work such as Real-ESRGAN (Wang et al., 2021), which demonstrate that increased variability in training degradations can improve robustness and generalization, we construct a diverse spectrum of degradations to better approximate real-world conditions (Luo et al., 2024; 2022; Zhang et al., 2021). The distortions are applied in random order with varied parameters, such as kernel size for blurring or angle of snowfall, that determine degradation intensity. We use GPT-4 (Hurst et al., 2024) to generate variable natural language prompts describing image degradations to simulate realistic user instructions (e.g., “remove haze,” “dehaze this image,” “dehaze and super-resolve this”). We also include partial prompts (remove a subset of distortions) and negative prompts (remove a non-present distortion). This design is critical for selective restoration: by exposing the model to submixtures and negative conditions, we encourage it to associate each degradation primitive with a distinct latent direction and to avoid unintended corrections when a distortion is not specified. This supervision explicitly supports predictable, distortion-specific intervention at inference time. Overall, the dataset consists of triplets (Iclean , I dist , p ). Further details on dataset sampling and the distortion pipeline are provided in Appendix B. 3.2 THE PRISM M ODEL 
+
+Our framework builds on composite/all-in-one restoration (Guo et al., 2024; Jiang et al., 2024; Ai et al., 2024) but emphasizes controllability and precision under compound degradations. Figure 2 outlines our process: we first fine-tune the CLIP image encoder on our mixed degradation dataset to ensure that embeddings preserve semantic content while becoming distortion-invariant, keeping the text encoder frozen. Once adapted, we freeze both CLIP encoders to provide a stable conditioning space for training the latent diffusion backbone. 
+
+Stage 1: Disentangling Distortions. Naive CLIP embeddings are poorly suited for restoration, as they primarily cluster images by semantic content rather than degradation type or quality (Radford et al., 2021). Prior work (Jiang et al., 2024) showed that quality-aware embeddings improve performance by shifting focus from semantics to distortions. We extend this to compound degradations by explicitly modeling compositionality , ensuring embeddings reflect the presence and overlap of 4Published as a conference paper at ICLR 2026 ……………….. 
+
+Figure 2: Overview of PRISM. We first fine-tune CLIP’s image encoder to disentangle image embed-dings by distortion. The degraded input and user prompt are then used to condition the latent diffusion backbone, the coarse outputs of which are refined with a Semantic Content Preservation Module (SCPM) to yield the final restored output. Appendix Figure 12 shows the SCPM’s architecture. multiple distortions (e.g., an image degraded by haze+rain should be more similar to haze-only and rain-only images than to images degraded by unrelated distortions such as noise). Let Iclean be a clean image and {I(j) 
+
+> dist
+
+}mj=1 its m degraded variants. For cosine similarity sim( ·, ·), we use a contrastive loss aligning the corresponding embeddings e(j) 
+
+> dist
+
+with eclean and repelling it from its m − 1 sibling variants and all variants from other images in the batch. To encode the similarity structure of different combinations of distortions, we use the Jaccard distance (Jaccard, 1901) between their distortion sets d(j) and d(k)
+
+wjk = exp 
+
+
+
+1 − |d(j) ∩ d(k)||d(j) ∪ d(k)|
+
+
+
+.
+
+We analyze this weighting mechanism in Appendix E. The resulting per-variant loss is 
+
+L(j) 
+
+> ctr
+
+= − log exp(sim( e(j)
+
+> dist
+
+, e clean )/τ )
+
+P  
+
+> k̸=j
+
+wjk · exp(sim( e(j)
+
+> dist
+
+, e (k) 
+
+> dist
+
+)/τ ) + P 
+
+> l∈B other
+
+exp(sim( e(j)
+
+> dist
+
+, e (l)
+
+> other
+
+)/τ ) .
+
+for τ = 0 .10 . We use B = 256 clean images per batch, each with Bother = 256 randomly sampled degraded variants from our library of primitive and compound distortions. The contrastive objective encourages degraded embeddings to reflect distortion structure, but it does not explicitly prevent the clean embedding from drifting toward degradation-sensitive features. We introduce a quality-aware regularizer that penalizes the clean embedding for exhibiting distortion evidence 
+
+L(j) 
+
+> qual
+
+= X
+
+> c∈d(j)
+
+ˆp(c | eclean ),
+
+where ˆp(c | eclean ) is the predicted probability of distortion c from eclean . This term discourages degradation hallucination and anchors the representation to remain distortion-free for clean inputs. The final encoder loss is LCLIP = 1
+
+> m
+
+Pmj=1 (L(j) 
+
+> ctr
+
++L(j)
+
+> qual
+
+), yielding embeddings that: (i) align degraded and clean images, (ii) reflect compositional overlap, and (iii) support controllable restoration. 
+
+Stage 2: Restoring with Conditional Diffusion. We adopt a latent diffusion model, Stable Diffusion v1.5 (Rombach et al., 2022). During training, we replace the standard CLIP image encoder with our fine-tuned compound distortion-aware encoder, providing semantic and degradation context. Then, we concatenate the conditioning vector from the image encoder with the text embedding of the restoration prompt from the frozen CLIP text encoder. These embeddings are passed through a learnable cross-attention layer at each UNet block following the original Stable Diffusion v1.5 design for prompt conditioning. This allows PRISM to attend to the desired set of degradations during each denoising step. Unlike sequential approaches (Jiang et al., 2024), PRISM conditions on the full composite prompt in a single denoising trajectory, enabling joint restoration of overlapping artifacts. While MPerceiver (Ai et al., 2024) encodes multiple degradations as concatenated tokens, this strategy 5Published as a conference paper at ICLR 2026 represents multi-distortion inputs but does not explicitly enforce disentangled or compositional structure in the embedding space that supports controlled recombination. Latent diffusion can blur fine-scale structures critical in scientific imagery. Following Jiang et al. (2024), we integrate a Semantic Content Preservation Module (SCPM), a lightweight decoder-side refinement block that adaptively fuses encoder and decoder features to preserve edges and small textures. Full architectural details and ablations are provided in Appendix E. For fair comparison, all baselines are trained on the fixed set of primitive distortions. Training details and compute requirements are provided in Appendix A, baselines are described in Appendix D, and ablations over model components are provided in Appendix E. 3.3 PROMPTING 
+
+PRISM enables both expert-guided and automated restoration by grounding free-form natural lan-guage prompts in a structured task space. At inference time, PRISM supports: • Expert-guided restoration: A free-form instruction (e.g., “remove fog and color shift”) is embedded with the frozen CLIP text encoder and used to condition diffusion. • Automated restoration: Given an input image, a lightweight MLP predicts a multi-label distortion set from the image embedding. This set is converted into a standardized prompt (“remove distortions x, y, z ”) and encoded by CLIP. In both prompting scenarios, the text embeddings condition the latent diffusion model through cross-attention at each denoising step. Sensitivity to prompt variation is analyzed in Appendix E. 3.4 EVALUATION 
+
+We evaluate PRISM on: (1) compound and controllable restoration, (2) handling unseen real-world composites, and (3) downstream utility. Unless noted otherwise, we evaluate manual restoration with predefined distortion types, using the free-form prompts generated by GPT-4. Full details on datasets and evaluation are in Appendix B and C. 
+
+Mixed Degradations Benchmark (MDB). We use the held-out subset of the triplets (Iclean , I dist , p )
+
+from our dataset as our fixed testbed. This MDB measures sequential vs. composite prompting and prompt faithfulness under compound degradations. This dataset extends beyond the CDD-11 dataset proposed by Guo et al. (2024) to span a broad set of real-world degradations, with varied intensities. 
+
+Handling Unseen Distortions. For zero-shot tests, we evaluate on real domains with compound distortions not explicitly seen in training: underwater effects in UIEB (Li et al., 2019), under-display camera artifacts (Zhou et al., 2021), and fluid distortions (Thapa et al., 2020). These datasets probe PRISM’s ability to extend to novel distortions. 
+
+Downstream Utility. Standard benchmarks measure pixel similarity to a clean reference, but such metrics fail to capture whether restored images remain scientifically useful. We instead evaluate restoration through downstream tasks using real datasets with natural distortions and undistorted views as ground truth. To reflect how restoration outputs are typically used in practice, we use off-the-shelf pretrained models, giving a conservative but practical measure of utility. We test across four domains: 1. Remote sensing with Sen12MS (Schmitt et al., 2019): landcover classification (Papoutsis et al., 2023) on cloudy satellite data, with labels from cloudless samples. 2. Wildlife monitoring with iWildCam 2022 (Beuving et al., 2022): species classification with SpeciesNet (Gadot et al., 2024) on low-confidence nighttime images with expert labels from high-confidence frames of the same sequence. 3. Segmentation and fluorescence in microscopy with BioSR (Gong et al., 2021): segmenta-tion and fluorescence/intensity measurements of clathrin-coated pits from low signal-to-noise 6Published as a conference paper at ICLR 2026 data using MicroSAM (Archit et al., 2025), compared to high quality structured illumination microscopy (SIM) ground truth. 4. Urban forest monitoring using our novel Rooftop Cityscapes dataset: panoptic segmen-tation (Lin et al., 2017) of cityscapes under haze/low light, with paired, labeled clear-weather data. See Appendix C for details on this custom dataset. 
+
+## 4 RESULTS AND DISCUSSION 
+
+4.1 BREAKING THE CASCADE : C OMPOUND RESTORATION MADE ROBUST 
+
+Table 1: PRISM outperforms baselines with manual prompting on MDB, where each test image has up to three distortions. Best results are bolded , second-best are underlined.                                               
+
+> Category Method PSNR ↑SSIM ↑FID ↓LPIPS ↓
+> All-in-One AirNet 14.76 0.742 78.55 0.382 Restormer A16.32 0.768 70.11 0.365 NAFNet A16.98 0.776 68.30 0.352 PromptIR 18.11 0.801 62.78 0.298 Diffusion DiffPlugin 19.07 0.821 53.88 0.255 MPerceiver 20.84 0.829 48.18 0.235 AutoDIR 20.42 0.833 50.75 0.246 Composite OneRestore 19.36 0.812 59.42 0.276
+> PRISM (ours) 22.08 0.842 48.97 0.218
+
+Sequentially removing distortions often accumulates errors, artifacts, or incon-sistencies, while restoring all distortions jointly yields more stable, high-fidelity results. Our MDB evaluation supports this intuition, with qualitative results in Appendix Figs. 17 and 16. Table 1 highlights a divide between early all-in-one models (Li et al., 2022a; Za-mir et al., 2022; Chen et al., 2022a; Potla-palli et al., 2023a), which are trained per distortion and generalize poorly to mix-tures, recent diffusion approaches Liu et al. (2024); Ai et al. (2024); Jiang et al. (2024), and models that explicitly target composite restoration (Guo et al., 2024). While OneRestore is trained on composite datasets like PRISM, it fails to match the perceptual quality of diffusion model outputs; however, these diffusion methods typically remain limited by their reliance on single-distortion or sequential training regimes. PRISM achieves the best results across both fidelity (PSNR/SSIM) and perceptual metrics (FID/LPIPS), owing to two design choices: (1) compound-aware supervision over mixed degradations, and (2) contrastive disentanglement of distortions. We study the contributions of each below. 
+
+Compound-aware supervision supports restoration under increasingly complex mix-tures. Training on combinatorial mixtures of degradations (full, partial, and negative restoration) allows simultaneous removal of multiple effects without cascading errors. Δ 11.30 Δ 7.30 Δ 3.70 Δ 11.80    
+
+> AutoDIR
+> 25
+> 20
+> 15
+> 10
+> 5
+> PSNR ( ↑)
+> MPerceiver
+> 1
+> 2
+> 3
+> 4
+> No. Distortions
+> Methods
+> PRISM (Primitive-Aware) PRISM (Compound-Aware)
+> Δ 11.33 Δ 11.12 Δ 10.56 Δ 8.14
+
+Figure 3: PRISM trained on composite examples scales best with the number of distortions. This outperforms our model trained on each degradation separately as well as comparable baselines, emphasized by the ∆ PSNR of test images with 1 vs. 4 distortions) above each bar. Fig. 3 shows that while PRISM matches baselines on images with a single degradation, it significantly out-performs them as complexity grows, especially on unseen cases with four distortions (an extension of the MDB set). Training on composites explic-itly outperforms training on primitives separately, and that improved image embeddings from our contrastive loss provide an additional boost over base-lines. Importantly, this compound-aware structure not only improves ro-bustness under increasing distortion complexity, but also lays the founda-tion for selective restoration. These trends hold consistently across other metrics (SSIM, LPIPS, and FID), as shown in Appendix Fig. 14). 7Published as a conference paper at ICLR 2026 PSNR ( ↑)
+
+> 23
+> 21
+> 20
+> 19
+> 18
+> 17
+> 22
+> Settings
+> Sequential
+> Composite
+> Pretrained CLIP
+> Primitive-Aware CLIP
+> Compound-Aware CLIP
+
+Figure 4: Latent disentanglement en-ables both stepwise and single-shot restoration, closing the gap between prompting strategies. 
+
+Contrastive disentanglement improves compositional restoration. Appendix Fig. 13 visualizes the effect of the fine-tuning CLIP on the image embedding space. Our compound-aware weighted contrastive loss explicitly in-corporates mixed degradations, enforcing a latent geom-etry that pulls compound distortions toward the span of their primitives (right). This design closes the gap be-tween sequential and single-shot prompting (Fig. 4), en-suring that multi-step restoration behaves predictably and that single-shot prompts achieve comparable fidelity. Ap-pendix Fig. 15 demonstrates that these improvements gen-eralize beyond PSNR. This allows experts to target spe-cific degradations without disturbing other content. By combining compound-aware supervision with contrastive disentanglement, PRISM not only outperforms existing baselines on restoring compound degradations, but also maintains fine control. 4.2 COMPOSITIONALITY ENABLES ADAPTIVE RESTORATION IN NOVEL SETTINGS 
+
+The compositional structure of the image latent space also supports generalization to unseen degra-dations. If degradations are represented compositionally, then novel composites can be modeled as combinations of known primitives. This means PRISM can automatically identify constituent distortions and restore them, even if the exact combination was never seen in training. We evaluate zero-shot restoration on three domains (underwater imagery, under-display cameras, and fluid lensing), each containing complex, previously unseen distortions (Table 2). For each dataset, we use the compound-aware CLIP encoder to identify the fixed set of distortion types present in the images of each dataset. We then apply the same manual prompts over this standardized set for all models to ensure a fair, consistent evaluation. While the predicted distortion categories for UIEB were more variable and often reflected mixtures of multiple effects such as low light, haze, contrast, and color shifts, the POLED and ThapaSet datasets exhibited more uniform and stable classifications, providing clearer mappings to their dominant distortion types: low light, blur, and contrast vs. refraction and warping, respectively. Qualitative examples are shown in Appendix F. Table 2: PRISM achieves state-of-the-art zero-shot performance across underwater (UIEB), under-display camera (POLED), and fluid lensing (ThapaSet) benchmarks. Best results are bolded , second-best are underlined.                                                                                                        
+
+> Category Method UIEB POLED ThapaSet PSNR ↑SSIM ↑LPIPS ↓PSNR ↑SSIM ↑LPIPS ↓PSNR ↑SSIM ↑LPIPS ↓
+> All-in-One AirNet 17.51 0.768 0.468 13.61 0.582 0.529 18.41 0.388 0.609 Restormer A18.13 0.792 0.454 14.38 0.608 0.512 19.31 0.413 0.588 NAFNet A17.76 0.756 0.479 13.02 0.591 0.543 18.94 0.401 0.596 PromptIR 19.76 0.858 0.417 16.42 0.651 0.468 20.63 0.439 0.564 Diffusion DiffPlugin 20.72 0.874 0.392 17.01 0.659 0.451 21.15 0.454 0.536 MPerceiver 21.18 0.889 0.366 17.55 0.669 0.436 21.41 0.459 0.522 AutoDIR 21.02 0.887 0.374 17.33 0.665 0.431 21.53 0.462 0.528 Composite OneRestore 20.53 0.869 0.404 16.82 0.654 0.457 20.82 0.446 0.548
+> PRISM (ours) 22.18 0.914 0.331 18.26 0.694 0.419 22.36 0.487 0.492
+
+Both all-in-one models like AirNet and Restormer and composite methods such as OneRestore fall short in capturing complex degradation interactions without robust priors. In contrast, diffusion models like AutoDIR generalize well but often treat distortions in isolation, which may introduce unwanted intermediate errors in linearly restoring inputs. PRISM’s state-of-the-art zero-shot performance is driven by a latent space that treats compound degradations as structured combinations of primitives. Rather than attempting to model the complex, non-linear physics of every possible distortion interaction, the contrastive design enforces a compo-sitional logic. By training on submixtures, the model learns to represent a composite (e.g., haze + overexposure) as a joint embedding of its constituent parts. This allows the model to map previously unseen mixtures into a known coordinate system defined by established primitives, effectively “in-8Published as a conference paper at ICLR 2026 terpolating” a restoration strategy for novel compounds. Consequently, PRISM avoids the pitfalls of brittle category memorization, enabling the restoration of unseen mixtures using the semantic proximity between known primitives and unknown composites without additional supervision. “unwarp” “fix coloring” “unblur” Drone Image of Reef Warp + Color + Motion Blur     
+
+> Input Automated Output Expert-Driven Outputs
+> 123
+
+Figure 5: Structured, compositional latent geometry supports both automated (left) and expert-driven (right) generalization. With an expert-in-the-loop, prompts progressively target distortions. Fig. 5 illustrates how this design translates into practice with high-resolution drone imagery over coral reefs in Mo’orea (Saccomanno et al., 2025). While our method enables automated classification and correction of novel distortions, it also provides interpretability and control: experts can explore how distortions relate, refine restoration strategies, and avoid black-box corrections. In improving performance on partial restoration, PRISM enables experts to issue stepwise prompts (e.g., “unwarp,” “fix coloring,” “unblur”) to iteratively restore unseen distortions as they see fit. 4.2.1 THE CASE FOR CONTROLLABILITY IN SCIENCE 
+
+While PRISM restores images robustly under compound degradations, we argue that in some appli-cations, restoration quality cannot be judged by appearance alone. We assess PRISM’s impact on downstream tasks across four domains: remote sensing, ecology, microscopy, and urban monitoring. This raises a critical question: if a model can remove all degradations, should it? In scientific imaging, often no . Distortions can be mixed with faint but meaningful signals, and indiscriminate restoration may erase these cues or introduce artifacts that mislead downstream models. Maintaining downstream fidelity requires control: experts must choose what to correct versus preserve. As shown in Table 3, controllability significantly improves downstream performance over full restoration (automatically detecting all distortions present) in three of four domains. For instance, in nighttime camera trap data, restoring only contrast may improve recognition over full restoration, which can blur subtle texture cues. In urban scenes, removing haze improves segmentation, but also brightening the image may over-adjust vegetation in the distance. Remote sensing is the exception: full, automatic restoration performs slightly better, as removing only clouds leaves images under-illuminated and hazy. Table 3: Selective controllability outperforms full restoration across three of four downstream tasks. We report mean ± std over 3 random seeds. Best results are bolded .                                                      
+
+> Domain Degraded Input Full Restoration Selective Restoration p-value
+> Remote sensing (Acc. ↑)0.781 ±0.013 0.842 ±0.011 0.836 ±0.012 0.11 (n.s.) Camera Traps (Acc. ↑)0.921 ±0.004 0.976 ±0.008 0.984 ±0.004 0.032 <0.05 Microscopy (mIoU ↑)0.353 ±0.015 0.475 ±0.012 0.580 ±0.010 0.018 <0.05 Urban scenes (mIoU ↑)0.548 ±0.018 0.615 ±0.014 0.650 ±0.012 0.041 <0.05
+
+Fig. 6 illustrates a use case of controllability in microscopy: super-resolution alone improves segmentation alignment with SIM ground truth, but additional denoising erases faint, biologically relevant structures. Additional examples across other domains are included in Appendix F. In some cases, controllability enables different analyses on the same data which may depend on fundamentally different visual cues. Within microscopy, segmentation of clathrin-coated pits relies on high-frequency structural detail, such as sharp boundaries and local contrast that delineate subcellular objects. In contrast, fluorescence measures the mean pixel intensity within biological regions, a proxy for molecular concentration or protein recruitment. This calculation is highly sensitive to intensity bias and noise variance but relatively tolerant to mild blur. 9Published as a conference paper at ICLR 2026 mIOU: 0.495 mIOU: 0.382   
+
+> HQ Microscopy Sensor LQ Microscopy Sensor Compress + Noise “super-resolve”
+> mIOU: 0.569
+
+Figure 6: Selective restoration improves segmentation of clathrin-coated pits in microscopy. Super-resolution alone improves mIoU, while automatically detecting and removing noise suppresses faint but biologically relevant signals (see regions encircled in red), reducing accuracy. Table 4 summarizes performance across restoration settings. Super-resolution yields the best seg-mentation mIoU by enhancing edges and subcellular boundaries, but this same sharpening increases fluorescence error. Denoising has the opposite effect. While it preserves the intensity distribution of input data, producing the lowest fluorescence MSE, it removes fine structure needed for accurate segmentation. Combined restoration produces intermediate or degraded results, demonstrating that no single transformation can satisfy both scientific objectives simultaneously. Table 4: Task-dependent restoration per-formance on BioSR. Segmentation prefers structural enhancement, whereas fluores-cence quantification requires accurate inten-sity preservation. No single restoration setting is optimal for both tasks.              
+
+> Restoration Prompt Segmentation Fluorescence mIoU ↑MSE ↓
+> Denoise 0.479 0.006
+> Super-Resolution 0.580 0.018 Combined 0.475 0.014 No restoration 0.356 0.025
+
+These findings highlight that restoration is task-dependent , and experts may not always know how to preprocess their data beforehand. Blanket restora-tion can overlook the varying demands of scientific workflows. PRISM’s controllability enables experts to ensure that restored images remain faithful to the underlying scientific signal as needed. Important challenges remain for PRISM. Our training still depends on synthetic augmentations that cannot fully capture real distortions. Moreover, extending controllability beyond specifying which distortions to remove to their intensity and spatial extent would enable localized restoration and finer-grained preservation of scientific signals. While diffusion-based restoration typically demands greater computational resources than traditional encoder–decoder architectures, PRISM maintains competitive runtimes. As detailed in Appendix E (Table 13), its latency is comparable to existing state-of-the-art diffusion frameworks. In this way, PRISM balances practical efficiency with addressing key priorities in scientific restoration. 
+
+## 5 CONCLUSIONS 
+
+Our results show that controllable and compound-aware restoration is critical for scientific and environmental imaging. PRISM outperforms both specialized and generalist baselines by combining (1) compound-aware supervision, which exposes the model to overlapping degradations, and (2) weighted contrastive disentanglement, which organizes the latent space according to composite distortions. Together, these yield more robust and interpretable restoration. We also find strong generalization beyond curated training sets. PRISM achieves robust zero-shot performance on underwater imaging, under-display camera correction, and fluid lensing, showing that compositional representations extend naturally to unseen domains. Importantly, evaluations on real composite degradations confirm generalization beyond our synthetic training pipeline. A key insight is that more restoration is not always better . Across diverse domains, we show that indiscriminate removal of degradations suppresses faint but meaningful signals or introduces artifacts. Moreover, the appropriate level and type of restoration can be task-dependent , as different scientific analyses may rely on distinct visual cues and therefore benefit from different restoration strategies. Allowing experts to choose which distortions to correct is essential for scientific precision. 10 Published as a conference paper at ICLR 2026 ACKNOWLEDGMENTS 
+
+This work was supported in part by a Schmidt Science’s AI2050 Early Career Fellowship, NSF CAREER Grant (Award No. 2441060), an NSF Graduate Research Fellowship (Award No. DGE-2141064), the NSF and NSERC AI and Biodiversity Change Global Center (NSF Award No. 2330423 and NSERC Award No. 585136), and the MIT Generative AI Consortium. ETHICS STATEMENT 
+
+This work relies exclusively on publicly available datasets and synthetic distortions; all source data are cited appropriately. We acknowledge that restoration models can be misapplied or introduce misleading artifacts, and note that our system is not intended for high-stakes decision-making without domain expert oversight, but as an overall framework design for handling complex real-world data. REPRODUCIBILITY STATEMENT 
+
+Our code repository includes reproducible pipelines for data generation, model training, inference, and evaluation across standard and downstream benchmarks. Detailed descriptions of the dataset preprocessing, model architecture, hyperparameters, training objectives, and evaluation protocols are included in the main paper and appendix, along with extensive ablation studies and full experimental results. All baselines use publicly available implementations following the original authors’ specifi-cations, and we additionally release our benchmarking dataset for mixed degradation removal and evaluation protocols for all downstream task analysis. 
+
+## REFERENCES 
+
+Asmala Ahmad, Shaun Quegan, S Firdaus, Hamzah Sakidin, and M Mawardy. Haze effects on satellite remote sensing imagery and their corrections. International Journal of Advanced Computer Science and Applications , 10(10):69–76, 2019. Yuang Ai, Huaibo Huang, Xiaoqiang Zhou, Jiexiang Wang, and Ran He. Multimodal prompt perceiver: Empower adaptiveness generalizability and fidelity for all-in-one image restoration. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pp. 25432–25444, 2024. Derya Akkaynak and Tali Treibitz. A revised underwater image formation model. In Proceedings of the IEEE conference on computer vision and pattern recognition , pp. 6723–6732, 2018. Derya Akkaynak and Tali Treibitz. Sea-thru: A method for removing water from underwater images. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pp. 1682–1691, 2019. Anwai Archit, Luca Freckmann, Sushmita Nair, Nabeel Khalid, Paul Hilt, Vikas Rajashekar, Marei Freitag, Carolin Teuber, Melanie Spitzner, Constanza Tapia Contreras, et al. Segment anything for microscopy. Nature Methods , 22(3):579–591, 2025. John Beuving, Phil Culliton, Sara Beery, and S, tefan Istrate. iwildcam 2022 - fgvc9. https: //kaggle.com/competitions/iwildcam2022-fgvc9 , 2022. Antoni Buades, Bartomeu Coll, and Jean-Michel Morel. Image denoising by non-local averaging. In Proceedings.(ICASSP’05). IEEE International Conference on Acoustics, Speech, and Signal Processing, 2005. , volume 2, pp. ii–25. IEEE, 2005. Christopher P Burgess, Irina Higgins, Arka Pal, Loic Matthey, Nick Watters, Guillaume Desjardins, and Alexander Lerchner. Understanding disentangling in β-vae. arXiv preprint arXiv:1804.03599 ,2018. Mary Cecilia and S Sakthivel Murugan. Denoising, edge aware restoration and enhancement of single shallow coastal water image. Fluctuation and Noise Letters , 21(01):2250009, 2022. Hanting Chen, Yunhe Wang, Tianyu Guo, Chang Xu, Yiping Deng, Zhenhua Liu, Siwei Ma, Chunjing Xu, Chao Xu, and Wen Gao. Pre-trained image processing transformer. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pp. 12299–12310, 2021. 11 Published as a conference paper at ICLR 2026 Liangyu Chen, Xiaojie Chu, Xiangyu Zhang, and Jian Sun. Simple baselines for image restoration. In ECCV , pp. 17–33, 2022a. Wei-Ting Chen, Zhi-Kai Huang, Cheng-Che Tsai, Hao-Hsiang Yang, Jian-Jiun Ding, and Sy-Yen Kuo. Learning multiple adverse weather removal via two-stage knowledge learning and multi-contrastive regularization: Toward a unified model. In CVPR , pp. 17653–17662, 2022b. John Y Chiang and Ying-Ching Chen. Underwater image enhancement by wavelength compensation and dehazing. IEEE transactions on image processing , 21(4):1756–1769, 2011. Charles Nicklas Christensen. Deep Learning for Image Processing in Optical Super-Resolution Microscopy . PhD thesis, University of Cambridge (United Kingdom), 2022. Marius Cordts, Mohamed Omran, Sebastian Ramos, Timo Rehfeld, Markus Enzweiler, Rodrigo Benenson, Uwe Franke, Stefan Roth, and Bernt Schiele. The cityscapes dataset for semantic urban scene understanding. In Proceedings of the IEEE conference on computer vision and pattern recognition , pp. 3213–3223, 2016. Kostadin Dabov, Alessandro Foi, Vladimir Katkovnik, and Karen Egiazarian. Image denoising by sparse 3-d transform-domain collaborative filtering. IEEE Transactions on image processing , 16 (8):2080–2095, 2007. Jia Deng, Wei Dong, Richard Socher, Li-Jia Li, Kai Li, and Li Fei-Fei. Imagenet: A large-scale hierarchical image database. In 2009 IEEE conference on computer vision and pattern recognition ,pp. 248–255. IEEE, 2009. Prafulla Dhariwal and Alexander Nichol. Diffusion models beat gans on image synthesis. Advances in neural information processing systems , 34:8780–8794, 2021. Patrick Ebel, Andrea Meraner, Michael Schmitt, and Xiao Xiang Zhu. Multisensor data fusion for cloud removal in global and all-season sentinel-2 imagery. IEEE Transactions on Geoscience and Remote Sensing , 59(7):5866–5878, 2020. Tomer Gadot, S, tefan Istrate, Hyungwon Kim, Dan Morris, Sara Beery, Tanya Birch, and Jorge Ahumada. To crop or not to crop: Comparing whole-image and cropped classification on a large dataset of camera trap images. IET Computer Vision , 18(8):1193–1208, 2024. Dawei Gong, Tengfei Ma, Julian Evans, and Sailing He. Deep neural networks for image super-resolution in optical microscopy by using modified hybrid task cascade u-net. Prog. Electromagn. Res , 171:185–199, 2021. Stephen F Gull and Geoff J Daniell. Image reconstruction from incomplete and noisy data. Nature ,272(5655):686–690, 1978. Qiang Guo, Hai-Miao Hu, and Bo Li. Haze and thin cloud removal using elliptical boundary prior for remote sensing image. IEEE Transactions on Geoscience and Remote Sensing , 57(11):9124–9137, 2019. Yu Guo, Yuan Gao, Yuxu Lu, Huilin Zhu, Ryan Wen Liu, and Shengfeng He. Onerestore: A universal restoration framework for composite degradation. In European Conference on Computer Vision ,pp. 255–272. Springer, 2024. Jonathan Ho, Ajay Jain, and Pieter Abbeel. Denoising diffusion probabilistic models. Advances in neural information processing systems , 33:6840–6851, 2020. Aaron Hurst, Adam Lerer, Adam P Goucher, Adam Perelman, Aditya Ramesh, Aidan Clark, AJ Os-trow, Akila Welihinda, Alan Hayes, Alec Radford, et al. Gpt-4o system card. arXiv preprint arXiv:2410.21276 , 2024. Md Jahidul Islam, Youya Xia, and Junaed Sattar. Fast underwater image enhancement for improved visual perception. IEEE Robotics and Automation Letters , 5(2):3227–3234, 2020. Paul Jaccard. Distribution de la flore alpine dans le bassin des dranses et dans quelques régions voisines. Bull Soc Vaudoise Sci Nat , 37:241–272, 1901. 12 Published as a conference paper at ICLR 2026 Junjun Jiang, Zengyuan Zuo, Gang Wu, Kui Jiang, and Xianming Liu. A survey on all-in-one image restoration: Taxonomy, evaluation and future trends. IEEE Transactions on Pattern Analysis and Machine Intelligence , 2025. Yitong Jiang, Zhaoyang Zhang, Tianfan Xue, and Jinwei Gu. Autodir: Automatic all-in-one image restoration with latent diffusion. In European Conference on Computer Vision , pp. 340–359. Springer, 2024. Masafumi Kidoh, Kensuke Shinoda, Mika Kitajima, Kenzo Isogawa, Masahito Nambu, Hiroyuki Uetani, Kosuke Morita, Takeshi Nakaura, Machiko Tateishi, Yuichi Yamashita, et al. Deep learning based noise reduction for brain mr imaging: tests on phantoms and healthy volunteers. Magnetic resonance in medical sciences , 19(3):195–206, 2020. Michael D King, Steven Platnick, W Paul Menzel, Steven A Ackerman, and Paul A Hubanks. Spatial and temporal distribution of clouds observed by modis onboard the terra and aqua satellites. IEEE transactions on geoscience and remote sensing , 51(7):3826–3852, 2013. Brenden M Lake, Tomer D Ullman, Joshua B Tenenbaum, and Samuel J Gershman. Building machines that learn and think like people. Behavioral and brain sciences , 40:e253, 2017. Boyun Li, Xiao Liu, Peng Hu, Zhongqin Wu, Jiancheng Lv, and Xi Peng. All-in-one image restoration for unknown corruption. In CVPR , pp. 17452–17462, 2022a. Boyun Li, Xiao Liu, Peng Hu, Zhongqin Wu, Jiancheng Lv, and Xi Peng. All-in-one image restoration for unknown corruption. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pp. 17452–17462, 2022b. Chongyi Li, Chunle Guo, Wenqi Ren, Runmin Cong, Junhui Hou, Sam Kwong, and Dacheng Tao. An underwater image enhancement benchmark dataset and beyond. TIP , 29:4376–4389, 2019. Ruoteng Li, Robby T Tan, and Loong-Fah Cheong. All in one bad weather removal using architectural search. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition ,pp. 3175–3185, 2020. Qiyao Liang, Daoyuan Qian, Liu Ziyin, and Ila Fiete. Compositional generalization via forced rendering of disentangled latents. arXiv preprint arXiv:2501.18797 , 2025. Guosheng Lin, Anton Milan, Chunhua Shen, and Ian Reid. Refinenet: Multi-path refinement networks for high-resolution semantic segmentation. In Proceedings of the IEEE conference on computer vision and pattern recognition , pp. 1925–1934, 2017. Nankai Lin, Guanqiu Qin, Gang Wang, Dong Zhou, and Aimin Yang. An effective deployment of con-trastive learning in multi-label text classification. In Findings of the Association for Computational Linguistics: ACL 2023 , pp. 8730–8744, 2023. Xinqi Lin, Jingwen He, Ziyan Chen, Zhaoyang Lyu, Bo Dai, Fanghua Yu, Yu Qiao, Wanli Ouyang, and Chao Dong. Diffbir: Toward blind image restoration with generative diffusion prior. In 
+
+European conference on computer vision , pp. 430–448. Springer, 2024. Tie Liu, Yuhui Quan, Yingna Su, Yang Guo, Shu Liu, Haisheng Ji, Qi Hao, Yulong Gao, Yuxia Liu, Yikang Wang, et al. Astronomical image denoising by self-supervised deep learning and restoration processes. Nature Astronomy , pp. 1–8, 2025. Yuhao Liu, Zhanghan Ke, Fang Liu, Nanxuan Zhao, and Rynson WH Lau. Diff-plugin: Revitalizing details for diffusion-based low-level tasks. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pp. 4197–4208, 2024. Yuer Lu, Yongfa Ying, Chen Lin, Yan Wang, Jun Jin, Xiaoming Jiang, Jianwei Shuai, Xiang Li, and Jinjin Zhong. Unet-att: a self-supervised denoising and recovery model for two-photon microscopic image. Complex & Intelligent Systems , 11(1):55, 2025. Ziwei Luo, Haibin Huang, Lei Yu, Youwei Li, Haoqiang Fan, and Shuaicheng Liu. Deep constrained least squares for blind image super-resolution. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pp. 17642–17652, 2022. 13 Published as a conference paper at ICLR 2026 Ziwei Luo, Fredrik K Gustafsson, Zheng Zhao, Jens Sjölund, and Thomas B Schön. Controlling vision-language models for multi-task image restoration. arXiv preprint arXiv:2310.01018 , 2023. Ziwei Luo, Fredrik K Gustafsson, Zheng Zhao, Jens Sjölund, and Thomas B Schön. Photo-realistic image restoration in the wild with controlled vision-language models. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pp. 6641–6651, 2024. José V Manjón and Pierrick Coupe. Mri denoising using deep learning. In International workshop on patch-based techniques in medical imaging , pp. 12–19. Springer, 2018. Jiawei Mao, Yu Yang, Xuesong Yin, Ling Shao, and Hao Tang. Allrestorer: All-in-one transformer for image restoration under composite degradations. arXiv preprint arXiv:2411.10708 , 2024. Joe D Menke, Halil Kilicoglu, and Neil R Smalheiser. Publication type tagging using transformer models and multi-label classification. medRxiv , 2025. Jiawei Miao, Liangping Tu, Bin Jiang, Xiangru Li, and Bo Qiu. Astrosr: A data set of galaxy images for astronomical superresolution research. The Astrophysical Journal Supplement Series , 274(1):7, 2024. Sandeep Nagar, Abhinaba Bala, and Sai Amrit Patnaik. Adaptation of the super resolution sota for art restoration in camera capture images. In 2023 International Conference on Emerging Techniques in Computational Intelligence (ICETCI) , pp. 158–163. IEEE, 2023. Msoud Nickparvar. Brain tumor mri dataset, 2021. URL https://www.kaggle.com/dsv/ 2645886 .Ozan Özdenizci and Robert Legenstein. Restoring vision in adverse weather conditions with patch-based denoising diffusion models. IEEE TPAMI , 45(8):10346–10357, 2023. Ioannis Papoutsis, Nikolaos Ioannis Bountos, Angelos Zavras, Dimitrios Michail, and Christos Try-fonopoulos. Benchmarking and scaling of deep learning models for land cover image classification. 
+
+ISPRS Journal of Photogrammetry and Remote Sensing , 195:250–268, 2023. Vaishnav Potlapalli, Syed Waqas Zamir, Salman Khan, and Fahad Shahbaz Khan. Promptir: Prompt-ing for all-in-one blind image restoration. arXiv preprint arXiv:2306.13090 , 2023a. Vaishnav Potlapalli, Syed Waqas Zamir, Salman H Khan, and Fahad Shahbaz Khan. Promptir: Prompting for all-in-one image restoration. Advances in Neural Information Processing Systems ,36:71275–71293, 2023b. Alec Radford, Jong Wook Kim, Chris Hallacy, Aditya Ramesh, Gabriel Goh, Sandhini Agarwal, Girish Sastry, Amanda Askell, Pamela Mishkin, Jack Clark, et al. Learning transferable visual models from natural language supervision. 2021. Robin Rombach, Andreas Blattmann, Dominik Lorenz, Patrick Esser, and Björn Ommer. High-resolution image synthesis with latent diffusion models. In Proceedings of the IEEE/CVF confer-ence on computer vision and pattern recognition , pp. 10684–10695, 2022. Vienna Saccomanno, Steve Schill, Breonna Jones, and Tamaki Bieri. High resolution drone imagery and supporting underwater photos of coral reefs in mo’orea, 2025. URL https://doi.org/ 10.5281/zenodo.17136938 . dataset. Michael Schmitt, Lloyd Haydn Hughes, Chunping Qiu, and Xiao Xiang Zhu. Sen12ms–a curated dataset of georeferenced multi-spectral sentinel-1/2 imagery for deep learning and data fusion. 
+
+arXiv preprint arXiv:1906.07789 , 2019. Jean-Luc Starck, Eric Pantin, and Fionn Murtagh. Deconvolution in astronomy: A review. Publica-tions of the Astronomical Society of the Pacific , 114(800):1051, 2002. Simron Thapa, Nianyi Li, and Jinwei Ye. Dynamic fluid surface reconstruction using deep neural network. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition ,pp. 21–30, 2020. 14 Published as a conference paper at ICLR 2026 Frederik Träuble, Elliot Creager, Niki Kilbertus, Francesco Locatello, Andrea Dittadi, Anirudh Goyal, Bernhard Schölkopf, and Stefan Bauer. On disentangled representations learned from correlated data. In International conference on machine learning , pp. 10401–10412. PMLR, 2021. Antonia Vojtekova, Maggie Lieu, Ivan Valtchanov, Bruno Altieri, Lyndsay Old, Qifeng Chen, and Filip Hroch. Learning to denoise astronomical images with u-nets. Monthly Notices of the Royal Astronomical Society , 503(3):3204–3215, 2021. Xintao Wang, Liangbin Xie, Chao Dong, and Ying Shan. Real-esrgan: Training real-world blind super-resolution with pure synthetic data. In Proceedings of the IEEE/CVF international conference on computer vision , pp. 1905–1914, 2021. Yinglong Wang, Chao Ma, and Jianzhuang Liu. Smartassign: Learning a smart knowledge assignment strategy for deraining and desnowing. In CVPR , pp. 3677–3686, 2023. Xu Yan, MingXuan Xiao, Weimin Wang, Yufeng Li, and Fei Zhang. A self-guided deep learning technique for mri image noise reduction. Journal of Theory and Practice of Engineering Science ,4(01):109–117, 2024. Syed Waqas Zamir, Aditya Arora, Salman Khan, Munawar Hayat, Fahad Shahbaz Khan, and Ming-Hsuan Yang. Restormer: Efficient transformer for high-resolution image restoration. In CVPR , pp. 5728–5739, 2022. Kai Zhang, Jingyun Liang, Luc Van Gool, and Radu Timofte. Designing a practical degradation model for deep blind image super-resolution. In Proceedings of the IEEE/CVF international conference on computer vision , pp. 4791–4800, 2021. Yuqian Zhou, David Ren, Neil Emerton, Sehoon Lim, and Timothy Large. Image restoration for under-display camera. In CVPR , pp. 9179–9188, 2021. 15 Published as a conference paper at ICLR 2026 
+
+## A TRAINING DETAILS 
+
+PRISM is trained on 8 ×40GB NVIDIA A100 GPUs using mixed-precision training (FP16). 
+
+Hyperparameters. For our final model we use: • Batch size: 264 (global, distributed across 8 GPUs) • Learning rate: 1 × 10 −4 (AdamW optimizer) • No learning-rate warm-up; cosine decay schedule • Training epochs: 500 • Input resolution: 256 × 256 
+
+• Gradient clipping: 1.0 • EMA decay: 0.9999 for model weights We initialize the backbone from publicly available Stable Diffusion v1.5 weights (Rombach et al., 2022). 
+
+CLIP Fine-Tuning. For the embedding space, we initialize from OpenAI CLIP ViT-B/32 (Radford et al., 2021) pretrained weights. We fine-tune only the final projection layers and cross-attention adapters, freezing the base vision and text encoders to preserve semantic alignment. Fine-tuning uses: • Batch size: 256 • Learning rate: 5 × 10 −5 (AdamW optimizer) • Training epochs: 50 
+
+Distortion Classifier for Automated Restoration. We train the distortion classifier after fine-tuning CLIP, using the frozen distortion-aware CLIP image encoder as a feature extractor. The two-layer MLP has a hidden dimension of 512 and predicts over a fixed vocabulary of K = 14 
+
+primitive distortions (blur, haze, low light, color shift, rain, snow, noise, etc.). We train the classifier using the same synthetic mixed-degradation dataset used to fine-tune the CLIP image encoder, treating each degraded image I as a multi-label instance with ground-truth distortion set D ⊆ { 1, . . . , K }. The label set is converted into a binary target vector y ∈ { 0, 1}K , and we optimize a binary cross-entropy loss. We use parameters • Batch size: 512 • Learning rate: 1 × 10 −4 (AdamW optimizer) • Training epochs: 98 • Cosine learning-rate decay schedule The CLIP image encoder is kept frozen during this stage; only the MLP parameters are updated. At test time, we predict the distortion set as ˆd = { k : ˆ pk > 0.85 } and convert ˆd into the associated standardized prompt “remove the effects of distortions d1, d 2, . . . , d m”. 
+
+## B MDB C ONSTRUCTION 
+
+As stated in Section 3, our composite degradation dataset used for ground truth during training was drawn from a diverse collection of datasets spanning multiple scientific and environmental imaging domains. Table 5 summarizes the datasets used. Each clean image is transformed into multiple distorted counterparts so that every distortion type is applied across the full dataset. For each image, we apply N distortions. We limit N to a maximum of 3 distortions because we found that N ≥ 4 degraded the signal significantly and made the task of restoration too difficult (see Appendix E for the relevant ablation over N ). 16 Published as a conference paper at ICLR 2026 Table 5: Summary of Training Datasets. PRISM is trained on a diverse set of natural and scientific domains spanning ecological, medical, astronomical, and remote sensing imagery.                   
+
+> Dataset Description Size ImageNet (Deng et al., 2009) 1000-class benchmark of natural images with visually diverse scenes. 1.2M
+> Sen12MS (Sentinel-2) (Schmitt et al., 2019) RGB satellite image patches with and without clouds, used for land-cover and cloud-removal tasks. 720K
+> iWildCam 2022 (Beuving et al., 2022) Camera trap sequences for wildlife monitoring under challenging lighting and environmental conditions. 28.8K
+> EUVP (Islam et al., 2020) Paired underwater photos with clear vs. distorted conditions (en-hanced clean split). 3.7K
+> Cityscapes (Cordts et al., 2016) Urban street scenes captured from vehicle-mounted cameras (in-cludes 5K labeled and 20K “extra”). 25K
+> BioSR (Gong et al., 2021) Fluorescence microscopy slides (wide-field vs. SIM ground truth) for super-resolution and denoising tasks. 14K
+> Brain Tumor MRI (Nickparvar, 2021) Clinical MRI scans for tumor detection and segmentation with paired clean/noisy modalities. 7K
+> AstroSR HSC Surveys (Miao et al., 2024) Wide-field sky survey images from the Hyper Suprime-Cam (HSC), used for astrophysical source recovery. 2K
+
+4. Randomize the order 
+
+1. Sample the number of distortions to apply 
+
+N
+
+2. Sample the N distortions 
+
+3. Sample the parameters per distortion   
+
+> αβγ
+
+Figure 7: An overview of the data augmentation pipeline of diverse compound degradations. Given the sampled number N , distinct distortion types are drawn uniformly from a predefined li-brary D of transformations. Our distortion set spans 14 categories: including geometric distor-tions (motion blur, warping, refraction, defocus blur), photometric degradations (contrast, color shifts, brightness, low light), occlusions (clouds, haze, rain, snow), and noise-based effects (addi-tive noise, compression). 
+
+Geometric Distortions. Elastic Deformation 
+
+generates random displacement fields from 
+
+U(−1, 1) , applies Gaussian smoothing ( σ ∈
+
+[20 , 30] ), scales by α ∈ [10 , 20] , and warps im-ages via bilinear interpolation. Refraction uses Gaussian-filtered noise ( σ = 10 ) with strength 
+
+∈ [20 , 80] applied to coordinate maps. Motion Blur creates directional kernels (size ∈ [5 , 10] )along horizontal, vertical, or diagonal axes, with optional depth-aware masking that selectively blurs foreground or background regions based on threshold τ ∈ [0 .3, 0.7] .
+
+Photometric Distortions. Low Light applies multiplicative brightness reduction with factor 
+
+f ∈ [0 .4, 0.9] . Color Jitter combines indepen-dent RGB channel shifts ( δ ∈ [−0.4, 0.4] ) with color casts (warm/cool/green/magenta/cyan/yellow) at intensity α ∈ [0 .1, 0.3] . Overexposure uses inverse gamma correction ( γ = 1 /f , f ∈ [1 .0, 1.5] ), brightness boost, and soft highlight clipping above threshold τ ∈ [0 .4, 0.9] . Underexposure applies gamma with f ∈ [0 .5, 0.9] , shadow compres-sion below τ ∈ [0 .1, 0.3] , and luminance-weighted noise ( σ ∈ [0 .02 , 0.08] ) in dark regions. Contrast 
+
+and Saturation use random factors from [0 .4, 1.0] .
+
+Occlusion Effects. Haze blends images with white layers using depth-scaled opacity α ∈ [0 .65 , 0.9] :
+
+Ihaze = I(1 −Dα )+ Dα . Rain generates two-scale streaks (blur kernels ∈ { 7-23 }, zoom ∈ [1 .0, 3.5] )with selective fog (90th percentile depth, visibility [8000 , 15000] ) and opacity α ∈ [0 .2, 0.4] . Snow 
+
+uses multi-scale particle generation with screen blending and minimal fog (95th percentile, visibility 
+
+[10000 , 20000] ). Clouds employs Perlin noise with randomized opacity ∈ [0 .7, 1.0] , shadow intensity 17 Published as a conference paper at ICLR 2026 
+
+∈ [0 .2, 0.7] , and blur scaling ∈ [1 .0, 3.0] . Raindrops places 20-60 drops with radii ∈ [3 , 50] pixels and edge darkening ∈ [0 .4, 0.8] .
+
+Noise and Resolution. Gaussian Noise randomly applies either Gaussian ( N (0 , σ ), σ ∈ [0 .05 , 0.1] )or salt-and-pepper noise (2-8% corruption, 50:50 ratio) with equal probability. Defocus Blur uses Gaussian kernels with size k ∈ [3 , 19] . Pixelation downsamples by factors s ∈ [2 .0, 4.0] using bicubic interpolation for super-resolution tasks. Parameter ranges for each degradation type are uniformly sampled within physically realistic bounds. See our codebase for the full implementation of this distortion library. Finally, the selected distortions are randomly ordered and sequentially applied to the clean image. Randomizing the application order reflects the non-commutative nature of compound distortions and further increases the diversity and realism of the visual outcomes. For all randomized sampling, we used a fixed seed of 42. This data augmentation process is summarized in Fig. 7. Prompts describing distortions are auto - generated with GPT - 4 (Hurst et al., 2024) to simulate the variability in natural -language queries likely to be provided at inference time. For each primitive distortion type c in our vocabulary (e.g., haze, blur, noise), we query GPT - 4 with “Provide 50 different ways a user might ask to remove c from an image.” This yields multiple phrasings per distortion (e.g., “remove haze,” “dehaze this image,” “clear the atmospheric fog,” “fix the hazy artifacts”), promoting robustness to linguistic variation and paraphrasing. To model realistic multi - artifact scenarios, we also generate compound prompts. For each pair or triplet of distortions d = c1, c 2, . . . sampled during data construction, we query GPT -4 with “Provide 50 ways a user might ask to remove c1, c2, ... from an image.” GPT -4 is required to mention all distortions in d within a single natural instruction (e.g., “remove blur and color shift,” “fix the blurriness and correct the color cast,” “clean up both the motion blur and the hue distortion”). These compound prompts ensure that the model is trained on natural -language descriptions of mixtures 
+
+rather than isolated categories. All GPT -4 outputs were manually inspected to remove malformed or incomplete phrasings (e.g., missing distortion names, ambiguous requests). Our MDB dataset release includes our image pairs and natural-language prompts, as well as scripts used to generate and sample prompts. To improve controllability, we further incorporate: • Partial prompts : instructing the model to remove only a subset of degradations present in 
+
+Idist , requiring the model to learn selective restoration (e.g., input degraded with haze + rain + blur, prompt: “remove haze and blur”). • Negative prompts : instructing the model to remove degradations that are absent , which enforces that restoration actions are conditional on both image evidence and textual prompts. For instance, if the input is degraded with haze + blur and the prompt is “remove snow,” the model should leave the image unchanged with respect to snow. Approximately 20% of the training samples are partial prompts and 10% are negative prompts. The inclusion of partial and negative prompts is critical for teaching PRISM to respect expert instructions. Without them, the model tends to over-restore, indiscriminately removing all degradations it detects. By explicitly training on examples where the correct action is not to remove a present or absent degradation, PRISM learns to balance restoration fidelity with adherence to prompts. The final training corpus consists of approximately 2.5M triplets, split 80 /19 /1 across training, validation, and held-out test sets. For each clean image, multiple degraded variants and prompts are generated, increasing coverage of both degradation mixtures and linguistic variability. Fig. 8 demonstrates our dataset diversity, with examples of clean, distorted, and prompt triplets. 
+
+## C EVALUATION 
+
+As discussed in Section 3, we evaluate PRISM along three complementary axes: (1) restoration under synthetic compound degradations, (2) downstream utility in real scientific datasets, and (3) zero-shot robustness to unseen real-world distortions. A summary of each evaluation testbed is provided in Table 6. Unless noted otherwise, all outputs are generated using a fixed random seed 42. 18 Published as a conference paper at ICLR 2026 Derain this photo of a bird. 
+
+Remove the clouds here. 
+
+Can you unwarp this photo? 
+
+Adjust the color and contrast. 
+
+Remove the haze and snow. 
+
+Denoise and super-resolve this. 
+
+Remove the motion blur. 
+
+Could you denoise this? 
+
+Negative Prompt (no change) 
+
+Partial Prompt (some change) 
+
+Cityscapes BioSR Brain Tumor MRI HSC 
+
+ImageNet Sen12MS iWildCam 2022 EUVP 
+
+Figure 8: MDB Examples. Samples from our compound degradation dataset, with paired “clean” (top) and “distorted” (bottom) images, with corresponding prompts in between. 19 Published as a conference paper at ICLR 2026 Table 6: We group evaluations into (1) synthetic compound degradations, (2) downstream utility in real scientific datasets, and (3) zero-shot robustness to unseen real-world distortions.                               
+
+> Evaluation Setting Task / Dataset Dataset Size Metric (1) Synthetic Compound Degradations
+> MDB Synthetic mixtures from clean datasets 25K PSNR, SSIM, FID, LPIPS
+> (3) Zero-Shot Robustness to Unseen Real-World Distortions
+> Underwater Imaging UIEB (Li et al., 2019) 890 PSNR, SSIM, LPIPS Under-Display Cameras POLED (UDC) (Zhou et al., 2021) 512 PSNR, SSIM, LPIPS Fluid Lensing ThapaSet 600 PSNR, SSIM, LPIPS
+> (2) Downstream Utility in Real Scientific Datasets
+> Land Cover Classification Sen12MS-CR (cloudy Sentinel-2 patches) (Ebel et al., 2020; Schmitt et al., 2019) 200 Classification accuracy (ResNet50) Wildlife Classification iWildCam 2022 (camera traps) (Beuving et al., 2022) 200 Classification accuracy (Species-Net) Microscopy Segmentation BioSR (WF vs. SIM microscopy) (Gong et al., 2021) 10K Instance segmentation mIoU (MicroSAM) & Fluorescence quantification (MSE) Urban Scene Understanding Rooftop Cityscapes 5K Panoptic segmentation mIoU (RefineNet)
+
+Downstream Utility. Here, we provide specific details about how we constructed our novel bench-marking suite for evaluation over downstream utility. We re-purpose real datasets with distortions that present known challenges for models across remote sensing, wildlife monitoring, microscopy and weather, where ground truth labels are available not because the distorted images are annotated, but because undistorted views exist at different points in time or are collected from a more sophisticated sensor. Rather than training task-specific models for each of these downstream tasks, we deliberately use off-the-shelf pretrained models. This design choice reflects a realistic scenario: domain experts are far more likely to apply widely available models for segmentation than to train bespoke models for each experimental setup. Using off-the-shelf models therefore provides a conservative estimate of restoration utility in practice and avoids confounding performance gains from joint training on dataset-specific distributions. If restoration improves the outputs of a generic model, this strongly suggests practical downstream utility beyond controlled benchmarks. In each of the four domains, we examine restoration performance on a specified distortion against the default set of automatically-detected distortions present in the input image. We do not compare against domain-specific restoration models (e.g., dedicated cloud removal networks) because our goal is to evaluate generalist models that can flexibly handle a wide variety of distortions; this broader applicability makes them more useful in scientific imaging, where degradations are diverse, overlapping, and often domain-shifted. 1. Land Cover Classification: To assess performance on land cover classification over satellite data, we select 200 cloudy satellite images degraded by cloud cover from the Sen12MS-CR dataset (Ebel et al., 2020), with land cover labels derived from temporally aligned, cloud-free views in the Sen12MS dataset (Schmitt et al., 2019). We evaluate using a ResNet50, trained on satellite imagery that includes minimal cloud cover (Papoutsis et al., 2023). It is important to evaluate on land cover classification because accurate identification of surface types (e.g., forests, croplands, urban areas) under degraded conditions like cloud cover directly underpins large-scale monitoring of climate change, biodiversity, and resource management. 2. Wildlife Classification Camera trap classification is critical for ecological monitoring, enabling large-scale biodiversity surveys without direct human observation. We evaluate our model on the task of species identification using iWildCam 2022 Camera Trap dataset (Beuving et al., 2022). Specifically, we use 200 nighttime wildlife images, after filtering out blank frames (no species) and sample frames with low confidence species predictions (< 0.70). Ground truth annotations are sourced from expert labels of alternate frames in the same camera trap sequence. Classification is evaluated using SpeciesNet (Gadot et al., 2024), a classifier trained on over 6 million camera trap images. 20 Published as a conference paper at ICLR 2026 3. Microscopy Segmentation Next, we evaluate our model on the task of microscopy image segmentation, which informs the quantification of organelle morphology and dynamics, which are central to understanding cell physiology and disease. We build on the BioSR dataset (Gong et al., 2021) introduced by Qiao et al. This dataset was acquired using paired low resolution wide-field (WF, diffraction-limited) and super-resolved structured illumination microscopy (SIM) images of cellular structures (clathrin-coated pits) across a wide range of signal-to-noise ratios. In our setting, the WF images serve as noisy “distorted” inputs, while the corresponding high-SNR SIM sensor data provide the undistorted refer-ence. This setup allows us to evaluate restoration not against simulated degradations, but against experimentally aligned ground truth. We measure performance by applying restored images to the downstream task of segmentation, using the microscopy foundation model MicroSAM model (Archit et al., 2025) to generate cell-structure masks, and report segmen-tation accuracy compared to the high-quality SIM annotations. This mirrors real-world use, where quantitative biological conclusions (e.g., about organelle morphology or cytoskeletal organization) depend critically on reliable segmentation. 4. Urban Scene Understanding We also evaluate our model on the task of cityscape scene understanding, which enables reliable monitoring of urban forests. To do so, we collected, labeled, and processed a novel Rooftop Cityscapes dataset for an additional setting: and haze in urban scenes. Specifically, we deployed fixed-position cameras on several building rooftops across multiple days under varying weather and lighting conditions. From each sequence, we manually identified and labeled frames with clear conditions to serve as the ground truth. We applied an off-the-shelf panoptic segmentation model pretrained on the original Cityscapes (Cordts et al., 2016) dataset to each distorted and restored frame. To ensure reliable comparison, we restricted evaluation to “stationary” classes (buildings, vegetation, and sky) while ignoring dynamic objects such as cars or pedestrians, which may change across frames and introduce label inconsistency. See Fig. 21 for qualitative examples from this custom dataset. 
+
+Statistical Significance Evaluation To assess whether Selective Restoration provided a statistically significant improvement over Full Restoration, we conducted paired hypothesis tests across repeated experimental runs. Each model was trained and evaluated with multiple random seeds on the same dataset splits (seeds 2, 42, and 420), yielding a distribution of results for each condition. For every domain and downstream task, we computed paired differences between the two methods: 
+
+di = Selective i − Full i, i = 1 , . . . , n 
+
+where n is the number of runs (seeds/splits). This controls for variability due to dataset sampling and ensures that each comparison is made under identical conditions. We then applied a two-tailed paired t-test to the differences di:
+
+t = ¯dsd/√n , sd =
+
+vuut 1
+
+n − 1
+
+> n
+
+X
+
+> i=1
+
+(di − ¯d)2,
+
+with n − 1 degrees of freedom. The null hypothesis H0 is that Selective and Full Restoration perform equally ( μd = 0 ). The p-value is computed as: 
+
+p = 2 · P (Tn−1 ≥ | t|) ,
+
+where Tn−1 is a Student’s t distribution with n − 1 degrees of freedom. 1. If p < 0.05 , we reject H0 and conclude that Selective Restoration significantly outperforms Full Restoration. 2. If p ≥ 0.05 , we fail to reject H0, indicating that the observed difference may be due to random variation. 21 Published as a conference paper at ICLR 2026 
+
+## D BASELINES 
+
+AirNet (Li et al., 2022a), Restormer (Zamir et al., 2022), and NAFNet (Chen et al., 2022a) represent strong encoder–decoder backbones widely used for low-level vision tasks, but they operate in an all-in-one setting without explicit modeling of compound effects. OneRestore (Guo et al., 2024) and PromptIR (Potlapalli et al., 2023b) extend this to multi-degradation scenarios: OneRestore introduces a one-to-composite mapping, while PromptIR conditions restoration on learned prompt embeddings. DiffPlugin (Liu et al., 2024) and MPerceiver (Ai et al., 2024) adopt modular or token-based conditioning, with DiffPlugin integrating contrastive prompt modules and MPerceiver encoding multiple degradation tokens. AutoDIR (Jiang et al., 2024) represents a task-routing approach, selecting subtasks adaptively during inference. Among these, only PRISM employs a weighted contrastive loss to enforce compositional disentan-glement in the embedding space. All other baselines use their standard supervision without this contrastive component. All baseline models were re-trained or fine-tuned on the same set of primitive distortions as PRISM to ensure a fair comparison. This controls for training data bias and isolates differences in architecture and supervision. Following their original training protocol, all baselines (with the exception of OneRestore (Guo et al., 2019)) are trained on single distortions/primitives only, unlike PRISM which is trained on the full combinatorial mixutre set. For evaluation, we predefined a set of primitive degradations (e.g., blur, noise, haze, rain) and applied restoration pipelines consistently across models, so that all methods operated under identical inputs whether they were trained to remove distortoins independently or compositely. This avoids favoring baselines tailored to a specific distribution and provides a controlled setting for compound restoration. Together, these baselines span backbone, prompt-driven, and diffusion-based strategies. Further details for fine-tuning and re-training our baselines and access to their implementations are included in the provided codebase linked above. 
+
+## E ADDITIONAL ABLATIONS AND SENSITIVITY ANALYSIS 
+
+To better understand the contributions of individual design choices in PRISM, we conduct ablations on our held-out the Mixed Degradations Benchmark (MDB) test set. 
+
+Semantic Content Preservation Module (SCPM). While latent diffusion excels at high-level denoising, it often loses fine-grained semantic or structural details critical in scientific imagery. To address this, we integrate the Semantic Content Preservation Module (SCPM), a lightweight decoder-side refinement block that adaptively fuses encoder and decoder features. Let fenc and fdec 
+
+denote features from the encoder and decoder at a given UNet resolution. SCPM refines the decoder representation via 
+
+frefined = γ(fenc ) ⊙ Norm( fdec ) + β(fenc ),
+
+where γ(·) and β(·) are learned per-channel affine transformations (2-layer MLPs), and ⊙ denotes element-wise multiplication. The refined feature frefined is then passed through: (1) a residual convolutional block, (2) a lightweight self-attention layer, and (3) upsampled to the next scale. This design improves the preservation of edges, small textures, and domain-specific patterns, which are often blurred by diffusion bottlenecks. Appendix Figure 12 shows the architecture of the SCPM. Quantitatively, removing SCPM drastically reduces MDB performance (see Table 7) and qualita-tively, SCPM prevents content drift while recovering edges, textures, and small objects essential for downstream analysis (see Fig. 9). 
+
+Effect of Temperature τ . We sweep τ ∈ { 0.03 , 0.07 , 0.10 , 0.20 , 0.50 } while keeping all other hyperparameters fixed. For each τ , we train the embedding module and freeze it before training the diffusion backbone. Figure 10 reports the average cosine similarity between degraded and clean 22 Published as a conference paper at ICLR 2026 Table 7: Ablation on PRISM’s SCPM. This refinement module improves compound restoration fidelity on MDB.              
+
+> PSNR ↑SSIM ↑LPIPS ↓
+> After SCPM 22.08 0.842 0.218
+> Before SCPM 16.65 0.654 0.566 Ground Truth Before SCPM After SCPM
+
+Figure 9: Effect of SCPM on restoration fidelity. Without SCPM (middle), restoration reduces degradations but alters scene details, leading to blurred text/textures and distorted object boundaries. With SCPM (right), fine structures are preserved, maintaining fidelity to the ground truth (left). By reintroducing encoder features at the decoding stage, SCPM retains spatial cues that are often lost in the bottleneck representation. This cross-scale fusion constrains the decoder to stay faithful to the input structure, reducing hallucinations and over-smoothing while preserving fine details critical for scientific fidelity. views and the average difference between this positive similarity and the most confusable negative example (a large indicates better separation). ↑ ↓
+
+Figure 10: Ablation on temperature τ . for the contrastive objective. We show the mean cosine similarity between degraded and clean views (left) and the mean gap between positive and hardest-negative cosine (right). Results are means ± standard error margin over 3 seeds. We observe a sweet spot at τ ≈ 0.1, which maximizes separation. Very low temperatures ( τ = 0 .03 )over-emphasize hard negatives and reduce generalization; high temperatures ( τ = 0 .5) soften negatives excessively, collapsing cluster structure and harming retrieval/accuracy. We therefore set 
+
+τ = 0 .1 for all main results. 
+
+Role of Jaccard Re-weighting. Our setting involves multi-label supervision, where each example is associated with a set of labels rather than a single class. For the contrastive objective, we require a similarity measure that reflects the degree of semantic overlap between two such label sets. The Jaccard index is the canonical similarity measure for finite sets and is widely used in multi-label learning, retrieval, and segmentation (Lin et al., 2023; Menke et al., 2025)). Unlike cosine or dot-product similarity between binary label vectors, the Jaccard index ignores shared negatives, which is critical in sparse label spaces, normalizes by the size of the union, ensuring comparability across examples with different label cardinalities, and provides a bounded and interpretable similarity in 23 Published as a conference paper at ICLR 2026 
+
+[0 , 1] , yielding smooth interpolation between positives and negatives. These properties make Jaccard an ideal choice for weighting sample pairs in our supervised contrastive loss. We compare our Jaccard-based similarity weighting against the following alternatives: • No re-weighting : standard InfoNCE contrastive loss without contrastive reweighting, • Unweighted SupCon : exact label matches treated as positives, all others as negatives, • Cosine similarity : cosine between multi-hot label vectors, • Overlap coefficient : |yi ∩ yj |/ min( |yi|, |yj |).Each similarity score sij is used in the same contrastive objective, with all training settings held fixed. Table 8: Effect of similarity function on downstream performance on the main dataset. Values show absolute performance change relative to the Jaccard-based loss (ours).                      
+
+> Similarity function PSNR ↑SSIM ↑LPIPS ↓
+> None 19.52 0.734 0.154 Unweighted SupCon 20.63 0.799 0.388 Cosine (labels) 21.49 0.772 0.429 Overlap coefficient 21.35 0.784 0.332
+> Jaccard (ours) 22.08 0.842 0.218
+
+Jaccard similarity yields the strongest performance. We suspect that alternatives such as cosine or the overlap coefficient systematically inflate similarity for high-cardinality label sets, reducing discriminativity. Unweighted SupCon performs worst because it discards all partial-overlap rela-tionships, which are common in this dataset. Cosine similarity also correlates strongly with label count (Spearman ρ = 0 .42 ), whereas Jaccard minimizes this dependency ( ρ = 0 .07 ), ensuring that similarity reflects the fraction of shared labels instead of the absolute number of labels present. Table 8 also shows that without any re-weighting in the contrastive loss (using a standard InfoNCE-based loss), overall performance decreases drastically. Many sample pairs share only 1-2 labels. Jaccard naturally assigns intermediate similarity values in these cases, enabling “soft positives” that improve representation learning. We expect that the overlap coefficient overestimates similarity for such pairs, while Unweighted SupCon ignores them entirely. 
+
+Role of Distortion Complexity Here we provide empirical evidence and theoretical motivation behind training on up to three distortions. To directly evaluate this design choice, we sweep the maximum number of distortions used during training over N ∈ { 1, 2, 3, 4} while holding all other factors constant (same set of clean images, same set of augmentations, same CLIP fine-tuning, same diffusion backbone). For each setting, we re-train PRISM from scratch and evaluate restoration fidelity (PSNR, SSSM, and LPIPS) on images from MDB that are degraded by a single distortion .We also evaluate training stability by the variance of the validation loss across epochs. Lastly, we retrain and evaluate the accuracy of a lightweight multi-label classifier on identifying the distortions present from the CLIP image encoder. Table 9 summarizes results across all distortion-count settings. Table 9: Impact of maximum distortion count ( N ) used in the training set. Training on more than three simultaneous degradations reduces restoration fidelity, harms distortion classification accuracy, and destabilizes prompt-following behavior.                                 
+
+> NRestoration Fidelity Training Classifier
+> PSNR ↑SSIM ↑LPIPS ↓Stability ↓F1 Score ↑
+> 124.35 0.942 0.112 0.014 0.91 220.65 0.923 0.126 0.018 0.88 318.73 0.842 0.218 0.022 0.87 416.98 0.741 0.401 0.047 0.61
+
+From this sweep, we observe diminishing returns and eventual collapse beyond N = 3 . Increasing 
+
+N from 1 to 3 expands the compositional coverage of the data augmentation pipeline, enabling the model to learn meaningful interactions among common distortions (e.g., blur+noise, haze+color shift). When 4 or 5 distortions are applied simultaneously, synthetic degradations become so severe that the underlying semantic content is ambiguously recoverable, hurting both restoration fidelity and 24 Published as a conference paper at ICLR 2026 distortion-classification accuracy (F1 drops from 0.87 to 0.61). This aligns with the intuition that supervision becomes unreliable as compound degradations multiply. Thus, N = 3 maximizes the trade-off between representing realistic compound degradations (seen in underwater, microscopy, remote sensing, and camera-trap imagery) and maintaining well-posed, interpretable supervision for restoration. 
+
+Role of Partial and Negative Prompts. Training with partial prompts (requesting removal of only a subset of degradations applied to an image) and negative prompts (explicitly requesting removal of degradations not present) enforces controllability. Without these cases, the model tends to over-restore, indiscriminately removing everything it detects. To evaluate this, we compute prompt faithfulness: for each prompt, we compare the predicted degradation labels before and after restoration against the degradations specified in the prompt. A restoration is counted as faithful if all requested degradations are removed while non-requested degradations are preserved. As shown in Table 10, including partial and negative prompts during training improves prompt faithfulness. 
+
+Role of Prompt Diversity. We generate multiple natural-language variants for each distortion type (e.g., “remove haze,” “clear atmospheric fog”). Limiting training to a fixed prompt format (“remove the effects of haze”) only improves prompt faithfulness by 0.4%. Considering the tradeoff between accuracy and usability, we conclude that the benefits of linguistic variability outweigh this minor change in performance. Table 10: Effect of partial and negative prompts. Including these improves prompt faithfulness (measured as proportion of outputs correctly following instructions).        
+
+> Training Setting Prompt Faithfulness ↑
+> w/o Partial or Negative Prompts 61.4% With Partial Prompts Only 78.9% With Negative Prompts Only 85.9% w/o Prompt Variation 88.1% With Partial + Negative Prompts and Prompt Variation (ours) 87.7%
+
+Sensitivity to Prompting Style. To clarify that PRISM does not require human labor at scale, we compare three prompting modes: (1) fixed manual prompts of the form “remove the effects of x, y, and z,” (2) automated prompts produced by PRISM’s multi-label distortion classifier, and (3) free-form user prompts paraphrased via GPT-4 (sampled from the pre-existing pool of variants of the fixed-prompt) to simulate real-world usage. Table 11: Comparison of prompting modes on MDB. Automated restoration achieves 85–95% of fixed prompting performance.                
+
+> Method PSNR ↑SSIM ↑LPIPS ↓
+> Fixed Prompt 22.08 0.842 0.218 Automated Prompt 20.84 0.824 0.229 Free-form Prompt 20.81 0.819 0.231
+
+Automation provides near-manual performance while eliminating human specification entirely. This confirms that PRISM is not dependent on expert labor for large-scale deployment. Free-form prompting performs similarly, indicating that PRISM tolerates paraphrasing and user variation. We evaluate PRISM’s distortion classifier on the MDB test set spanning 14 primitive distortions and their synthetic combinations. The classifier achieves 0.94 accuracy on this benchmark, reliably identifying both individual degradations and multi-distortion mixtures. This high classification fidelity helps explain the strong automated restoration results reported in Table 11. When uncertain, the classifier tends to predict supersets of the true distortions (e.g., “blur + haze” instead of “haze”), a desirable bias in restoration where omission is riskier than mild over-specification. However, MDB is a synthetic benchmark with cleanly defined distortion categories. It does not capture the open-ended, overlapping, and often ambiguous distortion mixtures found in real imagery. As a result, MDB accuracy cannot directly evaluate real-world generalization, and we expect classifier accuracy to be lower on real compositional degradations, where distortions are less separable and category boundaries are not well-defined. 25 Published as a conference paper at ICLR 2026 
+
+Sensitivity to Prompt Granularity and Accuracy To explicitly quantify how different forms of prompt specification influence PRISM’s behavior, we perform a controlled prompt-perturbation study on the MDB. For all experiments in this subsection, we use the same MDB test set validation images, ensuring that each prompt type is evaluated on identical inputs and degradation patterns. For every image I with ground-truth distortion set D, we construct four prompt variants using GPT-4: 1. Composite semantic: A single combined instruction describing the same distortion set (e.g., “remove the effects of blur and haze”). These prompts are generated using a fixed template to avoid stylistic confounds. These prompts are generated using the form “remove the effects of x, y, and z.” 2. Over-specific: Prompts augmented with redundant adjectives or intensity qualifiers (e.g., “remove mild Gaussian blur and strong chromatic haze”). For each set of distortions, we query GPT-4 with “Write 10 restoration instructions that tells a model to remove the following distortions x, y, and z. For each distortion, add one or two descriptive modifiers (e.g., mild, severe, colored, high-frequency, patchy).” 3. Under-specified: Prompts that target broad categories of restoration (e.g., true set: snow, prompt: “remove occlusions”). For each set of distortions, we query GPT-4 with “Write 10 broad, high-level restoration instructions that could apply to the following distortions x, y, and z. Use a generic category name such as ’occlusions’ or ’artifacts.’ Do not mention specific distortion types.” 4. Incorrect / negative: Prompts specifying distortions not present in D, sampled uniformly from the remaining distortion types (e.g., true set: blur+haze, prompt: “remove rain”). We used the fixed format “remove the effects of x, y, and z.” For each prompt variant, we encode the instruction using the frozen CLIP text encoder from our distortion-aware contrastive training stage, and condition the latent diffusion model with this em-bedding. Image restoration is run using the same sampling schedule and model weights across all conditions. We report PSNR, LPIPS, prompt faithfulness, and the cosine similarity between the CLIP text embedding of the prompt and the CLIP image embedding of the degraded input (after applying the distortion-aware fine-tuning). The latter serves as a measure of latent alignment between the user instruction and the distortion evidence present in the image. Table 12: Ablation on prompt granularity and accuracy. PRISM is robust to linguistic variations but sensitive to the correctness of the distortion set.                         
+
+> Prompt Type PSNR ↑LPIPS ↓Faithfulness ↑Alignment ↑
+> Composite semantic 22.08 0.218 0.98 0.93 Over-specific 22.01 0.225 0.96 0.89 Under-specified 20.30 0.241 0.78 0.70 Incorrect / negative 21.39 0.247 0.55 0.53
+
+Results show that PRISM is invariant to changes in linguistic style (primitive-only vs. composite vs. over-specific), but is sensitive to whether the prompt specifies the correct set of underlying distortions .Importantly, even when prompts are incorrect or incomplete, the image-driven CLIP embedding pulls the joint embedding back toward an appropriate region of the latent space, limiting degradation. This supports the claim that PRISM is robust and image-conditioned, rather than overly dependent on prompt wording. 
+
+Sensitivity to Local and Intensity-Aware Prompts. We examine PRISM’s behavior when given restoration instructions that reference either the strength (e.g., “slightly remove the haze”) or the location (e.g., “remove haze from sky”) of degradation removal. Although PRISM was not explicitly trained on scalar intensity levels or spatial masks, we observe that it can exhibit qualitative differences in response to intensity-related modifiers, with prompts such as “slightly” sometimes resulting in milder restorations (see Fig. 11). In contrast, spatially localized prompts are interpreted less consistently. This is unsurprising given that our data augmentation pipeline introduces degradations uniformly across the entire image, meaning the model is primarily exposed to globally applied 26 Published as a conference paper at ICLR 2026 distortions during training. Future work incorporating localized augmentations and corresponding context-specific prompts may help improve performance in this setting. 
+
+Figure 11: Responses to intensity- and location-aware prompts. PRISM shows qualitative variability with different prompt phrasings: milder restoration tends to occur under “slightly remove the haze,” while stronger dehazing appears under “remove the haze.” Spatial specificity remains limited, and the model generally applies restoration globally even when local changes are requested (e.g., “remove haze from sky”), likely reflecting its training on global augmentations. Bottom row: heatmaps visualize pixel-wise error, and PSNR/LPIPS values are reported below. 
+
+Cost and Latency Analysis In this section, we benchmark efficiency, memory usage, and latency under standardized conditions to evaluate the practical deployability of PRISM relative to both lightweight restoration models and state-of-the-art diffusion-based baselines. All evaluations were conducted on a single NVIDIA A100 (40GB) GPU using a fixed input resolution of 256 × 256 . We report FLOPs (via the ‘thop‘ library), peak GPU memory usage (via PyTorch profiling tools), and average per-image latency (ms). All models were evaluated using identical batch size, mixed-precision (fp16), and PyTorch’s benchmarking mode for consistent measurement. Table 13: Efficiency comparison under standardized conditions. Despite added controllability and SCPM modules, PRISM matches the runtime and memory footprint of strong diffusion-based baselines.                                     
+
+> Method FLOPs (G) Memory (GB) Latency (s ↓)
+> AirNet (Li et al., 2022a) 46 2.1 0.3 Restormer A(Zamir et al., 2022) 118 4.6 0.5 NAFNet A(Chen et al., 2022a) 104 4.2 0.5 OneRestore (Guo et al., 2024) 136 5.8 0.6 PromptIR (Potlapalli et al., 2023b) 128 5.4 0.6 DiffPlugin (Liu et al., 2024) 145 6.5 2.63 MPerceiver (Ai et al., 2024) 132 5.9 1.98 AutoDIR (Jiang et al., 2024) 138 6.0 2.24
+> PRISM (manual) 141 6.1 2.55
+> PRISM (automated) 141 6.1 2.87
+
+As expected, lightweight encoder–decoder models such as AirNet offer the fastest throughput and lowest memory usage, but struggle with generalization and complex distortions as shown in the main text of the paper. Transformer-based or prompt-conditioned models (Restormer, NAFNet, PromptIR) increase compute due to deeper backbones and multi-branch design. Among diffusion-based models, PRISM operates at a similar computational cost to leading baselines (DiffPlugin, AutoDIR, MPerceiver), with a modest increase in FLOPs and memory due to our SCPM conditioning module. Importantly, this added capability yields improved downstream fidelity (Tables 27 Published as a conference paper at ICLR 2026 2, 5, and 9 in main text and Appendix). The distortion classifier used in automated restoration incurs minimal additional cost compared to manual restoration. We believe this demonstrates that prompt-guided, compound-aware restoration is achievable without compromising deployability—making PRISM well-suited for integration into scientific workflows that require interpretability and modularity alongside high-quality results. 
+
+## F ADDITIONAL FIGURES 
+
+Figure 12: Semantic Content Preservation Module (SCPM). Encoder features fenc are used to generate adaptive affine parameters γ(fenc ) and β(fenc ), which modulate normalized decoder features Norm (fdec ). The refined features frefined are then processed by residual and attention blocks before final decoding by DVAE . This adaptive fusion preserves fine structures such as edges, textures, and small objects that are critical for scientific imaging tasks. 
+
+Figure 13: Contrastive disentanglement of distortion embeddings. UMAP projections of f (Idist )
+
+from 10K samples in the MDB, across a subset of distortion classes. Left: CLIP entangles distortions with semantics. Right: Our weighted contrastive loss achieves clear separation while aligning compounds with their primitives. Overall, without contrastive disentanglement, embeddings of compound degradations collapse into unrelated regions, forcing the model to treat them as unseen categories. This can lead to artifacts or overcorrection. 28 Published as a conference paper at ICLR 2026 0.35 
+
+> Δ 0.10
+> Δ 0.18
+> 0.30
+> 0.25
+> 0.20
+> 0.15
+> LPIPS ( ↓)
+> 0.10
+> Δ 0.07
+> Δ 0.17
+> AutoDIR
+> PRISM (Composite)
+> Methods
+> MPerceiver
+> PRISM (Separate)
+> FID ( ↓)
+> 45
+> 50
+> 55
+> 60
+> 65
+> 70
+> 75
+> 80
+> 1
+> 2
+> 3
+> 4
+> No. Distortions
+> Δ 31.95
+> Δ 28.42
+> Δ 20.92
+> Δ 6.73
+> SSIM ( ↑)
+> 0.5
+> 0.6
+> 0.7
+> 0.8
+> 0.9
+> 1.0
+> Δ 0.39 Δ 0.34 Δ 0.30
+> Δ 0.21
+
+Figure 14: PRISM trained on composite examples scales best with the number of distortions. This outperforms PRISM trained on each degradation separately as well as comparable baselines (MPer-ceiver and AutoDIR), emphasized by the ∆ (change in performance across test images with 1 vs. 4 distortions) above each bar. 29 Published as a conference paper at ICLR 2026 SSIM ( ↑)
+
+Pretrained CLIP 
+
+Weighted Compound CLIP 
+
+Quality-Aware CLIP 
+
+> 0.325
+> 0.300
+> 0.275
+> 0.250
+> 0.225
+> 0.200
+> 0.175
+> 0.150
+> 0.65
+> 0.350
+
+LPIPS ( ↓)
+
+FID ( ↓)
+
+> Settings
+> Sequential
+> Composite
+> 0.70
+> 0.75
+> 0.80
+> 0.85
+> 0.90
+> 15
+> 35
+> 25
+> 45
+> 55
+> 65
+> 75
+
+Pretrained CLIP 
+
+Quality-Aware CLIP 
+
+Weighted Compound CLIP 
+
+Quality-Aware CLIP 
+
+Pretrained CLIP 
+
+Weighted Compound CLIP 
+
+Figure 15: Latent disentanglement of distortion types enables faithful stepwise and single-shot restoration. The contrastive loss closes the gap between sequential and composite prompting. 30 Published as a conference paper at ICLR 2026 21.13 / 0.278 22.52 / 0.213 23.12 / 0.135     
+
+> Sequential Restoration
+> Low Light
+> Low Light + Clouds
+> Clear
+> “remove the effect of clouds” “remove the effects of low light” “remove the effects of clouds and low light”
+> Composite Restoration Ground Truth
+> 23.34 / 0.244 24.88 / 0.175 25.39 / 0.127
+> No Loss
+> Loss
+
+Figure 16: Contrastive disentanglement of distortions helps separate distortions from each other and from semantic content, enabling higher-fidelity sequential and composite restoration. Cross-attention maps (left of each output) show how the model attends to distortions. Without PRISM’s contrastive disentanglement (top), sequential restoration preserves artifacts and fails to isolate degradations. With the loss (bottom), embeddings cleanly separate distortions (e.g., clouds vs. low light). This separation not only prevents distortion types from interfering with one another, improving sequential restoration by reducing error accumulation, but also enables the model to accurately target and remove multiple degradations simultaneously, as seen in the composite restoration outputs. We report PSNR/LPIPS metric values below each output. Ground Truth PRISM AutoDIR MPerceiver DiffPlugin   
+
+> OneRestore Restormer PromptIR AirNet
+> 16.31 / 0.170 18.76 / 0.212 14.19 / 0.244 15.12 / 0.245 10.65 / 0.495
+> Low Light + Haze + Snow
+> 22.47 / 0.120 17.78 / 0.139 13.45 / 0.244 15.25 / 0.153
+
+Figure 17: Qualitative outputs on the Mixed Degradations Benchmark (MDB). Example of a low-light + haze + snow composite evaluated across baselines. We report (PSNR/LPIPS) below, with the best results in bold . While prior methods reduce some degradations, they leave residual haze (AirNet, PromptIR), oversmooth texture (Restormer, MPerceiver), or introduce artifacts from over-correction (OneRestore, AutoDIR, DiffPlugin). PRISM produces the most faithful reconstruction, recovering both sky and foreground with minimal artifacts, closely matching the ground truth. This illustrates the strength of compositional latent disentanglement: PRISM not only removes multiple degradations simultaneously but also resists the tendency to over-restore, yielding outputs that are both high fidelity and scientifically faithful. 31 Published as a conference paper at ICLR 2026 Ground Truth R SM 
+
+Res ore 
+
+Pool Ripples (ThapaSet) 
+
+refraction + warping 
+
+PromptIR 
+
+18.28 / 0.198 0 172 
+
+19.60 / 0.252 13.24 / 0.388 
+
+0 105 
+
+Ground Truth PRISM AutoDIR 
+
+MPerceiver DiffPlugin 
+
+Underwater (UIEB) 
+
+color + haze 
+
+16.87 / 0.352 
+
+24.55 / 0.105 23.60 / 0.120 
+
+20.00 / 0.218 21.41 / 0.200 
+
+18.28 / 0.198 
+
+21.30 / 0.172 20.66 / 0.219 
+
+16.66 / 0.472 10.51 / 0.813 19.86 / 0.160 
+
+20.68 / 0.235 18.86 / 0.067 
+
+Under-Display Camera (POLED) 
+
+low light + blur + contrast 
+
+Input 
+
+Ground Truth PRISM AutoDIR 
+
+MPerceiver DiffPlugin Input 
+
+Ground Truth PRISM AutoDIR 
+
+MPerceiver DiffPlugin Input 
+
+Figure 18: PRISM best removes unseen compound degradations. PRISM restores real-world images with degradations outside its training set in underwater imagery, under-display camera images, and fluid lensing. In all cases, it produces faithful restorations that most closely match the ground truth, showing strong single-shot generalization compared to similar diffusion baselines. We report PSNR/LPIPS metric values below, with the best results in bold .32 Published as a conference paper at ICLR 2026 Mixed Forests Mixed Forests Deciduous Needleleaf   
+
+> Clouds + Low Light Cloudless Sample Cloudy Sample
+> Closed Shrublands Closed Shrublands Urban Lands
+> Grasslands
+> “remove the effect of clouds”
+> Open Shrublands
+
+Figure 19: Remote sensing classification under cloud occlusions requires full composite restoration. 
+
+In this Sentinel-2 example, removing only clouds (middle-left) reveals incomplete information and leads to a misclassification. Full composite restoration (middle-right), correcting both clouds and low light, recovers the underlying landscape with high fidelity and matches the ground-truth class, in 
+
+bold .
+
+Figure 20: Selective restoration helps with camera trap classification under compound nighttime degradations. On the Rooftop Cityscapes dataset, frames suffer from haze and low-light conditions. Only improving contrast aids recognition of nocturnal species, while over-restoration (e.g., removing haze) can alter image content, obscure subtle texture cues, or introduce artifacts that mislead classi-fication—sometimes even changing the perceived species. We bold the classification outputs that matches expert-provided labels. 33 Published as a conference paper at ICLR 2026 mIOU: 0.6496 
+
+> Clear-Weather Image “remove the effects of haze”
+> Poor Weather Image
+> mIOU: 0.5936
+> mIOU: 0.6313 mIOU: 0.4281
+> mIOU: 0.6430
+> “remove the effects of haze and low light”
+> mIOU: 0.6121
+> “remove the effects of haze”
+> “remove the effects of haze and low light”
+
+Figure 21: Selective restoration helps with urban scene understanding under haze and low light. 
+
+Rooftop Cityscapes examples show how selective restoration affects scene understanding. Removing haze alone improves mIoU, while attempting to also remove low light leads to over-correction and lower segmentation accuracy. 
+
+Figure 22: Failure modes of PRISM on challenging degradations. Top-left: Extreme unseen distor-tions cause incomplete restoration and overcorrection of color/contrast. Top-right: Overfitting to synthetic distortions leaves lingering artifacts when applied to real data that diverges from training augmentations. Bottom-left: Overfitting to common distortions partially reduces moire but fails to fully restore fine details. Bottom-right: Ambiguous degradations (e.g., solar flares, glare) remain difficult to generalize without explicit training examples. 34 Published as a conference paper at ICLR 2026 Distorted Input seed = 1234 seed = 42 Ground Truth 
+
+Figure 23: Qualitative impact of random seed and stochasticity on restoration outcomes. Different seeds produce slightly varied outputs, reflecting both diffusion sampling variability and embedding initialization. While global structure remains stable, fine details may differ, underscoring the impor-tance of evaluating consistency across multiple runs. 35

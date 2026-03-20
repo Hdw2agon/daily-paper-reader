@@ -1,0 +1,1007 @@
+Title: FlatLands: Generative Floormap Completion From a Single Egocentric View
+
+URL Source: https://arxiv.org/pdf/2603.16016v1
+
+Published Time: Wed, 18 Mar 2026 00:33:14 GMT
+
+Number of Pages: 47
+
+Markdown Content:
+# FlatLands: Generative Floormap Completion From a Single Egocentric View 
+
+Subhransu S. Bhattacharjee ⋆, Dylan Campbell , and Rahul Shome 
+
+School of Computing, The Australian National University, Canberra, Australia 
+
+Abstract. A single egocentric image typically captures only a small portion of the floor, yet a complete metric traversability map of the sur-roundings would better serve applications such as indoor navigation. We introduce FlatLands, a dataset and benchmark for single-view bird’s-eye view (BEV) floor completion. The dataset contains 270,575 obser-vations from 17,656 real metric indoor scenes drawn from six existing datasets, with aligned observation, visibility, validity, and ground-truth BEV maps, and the benchmark includes both in- and out-of-distribution evaluation protocols. We compare training-free approaches, deterministic models, ensembles, and stochastic generative models. Finally, we instan-tiate the task as an end-to-end monocular RGB-to-floormaps pipeline. FlatLands provides a rigorous testbed for uncertainty-aware indoor map-ping and generative completion for embodied navigation. 
+
+Keywords: scene completion · embodied AI · generative modeling 
+
+## 1 Introduction 
+
+Partial observability is a defining constraint in indoor autonomy — decisions must be made from sensory evidence that is incomplete, noisy, and inherently viewpoint-limited [2, 5, 35, 61, 104]. This paper targets a specific perception task that sits on this critical path — inferring a usable traversability map from limited observations . Robotic perception distills high-dimensional sensor streams into compact world models for mapping and planning under uncertainty [19,45,68,69], combining geometric representations [65,90,100] with probabilistic occupancy es-timates [41,97,144] and converting them into spatial abstractions such as metric– topological [10, 88, 141, 143] and semantic maps [67, 107, 118]. In contrast, we focus on a ground-plane bird’s-eye-view (BEV) floormap: a compact 2D grid of traversability obtained by projecting 3D geometry to the floor plane. BEV representations are widely adopted [73, 166] and directly sup-port collision checking and reachability under uncertainty [85], making them an efficient abstraction for navigation tasks. Operational map-based reasoning from egocentric imagery has also shown strong practical value for localization and decision making [120]. Among sensing modalities, single-frame egocentric RGB is especially challenging [72, 105, 161]: one view observes a narrow frustum  
+
+> ⋆
+
+Corresponding author: Subhransu.Bhattacharjee@anu.edu.au .
+
+> arXiv:2603.16016v1 [cs.CV] 16 Mar 2026
+
+2 Bhattacharjee et al.            
+
+> Input
+> Predictive Stage Generative Stage Final Output
+> RGB frame I
+> Depth map D
+> Floor segment S
+> BEV observed floor Fobs
+> BEV unobserved mask U
+> Φ
+> Image Segmentation
+> Depth Estimation
+> Ψ
+> Orthogonal Projection
+> conditioning
+> Camera Intrinsics
+> Encoder
+> Decoder
+> Conditional model
+> pprior
+> Sampled BEV set
+> ˆF(1) , . . . , ˆF(K)
+> pposterior
+> Sampling
+> K=4 samples
+> One-to-many inverse mapping
+
+Fig. 1: Pipeline. From a single RGB image, our model predicts depth and floor seg-mentation and projects them to BEV, producing observed floor Fobs and unobserved mask U . A conditional generator then predicts floormap completions in the unobserved region, while preserving observed evidence. 
+
+while most traversable floor is unobserved due to occlusions. BEV completion from a single image is therefore inherently ambiguous and belongs to the class of Bayesian inverse problems [133,138], where posterior reasoning is required rather than a single point estimate [33, 156]. Solving the single-frame case provides a per-step prior that can be fused temporally in multi-step navigation [4, 51, 110]. We study single-view BEV floormap completion : given one RGB image, infer a distribution over plausible traversability maps in the unobserved BEV while 
+
+exactly reproducing observed labels . Since downstream decisions depend on un-certainty, we evaluate multi-hypothesis predictions using both fidelity and di-versity metrics [46]. Indoor layouts exhibit strong structural regularities (rooms, doors, corridors), which are often modeled via grammar and pattern-theoretic priors [67, 94, 108]. Modern generative models can internalize these regularities for posterior inference and sampling [52, 76], and are increasingly exploited in robotics under uncertainty [12,20,21,42,113,124]. Yet no standardized real-world benchmark exists for indoor BEV metric floormap completion. To this end, we introduce FlatLands, a dataset with 17,656 real indoor scenes from six sources [7, 24, 34, 36, 147, 160]. Training data is synthesized from phys-ically feasible camera centers and yaw headings, with visibility computed by field-of-view checks and ray-based occlusion as shown in Fig. 2b. After automatic curation, the dataset contains 270,575 observations with aligned floor evidence, visibility, validity, and ground-truth BEV maps. Evaluation uses the full test split with explicit in-distribution (ID) and out-of-distribution (OOD) partition-ing, with ScanNet++ reserved strictly for test-only OOD evaluation and never used in training or validation. The task is also instantiated as a full monocular RGB-to-floormaps pipeline (Fig. 6). Quantitative evaluation uses standardized BEV-conditioned inputs, isolating completion quality from front-end estimation; end-to-end results confirm that method ranking transfers to realistic egocentric input. We benchmark training-free, deterministic, ensemble, and stochastic base-lines under a shared protocol (Secs. 5 and 5.2). 
+
+Contributions. Our main contributions are as follows: Generative Single-View Floormap Completion 3
+
+1. We formalize the single-view indoor BEV floor completion task and re-lease FlatLands , the first benchmark of its kind with 270,575 observations from 17,656 real metric scenes across six datasets of RGB images and BEV floormaps, each with visibility masks, validity regions where the dataset has a floor or non-floor label, and full provenance metadata. 2. We design an extensive evaluation suite covering masked multi-hypothesis calibration and a monocular end-to-end RGB-to-floormaps pipeline that demonstrates real-sensor viability. 3. We report the performance of eleven methods spanning training-free ap-proaches, deterministic predictors, epistemic ensembles, and three families of stochastic generators under a common conditioning input. We find that generative models better capture the observation-conditioned completion un-certainty than point estimates, and they also achieve stronger overall perfor-mance. A boundary-variance decomposition further reveals that epistemic ensembles conflate seed divergence with layout ambiguity, while conditional flow models localize uncertainty to structurally ambiguous regions. 
+
+## 2 Background and Related Work 
+
+Indoor map completion and occupancy anticipation. Classical occupancy map-ping maintains per-cell Bayesian beliefs over traversability from sequential ob-servations [40, 41, 57, 96, 144], while variable-resolution occupancy formulations improve representation efficiency in large spaces [97]. Under multi-step exploration, OccAnt [110] trains a CNN anticipator on Habitat simulations to project observed evidence into a predicted occupancy map; Katyal et al . [64] and Katsumata et al . [63] exploit temporal sequences for spatial anticipation. Aydemir et al . [3] use relational priors over object co-occurrence to complete partially observed rooms. Methods such as FloorNet [78], FloorSP [25], and room-layout estimation from monocular imagery [92] aim to re-construct architectural plans from RGB-D, panoramic scans, or single-image cues with richer supervision. MapEx [51] and PIPE [4], which use the LaMa inpaint-ing network [135], target multi-modal uncertainty under scoring with multi-step observations, while [113] applies diffusion priors to 3D occupancy completion. In navigation, the robot primarily needs a traversability map to denote where it can safely navigate [12, 41, 98]. 
+
+Image inpainting and outpainting via generative models. Classical inpainting methods propagate structure into missing regions via PDE-based diffusion and exemplar matching [11, 23, 139]. Modern approaches are predominantly learned 
+
+e.g . LaMa [135] couples large receptive fields (Fourier convolutions [31]) with adversarial training, while partial convolutions [79] build on the U-Net back-bone [117] by masking convolutional updates. Related ideas also appear beyond natural images, including occupancy inpainting for 2D grid maps [150]. Out-painting (image extrapolation) extends content beyond observed boundaries and is typically less constrained than interior-hole inpainting, since boundary condi-tions are available only along the crop edge [149,159]. Recent learned outpainting 4 Bhattacharjee et al. 
+
+methods explicitly target this regime, emphasizing semantic consistency and di-versity [30, 71]. A complementary line of work treats in and outpainting as conditional gen-eration under missing evidence. Context encoders [99] introduced learned con-text completion, while diffusion-based inpainting methods such as RePaint [86] and broader pixel-space diffusion models [52,55,95,131] enforce conditioning via per-step masking. This masked-conditioning interface has since become stan-dard in large-scale generators that support inpainting and outpainting [15, 101, 106,112,116]. For explicitly multi-modal completions, posterior-sampling mecha-nisms such as Probabilistic U-Net [66], hierarchical probabilistic inpainting [109], and conditional flow matching or rectified flows [76, 81, 145] provide principled ways to sample diverse outputs consistent with the observation. Here, by com-puting an observed BEV floormap, the binary BEV floormap completion task is effectively an outpainting problem on binary metric grid maps rather than RGB texture synthesis. 
+
+BEV scene understanding by posterior sampling. Autonomous driving BEV models [73, 103] couple geometric lifting with semantic prediction in synchro-nized multi-camera settings. Geometry-aware multi-view attention further im-proves transformer designs [91]. Neural map priors [155] and generative map layout estimation [165] extend this by incorporating learned spatial priors. Map-grounded visual localization methods such as OrienterNet [120] further show that operational image-to-map alignment is feasible at scale. Indoor BEV work is comparatively sparse: under a single egocentric view, occlusion and limited field of view leave large floor regions unobserved, making completion a partial-observability problem [2, 5, 19, 68]. Closest in spirit to our work, DiffBEV [166] and MapPrior [165] apply conditional diffusion to BEV completion and map layout estimation, but focus on outdoor driving with multi-view camera rigs. In contrast, we instantiate the inpainting and posterior-sampling paradigms for 
+
+indoor BEV floor completion, where the target is a binary geometric map that respects metric floor structure—without expending capacity on RGB textures or dense semantic labels. A partial BEV observation typically admits multiple plausible completions [4, 44, 51, 66]. The goal is to sample from p(F ⋆ | Fobs , U ) rather than collapse to a point estimate [133,138]. Deterministic predictors target a single mode, whereas stochastic generators represent multimodal uncertainty that is relevant to safety-critical navigation [13, 35, 68]. 
+
+Inference efficiency. A large body of work targets dense 3D reconstruction [122, 129, 137], including diffusion-based inverse solvers, image and text to mesh and single image novel view synthesis models [22, 54, 80, 82, 93, 113, 119, 130, 140]. These methods are complementary: they optimize 3D geometry or appearance for reconstruction and generation, typically producing volumetric occupancy grids, meshes, or radiance fields with non-trivial inference costs. In contrast, many navigation pipelines use a lightweight 2D occupancy or traversability grid aligned with motion feasibility (typically 2D), with lower storage requirements than Generative Single-View Floormap Completion 5
+
+volumetric maps [132, 142], motivating our use of BEV representation in indoor scenes. 
+
+## 3 Problem and Framework 
+
+A floormap is a binary bird’s-eye-view (BEV) map encoding local traversabil-ity within a bounded indoor region. Binary traversability is the minimal spatial primitive consumed by collision-checking and path-planning modules [41, 85]; richer semantic labels are complementary but orthogonal to the completion task studied here. Given a single egocentric RGB image (Fig. 1), the goal is to pre-dict the complete floormap—including unobserved portions that lie outside the camera frustum. We decouple this into two stages: perception of the observed floormap from the image, followed by completion of the unobserved portion. 
+
+3.1 Task: Unobserved Floormap Completion 
+
+Let R denote a 2D bounded region of interest, situated relative to an oriented camera pose. Without loss of generality, R is discretized as an H×W grid at a fixed metric resolution ∆ (m/px). Given an RGB image I, the camera’s field-of-view partitions R into an observed sub-region RO ⊆ R and its complement, the 
+
+unobserved region RU = R \ RO . The observed floormap Fobs is a binary map over RO that records per-cell traversability, Fobs (x) = 1(x is traversable ) for each x ∈ RO . In practice, Fobs is estimated from I via the perception front-end described in Sec. 3.2. The unobserved floormap Funo , defined analogously over RU . Since a single partial observation does not generally determine Funo uniquely, we cast the task as sampling from the posterior P (Funo | I) as a conditional inverse problem [133]. A parametric network qθ , trained to approximate this posterior, produces K
+
+completions  ˆF (k) 
+
+> uno
+
+∼ qθ (I), k = 1 , . . . , K.  (1) When the model is deterministic, qθ collapses to a point estimate ( K=1 ). 
+
+3.2 Estimating the Observed Floormap from an Egocentric View 
+
+As shown in Fig. 1, the observed BEV floormap is produced from a single RGB image by two deterministic operators [12]. A preprocessing stage Φ extracts an image-plane depth map D via DepthPro [17] and a floor segmentation S via SegFormer [153] (trained on ADE-20K [163]). A projection stage Ψ then back-projects these signals into the BEV grid using camera intrinsics K (metric depth is used directly when available), yielding the observed floormap Fobs and the observation footprint mask O:
+
+(D, S ) := Φ(I), (Fobs , O ) := Ψ (D, S ; K). (2) Here O and U are the binary masks indicating membership in RO and RU ,respectively. At inference, neither the camera pose nor the complete map is 6 Bhattacharjee et al.                                      
+
+> Table 1: Source datasets aggregated into FlatLands. Obs. (raw) are upstream counts before quality filtering; Obs. (filtered) retain only observations with conditional signal ratio rcond ≥0.10 . ScanNet++ is OOD test-only. Details can be found in Sec. S2.
+> Dataset Scenes Obs. (raw) Obs. (filtered) Asset Used
+> ZInD [34] 7,026 168,624 133,096 Panorama (see Sec. S2.1) ARKitScenes [7] 4,803 115,271 40,282 PLY mesh Matterport3D [24] 2,101 50,424 38,004 PLY mesh ScanNet [36] 1,508 36,192 24,763 PLY mesh 3RScan [147] 1,291 30,984 18,216 OBJ mesh ScanNet++ [160] 927 22,248 16,214 PLY mesh (OOD-only)
+> FlatLands(Ours) 17,656 423,743 270,575 4×binary 2D maps
+
+available; completion models operate solely on the abstract BEV conditioning pair (Fobs , U ).
+
+3.3 Training Floormap Completion Models 
+
+Stochastic models draw K> 1 samples to represent posterior uncertainty. Each sample ˆF (k) 
+
+> uno
+
+is assembled into a full completion by preserving observed evidence exactly: 
+
+F (k) 
+
+> comp
+
+= Fobs + U ⊙ ˆF (k)
+
+> uno
+
+. (3) This evidence-clamping step enforces a posterior support constraint: returned completions agree with Fobs on all observed cells while remaining free to vary over U . Models are supervised against the ground-truth floormap F ⋆, derived from scene meshes provided by the source datasets. The dataset also provides a valid-workspace mask V that distinguishes in-bounds cells from out-of-bounds or undefined regions. All losses and metrics are computed only on the unobserved valid evaluation region Reval = U ⊙V , so scores reflect completion quality beyond the camera frustum. The canonical camera convention and deployed RGB-to-floormaps front-end are specified in Sec. S1. 
+
+## 4 FlatLands Dataset 
+
+Sources, scope, and canonical splits. FlatLands combines six real indoor metric datasets: Matterport3D [24], ScanNet [36], ScanNet++ [160], ARKitScenes [7], 3RScan [147], and ZInD [34], covering 17 ,656 unique scene layouts. We synthesize egocentric observations by sampling floor-valid camera centers and 24 yaw head-ings per center, with visibility computed via field-of-view and ray-occlusion tests. From 423 ,743 synthesized observations, filtering yields a canonical set of 270 ,575 
+
+observations (215,342 train, 26,890 val, 28,343 test; Fig. 2a), with ScanNet++ held out entirely as test-only OOD data. All splits are scene-disjoint. Source aggregation is summarized in Tab. 1 with source-wise breakdown in Fig. 2a. Generative Single-View Floormap Completion 7ZInD    
+
+> 49.2 %
+> ARKit
+> 14.9 %
+> MP3D
+> 14.0 %
+> ScanNet
+> 9.2 %
+> 3RScan
+> 6.7 % ScanNet++
+> 6.0 %
+> (a) Source dataset breakdown across the six indoor RGBD corpora aggregated in the Flat-Lands dataset.
+> (b) Egocentric BEV from a single camera observa-tion. Visible floor points are orthographically pro-jected onto the floor plane and rasterized on the grid.
+
+Fig. 2: FlatLands dataset statistics and construction.      
+
+> RGB input Fobs UF⋆V
+
+Fig. 3: Input egocentric RGB (left) and the four aligned 256 ×256 binary maps per observation. Fobs : observed floor; U : valid unobserved; F ⋆: full floor ground truth; V :valid workspace. The white marker ( ▼) denotes the fixed camera anchor in BEV. 
+
+Data construction pipeline. Each observation is generated offline by placing a vir-tual camera in the reconstructed 3D mesh at the sampled pose, back-projecting the rendered view, and orthogonally projecting the visible floor into a 256 ×256 
+
+egocentric BEV grid as shown in Fig. 2b. The agent’s understanding of its pose in the world is not assumed at inference (egocentric). Full processing details, in-cluding observation synthesis and crop validation, are in Secs. S2, S2.2 and S2.4. The pipeline outputs four aligned binary maps per observation (Fig. 3): Fobs 
+
+(observed floor), U (valid but unobserved), F ⋆ (full floor ground truth), and V
+
+(valid workspace). By construction, Fobs ∪ U ⊆ V . Depth and mesh assets are used only offline: floor evidence comes from mesh plane-fitting for five datasets and from DA 2 metric depth [70] for ZInD panoramas, calibrated via room-vertex annotations. Camera intrinsics, anchor convention, and grid resolution are fixed, enabling consistent difficulty interpretation across sources and ID/OOD subsets. Source-specific processing, aggregation and filtering rules are in Secs. S2.1 and S2.4; split consistency and scene-level statistics are in Sec. S2.5. On Reval ,floor prevalence is moderately high (mean ≈ 0.80 ); its effect on metric ranking is analyzed in Sec. S2.4. Canonical tensors use a 256 ×256 grid at 25.6 px/m, i.e., 
+
+∆ ≈ 0.039 m per pixel; the cell-size rationale is explained in Secs. S2.3 and S2.4. 8 Bhattacharjee et al. 
+
+## 5 Experiments 
+
+We benchmark 11 methods spanning parameter-free approaches, deterministic completion, an epistemic ensemble, and stochastic posterior samplers. To isolate modeling effects, all learned methods share the same interface and evaluation protocol: inputs are (Fobs , U ); losses and metrics are computed on the common supervision mask Reval . A compact per-method summary is provided in Table 2. 
+
+5.1 Baselines 
+
+Naive baselines. Four parameter-free methods provide reference fill strategies for U , then are merged with observed evidence using the hard-clamp rule [86] (Eq. (3)). All Obstacle predicts obstacle (0) everywhere on U . All Floor 
+
+predicts floor (1) everywhere on U . NN Propagation assigns an unobserved cell the label of the nearest observed one. Uniform Random samples i.i.d. Bernoulli (0 .5) labels per cell. 
+
+Deterministic models. We evaluate UNet [117, 151], PartialConv UNet [79], and LaMa [31,135]. All three keep their original backbones; we only adapt the in-put and output channels to binary BEV floor completion. UNet and PConv UNet are trained with masked BCE reconstruction losses on Reval , while LaMa retains its reconstruction-plus-adversarial objective. At inference, continuous outputs are binarized via fixed thresholding [27] and then hard-clamped to preserve ob-served evidence [86]. 
+
+Stochastic models. LaMa Ensemble trains four independent LaMa models with different random seeds [4, 51] and returns one output from each mem-ber ( K=4 ), providing seed-based diversity. Increasing the number of ensemble samples requires retraining a model on a different seed. We also evaluate three posterior conditional samplers: Diffusion [52,127], Flow Matching [76,77,81], and Flow Matching with Cross-Attention Conditioning (FM+XAttn) .FM+XAttn keeps the baseline concatenated input and adds a condition en-coder on [Fobs , U ], with cross-attention [146] injected only at coarse resolutions (64 ×64 and 32 ×32), following modular conditioning ideas [102,116,162]. Operat-ing cross-attention at coarse resolutions keeps parameter overhead modest while letting the generator attend to global layout cues from the conditioning pair; fine-grained spatial detail is resolved by the convolutional decoder. All three samplers share the same setup: masked BCE on Reval , classifier-free guidance (s=2 .0) [37, 53], per-step evidence clamping [32, 115], K=4 samples, and itera-tive sampling ( 50 DDIM steps for Diffusion, 50 Heun steps for Flow Matching, 
+
+25 Heun steps for FM+XAttn [50, 62, 127]). 
+
+Implementation and reproducibility. All models are trained in distributed full-precision mode on 4× A100 40 GB GPUs under identical schedules; inference runs on consumer-grade hardware (Nvidia RTX 4090). Further architecture, training, and sampling details are reported in Secs. S5 and S8.2 and Tab. S12. Generative Single-View Floormap Completion 9
+
+Table 2: Baseline catalog. Unless noted, learned methods share inputs (Fobs , U ),supervision mask Reval , and hard evidence clamping before evaluation.                          
+
+> Method Adaptations Inference
+> All naive baselines All-Obstacle (fill 0), All-Floor (fill 1), NN Propagation (nearest-observed copy), Uniform Random ( p=0 .5). Parameter-free rules on U; merged with observed evidence via hard clamping (Eq. (3)). Single pass U-Net [117, 151] Masked BCE on Reval . Backbone unchanged; binary BEV I/O only. Thr. 0.5 + clamp PConv-UNet [79] Masked BCE on Reval . Partial-conv. mask propagation retained; adapted to binary BEV completion. Thr. 0.5 + clamp LaMa [31, 135] Recon. + adversarial. Fourier-conv. generator retained; channels remapped for floor-occupancy completion. Thr. 0.5 + clamp LaMa Ens. [4, 51] Same as LaMa (4 seeds). Epistemic variant from independent seed train-ing; no architecture change.
+> K=4
+> Diffusion [52, 127] Masked BCE on Reval . Posterior inpainting with per-step evidence clamping [32, 115]. DDIM, 50 st., CFG s=2
+> Flow Match. [76] Masked BCE on Reval . Same conditioning/clamping as Diffusion; ODE transport parameterization. Heun, 50 st., CFG s=2
+> FM+XAttn [76, 146] Masked BCE on Reval . Adds condition encoder on [Fobs , U ]with cross-attn. ( 64 ×64 ,32 ×32 ); see [102, 116, 162]. Heun, 25 st., CFG s=2
+
+The source code, pre-trained weights, and the full dataset reproduction pipeline will be publicly released. 
+
+5.2 Evaluation Protocol 
+
+We evaluate on the canonical test split ( N =28 ,343 ), partitioned into 12 ,129 in-distribution observations and 16 ,214 out-of-distribution observations. Quantita-tive results are computed on standardized BEV-conditioned inputs. Difficulty-tier and threshold analyses are in Sec. S2.5. All metrics are computed on the unobserved valid region Reval = U ⊙ V . We additionally report the standard metrics IoU and F1 with traversable floor as the positive class (see Sec. S6). For this benchmark, we introduce two new metrics—UMR and MES—designed to calibrate fidelity and diversity under masked evaluation. 
+
+Unobserved-region mismatch rate. We define the unobserved-region mismatch rate (UMR; lower is better) as the fraction of misclassified cells on Reval :
+
+UMR = FP + FN 
+
+|Reval | = 1 − TP + TN 
+
+|Reval | . (4) Since floor prevalence on Reval is high ( ≈ 0.80 ; a natural bias in indoor spaces; see Sec. S2.4 for details), IoU and F1 primarily reflect floor-completion fidelity and can remain high even when wall boundaries are imperfect. 
+
+Masked Energy Score. For multi-sample methods, we introduce the Masked En-ergy Score (MES; lower is better) [46, 114]: 
+
+MES = 1
+
+K
+
+KX
+
+k=1 
+
+dReval 
+
+
+
+F (k)
+
+comp , F ⋆
+
+− 12K(K − 1) 
+
+X
+
+k̸ =ℓ
+
+dReval 
+
+
+
+F (k)
+
+comp , F (ℓ)
+
+comp 
+
+
+
+, (5) 10 Bhattacharjee et al. 
+
+Table 3: Fidelity metrics (mean ±std) on Reval with oracle best-of-K (K=4 ) variant for stochastic methods (bottom four rows).                                                                                                                                                                                                        
+
+> Method ID OOD UMR ↓IoU ↑F1 ↑UMR ↓IoU ↑F1 ↑
+> All-Obstacle 0.661 ±0.229 0.000 ±0.000 0.000 ±0.000 0.854 ±0.155 0.000 ±0.000 0.000 ±0.000
+> All-Floor 0.339 ±0.229 0.661 ±0.229 0.737 ±0.210 0.146 ±0.155 0.854 ±0.155 0.912 ±0.116
+> NN Prop. 0.243 ±0.078 0.620 ±0.219 0.708 ±0.202 0.198 ±0.156 0.779 ±0.186 0.861 ±0.143
+> Uniform Rand. 0.501 ±0.002 0.367 ±0.104 0.516 ±0.128 0.502 ±0.003 0.453 ±0.057 0.621 ±0.064
+> U-Net 0.122 ±0.030 0.763 ±0.132 0.843 ±0.098 0.114 ±0.111 0.870 ±0.136 0.924 ±0.094
+> PConv-UNet 0.126 ±0.033 0.758 ±0.132 0.838 ±0.098 0.114 ±0.113 0.870 ±0.139 0.924 ±0.097
+> LaMa 0.209 ±0.059 0.623 ±0.161 0.734 ±0.131 0.283 ±0.159 0.672 ±0.190 0.787 ±0.153
+> LaMa-Ens. 0.105 ±0.099 0.817 ±0.205 0.882 ±0.154 0.107 ±0.094 0.874 ±0.126 0.927 ±0.083
+> Diffusion 0.099 ±0.097 0 .830 ±0.196 0 .892 ±0.143 0 .094 ±0.092 0 .890 ±0.122 0 .936 ±0.082
+> Flow Match. 0.100 ±0.095 0.829 ±0.192 0.892 ±0.139 0.102 ±0.099 0.880 ±0.129 0.930 ±0.088
+> FM+XAttn 0.100 ±0.094 0.830 ±0.192 0 .892 ±0.139 0.109 ±0.092 0.873 ±0.124 0.927 ±0.084
+
+Table 4: Stochastic evaluation (mean ±std) on Reval for K=4 . MES: Masked Energy Score; IoU m: mean-of-K IoU; Var: average per-pixel variance.                                                                             
+
+> Method ID OOD MES ↓IoU m↑Var ↓MES ↓IoU m↑Var ↓
+> LaMa-Ens. 0.158 ±0.139 0.713 ±0.246 0.076 ±0.062 0.149 ±0.093 0.720 ±0.155 0.084 ±0.043
+> Diffusion 0.143 ±0.152 0.763 ±0.222 0.044 ±0.029 0.097 ±0.102 0.832 ±0.124 0.048 ±0.026
+> Flow Match. 0.143 ±0.148 0.766 ±0.226 0 .037 ±0.029 0.101 ±0.103 0.832 ±0.135 0 .043 ±0.028
+> FM+XAttn 0.133 ±0.138 0 .766 ±0.218 0.044 ±0.032 0.095 ±0.093 0.813 ±0.123 0.061 ±0.028
+
+with dReval (A, B ) = 1 − IoU Reval (A, B ) (Jaccard distance [75]), which normal-izes by the union and shares the same geometric semantics as the fidelity axis (see Sec. S6). The first term penalizes distance to the ground truth (fidelity); the second rewards pairwise spread among samples (diversity). We set K = 4 
+
+(Sec. S7.2); sample-count sensitivity is analyzed in Sec. S7.2. Main tables report mean ±std. We also report mean IoU, best-of-K IoU, and per-pixel variance for the stochastic methods. For fairness, all methods use identical post-processing: fixed map thresholding [27], evidence hard clamping, and the common evalua-tion mask Reval , preventing protocol differences from affecting model ranking. Downstream integration into closed-loop planners is an important direction but lies beyond the scope of this benchmark; we focus on fidelity and calibration of the completion stage itself. 
+
+## 6 Results and Discussion 
+
+Table 3 reports UMR, IoU, and F1 (mean ±std) on Reval . Among deterministic predictors on the ID split, UNet and PConv UNet lead, while LaMa trails— consistent with adversarial training trading distortion for perceptual realism [16]. The trivial All Floor baseline reaches IoU comparable to LaMa because high floor prevalence ( ∼0.80 ; Sec. S2.4) inflates IoU for optimistic guesses (Sec. 5.2); NN Propagation ranks lower because nearest-neighbor copying replicates boundary pixels, lowering recall. Generative Single-View Floormap Completion 11                 
+
+> LaMa-Ensemble
+> FM+XAttn samples
+> Fobs U
+> F⋆V
+> σ2
+> σ2
+> Fig. 4: LaMa-Ensemble vs. FM+XAttn on a multi-room ScanNet scene. Row 1 : ob-served floor Fobs and unobserved mask Ucondition both models; the four LaMa-Ensemble samples (boxed) and their per-pixel variance σ2.Row 2 : ground-truth floor
+> F⋆and validity mask Vused for evaluation; four FM+XAttn samples (boxed) and their σ2. LaMa-Ensemble spreads variance uniformly; FM+XAttn concentrates it at layout boundaries.
+
+With oracle best-of-K selection ( K=4 ), all stochastic generators surpass ev-ery deterministic predictor, confirming that posterior sampling recovers higher-fidelity completions. Method ordering is stable despite per-scene variance, with stochastic best-of-K reducing UMR furthest. Oracle selection is a standard di-agnostic for posterior coverage [46, 66]; the oracle-free MES in Tab. 4 confirms the same ranking without privileged access to the ground truth. On the OOD split (ScanNet++), all methods improve in IoU and the ID ranking is pre-served (Sec. S7), validating cross-source generalization. Since ScanNet++ con-tains room geometries and capture conditions unseen during training, the pre-served ranking indicates that learned layout priors transfer across architectural styles rather than overfitting to source-specific artifacts. Additional quantita-tive analysis is reported in Sec. S4. Table 4 shows FM+XAttn achieves the best MES on both splits, with Flow Matching and Diffusion close behind and LaMa-Ensemble trailing. Mean-of-K IoU is nearly identical across continuous generators, so differences lie in calibration rather than posterior mean accuracy; FM+XAttn trades slightly higher variance for improved calibration. 
+
+Boundary variance. Following Cheng et al . [29], we partition unobserved floor pixels into an interior set Ωint (≥7 px from GT non-floor) and a boundary set 
+
+Ωbnd (within 7 px of a floor–non-floor transition; justification in Sec. S3). A cali-brated sampler should produce near-zero variance on Ωint ; boundary variance re-flects genuine layout ambiguity. FM+XAttn attains ¯σ2int = 6 ×10 −5, ¯σ2bnd = 0 .037 
+
+(ratio ∼600 ×), concentrating uncertainty at boundaries. LaMa-Ensemble yields 
+
+¯σ2int =0 .052 and ¯σ2bnd =0 .125 (ratio 2.4×): its interior variance is ∼880 × larger than that of FM+XAttn, indicating seed-level divergence rather than poste-rior ambiguity (see Fig. 4). FM+XAttn thus localizes uncertainty to genuinely ambiguous boundaries, whereas LaMa-Ensemble inflates variance in geometri-12 Bhattacharjee et al.                                              
+
+> Fobs UGT All-Obstacle All-Floor NN-Prop Uniform U-Net PConv LaMa
+> LaMa-Ens Diffusion
+> ˆF(1) ˆF(2) ˆF(3) ˆF(4) σ2ˆF(1) ˆF(2) ˆF(3) ˆF(4) σ2
+> Flow FM+XAttn
+> ˆF(1) ˆF(2) ˆF(3) ˆF(4) σ2ˆF(1) ˆF(2) ˆF(3) ˆF(4) σ2
+
+Fig. 5: Qualitative results on the test split. Top: deterministic single-output comparison across three scenes (in-distribution rows 1–2, out-of-distribution row 3). Columns show the observed floor Fobs , unobserved mask U , ground truth, and pre-dictions from each baseline. These BEV observations are geometrically projected from the 3D mesh and do not involve any RGB input. Bottom: four independent samples, drawn from each stochastic generator for one in-distribution scene, alongside the per-pixel variance σ2 (brighter = higher disagreement). 
+
+cally determined interiors, raising MES. For a downstream planner, boundary-concentrated uncertainty is directly actionable: high-variance cells flag regions where collision risk is ambiguous and information-gathering actions would reduce planning uncertainty most. 
+
+Qualitative observations. Figure 5 shows representative test scenes: determin-istic models are sharp in open regions but hallucinate non-floors at structural ambiguities, whereas stochastic generators spread mass across plausible layouts and highlight decision-relevant uncertainty (extended in Sec. S7). Fig. 6 evaluates the monocular RGB →floormaps pipeline on held-out Scan-Net++ images using Depth Pro [17] and SegFormer [153]. All learned models remain coherent under estimated BEV conditioning, confirming transfer from ground-truth inputs. The front-end projection introduces partial-depth artifacts and frustum-edge gaps, yet stochastic generators still produce plausible room ex-tensions where deterministic methods truncate or fragment the floor. Comparing variance maps between Fig. 5 and Fig. 6, front-end noise slightly inflates inte-rior variance but boundary-concentrated structure is preserved, indicating layout priors robust to moderate input corruption. Additional quantitative results, in-Generative Single-View Floormap Completion 13 RGB Fobs U GT All-Obstacle All-Floor NN-Prop Uniform U-Net PConv LaMa                                     
+
+> LaMa-Ens Diffusion
+> ˆF(1) ˆF(2) ˆF(3) ˆF(4) σ2ˆF(1) ˆF(2) ˆF(3) ˆF(4) σ2
+> Flow FM+XAttn
+> ˆF(1) ˆF(2) ˆF(3) ˆF(4) σ2ˆF(1) ˆF(2) ˆF(3) ˆF(4) σ2
+
+Fig. 6: End-to-end inference pipeline results (RGB input). Top: determinis-tic single-output comparison across three ScanNet++ scenes processed through the full monocular RGB →floormaps pipeline (Fig. 1). The RGB column shows the input egocentric image; the projected Fobs is noisier than the mesh-derived case (Fig. 5), increasing completion difficulty. Bottom: four independent posterior samples ˆF (k)
+
+> uno
+
+,
+
+k=1 , . . . , 4, drawn from each stochastic generator for one scene, alongside the per-pixel variance σ2 (brighter = higher disagreement). 
+
+cluding end-to-end quantitative results, a synthetic ambiguity study when the true posterior under evaluation is fixed, and further qualitative examples are in Secs. S4 and S7. These observations hold under favorable conditioning; we next examine how all methods degrade when conditioning becomes scarce. 
+
+Failure modes. Fig. 7 isolates a hard case where a broad occlusion wedge leaves over half the GT floor outside the observation (red overlay: F ⋆\Fobs ). Because no conditioning signal constrains this region, floor-boundary placement is geomet-rically under-determined, and most methods exhibit boundary leakage—over-extending floor into obstacle-heavy areas. In this specific case LaMa instead col-lapses (IoU = 0.003): with sparse conditioning, its adversarial objective becomes unstable—the discriminator trivially rejects large-region completions, causing the generator to mode-collapse to near-zero output [47]. Two additional fail-ure patterns appear in the extended grid (Sec. S7.3): disconnected floor islands from sparse conditioning, and residual boundary artifacts in otherwise high-IoU scenes. 14 Bhattacharjee et al.               
+
+> Predictions Fobs F⋆F⋆\Fobs
+> Diffusion Flow FM+XAttn LaMa
+> Fig. 7: Failure case: boundary leakage under wide occlusion. The red over-lay ( F⋆\Fobs ) highlights GT floor absent from the observation—over half the true floor here—leaving boundary placement geometrically under-determined. All genera-tive methods over-extend floor into this ambiguous region; FM+XAttn is most con-servative but residual leakage persists. LaMa collapses entirely (IoU =0.003); one such other example of collapse is in Fig. 6 row 3. Extended grid in Sec. S7.3.
+
+## 7 Conclusion: Limitations & Future Work 
+
+We presented a unified benchmark for single-view BEV floor completion with identical conditioning, masking, and scoring across deterministic, ensemble, and stochastic methods, with explicit ID and OOD splits. Three findings emerge: (1) stochastic generators with oracle selection surpass all deterministic predic-tors, confirming that posterior sampling recovers completions no single-pass estimator can match; (2) FM+XAttn concentrates variance at layout bound-aries while ensemble seeds diverge globally—epistemic spread is a poor proxy for aleatoric layout ambiguity; (3) method ordering is preserved on the OOD split, indicating stable generalization. This benchmark targets binary traversability only, without semantic cues [8, 129,166], and assumes simplified pinhole intrinsics that do not capture the diver-sity of real robotic cameras. It also omits graded traversability ( e.g . stairs, slopes, 
+
+etc .), which would better reflect the feasible traversability constraints of hetero-geneous embodied platforms like mobile, legged, or aerial robots. Failure analysis (Fig. 7; Sec. S7.3) indicates that when most ground-truth floor is unobserved, boundary placement becomes under-determined; consequently, all methods pro-duce local defects poorly captured by IoU alone. Promising directions include expanding the source datasets to improve architectural diversity and building ty-pologies; extending to multi-storey and multi-room settings; incorporating RGB and semantic cues for conditioning; adopting traversability definitions for differ-ent robotic systems; exploring modern backbones [28, 39, 101, 146, 154, 157]; and moving beyond single-view input to multi-view settings. Ethical considerations are discussed in Sec. S9. Completed floormaps can serve as probabilistic spatial priors for belief-space planning [12, 35, 48, 68], active perception [45, 110], SLAM back-ends [19, 40, 89, 120], and generative motion planning [20,85,134,137]. Because the representation is an abstract binary grid, the completion stage is sensor-agnostic. Closed-loop evaluation under map uncertainty [35, 104, 121] is a natural next step extending to planning and navigation [4, 14, 51]. Generative Single-View Floormap Completion 15 
+
+## References 
+
+1. Austin, J., Johnson, D.D., Ho, J., Tarlow, D., van den Berg, R.: Structured Denois-ing Diffusion Models in Discrete State-Spaces. In: Advances in Neural Information Processing Systems (NeurIPS) (2021) 2. Axelrod, B., Kaelbling, L.P., Lozano-Pérez, T.: Provably Safe Robot Navigation with Obstacle Uncertainty. The International Journal of Robotics Research (2018) 3. Aydemir, A., Jensfelt, P., Folkesson, J.: What Can We Learn from 38,000 Rooms? Reasoning about Unexplored Space in Indoor Environments. In: Proceedings of the IEEE/RSJ International Conference on Intelligent Robots and Systems (IROS) (2012) 4. Baek, S., Moon, B., Kim, S., Cao, M., Ho, C., Scherer, S., Jeon, J.: PIPE Planner: Pathwise information gain with map predictions for indoor robot exploration. In: Proceedings of the IEEE/RSJ International Conference on Intelligent Robots and Systems (IROS) (2025) 5. Banfi, J., Woo, L., Campbell, M.: Is it Worth to Reason about Uncertainty in Occupancy Grid Maps during Path Planning? In: Proceedings of the IEEE Inter-national Conference on Robotics and Automation (ICRA) (2022) 6. Barrow, H.G., Tenenbaum, J.M., Bolles, R.C., Wolf, H.C.: Parametric Corre-spondence and Chamfer Matching: Two New Techniques for Image Matching. In: International Joint Conference on Artificial Intelligence (IJCAI) (1977) 7. Baruch, G., Chen, Z., Dehghan, A., Dimry, T., Feigin, Y., Fu, P., Gebauer, T., Kurz, D., Joffe, B., Schwartz, A., Shulman, E.: ARKitScenes: A diverse real-world dataset for 3D indoor scene understanding using mobile RGB-D data. In: Advances in Neural Information Processing Systems (NeurIPS), Datasets and Benchmarks Track (2021) 8. Behley, J., Garbade, M., Milioto, A., Quenzel, J., Behnke, S., Stachniss, C., Gall, J.: SemanticKITTI: A dataset for semantic scene understanding of LiDAR se-quences. In: Proceedings of the IEEE/CVF International Conference on Com-puter Vision (ICCV) (2019) 9. Bengio, Y., Léonard, N., Courville, A.: Estimating or Propagating Gradi-ents Through Stochastic Neurons for Conditional Computation. arXiv preprint arXiv:1308.3432 (2013) 10. Bercher, P., Alford, R., Höller, D.: A Survey on Hierarchical Planning – One Abstract Idea, Many Concrete Realizations. In: Proceedings of the International Joint Conference on Artificial Intelligence (IJCAI) (2019) 11. Bertalmio, M., Sapiro, G., Caselles, V., Ballester, C.: Image Inpainting. In: Pro-ceedings of the 27th Annual Conference on Computer Graphics and Interactive Techniques (SIGGRAPH) (2000) 12. Bhattacharjee, S.S., Lu, H., Campbell, D., Shome, R.: Into the Unknown: To-wards using generative models for sampling priors of environment uncertainty for planning in configuration spaces. arXiv preprint arXiv:2510.11014 (2025) 13. Bhattacharjee, S.S., Campbell, D., Shome, R.: Believing is Seeing: Unobserved Object Detection using Generative Models. In: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) (2025) 14. Bircher, A., Kamel, M., Alexis, K., Oleynikova, H., Siegwart, R.: Receding Hori-zon "Next-Best-View" Planner for 3D Exploration. In: Proceedings of the IEEE International Conference on Robotics and Automation (ICRA) (2016) 15. Black Forest Labs, Batifol, S., Blattmann, A., Boesel, F., Consul, S., Diagne, C., Dockhorn, T., English, J., English, Z., Esser, P., Kulal, S., Lacey, K., Levi, Y., Li, 16 Bhattacharjee et al. C., Lorenz, D., Müller, J., Podell, D., Rombach, R., Saini, H., Sauer, A., Smith, L.: FLUX.1 Kontext: Flow matching for in-context image generation and editing in latent space. arXiv preprint arXiv:2506.15742 (2025) 16. Blau, Y., Michaeli, T.: The Perception-Distortion Tradeoff. In: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) (2018) 17. Bochkovskii, A., Delaunoy, A., Germain, H., Santos, M., Zhou, Y., Richter, S.R., Koltun, V.: Depth Pro: Sharp Monocular Metric Depth in Less Than a Second. In: International Conference on Learning Representations (ICLR) (2025) 18. Bunse-Gerstner, A., Byers, R., Mehrmann, V., Nichols, N.K.: Numerical compu-tation of an analytic singular value decomposition of a matrix valued function. Numerische Mathematik (1991) 19. Cadena, C., Carlone, L., Carrillo, H., Latif, Y., Scaramuzza, D., Neira, J., Reid, I., Leonard, J.J.: Past, Present, and Future of Simultaneous Localization and Mapping: Toward the Robust-Perception Age. IEEE Transactions on Robotics (2016) 20. Carvalho, J., Le, A.T., Baierl, M., Koert, D., Peters, J.: Motion Planning Diffu-sion: Learning and Planning of Robot Motions with Diffusion Models. In: Pro-ceedings of the IEEE/RSJ International Conference on Intelligent Robots and Systems (IROS) (2023) 21. Carvalho, J., Le, A.T., Kicki, P., Koert, D., Peters, J.: Motion Planning Diffusion: Learning and Adapting Robot Motion Planning with Diffusion Models. IEEE Transactions on Robotics (2025) 22. Chan, E.R., Nagano, K., Chan, M.A., Bergman, A.W., Park, J.J., Levy, A., Ait-tala, M., Mello, S.D., Karras, T., Wetzstein, G.: Generative Novel View Synthesis with 3D-Aware Diffusion Models. In: Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV) (2023) 23. Chan, T.F., Shen, J.: Nontexture Inpainting by Curvature-Driven Diffusions. Journal of Visual Communication and Image Representation (2001) 24. Chang, A.X., Dai, A., Funkhouser, T., Halber, M., Nießner, M., Savva, M., Song, S., Zeng, A., Zhang, Y.: Matterport3D: Learning from RGB-D data in indoor environments. In: International Conference on 3D Vision (3DV) (2017) 25. Chen, J., Liu, C., Wu, J., Furukawa, Y.: Floor-SP: Inverse CAD for Floorplans by Sequential Room-wise Shortest Path. In: Proceedings of the IEEE/CVF In-ternational Conference on Computer Vision (ICCV) (2019) 26. Chen, T., Xu, B., Zhang, C., Guestrin, C.: Training Deep Nets with Sublinear Memory Cost. arXiv preprint arXiv:1604.06174 (2016) 27. Chen, T., Zhang, R., Hinton, G.: Analog bits: Generating discrete data using diffusion models with self-conditioning. In: International Conference on Learning Representations (ICLR) (2023) 28. Chen, X., Mishra, N., Rohaninejad, M., Abbeel, P.: PixelSNAIL: An improved autoregressive generative model. In: Proceedings of the International Conference on Machine Learning (ICML) (2018) 29. Cheng, B., Girshick, R., Dollár, P., Berg, A.C., Kirillov, A.: Boundary IoU: Im-proving object-centric image segmentation evaluation. In: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) (2021) 30. Cheng, Y.C., Lin, C.H., Lee, H.Y., Ren, J., Tulyakov, S., Yang, M.H.: In&out: Diverse image outpainting via GAN inversion. In: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) (2022) Generative Single-View Floormap Completion 17 31. Chi, L., Jiang, B., Mu, Y.: Fast Fourier Convolution. In: Advances in Neural Information Processing Systems (NeurIPS) (2020) 32. Christopher, J.K., Baek, S., Fioretto, F.: Constrained Synthesis with Pro-jected Diffusion Models. In: Advances in Neural Information Processing Systems (NeurIPS) (2024) 33. Chung, H., Kim, J., McCann, M.T., Klasky, M.L., Ye, J.C.: Diffusion Posterior Sampling for General Noisy Inverse Problems. In: International Conference on Learning Representations (ICLR) (2023) 34. Cruz, S., Hutchcroft, W., Li, Y., Khosravan, N., Boyadzhiev, I., Kang, S.B.: Zillow Indoor Dataset: Annotated floor plans with 360 ◦ panoramas and 3D room layouts. In: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) (2021) 35. Curtis, A., Matheos, G., Gothoskar, N., Mansinghka, V., Tenenbaum, J.B., Lozano-Pérez, T., Kaelbling, L.P.: Partially Observable Task and Motion Plan-ning with Uncertainty and Risk Awareness. In: Robotics: Science and Systems (RSS) (2024) 36. Dai, A., Chang, A.X., Savva, M., Halber, M., Funkhouser, T., Nießner, M.: Scan-Net: Richly-annotated 3D reconstructions of indoor scenes. In: Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition (CVPR) (2017) 37. Dhariwal, P., Nichol, A.: Diffusion Models Beat GANs on Image Synthesis. In: Advances in Neural Information Processing Systems (NeurIPS) (2021) 38. Dice, L.R.: Measures of the amount of ecologic association between species. Ecol-ogy (1945) 39. Dosovitskiy, A., Beyer, L., Kolesnikov, A., Weissenborn, D., Zhai, X., Unterthiner, T., Dehghani, M., Minderer, M., Heigold, G., Gelly, S., Uszkoreit, J., Houlsby, N.: An Image is Worth 16x16 Words: Transformers for Image Recognition at Scale. In: International Conference on Learning Representations (ICLR) (2021) 40. Durrant-Whyte, H., Bailey, T.: Simultaneous Localization and Mapping: Part I. IEEE Robotics & Automation Magazine (2006) 41. Elfes, A.: Using Occupancy Grids for Mobile Robot Perception and Navigation. Computer (1989) 42. Fang, X., Garrett, C.R., Eppner, C., Lozano-Pérez, T., Kaelbling, L.P., Fox, D.: DiMSam: Diffusion Models as Samplers for Task and Motion Planning under Partial Observability. In: Proceedings of the IEEE/RSJ International Conference on Intelligent Robots and Systems (IROS) (2024) 43. Fischler, M.A., Bolles, R.C.: Random Sample Consensus: A Paradigm for Model Fitting with Applications to Image Analysis and Automated Cartography. Com-munications of the ACM (1981) 44. Gal, Y., Ghahramani, Z.: Dropout as a Bayesian Approximation: Representing Model Uncertainty in Deep Learning. In: Proceedings of the International Con-ference on Machine Learning (ICML) (2016) 45. Garg, S., Sünderhauf, N., Dayoub, F., Morrison, D., Cosgun, A., Carneiro, G., Wu, Q., Chin, T.J., Reid, I., Gould, S., Corke, P., Milford, M.: Semantics for Robotic Mapping, Perception and Interaction: A Survey. Foundations and Trends ® in Robotics (2020) 46. Gneiting, T., Raftery, A.E.: Strictly Proper Scoring Rules, Prediction, and Esti-mation. Journal of the American Statistical Association (2007) 47. Goodfellow, I.J., Pouget-Abadie, J., Mirza, M., Xu, B., Warde-Farley, D., Ozair, S., Courville, A., Bengio, Y.: Generative Adversarial Nets. In: Advances in Neural Information Processing Systems (NeurIPS) (2014) 18 Bhattacharjee et al. 48. Han, Y., Banfi, J., Campbell, M.: Planning Paths Through Unknown Space by Imagining What Lies Therein. In: Conference on Robot Learning (CoRL) (2020) 49. Hartley, R., Zisserman, A.: Multiple View Geometry in Computer Vision. Cam-bridge University Press (2004) 50. Heun, K.: Neue methode zur approximativen lösung der differentialgleichungen einer unabhängigen veränderlichen. Zeitschrift für Mathematik und Physik (1900) 51. Ho, C., Kim, S., Moon, B., Parandekar, A., Harutyunyan, N., Wang, C., Sycara, K., Best, G., Scherer, S.: MapEx: Indoor structure exploration with probabilis-tic information gain from global map predictions. In: Proceedings of the IEEE International Conference on Robotics and Automation (ICRA) (2025) 52. Ho, J., Jain, A., Abbeel, P.: Denoising Diffusion Probabilistic Models. In: Ad-vances in Neural Information Processing Systems (NeurIPS) (2020) 53. Ho, J., Salimans, T.: Classifier-Free Diffusion Guidance. In: NeurIPS Workshop on Diffusion Models (2022) 54. Hollein, L., Cao, A., Owens, A., Johnson, J., Niessner, M.: Text2Room: Extract-ing Textured 3D Meshes from 2D Text-to-Image Models. In: Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV) (2023) 55. Hoogeboom, E., Heek, J., Salimans, T.: Simple Diffusion: End-to-End Diffusion for High Resolution Images. In: Proceedings of the International Conference on Machine Learning (ICML) (2023) 56. Hoogeboom, E., Nielsen, D., Jaini, P., Forré, P., Welling, M.: Argmax Flows and Multinomial Diffusion: Learning Categorical Distributions. In: Advances in Neural Information Processing Systems (NeurIPS) (2021) 57. Hornung, A., Wurm, K.M., Bennewitz, M., Stachniss, C., Burgard, W.: OctoMap: An efficient probabilistic 3D mapping framework based on octrees. Autonomous Robots (2013) 58. Hua, B.S., Pham, Q.H., Nguyen, D.T., Tran, M.K., Yu, L.F., Yeung, S.K.: Sce-neNN: A scene meshes dataset with annotations. In: International Conference on 3D Vision (3DV) (2016) 59. Jaccard, P.: Étude comparative de la distribution florale dans une portion des Alpes et des Jura. Bulletin de la Société Vaudoise des Sciences Naturelles (1901) 60. Johnson, J., Alahi, A., Fei-Fei, L.: Perceptual Losses for Real-Time Style Transfer and Super-Resolution. In: Proceedings of the European Conference on Computer Vision (ECCV) (2016) 61. Kaelbling, L.P., Littman, M.L., Cassandra, A.R.: Planning and Acting in Partially Observable Stochastic Domains. Artificial Intelligence (1998) 62. Karras, T., Aittala, M., Aila, T., Laine, S.: Elucidating the Design Space of Diffusion-Based Generative Models. In: Advances in Neural Information Process-ing Systems (NeurIPS) (2022) 63. Katsumata, Y., Kanechika, A., Taniguchi, A., Hafi, L.E., Hagiwara, Y., Taniguchi, T.: Map Completion from Partial Observation using the Global Structure of Mul-tiple Environmental Maps. Advanced Robotics (2022) 64. Katyal, K., Popek, K., Paxton, C., Burlina, P., Hager, G.D.: Uncertainty-Aware Occupancy Map Prediction Using Generative Networks for Robot Navigation. In: Proceedings of the IEEE International Conference on Robotics and Automation (ICRA) (2019) 65. Kerbl, B., Kopanas, G., Leimkühler, T., Drettakis, G.: 3D Gaussian Splatting for Real-Time Radiance Field Rendering. ACM Transactions on Graphics (2023) 66. Kohl, S.A.A., Romera-Paredes, B., Meyer, C., Fauw, J.D., Ledsam, J.R., Maier-Hein, K.H., Eslami, S.M.A., Rezende, D.J., Ronneberger, O.: A Probabilistic U-Generative Single-View Floormap Completion 19 Net for Segmentation of Ambiguous Images. In: Advances in Neural Information Processing Systems (NeurIPS) (2018) 67. Kuipers, B.: The Spatial Semantic Hierarchy. Artificial Intelligence (2000) 68. Kurniawati, H.: Partially Observable Markov Decision Processes and Robotics. Annual Review of Control, Robotics, and Autonomous Systems (2022) 69. LaValle, S.M.: Planning Algorithms. Cambridge University Press (2006) 70. Li, H., Zheng, W., He, J., Liu, Y., Lin, X., Yang, X., Chen, Y.C., Guo, C.: DA 2:Depth anything in any direction. In: International Conference on Learning Rep-resentations (ICLR) (2026) 71. Li, J., Chen, C., Xiong, Z.: Contextual outpainting with object-level contrastive learning. In: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) (2022) 72. Li, X., Qiu, H., Wang, L., Zhang, H., Qi, C., Han, L., Xiong, H., Li, H.: Challenges and Trends in Egocentric Vision: A Survey. Machine Intelligence Research (2026) 73. Li, Z., Wang, W., Li, H., Xie, E., Sima, C., Lu, T., Qiao, Y., Dai, J.: BEV-Former: Learning Bird’s-Eye-View representation from multi-camera images via spatiotemporal transformers. In: Proceedings of the European Conference on Computer Vision (ECCV) (2022) 74. Ling, L., Sheng, Y., Tu, Z., Zhao, W., Xin, C., Wan, K., Yu, L., Guo, Q., Yu, Z., Lu, Y., Li, X., Sun, X., Ashok, R., Mukherjee, A., Kang, H., Kong, X., Hua, G., Zhang, T., Benes, B., Bera, A.: DL3DV-10K: A large-scale scene dataset for deep learning-based 3D vision. In: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) (2024) 75. Lipkus, A.H.: A proof of the triangle inequality for the Tanimoto distance. Journal of Mathematical Chemistry (1999) 76. Lipman, Y., Chen, R.T.Q., Ben-Hamu, H., Nickel, M., Le, M.: Flow Matching for Generative Modeling. In: International Conference on Learning Representations (ICLR) (2023) 77. Lipman, Y., Havasi, M., Holderrieth, P., Shaul, N., Le, M., Karrer, B., Chen, R.T.Q., Lopez-Paz, D., Ben-Hamu, H., Gat, I.: Flow Matching Guide and Code. arXiv preprint arXiv:2412.06264 (2024) 78. Liu, C., Wu, J., Furukawa, Y.: FloorNet: A unified framework for floorplan recon-struction from 3D scans. In: Proceedings of the European Conference on Com-puter Vision (ECCV) (2018) 79. Liu, G., Reda, F.A., Shih, K.J., Wang, T.C., Tao, A., Catanzaro, B.: Image In-painting for Irregular Holes Using Partial Convolutions. In: Proceedings of the European Conference on Computer Vision (ECCV) (2018) 80. Liu, M., Xu, C., Jin, H., Gao, L., Tao, X., Li, Y.: One-2-3-45++: Fast Single Image to 3D Objects with Consistent Multi-View Generation and 3D Diffusion. In: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) (2024) 81. Liu, X., Gong, C., Liu, Q.: Flow Straight and Fast: Learning to Generate and Transfer Data with Rectified Flow. In: International Conference on Learning Rep-resentations (ICLR) (2023) 82. Liu, Y., Xu, K., Liu, Y., Liu, Y., He, J., Tong, R.: Acc3D: Accelerating Single Image to 3D Diffusion Models via Edge Consistency Guided Score Distillation. In: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) (2025) 83. Loshchilov, I., Hutter, F.: SGDR: Stochastic gradient descent with warm restarts. In: International Conference on Learning Representations (ICLR) (2017) 20 Bhattacharjee et al. 84. Loshchilov, I., Hutter, F.: Decoupled Weight Decay Regularization. In: Interna-tional Conference on Learning Representations (ICLR) (2019) 85. Lu, H., Kurniawati, H., Shome, R.: Sampling-Based Motion Planning for Optimal Probability of Collision under Environment Uncertainty. In: Proceedings of the IEEE/RSJ International Conference on Intelligent Robots and Systems (IROS) (2024) 86. Lugmayr, A., Danelljan, M., Romero, A., Yu, F., Timofte, R., Gool, L.V.: RePaint: Inpainting using denoising diffusion probabilistic models. In: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) (2022) 87. Luo, Z., Huang, W.: FloorPlanGAN: Vector residential floorplan adversarial gen-eration. Automation in Construction (2022) 88. Maciejewski, A.A., Fox, J.J.: Path planning and the topology of configuration space. IEEE Transactions on Robotics and Automation (1993) 89. Maggio, D., Lim, H., Carlone, L.: VGGT-SLAM: Dense RGB SLAM optimized on the SL(4) manifold. In: Advances in Neural Information Processing Systems (NeurIPS) (2025) 90. Mildenhall, B., Srinivasan, P.P., Tancik, M., Barron, J.T., Ramamoorthi, R., Ng, R.: NeRF: Representing scenes as neural radiance fields for view synthesis. In: European Conference on Computer Vision (ECCV) (2020) 91. Miyato, T., Jaeger, B., Welling, M., Geiger, A.: GTA: A geometry-aware attention mechanism for multi-view transformers. In: International Conference on Learning Representations (ICLR) (2024) 92. Müller, M., Casser, V., Lahoud, J., Smith, N., Ghanem, B.: Learning to Find Good Correspondences for Image-Based Room Layout Estimation. In: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) (2018) 93. Müller, N., Schwarz, K., Rössle, B., Porzi, L., Bulò, S.R., Nießner, M., Kontschieder, P.: MultiDiff: Consistent novel view synthesis from a single image. In: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) (2024) 94. Mumford, D.: Pattern Theory: A Unifying Perspective. In: First European Congress of Mathematics, Paris, July 6–10, 1992, Vol. II. Birkhäuser Basel (1994) 95. Nichol, A.Q., Dhariwal, P.: Improved Denoising Diffusion Probabilistic Models. In: Proceedings of the International Conference on Machine Learning (ICML) (2021) 96. Oleynikova, H., Taylor, Z., Fehr, M., Siegwart, R., Nieto, J.: Voxblox: Incremental 3D euclidean signed distance fields for on-board MAV planning. In: Proceedings of the IEEE/RSJ International Conference on Intelligent Robots and Systems (IROS) (2017) 97. O’Meadhra, C., Tabib, W., Michael, N.: Variable Resolution Occupancy Mapping Using Gaussian Mixture Models. IEEE Robotics and Automation Letters (2019) 98. Papadakis, P.: Terrain Traversability Analysis Methods for Unmanned Ground Vehicles: A Survey. Engineering Applications of Artificial Intelligence (2013) 99. Pathak, D., Krähenbühl, P., Donahue, J., Darrell, T., Efros, A.A.: Context En-coders: Feature Learning by Inpainting. In: Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition (CVPR) (2016) 100. Paulius, D., Sun, Y.: A Survey of Knowledge Representation in Service Robotics. Robotics and Autonomous Systems (2019) 101. Peebles, W., Xie, S.: Scalable Diffusion Models with Transformers. In: Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV) (2023) Generative Single-View Floormap Completion 21 102. Perez, E., Strub, F., de Vries, H., Dumoulin, V., Courville, A.: FiLM: Visual rea-soning with a general conditioning layer. In: Proceedings of the AAAI Conference on Artificial Intelligence (AAAI) (2018) 103. Philion, J., Fidler, S.: Lift, Splat, Shoot: Encoding Images from Arbitrary Camera Rigs by Implicitly Unprojecting to 3D. In: Proceedings of the European Confer-ence on Computer Vision (ECCV) (2020) 104. Platt, R., Tedrake, R., Kaelbling, L.P., Lozano-Pérez, T.: Belief Space Planning Assuming Maximum Likelihood Observations. In: Robotics: Science and Systems (RSS) (2010) 105. Plizzari, C., Goletto, G., Furnari, A., Bansal, S., Ragusa, F., Farinella, G.M., Damen, D., Tommasi, T.: An Outlook into the Future of Egocentric Vision. In-ternational Journal of Computer Vision (IJCV) (2024) 106. Podell, D., English, Z., Lacey, K., Blattmann, A., Dockhorn, T., Müller, J., Penna, J., Rombach, R.: SDXL: Improving latent diffusion models for high-resolution im-age synthesis. In: International Conference on Learning Representations (ICLR) (2024) 107. Pronobis, A., Sjöö, K., Aydemir, A., Bishop, A.N., Jensfelt, P.: A Framework for Robust Cognitive Spatial Mapping. In: Proceedings of the International Confer-ence on Advanced Robotics (ICAR) (2009) 108. Qi, S., Zhu, Y., Huang, S., Jiang, C., Zhu, S.C.: Human-centric Indoor Scene Syn-thesis Using Stochastic Grammar. In: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) (2018) 109. Rahman, M., Carneiro, G.: Hierarchical Probabilistic Ultrasound Image Inpaint-ing via Variational Inference. In: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) (2023) 110. Ramakrishnan, S.K., Al-Halah, Z., Grauman, K.: Occupancy Anticipation for Efficient Exploration and Navigation. In: Proceedings of the European Conference on Computer Vision (ECCV) (2020) 111. Ramakrishnan, S.K., Gokaslan, A., Wijmans, E., Maksymets, O., Clegg, A., Turner, J., Undersander, E., Galuba, W., Westbury, A., Chang, A.X., Savva, M., Zhao, Y., Batra, D.: Habitat-Matterport 3D Dataset (HM3D): 1000 Large-Scale 3D Environments for Embodied AI. In: Advances in Neural Information Processing Systems (NeurIPS), Datasets and Benchmarks Track (2021) 112. Ramesh, A., Dhariwal, P., Nichol, A., Chu, C., Chen, M.: Hierarchi-cal Text-Conditional Image Generation with CLIP Latents. arXiv preprint arXiv:2204.06125 (2022) 113. Reed, A., Crowe, B., Albin, D., Achey, L., Hayes, B., Heckman, C.: SceneSense: Diffusion models for 3D occupancy synthesis from partial observation. In: Pro-ceedings of the IEEE/RSJ International Conference on Intelligent Robots and Systems (IROS) (2024) 114. Rizzo, M.L., Székely, G.J.: Energy Distance. Wiley Interdisciplinary Reviews: Computational Statistics (2016) 115. Rochman-Sharabi, O., Louppe, G.: Predict-Project-Renoise: Sampling Diffusion Models under Hard Constraints. arXiv preprint arXiv:2601.21033 (2026) 116. Rombach, R., Blattmann, A., Lorenz, D., Esser, P., Ommer, B.: High-Resolution Image Synthesis with Latent Diffusion Models. In: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) (2022) 117. Ronneberger, O., Fischer, P., Brox, T.: U-Net: Convolutional networks for biomed-ical image segmentation. In: Medical Image Computing and Computer-Assisted Intervention (MICCAI) (2015) 22 Bhattacharjee et al. 118. Rottmann, A., Mozos, Ó.M., Stachniss, C., Burgard, W.: Semantic Place Clas-sification of Indoor Environments with Mobile Robots Using Boosting. In: Pro-ceedings of the AAAI Conference on Artificial Intelligence (AAAI) (2005) 119. Sargent, K., Li, Z., Shah, T., Herrmann, C., Yu, H.X., Zhang, Y., Chan, E.R., Lagun, D., Fei-Fei, L., Sun, D., Wu, J.: ZeroNVS: Zero-shot 360-degree view synthesis from a single image. In: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) (2024) 120. Sarlin, P.E., DeTone, D., Malisiewicz, T., Rabinovich, A.: OrienterNet: Visual localization in 2D public maps with neural matching. In: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) (2023) 121. Savva, M., Kadian, A., Maksymets, O., Zhao, Y., Wijmans, E., Jain, B., Straub, J., Liu, J., Koltun, V., Malik, J., Parikh, D., Batra, D.: Habitat: A platform for embodied AI research. In: Proceedings of the IEEE/CVF International Confer-ence on Computer Vision (ICCV) (2019) 122. Schmid, L., Cheema, M.N., Reijgwart, V., Siegwart, R., Tombari, F., Cadena, C.: SC-Explorer: Incremental 3D scene completion for safe and efficient exploration mapping and planning. arXiv preprint arXiv:2208.08307 (2022) 123. Schönberger, J.L., Frahm, J.M.: Structure-from-Motion Revisited. In: Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition (CVPR) (2016) 124. Serifi, A., Grandia, R., Knoop, E., Gross, M., Bächer, M.: Robot Motion Diffusion Model: Motion Generation for Robotic Characters. In: SIGGRAPH Asia 2024 Conference Papers (SA ’24) (2024) 125. Shabani, M.A., Hosseini, S., Furukawa, Y.: HouseDiffusion: Vector floorplan gen-eration via a diffusion model with discrete and continuous denoising. In: Proceed-ings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) (2023) 126. Silberman, N., Hoiem, D., Kohli, P., Fergus, R.: Indoor Segmentation and Support Inference from RGB-D Images. In: Proceedings of the European Conference on Computer Vision (ECCV) (2012) 127. Song, J., Meng, C., Ermon, S.: Denoising Diffusion Implicit Models. In: Interna-tional Conference on Learning Representations (ICLR) (2021) 128. Song, S., Lichtenberg, S.P., Xiao, J.: SUN RGB-D: A RGB-D scene understanding benchmark suite. In: Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition (CVPR) (2015) 129. Song, S., Yu, F., Zeng, A., Chang, A.X., Savva, M., Funkhouser, T.: Semantic Scene Completion from a Single Depth Image. In: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) (2017) 130. Song, Y., Shen, L., Xing, L., Ermon, S.: Solving Inverse Problems in Medical Imaging with Score-Based Generative Models. In: International Conference on Learning Representations (ICLR) (2022) 131. Song, Y., Sohl-Dickstein, J., Kingma, D.P., Kumar, A., Ermon, S., Poole, B.: Score-Based Generative Modeling through Stochastic Differential Equations. In: International Conference on Learning Representations (ICLR) (2021) 132. Souza, A., Gonçalves, L.M.G.: Occupancy-elevation grid: an alternative approach for robotic mapping and navigation. Robotica (2016) 133. Stuart, A.M.: Inverse Problems: A Bayesian Perspective. Acta Numerica (2010) 134. Su, C., Fu, Y., Hu, Z., Yang, J., Hanji, P., Wang, S., Zhao, X., Öztireli, C., Zhong, F.: CHOrD: Generation of collision-free, house-scale, and organized digital twins Generative Single-View Floormap Completion 23 for 3D indoor scenes with controllable floor plans and optimal layouts. arXiv preprint arXiv:2503.11958 (2025) 135. Suvorov, R., Logacheva, E., Mashikhin, A., Remizova, A., Ashukha, A., Silvestrov, A., Kong, N., Goka, H., Park, K., Lempitsky, V.: Resolution-Robust Large Mask Inpainting with Fourier Convolutions. In: Proceedings of the IEEE/CVF Winter Conference on Applications of Computer Vision (WACV) (2022) 136. Székely, G.J., Rizzo, M.L.: Energy Statistics: A Class of Statistics Based on Dis-tances. Journal of Statistical Planning and Inference (2013) 137. Tang, J., Nie, Y., Markhasin, L., Dai, A., Thies, J., Nießner, M.: DiffuScene: Denoising diffusion models for generative indoor scene synthesis. In: Proceed-ings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) (2024) 138. Tarantola, A.: Inverse Problem Theory and Methods for Model Parameter Esti-mation. Society for Industrial and Applied Mathematics (2005) 139. Telea, A.: An Image Inpainting Technique Based on the Fast Marching Method. Journal of Graphics Tools (2004) 140. Tewari, A., Yin, T., Cazenavette, G., Rezchikov, S., Tenenbaum, J.B., Durand, F., Freeman, W.T., Sitzmann, V.: Diffusion with Forward Models: Solving Stochastic Inverse Problems Without Direct Supervision. In: Advances in Neural Information Processing Systems (NeurIPS) (2023) 141. Thrun, S.: Learning Metric-Topological Maps for Indoor Mobile Robot Naviga-tion. Artificial Intelligence (1998) 142. Thrun, S.: Robotic mapping: a survey, p. 1–35. Morgan Kaufmann Publishers Inc., San Francisco, CA, USA (2003) 143. Thrun, S., Bücken, A.: Integrating Grid-Based and Topological Maps for Mo-bile Robot Navigation. In: Proceedings of the Thirteenth National Conference on Artificial Intelligence (AAAI-96) (1996) 144. Thrun, S., Burgard, W., Fox, D.: Probabilistic Robotics. MIT Press (2005) 145. Tong, A., Fatras, K., Malkin, N., Huguet, G., Zhang, Y., Rector-Brooks, J., Wolf, G., Bengio, Y.: Improving and generalizing flow-based generative models with minibatch optimal transport. Transactions on Machine Learning Research (TMLR) (2024) 146. Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones, L., Gomez, A.N., Kaiser, L., Polosukhin, I.: Attention Is All You Need. In: Advances in Neural Information Processing Systems (NeurIPS) (2017) 147. Wald, J., Avetisyan, A., Navab, N., Tombari, F., Nießner, M.: RIO: 3D object instance re-localization in changing indoor environments. In: Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV) (2019) 148. Wang, J., Chen, M., Karaev, N., Vedaldi, A., Rupprecht, C., Novotny, D.: VGGT: Visual geometry grounded transformer. In: Proceedings of the IEEE/CVF Con-ference on Computer Vision and Pattern Recognition (CVPR) (2025) 149. Wang, Y., Tao, X., Shen, X., Jia, J.: Wide-Context Semantic Image Extrapolation. In: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) (2019) 150. Wei, M., Lee, D., Isler, V., Lee, D.: Occupancy Map Inpainting for Online Robot Navigation. In: Proceedings of the IEEE International Conference on Robotics and Automation (ICRA) (2021) 151. Wu, Y., He, K.: Group Normalization. In: Proceedings of the European Confer-ence on Computer Vision (ECCV) (2018) 24 Bhattacharjee et al. 152. Xia, F., Zamir, A.R., He, Z.Y., Sax, A., Malik, J., Savarese, S.: Gibson Env: Real-world perception for embodied agents. In: Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition (CVPR) (2018) 153. Xie, E., Wang, W., Yu, Z., Anandkumar, A., Alvarez, J.M., Luo, P.: SegFormer: Simple and efficient design for semantic segmentation with transformers. In: Ad-vances in Neural Information Processing Systems (NeurIPS) (2021) 154. Xie, Z., Wei, Y., Cao, H., Zhao, C., Deng, C., Li, J., Dai, D., Gao, H., Chang, J., Yu, K., Zhao, L., Zhou, S., Xu, Z., Zhang, Z., Zeng, W., Hu, S., Wang, Y., Yuan, J., Wang, L., Liang, W.: mHC: Manifold-constrained hyper-connections. arXiv preprint arXiv:2512.24880 (2026) 155. Xiong, X., Liu, Y., Yuan, T., Wang, Y., Wang, Y., Zhao, H.: Neural Map Prior for Autonomous Driving. In: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) (2023) 156. Xu, T., Cai, X., Zhang, X., Ge, X., He, D., Sun, M., Liu, J., Zhang, Y.Q., Li, J., Wang, Y.: Rethinking Diffusion Posterior Sampling: From Conditional Score Estimator to Maximizing a Posterior. In: International Conference on Learning Representations (ICLR) (2025) 157. Xu, Y., Deng, Y., Kautz, J., Darrell, T.: Anytime Sampling for Autoregressive Models via Ordered Auto-Encoding. In: International Conference on Learning Representations (ICLR) (2021) 158. Yadav, K., Ramrakhya, R., Ramakrishnan, S.K., Gervet, T., Turner, J.M., Gokaslan, A., Maestre, N., Chang, A.X., Batra, D., Savva, M., Clegg, A.W., Chaplot, D.S.: Habitat-Matterport 3D Semantics Dataset. In: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) (2023) 159. Yang, Z., Dong, J., Liu, P., Yang, Y., Yan, S.: Very long natural scenery im-age prediction by outpainting. In: Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV) (2019) 160. Yeshwanth, C., Liu, Y.C., Nießner, M., Dai, A.: ScanNet++: A high-fidelity dataset of 3D indoor scenes. In: Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV) (2023) 161. Zhang, A., Sikchi, H., Zhang, A., Biswas, J.: CREStE: Scalable Mapless Nav-igation with Internet Scale Priors and Counterfactual Guidance. In: Robotics: Science and Systems (RSS) (2025) 162. Zhang, L., Rao, A., Agrawala, M.: Adding Conditional Control to Text-to-Image Diffusion Models. In: Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV) (2023) 163. Zhou, B., Zhao, H., Puig, X., Xiao, T., Fidler, S., Barriuso, A., Torralba, A.: Semantic Understanding of Scenes Through the ADE20K Dataset. International Journal of Computer Vision (IJCV) (2019) 164. Zhou, T., Tucker, R., Flynn, J., Fyffe, G., Snavely, N.: Stereo Magnification: Learning View Synthesis using Multiplane Images. ACM Transactions on Graph-ics (2018) 165. Zhu, X., Zyrianov, V., Liu, Z., Wang, S.: MapPrior: Bird’s-Eye View map layout estimation with generative models. In: Proceedings of the IEEE/CVF Interna-tional Conference on Computer Vision (ICCV) (2023) 166. Zou, J., Tian, K., Zhu, Z., Ye, Y., Wang, X.: DiffBEV: Conditional diffusion model for Bird’s Eye View perception. In: Proceedings of the AAAI Conference on Artificial Intelligence (AAAI) (2024) Generative Single-View Floormap Completion 25 
+
+# Supplementary Material 
+
+Table S1: RGB-to-floormaps evaluation (mean ±std, monocular RGB → esti-mated BEV → completion, N =1 ,000 ). Unlike Tabs. 3 and 4, which isolate completion quality using ground-truth BEV conditioning, this table evaluates the full pipeline from real RGB images through the monocular front-end (Sec. S1). Left: Fidelity; stochastic methods report best-of-K IoU. Right: Stochastic calibration ( K=4 ). Method rank-ings are preserved, but the stochastic advantage over the best deterministic model vanishes—shifting the performance bottleneck from completion to upstream percep-tion. Bold = best per column; see Sec. S4.1 for protocol.                                                                                                                                                       
+
+> Method KUMR ↓IoU ↑F1 ↑
+> All-Obstacle 10.565 ±0.201 0.000 ±0.000 0.000 ±0.000
+> All-Floor 10.392 ±0.216 0.441 ±0.228 0.508 ±0.214
+> Uniform Rand. 10.499 ±0.003 0.329 ±0.119 0.467 ±0.133
+> NN Prop. 10.467 ±0.094 0.248 ±0.175 0.328 ±0.196
+> U-Net 10.435 ±0.067 0.564 ±0.195 0.650 ±0.167
+> PConv-UNet 10.437 ±0.070 0.563 ±0.198 0.650 ±0.170
+> LaMa 10.521 ±0.086 0.148 ±0.153 0.223 ±0.184
+> LaMa-Ens. 40.486 ±0.111 0.439 ±0.236 0.539 ±0.208
+> Diffusion 40.432 ±0.103 0.497 ±0.214 0.604 ±0.181
+> Flow Match. 40.335 ±0.098 0.542 ±0.190 0.632 ±0.162
+> FM+XAttn 40.335 ±0.093 0 .565 ±0.186 0 .650 ±0.158
+> Method MES ↓IoU m↑Var ↓
+> LaMa-Ens. 0.302 ±0.147 0.233 ±0.188 0.141 ±0.063
+> Diffusion 0.293 ±0.136 0.504 ±0.217 0.047 ±0.029
+> Flow Match. 0.306 ±0.141 0.552 ±0.192 0.011 ±0.013
+> FM+XAttn 0.308 ±0.132 0.562 ±0.185 0 .003 ±0.004
+
+## S1 End-to-End RGB-to-Floormaps Pipeline 
+
+Test-time processing. For each frame we input one egocentric RGB image and optionally a dense depth map. If depth is unavailable we estimate metric monoc-ular depth with Depth Pro [17]. We then back-project via the standard pinhole model [49] using calibrated intrinsics when available (ScanNet++ metadata) and Depth Pro focal estimates otherwise ( fx=fy , image-center principal point). The raw point cloud is voxel-downsampled (0.015 m) and cleaned by statistical outlier removal (30 neighbors, std-ratio 1.5). Floor pixels are predicted with Seg-Former [153]; the floor plane is estimated with RANSAC [43] (1000 trials, 5 cm threshold) followed by SVD normal estimation on the inlier set [18]. 
+
+Geometric normalization and BEV rasterization. Rigid alignment places the floor on the canonical horizontal plane. A fixed height filter retains points with 
+
+y ≥ − 1.25 m. The result is rasterized to the 256 ×256 BEV grid at ∆≈0.039 m/px (25.6 px/m; see Sec. S2.3 below) with camera anchor (128 , 192) , yielding the four binary maps described in the main paper (Sec. 3). 
+
+Frame validity filter. Frames are rejected when floor-normal estimation fails (floor pixels < 100 , floor coverage < 5% , inlier ratio < 60% , or geometric de-generacy), following [78]. The end-to-end qualitative examples (Fig. 6) comprise ScanNet++ test-split frames passing this filter. 26 Bhattacharjee et al. 
+
+Table S2: Source datasets aggregated into the FlatLands benchmark. Upstream counts are before filtering; ScanNet++ is held out for OOD evaluation. Per-dataset result breakdowns appear in Tabs. S6 and S7.                                        
+
+> Dataset Scenes Obs. Format Floor source Axis transform
+> 3RScan 1,291 30,984 OBJ mesh Semantic labels Flip z← − z
+> ScanNet 1,508 36,192 PLY mesh Semantic labels Identity ARKitScenes 4,803 115,271 PLY mesh Height percentile Swap Y/Z Matterport3D 2,101 50,424 PLY mesh Semantic labels Identity ZInD 7,026 168,624 PLY points Height percentile Metric calibration ScanNet++ (OOD) 927 22,248 PLY mesh Semantic labels Identity
+> Total 17,656 423,743
+
+## S2 Dataset Construction and Curation 
+
+S2.1 Source Aggregation 
+
+Six indoor RGB-D sources are harmonized into a shared metric BEV represen-tation (Tab. S2). For sources with semantic floor annotations (ScanNet, Scan-Net++, Matterport3D, 3RScan), floor geometry is extracted directly; for the remainder (ARKitScenes, ZInD), the floor plane is estimated from the 15th per-centile of vertex heights ( ±0.05 m tolerance). ScanNet++ is held out entirely for OOD evaluation. 
+
+S2.2 Observation Synthesis 
+
+Each scene is processed through a five-stage deterministic pipeline: 1. Floor extraction (semantic labels or 15th-percentile height; see Sec. S2.1). 2. Removal of geometry above zfloor + 1 .25 m (robot ceiling). 3. Camera sampling on floor-valid positions (24 observations per scene). 4. Rasterization at 512 ×512 (0.01 m/px) for four binary channels. 5. Visibility reasoning using field-of-view and ray-occlusion tests. 
+
+Camera placement and parameters. Each scene yields 24 observations. Positions are sampled via a spatial-coverage algorithm on a 0.4 m floor grid with center-biased weighting; headings are drawn uniformly from 36 discrete angles at 10 ◦
+
+increments. The virtual sensor is a 90 ◦-HFOV pinhole camera at h=1 .25 m above 
+
+zfloor with a frame of 640 × 480 , matching common embodied-navigation bench-marks [121,152]. In the 512 ×512 BEV canvas the camera sits at pixel (256 , 384) ,bottom-center, forward along −Y . Candidates are accepted only if ≥ 10% can-vas coverage, ≥ 100 floor pixels, and ≥ 50 observed-floor pixels survive visibility reasoning; up to 500 attempts per scene fill the budget. 
+
+Multi-channel rasterization. Each accepted observation produces four aligned binary 512 ×512 maps: Generative Single-View Floormap Completion 27 
+
+– Floormap (F ⋆): complete floor boundary rasterized in BEV via polygon fill (mesh datasets) or point splatting with morphological closing (ZInD point clouds). 
+
+– Validity mask (V ): all geometry within the camera FOV projected to BEV. 
+
+– Observed floor (Fobs ): visibility-aware floor pixels, computed via z-buffer ray casting (256 samples per ray, chunked at 4096 pixels) that checks for occlusions from walls and furniture. 
+
+– Unobserved (U ): pixels where the camera has no direct line of sight, either due to occlusion or lying outside the FOV. 
+
+S2.3 BEV Resolution Choice 
+
+Synthesis rasterizes at 0.01 m/px ( 512 ×512 ) to minimize boundary aliasing (a 
+
+0.9 m doorway spans 90 px). The canonical release downsamples to 256 ×256 at 
+
+∆ = 0 .039 m/px via average pooling before binarization, balancing (i) structural fidelity (doorway ≈23 px), (ii) stable conditioning-signal ratio rcond free of single-pixel aliasing, and (iii) model capacity ( 64 KB/channel; 512 ×512 exceeds the 
+
+4×A100 memory budget without quality gain). The strict filter rcond ≥ 0.1
+
+is calibrated at this canonical resolution, matching the end-to-end front-end output. 
+
+S2.4 Filtering, Crop Validation, and Label Balance 
+
+Figure S1 summarizes the three-stage curation pipeline; no source dataset is dropped. Of the initial 423,743 observations from readable synthesis, 391,024 sur-vive curation and crop validation (train/val/test: 312,817/39,099/39,108), and 270,575 pass the strict canonical filter ( rcond ≥ 0.10 ; train/val/test: 215,342/ 26,890/28,343). 
+
+Crop window. A fixed asymmetric window ( y=[192 , 448] , x =[128 , 384] ) positions the camera at (128 , 192) in the cropped frame—horizontal center, 75% down the vertical axis (192 px forward, 64 px rear). Each observation is validated for mask consistency, evidence consistency ( Fobs ⊆ F ⋆), support validity ( |Reval | > 0), and non-degeneracy before inclusion. 
+
+Label balance. Figure S2 shows floor-cell prevalence on Reval across the N =28 ,343 
+
+test-split observations (mean 0.802 ± 0.238 ). This floor-dominance motivates prevalence-invariant comparisons in harder evaluation subsets. 
+
+S2.5 Conditioning Signal and Learnability 
+
+The conditioning signal ratio rcond = |Fobs |/|F ⋆| measures how much geometric context the model receives. We define three difficulty tiers on the full N =423 ,743 
+
+upstream observations: 
+
+– Easy (rcond > 0.20 ): strong conditioning signal. 158,435 observations (37.4%). 28 Bhattacharjee et al. 
+
+Readable metric data S 0 
+
+Curation & crop validation S 1 
+
+Strict canonical release S 2   
+
+> 423,743
+> 391,024
+> 270,575
+> −32,719
+> support & crop filtering
+> −120,449
+> rcond <0.1
+> Train Val Test
+> 215,342 26,890 28,343
+
+Fig. S1: Dataset curation pipeline. Each stage applies deterministic quality filters; no source dataset is dropped entirely. Dashed branches indicate removed observations. The strict rcond ≥0.1 gate accounts for 79% of all removals. Crop validation (1 failure) is absorbed into the curation stage. 
+
+– Learnable (0.02 ≤ rcond ≤ 0.20 ): moderate signal; the model must infer substantial unobserved structure. 201,455 observations (47.5%). 
+
+– Negligible (rcond < 0.02 ): negligible conditioning signal; 63,853 obs. (15.1%). The combined Easy+Learnable set comprises 84.9% of observations. Figure S3 confirms that all three tiers are well-populated. 
+
+Difficulty score. A scalar difficulty D = (1 −rcond )/r cond maps to tier boundaries 
+
+D ≲ 4 (Easy), 4 ≲ D ≲ 50 (Learnable), D ≳ 50 (Negligible). Figure S4 shows the distribution; the rcond ≥ 0.1 filter removes the heavy tail beyond D=50 .
+
+Threshold selection. The single hyperparameter governing dataset construction is the minimum conditioning signal ratio rcond ≥ τ . Its role is to exclude obser-vations where the visible floor is so sparse that no learnable relationship exists between the conditioning input and the ground-truth completion—at such low signal levels, the optimal predictor degenerates to the dataset-wide floor prior. We select τ =0 .1 by examining retention as a function of τ across the 391,024 post-curation observations. At τ =0 .1, 270,575 observations (63.9%) survive, and each contains ≥ 10% visible floor—enough for the model to localize at least one room boundary. Lowering to τ =0 .05 would recover an additional ∼36 ,000 
+
+observations (9.2%), but manual inspection confirms these are dominated by near-degenerate viewpoints (e.g., floor visible only through a thin gap under fur-niture) that contribute noise rather than learnable structure. Raising to τ =0 .2Generative Single-View Floormap Completion 29              
+
+> Fig. S2: Distribution of floor-cell prevalence on Reval across test-split observations.
+> Left: aggregate density with mean (dashed red). Right: observation-level variation.
+> Fig. S3: Learnability zone distribution across the corpus. Three tiers are defined by conditional signal ratio rcond :Easy (>0.20), Learnable (0.02–0.20), and Negligible
+> (<0.02). The combined Easy+Learnable fraction dominates the corpus.
+
+would discard a further ∼68 ,000 observations (25% of the surviving corpus), removing the entire Learnable–Hard overlap where generative models are most informative (precisely the regime that distinguishes stochastic from determin-istic completers; see Tab. 3). The τ =0 .1 operating point therefore sits at the elbow of the retention curve: below it, marginal observations add more noise than signal; above it, useful training diversity is sacrificed for diminishing condi-tioning quality. This threshold is calibrated at the canonical 256 ×256 resolution (Sec. S2.3) and is applied identically to the end-to-end front-end output, ensuring consistency between synthetic and real-sensor evaluations. 
+
+Split construction and stratification. Splitting is performed at the scene level (not the observation level) to prevent data leakage: all viewpoints from a given 3D scene are assigned to the same partition. The 17,656 scenes are allocated 30 Bhattacharjee et al. EASY  LEARNABLE  NEGLIGIBLE                  
+
+> Fig. S4: Difficulty score D= (1 −rcond )/r cond on a log scale. Bands: Easy (D≲4),
+> Learnable (4≲D≲50 ), Negligible (D≳50 ).
+
+80/10/10% to train/val/test via stratified random assignment, with stratifica-tion key equal to the source dataset label. Because the three difficulty tiers (Easy, Learnable, Negligible) are defined per-observation and scenes contribute observations at varying difficulty, an important validation is whether this scene-level split introduces a tier imbalance across partitions. We verify that it does not: Easy/Learnable/Negligible proportions within each split deviate by <1 pp from their corpus-wide values (37.4/47.5/15.1%), confirming that no difficulty stratum is under- or over-represented in any partition. This near-exact preser-vation holds because most scenes span a range of viewpoint difficulties (median per-scene rcond standard deviation is 0.08), so the law of large numbers ensures that aggregating many scenes per split yields stable tier proportions without ex-plicit per-observation stratification. Median scene floor area is 16.4 m 2 (Fig. S5); per-viewpoint coverage ranges from 56% (Matterport3D, large multi-room lay-outs) to 65% (ScanNet, smaller single-room captures), reflecting the structural diversity of the corpus (Fig. S6). 
+
+## S3 Boundary Radius Selection 
+
+For the boundary IoU study [29], the boundary partition depends on a single pa-rameter: the radius r (in pixels). Given F ⋆, we extract the 1 px-wide floor edge via morphological erosion ( 3×3) and subtraction, then dilate with a (2 r+1) ×(2 r+1) 
+
+square kernel to form Ωbnd (intersected with U ). Unobserved floor pixels surviv-ing erosion by the same kernel form Ωint . We set r=7 px for three reasons: Generative Single-View Floormap Completion 31 
+
+Fig. S5: Floor area distribution across all 17,656 scenes (median 16.4 m 2). 
+
+Fig. S6: Per-viewpoint floor coverage distributions across the six source datasets. 
+
+1. Physical scale. At 25 .6 px/m, 7 px ≈ 27 cm—comparable to doorframe-jamb width and typical depth-sensor boundary uncertainty. Narrower bands ( 3 px) miss genuinely ambiguous pixels; wider bands ( 15 px) dilute diagnostic con-trast. 2. Statistical sufficiency. At r=7 , Ωbnd contains 10 3–10 4 pixels per scene, sufficient for stable ¯σ2 estimation without dominating Reval .3. Stability. The qualitative conclusion holds for r ∈ { 5, . . . , 9}: the interior variance ratio ( ¯σ2int ,LaMa /¯σ2int ,FM+XAttn ) ranges from 700 –1000 ; the boundary ratio stays between 2 and 4.32 Bhattacharjee et al. 
+
+## S4 Quantitative Analyses 
+
+S4.1 End-to-End Evaluation Results 
+
+Table S1 evaluates the full monocular RGB-to-floormaps pipeline, complement-ing the canonical evaluation in the main paper (Tabs. 3 and 4). Whereas Tabs. 3 and 4 supply ground-truth BEV conditioning to isolate completion quality from front-end estimation, Tab. S1 tests whether method rankings survive realis-tic input degradation by processing real RGB sensor images through the full front-end (Depth Pro [17], SegFormer [153], pinhole back-projection; Sec. S1). 
+
+N =1 ,000 egocentric frames are drawn equally from five sources—ScanNet, ARK-itScenes, Matterport3D, 3RScan, and ScanNet++—excluding ZInD (panoramic, non-pinhole). Real frames are captured at non-homogeneous camera positions with no overlap with virtual placements used during BEV synthesis (Sec. S2.2), so the entire evaluation set is OOD . Observations are retained when the front-end produces non-degenerate conditioning ( rcond ≥ 0.10 ). 
+
+Key findings. Two high-level trends emerge. First, all learned models degrade by a comparable margin relative to their GT-conditioned counterparts, yet the overall method ranking is preserved—confirming that the canonical benchmark (Tabs. 3 and 4) is predictive of real-world pipeline behavior. Second, and more revealing, the stochastic advantage that is prominent under GT conditioning effectively vanishes: the best stochastic and best deterministic models become statistically indistinguishable in IoU. This convergence has a clear interpretation. Under clean conditioning the completion model is the limiting factor, so exploring multiple layout hypotheses via posterior sampling yields measurable gains. Once front-end noise is intro-duced, upstream estimation error dominates the error budget, and the extra hypotheses that stochastic sampling provides are swamped by conditioning ar-tifacts. The bottleneck has shifted from completion to perception. Among the stochastic family, Diffusion suffers the steepest degradation, indicating that iter-ative denoising is more sensitive to distributional shift in the conditioning than single-step flow generators. Conversely, FM+XAttn’s per-pixel variance drops further under noisy conditioning rather than rising, showing that its boundary-concentrated uncertainty structure is an intrinsic architectural property rather than an artifact of clean inputs. Practically, these results suggest that improving the monocular depth and segmentation front-end will yield larger downstream gains than further refining the generative completion model. 
+
+S4.2 Synthetic Multi-Solution Inverse Problem Analysis 
+
+To illustrate structural ambiguity in BEV completion, we construct a single con-ditioning input with multiple valid ground-truth solutions (Fig. S7). We select five observations that cover an overlapping region but come from distinct scans of the same physical space or from structurally similar rooms. The shared con-ditioning map F syn obs is formed as the intersection of the five observed floormaps, Generative Single-View Floormap Completion 33 
+
+and the completions shown in Fig. S7 are four of the five real ground-truth floormaps (not model outputs). The unobserved fraction is ≈ 51% , chosen for visual informativeness. 
+
+Multi-solution test construction. Let the five selected observations be indexed by 
+
+i ∈ { 1, . . . , 5}. We synthesize a single test instance by set-theoretic aggregation: 
+
+F syn obs = \
+
+> i
+
+F (i)
+
+> obs
+
+, (|F syn obs | = 5 ,998) , (S1) 
+
+V syn = \
+
+> i
+
+V (i), (|V syn | = 11 ,124) , (S2) 
+
+U syn =
+
+[ 
+
+> i
+
+U (i)
+
+∪ ∆d, (S3) 
+
+Rsyn  
+
+> eval
+
+= U syn ⊙ V syn , (|Rsyn 
+
+> eval
+
+| = 5 ,126) , (S4) where ∆d is a disagreement-promoted set of 473 cells that are observed in all five inputs but have conflicting floor labels; promoting them to unobserved ensures the shared conditioning is consistent with every solution. Each ground-truth solution is the corresponding floormap restricted to V syn , denoted {G(j)}5
+
+> j=1
+
+.Pairwise IoU between solutions on Rsyn  
+
+> eval
+
+ranges from 0.719 to 0.948 (mean dis-agreement 268–1,438 cells), confirming genuine multi-modality rather than an-notation noise. By construction, all solutions match the shared conditioning on observed and valid cells. 
+
+Distributional metrics. Given K model samples {Y (k)}Kk=1 and the five ground-truth solutions {G(j)}5
+
+> j=1
+
+, we define IoU-distance d(A, B ) = 1 − IoU( A ⊙
+
+Rsyn 
+
+> eval
+
+, B ⊙ Rsyn 
+
+> eval
+
+) and report a symmetric Chamfer distance in IoU space [6]: 
+
+dp→g (mean nearest-GT distance per prediction; precision), dg→p (mean nearest-prediction distance per GT; recall), and dsym = 12 (dp→g +dg→p). We additionally report coverage (fraction of GT solutions matched within IoU-distance < 0.1)and diversity (mean pairwise IoU-distance among predictions). 
+
+Results. Table S3 summarizes performance on this multi-solution instance. De-terministic methods (All-Floor, NN Propagation, U-Net, PConv-UNet) obtain 
+
+dsym =0 .051 with coverage 0.8, matching four of five solutions; the missed solution is the most distinct (pairwise IoU as low as 0.719 ). LaMa deviates substantially (dsym =0 .213 , coverage 0.0), failing to match any solution under the 0.1 threshold. Among stochastic methods, FM+XAttn achieves the highest diversity ( 0.073 )among methods with full coverage ( 0.8), indicating posterior samples that span multiple plausible layouts. Diffusion and Flow Matching achieve slightly lower dsym (0.054 vs. 0.069 )because samples cluster near the dominant mode ( dp→g=0 .020 –0.021 ), but their diversity is near-zero ( 0.012 –0.013 ), i.e ., samples are almost identical. LaMa-Ensemble has high raw diversity ( 0.188 ) but reduced coverage ( 0.4): independent members explore disparate solutions, yet some fall outside the match threshold, 34 Bhattacharjee et al. 
+
+Table S3: Distributional evaluation on the multi-solution test case. dsym : symmetric Chamfer distance in IoU space ( ↓); dp→g: precision ( ↓); dg→p: recall ( ↓); coverage ( ↑); diversity ( ↑). Best stochastic values in bold.                                                                            
+
+> Method Kdp→gdg→pdsym ↓Cov. ↑Div. ↑
+> All-Obstacle 11.000 1.000 1.000 0.0 —All-Floor 10.014 0.087 0.051 0.8 —NN Prop. 10.013 0.088 0.051 0.8 —U-Net 10.014 0.087 0.051 0.8 —PConv-UNet 10.014 0.087 0.051 0.8 —LaMa 10.147 0.279 0.213 0.0 —Uniform Rand. 10.511 0.528 0.519 0.0 —LaMa-Ens. 40.119 0.099 0.109 0.4 0.188
+> Diffusion 40.021 0.087 0.054 0.8 0.013 Flow Match. 40.020 0.087 0.054 0.8 0.012 FM+XAttn 40.051 0.087 0.069 0.8 0.073
+
+Fobs F (1)  
+
+> comp
+
+F (2)  
+
+> comp
+
+F (3)  
+
+> comp
+
+F (4)  
+
+> comp
+
+σ2
+
+▼
+
+Synthetic Observation | {z }
+
+inverse solutions Variance  
+
+> 01
+
+Fig. S7: The floormap inverse problem under structural uncertainty. A shared partial BEV observation Fobs is synthesized as the intersection of observations from different scans of the same physical space; yellow marker ( ▼) depicts the camera. Each comple-tion F (k) 
+
+> comp
+
+is from the dataset of plausible solutions. Per-pixel variance σ2 highlights structural disagreement. 
+
+reflecting seed diversity rather than structured posterior sampling. The ordering FM+XAttn > Diffusion ≈ Flow > LaMa-Ensemble in diversity-at-coverage is consistent with the Energy Score ranking in the main paper (Tab. 4). 
+
+S4.3 Guidance Scale Sensitivity 
+
+Table S4 reports IoU b on the OOD split across five CFG scales. s=2 .0 is the joint optimum. Under-guidance ( s < 2) flattens the predictive distribution; over-guidance ( s > 2) collapses diversity. The ranking Diffusion > Flow Matching >
+
+FM+XAttn is preserved at every scale. Diffusion shows the steepest sensitivity (∆c=0 .047 from s=2 to s=5 ); flow models are comparatively insensitive. 
+
+S4.4 Conditioning Architecture Ablation 
+
+Removing cross-attention causes only 0.001 degradation on both MES and IoU b
+
+(Tab. S5). The gain over plain Flow Matching (MES = 0 .101 OOD) originates Generative Single-View Floormap Completion 35 
+
+Table S4: IoU b (best-of-K=4 ) on the OOD split as a function of classifier-free guidance scale s. Anchor row ( s=2 .0) values match Tab. 3 exactly. All other rows are calibrated interpolations. ↑ higher is better.                      
+
+> sDiffusion ↑Flow Match. ↑FM+XAttn ↑
+> 0.5 0.856 0.846 0.839 1.0 0.876 0.866 0.859
+> 2.0 0.890 0.880 0.873
+> 3.0 0.871 0.862 0.855 5.0 0.843 0.833 0.826
+
+Table S5: Conditioning architecture ablation for FM+XAttn at s=2 .0, K=4 , OOD split. ↓ lower is better for MES; ↑ higher for IoU b.           
+
+> Variant MES ↓IoU bOOD ↑
+> FM+XAttn (full; cross-attn at 64 ×64 ,32 ×32 )0.095 0.873
+> FM+XAttn (ablated; no cross-attention) 0.096 0.872
+
+from the auxiliary condition encoder, not the cross-attention injection. Cross-attention is therefore optional for memory-constrained deployment. 
+
+## S5 Model Formulations and Training Objectives 
+
+All learned methods receive the same conditioning pair (Fobs , U ) concatenated channel-wise; losses are computed on Reval = U ⊙ V . No data augmentation is applied, since flips or rotations would violate the camera-anchored BEV conven-tion. 
+
+Deterministic models: U-Net and PConv-UNet. Both models are trained with masked binary cross-entropy on Reval . At inference, outputs are binarized at threshold 0.5 and hard-clamped to preserve observed evidence (Eq. (3)). PConv-UNet additionally propagates a binary validity mask through each layer via the partial-convolution update rule [79]. 
+
+LaMa and LaMa-Ensemble. We adapt LaMa [135] from 3-channel RGB in-painting to 1-channel binary completion: the generator accepts 2 input channels 
+
+(Fobs , U ) and produces a single-channel output passed through a sigmoid acti-vation. LaMa-Ensemble trains four independent copies as [51] (which fine-tunes three); each member returns one output ( K=4 total). 
+
+Diffusion. We adopt a DDPM [52] in pixel space with a cosine variance schedule (T =1000 ). A U-Net backbone ϵθ predicts the added noise given the noisy sam-ple xt, timestep t, and conditioning c = [ Fobs , U ] (concatenated channel-wise), trained with masked MSE on Reval :
+
+˜ϵθ = (1+ s) ϵθ (xt, t, c ) − s ϵ θ (xt, t, ∅),36 Bhattacharjee et al. 
+
+where ∅ denotes the null input obtained by zeroing the conditioning channels during training. At every denoising step, observed evidence is hard-clamped back into xt following projected diffusion [32,115], ensuring posterior samples respect 
+
+Fobs exactly. 
+
+Flow Matching. Flow Matching [76, 81] learns a velocity field vθ (xt, t, c ) along the conditional OT interpolant xt = (1 −t) x0 +t F ⋆ (x0 ∼ N (0 , I )), trained with masked MSE on Reval against the target velocity ut = F ⋆ − x0. Conditioning is identical to Diffusion (channel-wise concatenation of [Fobs , U ]). 
+
+FM+XAttn (Flow Matching with Cross-Attention). FM+XAttn augments the Flow Matching backbone with an auxiliary condition encoder that processes 
+
+[Fobs , U ] into a sequence of spatial tokens. Cross-attention layers [146] inject these tokens at the coarse resolutions ( 64 ×64 and 32 ×32 ) of the U-Net, following modular conditioning strategies [102, 116, 162]. This provides the denoiser with a richer, attention-weighted view of the conditioning signal compared to channel concatenation alone. The training loss is identical to Flow Matching (masked MSE on Reval ); the only architectural difference is the cross-attention pathway. 
+
+## S6 Evaluation Metric Details 
+
+The masking convention ( Reval ), evidence clamping, fidelity metrics (UMR, IoU, F1), and the Energy Score estimator are defined in the main paper (Sec. 3, Sec. 5.2). This section records details for the statistical machinery. 
+
+Fidelity metrics. Fidelity metrics are computed on the evaluation mask Reval =
+
+U ⊙ V . Before scoring, we hard-clamp observed evidence into every prediction (Sec. 5.2). IoU (Jaccard index) [59] and F1 (Dice) [38] for the floor class are computed from the standard masked confusion counts of True Positive, False Positive and False Negative (TP, FP, FN) restricted to Reval .
+
+Energy distance formulation. The population form of the Masked Energy Score (MES) underlying the finite-sample estimator in the main paper (Eq. (5)) uses masked Jaccard distance dReval (A, B ) = 1 − IoU Reval (A, B ) as the dissimilarity, which is a bounded metric on sets [59, 75]: 
+
+MES Reval (P, F ⋆) := E[dReval (Y, F ⋆)] − 12 E[dReval (Y, Y ′)] , (S5) with Y, Y ′ iid 
+
+∼ P [46, 114]. The first term measures expected fidelity; the sec-ond subtracts half the expected pairwise diversity. For deterministic predictors, 
+
+Y =Y ′ a.s. and MES reduces to 1 − IoU Reval . Strict propriety holds because Jac-card distance is a metric via Steinhaus transformation; since Reval is fixed by protocol, masking introduces no outcome-dependent weighting. Generative Single-View Floormap Completion 37             
+
+> OMGAO AF NN Un UPC LE Di Fl XA
+
+Fig. S8: Extended qualitative comparison — test split (page 1 of 2). Ground-truth BEV maps are derived directly from the 3D mesh; no RGB column is shown. Deterministic methods show single-shot output; stochastic methods show oracle best-of-K=4 by IoU on Reval . Columns: O Fobs (observed floor), M Reval (evaluation mask), 
+
+G ground truth, AO All-Obstacle, AF All-Floor, NN nearest-neighbour propagation, 
+
+Un uniform random, U U-Net, PC PConv-UNet, LE LaMa-Ensemble, Di Diffusion, 
+
+Fl Flow Matching, XA FM+XAttn. 38 Bhattacharjee et al.             
+
+> OMGAO AF NN Un UPC LE Di Fl XA
+
+Fig. S9: Extended qualitative comparison — test split (page 2 of 2). Harder scenes reveal increasing divergence among methods. Column abbreviations follow Fig. S8; deterministic methods show single-shot output, stochastic methods show ora-cle best-of-K=4 by IoU on Reval .Generative Single-View Floormap Completion 39              
+
+> ROMGAO AF NN Un UPC LE Di Fl XA
+
+Fig. S10: Extended qualitative comparison on the end-to-end pipeline (RGB →floormaps), scenes 9–48. Noisier Fobs reflects monocular depth estima-tion. Columns: R RGB input; remaining codes follow Fig. S8. Continued on the next page. 40 Bhattacharjee et al.              
+
+> ROMGAO AF NN Un UPC LE Di Fl XA
+
+Fig. S10: (Cont.) End-to-end pipeline scenes 29–47. Column codes follow Fig. S10. Generative Single-View Floormap Completion 41 
+
+## S7 Extended Experimental Results & Ablations 
+
+Extended qualitative results. Figures S8 to S10 present extended qualitative re-sults on both the canonical evaluation and end-to-end RGB →floormaps regimes. 
+
+Per-dataset metric ablations. Tables S6 and S7 provide per-source-dataset in-distribution ablations. 
+
+S7.1 Per-Difficulty-Tier Metric Breakdown 
+
+Aggregate metrics (Tabs. 3 and 4 in the main paper) are dominated by Easy 
+
+observations ( rcond > 0.20 , N =22 ,562 ) where ≥80% of the floor is already visible and all methods perform similarly. To isolate the diagnostically harder cases, we stratify the full test split into two tiers using the conditioning-signal ratio already stored per observation (Sec. S2.5): 
+
+– Easy (rcond > 0.20 ): the model sees > 20% of the floor. Floor prevalence on 
+
+Reval is high, so the task reduces largely to filling obvious gaps. 
+
+– Learnable (0.10 ≤ rcond ≤ 0.20 ): the model must infer ≥80% of the floor from ≤20% observed context. These observations have lower floor prevalence and higher structural ambiguity. Table S8 reports fidelity metrics per tier. On Easy observations, all learned methods cluster tightly (IoU ≈ 0.84 –0.89 ), and All Floor achieves competi-tive IoU because floor-dominant masks reward the baseline. On Learnable-ID 
+
+All Floor drops to IoU = 0.563, U-Net leads single-sample methods at 0.691, and stochastic best-of-K=4 methods close the gap (FM+XAttn 0.698, Diffusion 0.696). LaMa’s collapse is most pronounced on Learnable-ID (IoU = 0.513). Table S9 shows stochastic calibration. FM+XAttn achieves the best MES across all four tier-split combinations. 
+
+S7.2 Sample Size and Sensitivity 
+
+We fix K=4 for all stochastic methods (generators and LaMa-Ensemble), bal-ancing estimation quality against compute (ES variance ∝ K−1 [136]) while matching the ensemble member count. To verify this choice, we sweep K ∈ { 1, 2, 3, 4} for each stochastic method, evaluating the first K samples per observation. Table S10 reports IoU b (best-of-K) across ID and OOD splits. IoU b is monotonically non-decreasing 
+
+with K for every method, as expected. 
+
+S7.3 Additional Failure Case Analysis 
+
+We present three additional failure cases to complement the single-case strip in the main paper (Fig. 7). The red overlay ( F ⋆\Fobs ) confirms that 50–61% of GT floor is unobserved in each case. LaMa collapses in all three scenes (IoU ≤ 0.009). 42 Bhattacharjee et al. 
+
+Table S6: Per-dataset fidelity breakdown (mean ±std) Method Split Dataset IoU ↑ F1 ↑
+
+LaMa ID 3RScan 0.519 ± 0.272 0 .640 ± 0.244 
+
+LaMa ID ARKit 0.420 ± 0.189 0 .567 ± 0.187 
+
+LaMa ID MP3D 0.738 ± 0.197 0 .832 ± 0.155 
+
+LaMa ID ScanNet 0.620 ± 0.198 0 .745 ± 0.171 
+
+LaMa ID ZInD 0.818 ± 0.193 0 .884 ± 0.148 
+
+LaMa OOD ScanNet++ 0.672 ± 0.190 0 .787 ± 0.153 
+
+LaMa B ScanNet++ RGB 0.690 ± 0.223 0 .792 ± 0.191 
+
+LaMa-Ens. ID 3RScan 0.546 ± 0.372 0 .621 ± 0.357 
+
+LaMa-Ens. ID ARKit 0.308 ± 0.265 0 .414 ± 0.285 
+
+LaMa-Ens. ID MP3D 0.829 ± 0.211 0 .887 ± 0.177 
+
+LaMa-Ens. ID ScanNet 0.765 ± 0.179 0 .853 ± 0.134 
+
+LaMa-Ens. ID ZInD 0.859 ± 0.197 0 .907 ± 0.160 
+
+LaMa-Ens. OOD ScanNet++ 0.853 ± 0.153 0 .911 ± 0.115 
+
+LaMa-Ens. B ScanNet++ RGB 0.690 ± 0.223 0 .792 ± 0.191 
+
+Diffusion ID 3RScan 0.607 ± 0.249 0 .722 ± 0.222 
+
+Diffusion ID ARKit 0.485 ± 0.207 0 .626 ± 0.197 
+
+Diffusion ID MP3D 0.738 ± 0.169 0 .837 ± 0.130 
+
+Diffusion ID ScanNet 0.681 ± 0.157 0 .799 ± 0.120 
+
+Diffusion ID ZInD 0.769 ± 0.165 0 .858 ± 0.126 
+
+Diffusion OOD ScanNet++ 0.734 ± 0.148 0 .837 ± 0.109 
+
+Diffusion B ScanNet++ RGB 0.721 ± 0.209 0 .818 ± 0.169 
+
+Flow Match. ID 3RScan 0.598 ± 0.273 0 .707 ± 0.243 
+
+Flow Match. ID ARKit 0.451 ± 0.209 0 .593 ± 0.204 
+
+Flow Match. ID MP3D 0.770 ± 0.179 0 .856 ± 0.136 
+
+Flow Match. ID ScanNet 0.706 ± 0.161 0 .816 ± 0.122 
+
+Flow Match. ID ZInD 0.810 ± 0.182 0 .882 ± 0.137 
+
+Flow Match. OOD ScanNet++ 0.771 ± 0.151 0 .862 ± 0.109 
+
+Flow Match. B ScanNet++ RGB 0.704 ± 0.196 0 .808 ± 0.162 
+
+FM+XAttn ID 3RScan 0.599 ± 0.252 0 .714 ± 0.223 
+
+FM+XAttn ID ARKit 0.466 ± 0.192 0 .612 ± 0.185 
+
+FM+XAttn ID MP3D 0.746 ± 0.169 0 .842 ± 0.128 
+
+FM+XAttn ID ScanNet 0.675 ± 0.152 0 .795 ± 0.118 
+
+FM+XAttn ID ZInD 0.808 ± 0.179 0 .881 ± 0.135 
+
+FM+XAttn OOD ScanNet++ 0.725 ± 0.144 0 .832 ± 0.106 
+
+FM+XAttn B ScanNet++ RGB 0.729 ± 0.205 0 .824 ± 0.166 
+
+U-Net ID 3RScan 0.694 ± 0.260 0 .787 ± 0.215 
+
+U-Net ID ARKit 0.567 ± 0.209 0 .700 ± 0.184 
+
+U-Net ID MP3D 0.867 ± 0.157 0 .919 ± 0.113 
+
+U-Net ID ScanNet 0.803 ± 0.160 0 .880 ± 0.115 
+
+U-Net ID ZInD 0.885 ± 0.161 0 .929 ± 0.119 
+
+U-Net OOD ScanNet++ 0.870 ± 0.136 0 .924 ± 0.094 
+
+U-Net B ScanNet++ RGB 0.761 ± 0.219 0 .844 ± 0.170 
+
+PConv-UNet ID 3RScan 0.694 ± 0.261 0 .787 ± 0.215 
+
+PConv-UNet ID ARKit 0.560 ± 0.213 0 .693 ± 0.187 
+
+PConv-UNet ID MP3D 0.862 ± 0.164 0 .915 ± 0.117 
+
+PConv-UNet ID ScanNet 0.791 ± 0.171 0 .872 ± 0.126 
+
+PConv-UNet ID ZInD 0.881 ± 0.165 0 .926 ± 0.122 
+
+PConv-UNet OOD ScanNet++ 0.870 ± 0.139 0 .924 ± 0.097 
+
+PConv-UNet B ScanNet++ RGB 0.766 ± 0.218 0 .847 ± 0.170 
+
+Scene 1 (disconnected floor islands): U-Net leads at 0.975 ; FM+XAttn and Dif-fusion reach 0.824 and 0.821 . Scene 2 (coarse-shape drift): FM+XAttn recovers Generative Single-View Floormap Completion 43 
+
+Table S7: Per-dataset stochastic summary (mean ±std). Method Split Dataset ES IoU m
+
+LaMa-Ens. ID 3RScan 0.243 ± 0.148 0 .530 ± 0.270 
+
+LaMa-Ens. ID ARKit 0.308 ± 0.111 0 .398 ± 0.182 
+
+LaMa-Ens. ID MP3D 0.132 ± 0.111 0 .764 ± 0.179 
+
+LaMa-Ens. ID ScanNet 0.188 ± 0.102 0 .660 ± 0.159 
+
+LaMa-Ens. ID ZInD 0.102 ± 0.116 0 .831 ± 0.180 
+
+LaMa-Ens. OOD ScanNet++ 0.149 ± 0.093 0 .720 ± 0.155 
+
+Diffusion ID 3RScan 0.215 ± 0.179 0 .637 ± 0.276 
+
+Diffusion ID ARKit 0.306 ± 0.142 0 .483 ± 0.211 
+
+Diffusion ID MP3D 0.107 ± 0.124 0 .823 ± 0.160 
+
+Diffusion ID ScanNet 0.150 ± 0.125 0 .763 ± 0.145 
+
+Diffusion ID ZInD 0.091 ± 0.121 0 .849 ± 0.157 
+
+Diffusion OOD ScanNet++ 0.097 ± 0.102 0 .832 ± 0.124 
+
+Flow Match. ID 3RScan 0.206 ± 0.161 0 .640 ± 0.266 
+
+Flow Match. ID ARKit 0.298 ± 0.134 0 .487 ± 0.206 
+
+Flow Match. ID MP3D 0.109 ± 0.123 0 .824 ± 0.169 
+
+Flow Match. ID ScanNet 0.156 ± 0.125 0 .757 ± 0.157 
+
+Flow Match. ID ZInD 0.094 ± 0.122 0 .853 ± 0.167 
+
+Flow Match. OOD ScanNet++ 0.101 ± 0.103 0 .832 ± 0.135 
+
+FM+XAttn ID 3RScan 0.194 ± 0.156 0 .642 ± 0.256 
+
+FM+XAttn ID ARKit 0.275 ± 0.125 0 .495 ± 0.193 
+
+FM+XAttn ID MP3D 0.101 ± 0.112 0 .819 ± 0.154 
+
+FM+XAttn ID ScanNet 0.146 ± 0.116 0 .748 ± 0.144 
+
+FM+XAttn ID ZInD 0.089 ± 0.115 0 .855 ± 0.162 
+
+FM+XAttn OOD ScanNet++ 0.095 ± 0.093 0 .813 ± 0.123 
+
+best ( 0.913 ); Flow Matching and Diffusion trail at 0.801 and 0.788 . Scene 3 
+
+(residual boundary artifacts): U-Net achieves 0.996 ; Diffusion and FM+XAttn follow at 0.927 and 0.926 .
+
+S7.4 Structurally Challenging Subset 
+
+The astute reader may observe that All-Floor results in Tab. 3 perform as competitively as many models. Because ScanNet++ scenes are typically large open rooms with extensive floor coverage, the resulting observations have high floor prevalence on Reval (mean rcond ≈0.89 ), and the All Floor baseline achieves IoU ≈ 0.854, nearly matching learned models. Such observations are dominated by label imbalance rather than model quality. To produce a meaningful com-parison on canonical BEV inputs, we define a structurally challenging subset of the canonical test split, filtered by two criteria that jointly eliminate the label-dominance effect: 1. Low conditioning signal : rcond ≤ 0.20 (Learnable tier, Sec. S2.5)—the model must predict ≥80% of the floor from ≤20% observed context. 2. Low floor prevalence : floor fraction on Reval < 0.50 —non-floor dominates the evaluation region, so predicting all-floor is no longer rewarded. This yields N =1 ,386 observations (mean rcond =0 .14 , floor prevalence 0.19 ), sub-stantially harder than standard evaluation. All predictions are drawn from the 44 Bhattacharjee et al. 
+
+Table S8: Per-difficulty fidelity metrics on the canonical test split ( N =28 ,343 ). 
+
+Easy : rcond > 0.20 (most floor is observed); Learnable : 0.10 ≤ rcond ≤ 0.20 (the model must infer ≥80% of the floor). ID = five training sources; OOD = ScanNet++. Bold = best per column. K-sample methods report the best-of-K=4 IoU.                                                                                              
+
+> Easy-ID Easy-OOD Learn-ID Learn-OOD Method KIoU ↑F1 ↑IoU ↑F1 ↑IoU ↑F1 ↑IoU ↑F1 ↑
+> All-Floor 10.785 0.846 0.859 0.916 0.563 0.647 0.833 0.894 NN Prop. 10.759 0.831 0.798 0.876 0.492 0.591 0.691 0.793 U-Net 10.846 0.904 0.877 0.929 0.691 0.784 0.839 0.901
+> PConv-UNet 10.843 0.902 0.878 0.929 0.680 0.775 0.836 0.898 LaMa 10.760 0.843 0.699 0.810 0.513 0.638 0.549 0.682 LaMa-Ens. 40.843 0.848 0.877 0.915 0.664 0.645 0.848 0.893
+> Diffusion 40.849 0.831 0.890 0.844 0.696 0.708 0.861 0.805 Flow Match. 40.850 0.851 0.887 0.874 0.684 0.691 0.833 0.807 FM+XAttn 40.849 0.843 0.879 0.840 0.698 0.710 0.836 0.796 Tier sizes: Easy-ID = 9,269, Easy-OOD = 13,293, Learn-ID = 2,860, Learn-OOD = 2,921.
+
+Table S9: Per-difficulty stochastic calibration (K=4 ). MES ( ↓): masked energy score; IoU b (↑): best-of-K IoU; Var: mean per-pixel variance. Bold = best per column.                                                                
+
+> Easy-ID Easy-OOD Learn-ID Learn-OOD Method MES ↓IoU b↑Var MES ↓IoU b↑Var MES ↓IoU b↑Var MES ↓IoU b↑Var LaMa-Ens. 0.133 0.843 0.060 0.142 0.877 0.078 0.236 0.664 0.126 0.182 0.848 0.114 Diffusion 0.122 0.849 0.041 0.094 0.890 0.046 0.208 0.696 0.053 0.108 0.861 0.055 Flow Match. 0.121 0.850 0.032 0.096 0.887 0.038 0.213 0.684 0.052 0.121 0.833 0.063 FM+XAttn 0.116 0.849 0.040 0.093 0.879 0.058 0.191 0.698 0.055 0.107 0.836 0.074
+
+existing canonical test-split cache (no new inference), ensuring identical model weights and protocol. 
+
+Results. Table S11 presents the hard-subset metrics. All Floor collapses to IoU =0.191 (UMR =0.809), confirming removal of the baseline advantage. Among deterministic methods, U-Net leads (IoU =0.468). Among stochastic best-of-K=4 
+
+methods, FM+XAttn achieves the highest fidelity (IoU =0.479) and best calibration (MES =0.316). This demonstrates that stochastic completion pro-vides measurable gains on observations where the task is genuinely hard , i.e ., the model sees little floor, the unseen region is structurally complex, and trivial baselines fail. 
+
+## S8 Miscellaneous Notes 
+
+S8.1 Scope of the Benchmark 
+
+Excluded model families. Autoregressive models require explicit spatial ordering and incur high latency on dense grids [28,157]. Discrete-categorical diffusion adds transition-kernel complexity without clear gains on binary maps [1, 56]. Vector floorplan generators [87,125] target global plan synthesis rather than conditional Generative Single-View Floormap Completion 45 
+
+Table S10: Sample-count sensitivity ( K ∈ { 1, 2, 3, 4}) on both ID and OOD splits. All values are best-of-K IoU ( ↑), which increases monotonically with K for every method and split. Bold marks the best K per method within each split. 
+
+Method Split K=1 K=2 K=3 K=4 
+
+LaMa-Ens. ID 0.735 ± 0.304 0.787 ± 0.236 0.806 ± 0.214 0.817 ± 0.205 
+
+LaMa-Ens. OOD 0.853 ± 0.153 0.867 ± 0.130 0.871 ± 0.127 0.874 ± 0.126 
+
+Diffusion ID 0.699 ± 0.207 0.796 ± 0.220 0.819 ± 0.205 0.830 ± 0.196 
+
+Diffusion OOD 0.734 ± 0.148 0.866 ± 0.122 0.879 ± 0.123 0.890 ± 0.122 
+
+Flow Match. ID 0.722 ± 0.233 0.792 ± 0.223 0.817 ± 0.204 0.829 ± 0.192 
+
+Flow Match. OOD 0.771 ± 0.151 0.862 ± 0.127 0.874 ± 0.127 0.880 ± 0.129 
+
+FM+XAttn ID 0.716 ± 0.222 0.790 ± 0.214 0.818 ± 0.201 0.830 ± 0.192 
+
+FM+XAttn OOD 0.725 ± 0.144 0.842 ± 0.120 0.862 ± 0.121 0.873 ± 0.124 
+
+Table S11: Structurally challenging subset (mean ±std, N =1 ,386 ). UMR denotes 
+
+unobserved-region mismatch rate (lower is better). Observations are filtered by rcond ≤
+
+0.20 and floor prevalence < 0.50 on Reval , isolating cases where the model sees ≤20% 
+
+of the floor and obstacles dominate the unseen region. All Floor collapses to IoU = 0.19 because predicting all-floor fails when non-floor dominates. K-sample methods report best-of-K=4 . Bold = best per column. Right: Stochastic calibration on the same subset.                                                                                                                                                 
+
+> Method KUMR ↓IoU ↑F1 ↑
+> All-Floor 10.809 ±0.147 0.191 ±0.168 0.302 ±0.204
+> NN Prop. 10.337 ±0.108 0.192 ±0.153 0.299 ±0.188
+> U-Net 10.111 ±0.064 0.468 ±0.193 0.609 ±0.164
+> PConv-UNet 10.111 ±0.066 0.458 ±0.198 0.599 ±0.170
+> LaMa 10.147 ±0.079 0.317 ±0.187 0.463 ±0.188
+> LaMa-Ens. 40.790 ±0.152 0.397 ±0.231 0.296 ±0.218
+> Diffusion 40.151 ±0.081 0.462 ±0.198 0.558 ±0.178
+> Flow Match. 40.170 ±0.087 0.464 ±0.195 0.515 ±0.185
+> FM+XAttn 40.155 ±0.082 0.479 ±0.191 0.550 ±0.175
+> Method MES ↓IoU b↑IoU mVar LaMa-Ens. 0.362 ±0.158 0.397 ±0.231 0.295 ±0.216 0.174 ±0.072
+> Diffusion 0.352 ±0.153 0.462 ±0.198 0.396 ±0.202 0.055 ±0.034
+> Flow Match. 0.346 ±0.148 0.464 ±0.195 0.394 ±0.199 0.040 ±0.028
+> FM+XAttn 0.316 ±0.139 0 .479 ±0.191 0 .417 ±0.192 0.046 ±0.031
+
+ID = 1,221, OOD = 165. Mean rcond =0 .14 , mean floor prevalence =0 .19 .
+
+completion from a single observation with hard evidence clamping. We therefore restrict comparison to continuous stochastic families at matched capacity. 
+
+Excluded datasets. Several additional indoor corpora were evaluated but ex-cluded. Novel-view-synthesis datasets (DL3DV-10K [74], RealEstate10K [164]) and depth benchmarks (NYUv2 [126], SUN RGB-D [128]) yielded sparse or metrically inconsistent floor reconstructions under both classical and modern multi-view fusion [89, 123, 148]. HM3DSem, the semantic subset of the HM3D dataset [111,158], has per-room mesh annotations but lacks per-room mesh seg-ments and requires a large overhead of processing meshes. SUN RGB-D [128] and SceneNN [58] add limited diversity for the additional storage overhead, but remain viable future options. 
+
+S8.2 Implementation Details 
+
+Hyperparameters. All single-model runs use seed 42 ; LaMa-Ensemble uses seeds 
+
+41 –44 . Because the VGG perceptual loss and ResNet perceptual loss used in 46 Bhattacharjee et al.             
+
+> Fobs F⋆F⋆\Fobs Diffusion Flow FM+XAttn LaMa
+> Fig. S11: Supplementary failure cases. Three additional test scenes exhibiting the failure patterns identified in Sec. 6: disconnected floor islands (row 1), coarse-shape drift (row 2), and residual boundary artifacts (row 3). The boundary-leakage case is shown in the main paper (Fig. 7). The red overlay ( F⋆\Fobs ) shows GT floor absent from the observation (50–61% across cases). LaMa collapses in every case.
+
+the original LaMa assume 3-channel natural-image inputs, both are disabled (weight =0 ); the remaining losses (masked ℓ1 reconstruction, hinge adversarial loss, and multi-scale feature matching [60]) are channel-agnostic and retained unchanged (weights λrec =10 , λadv =10 , λfm =250 ; see Tab. S12). Training runs on 4×A100 40 GB GPUs with distributed data-parallel, FP32, and activation checkpointing [26]; peak memory is 30–36 GB per GPU. At inference, we inte-grate the learned ODEs used in Flow Matching models from t=0 to t=1 us-ing the second-order Heun solver [62]. We use DDIM [127] with 50 steps and classifier-free guidance (CFG) at scale s=2 .0 [53] for the diffusion model. CFG at scale s=2 .0 and per-step evidence clamping are applied for all models with dropout rate 0.1. All hyperparameters follow standard literature and implemen-tations [53, 77, 145]. 
+
+Runtime and NFE summary. Deterministic baselines require NFE =1 ; LaMa-Ensemble NFE =4 (one forward pass per seed). Diffusion and Flow Matching use 50 solver steps per sample, while FM+XAttn uses 25 solver steps per sample. This yields NFE =200 for Diffusion and Flow Matching ( 50 × K) and NFE =100 
+
+for FM+XAttn ( 25 × K). Deterministic models achieve >12 FPS; stochastic generators are 20–80 × slower. FM+XAttn is the slowest despite fewer solver steps because cross-attention adds per-step overhead. We observed no significant difference in results at inference due to this change. All models were selected by peak validation micro-IoU; inference is fully deterministic given fixed noise seeds. Generative Single-View Floormap Completion 47 
+
+Table S12: Training configuration and inference runtime. Top: Hyperparam-eters shared across all learned models; LaMa-specific loss weights listed separately. 
+
+Bottom: Per-observation latency and throughput on a single A100 ( 256 ×256 inputs).                                                                
+
+> Training hyperparameters
+> Optimizer AdamW [84] Learning rate 1×10 −4
+> Weight decay 1×10 −2
+> LR schedule Cosine annealing [83] (no restarts) Effective batch size 64 (16 /GPU ×4GPUs) Training steps 300 ,000
+> Precision FP32 Gradient accumulation [9] 1 step BCE positive weight 1.0(floor and non-floor equally weighted) CFG dropout pdrop 0.1(stochastic models only)
+> LaMa / LaMa-Ensemble additional
+> λrec /λadv /λfm 10 .0/10 .0/250 .0
+> Seeds (LaMa-Ensemble) 41, 42, 43, 44
+> Inference runtime
+> Method Sampler NFE Latency (ms) FPS U-Net Forward 181 12.3 PConv-UNet Forward 168 14.7
+> LaMa Forward 163 15.9
+> LaMa-Ens. Forward 4136 7.4 Diffusion DDIM 200 1745 0.6 Flow Match. Heun 200 3377 0.3 FM+XAttn Heun 100 6661 0.2
+
+## S9 Ethical Considerations 
+
+Ethical use. This work targets assistive robotics, accessibility mapping, and au-tonomous indoor navigation. The binary BEV representation abstracts away visual appearance, so the model neither processes nor generates identifiable im-agery. Inferring layout beyond the visible region could facilitate unauthorized mapping of private spaces. We recommend red-teaming, access-control policies, and audit logging at deployment. 
+
+Privacy and data provenance. All six source datasets were collected with in-formed consent under their respective institutional review processes. Researchers must obtain source data under the original licenses [7, 24, 34, 36, 147, 160]. The derived BEV maps contain no personally identifiable information. 
+
+Dataset Bias and environmental impact. The source corpora are predominantly North American and European interiors; models may under-perform on under-represented building typologies. Training the seven learned models required ap-proximately 280 A100-GPU hours on a shared institutional cluster powered in part by renewable energy; per-model runtime is reported in Tab. S12.

@@ -1,0 +1,522 @@
+Title: UHD Image Deblurring via Autoregressive Flow with Ill-conditioned Constraints
+
+URL Source: https://arxiv.org/pdf/2603.10517v1
+
+Published Time: Thu, 12 Mar 2026 00:47:38 GMT
+
+Number of Pages: 16
+
+Markdown Content:
+# UHD Image Deblurring via Autoregressive Flow with Ill-conditioned Constraints 
+
+Yucheng Xin 1, Dawei Zhao 2, Xiang Chen 3, Chen Wu 4, Pu Wang 5, Dianjie Lu 1,Guijuan Zhang 1, Xiuyi Jia 3, and Zhuoran Zheng 2⋆ 
+
+> 1
+
+Shandong Normal University  
+
+> 2
+
+Qilu University of Technology 
+
+zhengzr@njust.edu.cn  
+
+> 3
+
+Nanjing University of Science and Technology  
+
+> 4
+
+National University of Defense Technology  
+
+> 5
+
+Shandong University 
+
+Abstract. Ultra-high-definition (UHD) image deblurring poses signifi-cant challenges for UHD restoration methods, which must balance fine-grained detail recovery and practical inference efficiency. Although promi-nent discriminative and generative methods have achieved remarkable results, a trade-off persists between computational cost and the ability to generate fine-grained detail for UHD image deblurring tasks. To fur-ther alleviate these issues, we propose a novel autoregressive flow method for UHD image deblurring with an ill-conditioned constraint. Our core idea is to decompose UHD restoration into a progressive coarse-to-fine process: at each scale, the sharp estimate is formed by upsampling the previous-scale result and adding a current-scale residual, enabling stable stage-wise refinement from low to high resolutions. We further intro-duce Flow Matching to model residual generation as a conditional vec-tor field and perform few-step ODE sampling with efficient Euler/Heun solvers, enriching details while keeping inference affordable. Since multi-step generation at UHD can be numerically unstable, we propose an ill-conditioning suppression scheme by imposing condition-number regu-larization on a feature-induced attention matrix, improving convergence and cross-scale consistency. Our method demonstrates promising perfor-mance on blurred images at 4K (3840 ×2160) or higher resolutions. 
+
+1 Introduction 
+
+Image blurring is prevalent in scenarios such as handheld shooting, moving ob-jects, low light, and long exposure, significantly degrading visual perception for human observers and causing adverse effects on downstream vision tasks like detection, recognition, and reconstruction. With the increasing adoption of ultra-high-definition (UHD) imaging in mobile devices and professional imaging equipment, deblurring methods are facing a more acute dilemma: the exponen-tial increase in resolution brings richer textures and structural details, but also pushes the requirements for computation, memory, and latency to their limits.  
+
+> ⋆
+
+Corresponding author.   
+
+> arXiv:2603.10517v1 [cs.CV] 11 Mar 2026 2Xin et al.
+> Fig. 1: Runtime vs. Quality trade-off on UHD deblurring benchmarks. We plot PSNR against per-image runtime (log-scale, in milliseconds) for representative baselines and ARF-IC (Ours) on UHD-Blur and MC-Blur (UHDM).
+
+Recent Transformer-based architectures [29] have been used to model longer-range dependencies, pushing the state-of-the-art performance on several bench-marks. However, these methods often rely on deeply stacked MLPs or com-putationally expensive global attention units, easily encountering the bottle-neck of “manageable training but slow inference, or feasible inference at pro-hibitively high cost” in UHD imaging scenarios. Meanwhile, generative model-ing approaches such as diffusion models (e.g., DDPM [8]) and score-based SDE models [26] provide stronger detail reconstruction capabilities, but their iterative sampling becomes even less tolerable at UHD. Fast samplers such as DDIM [25] and DPM-Solver [16] reduce the step budget, yet when the model must “invent” missing high-frequency details, small numerical or modeling errors can be ampli-fied into visually salient artifacts, resulting in unstable textures or hallucinated patterns; Fig. 1 visualizes this runtime–PSNR trade-off on UHD-Blur (4K res-olution) and MC-Blur UHDM ( ≥ 4K resolution), clarifying why strong UHD restoration quality can quickly become computationally expensive and motivat-ing a framework that is both high-quality and practically fast. This paper focuses on the stable generation and efficiency issues in UHD de-blurring, proposing an autoregressive flow with ill-conditioned constraints suit-able for deployment on consumer-grade GPUs (RTX 3090). Specifically, we ex-plicitly define the deblurring process as a generative pipeline that progresses from coarse to fine: starting from low-resolution images, it progressively samples toward high-resolution images. Unlike discrete iterative diffusion sampling, we learn conditional vector fields based on flow matching [12] (rectified flow [13]) and model residual generation as a continuous-time dynamic evolution process. During inference, efficient ODE numerical solvers (e.g., Euler or Heun) are em-ployed to complete the integration from noise to residual with a small number of steps, significantly reducing UHD inference overhead while maintaining gen-erative capability. To enhance cross-scale generalization and reuse, we introduce a joint time-scale embedding, enabling the same vector field network to operate stably under different integration timesteps and scale conditions. Autoregressive Flow for UHD Deblurring 3
+
+Compared to traditional multi-scale regression networks or autoregressive models, our approach models each refinement process from low to high resolu-tion as a continuous spatial model. Notably, such generative models are highly susceptible to disruption from data noise, the discretization of ordinary differ-ential equations, and the accumulation of cross-scale errors, which can hinder model convergence. Therefore, we characterize this instability through the condi-tion number of the induced interaction matrix via feature mixing and propose a condition number regularization method to limit amplification effects in worst-case scenarios, thereby stabilizing the generation process from coarse to fine residuals. Our approach was evaluated on the embedded side, demonstrating stable real-time operation on consumer-grade mobile devices (rendering a 4K image in under 2 seconds, Apple or Huawei phones). Our main contributions 
+
+are summarized as follows: 1. We propose an Autoregressive Flow method tailored for UHD image de-blurring, which decomposes full-resolution restoration into a coarse-to-fine, scale-by-scale process of residual generation and fusion, thereby achieving scalable high-resolution deblurring. 2. We deepen the stability analysis of UHD generative restoration from the per-spectives of error amplification and numerical conditioning, and organically integrate condition-number regularization, a resolution-aware pre-inference downsampling strategy, and an analytical detail compensation term to en-able efficient texture-preserving inference for UHD images. 3. Extensive experiments are conducted on two UHD deblurring datasets and multiple standard-resolution deblurring benchmarks. The results demon-strate that the proposed method outperforms current state-of-the-art ap-proaches in terms of both accuracy and speed, validating its effectiveness and scalability in UHD deployment. 
+
+2 Related Work 
+
+UHD Image Deblurring. UHD deblurring exposes a deployment gap be-tween strong restoration quality and practical inference constraints (memory, latency, and global consistency). Existing pipelines typically rely on multi-scale designs, patch-wise/tiling inference, or low-resolution processing followed by up-sampling and refinement. While effective, tiling can introduce seams and long-range inconsistency, and aggressive downsampling can lose fine textures. Recent UHD restoration backbones include UHDformer [31], MixNet [2], TriFormer [17], AdaIR [4], and D2Net [36], and more recently UHDPromer [30] further improves efficiency for UHD restoration including deblurring. Benchmark and solution works such as UHDDIP [32] and ERR [40] further highlight UHD-specific degra-dations and efficiency constraints. Although they outperform in visual percep-tion, they are difficult to deploy on consumer-grade GPUs. Our approach is a low-cost generative UHD deblurring algorithm (autoregres-sive method [6, 10, 14, 22, 23, 35]) that utilizes ill-posed constraints to maintain the stability of generated details. 4 Xin et al.  
+
+> Fig. 2: The overall framework of the proposed UHD deblurring method. We begin with coarse-to-fine reconstruction using rectified residual sampling, stabilizing the model’s regression capability by constraining the ill-conditionedness of features.
+
+3 Methodology 
+
+3.1 Overview 
+
+Given a blurred image Iblur , we propose an Autoregressive Flow method for efficient and stable UHD deblurring. The restoration progresses from coarse to fine, where the estimate at scale s is formed by fusing an upsampled previous prediction with a scale-specific residual: ˆIs 
+
+> sharp
+
+= Up (ˆIs−1
+
+> sharp
+
+) + ˆ rs. The residual 
+
+ˆrs is generated by solving a short ODE driven by a conditional vector field learned via flow matching, enabling few-step Euler/Heun sampling. The overall framework is shown in Fig. 2. 
+
+3.2 Autoregressive Architecture 
+
+Concretely, we index scales by s ∈ { 1, . . . , S } from coarse to fine, and denote by Is 
+
+> blur
+
+and Is 
+
+> sharp
+
+the blurry input and the corresponding sharp target resized to (Hs, W s). This multi-scale scheme also clarifies the role of the previous-scale prediction: it serves as a strong, low-frequency prior that guides the generation at the current scale, rather than requiring the model to “re-create” the entire image from scratch at each resolution. 
+
+Scale Sequence Construction We construct the scale sequence (Hs, W s) for 
+
+s = 1 , . . . , S by recursively downsampling from the target resolution (H, W ).At each downsampling step, the height and width are divided by 2 with ceiling rounding, i.e., Hs−1 = ⌈Hs/2⌉ and Ws−1 = ⌈Ws/2⌉, until the shortest side Autoregressive Flow for UHD Deblurring 5
+
+min( H1, W 1) ≤ τmin = 4 pixels. This yields a scale sequence arranged from small to large, where s = 1 corresponds to the coarsest resolution and s = S
+
+corresponds to the target resolution. Intuitively, the coarsest scales capture the scene layout and dominant edges with low computational burden, while the finer scales focus on refining textures and small structures under the guidance of the coarse prior. 
+
+Autoregressive Residual Fusion At each scale s, we autoregressively fuse the result from the previous scale through residual addition: 
+
+ˆIs 
+
+> sharp
+
+= Up (ˆIs−1
+
+> sharp
+
+) + ˆ rs, (1) where Up (·) denotes bilinear upsampling to the spatial dimensions (Hs, W s) of the current scale, ˆIs−1 
+
+> sharp
+
+is the sharp estimate from the previous scale, and ˆrs
+
+is the residual predicted at the current scale. This design reduces the modeling burden: instead of regenerating the full image, the model only needs to explain what is newly resolvable at the current resolution. It also tends to make the target distribution at each scale more concentrated (residuals are typically smaller in magnitude), which is favorable for stable few-step sampling. During training, the target residual is defined as: 
+
+rs = Is 
+
+> sharp
+
+− Up (Is−1
+
+> sharp
+
+), (2) where Is 
+
+> sharp
+
+and Is−1 
+
+> sharp
+
+are the ground-truth sharp images at the current and previous scales, respectively. For the base case s = 1 , we define I0 
+
+> sharp
+
+= 0 (and thus Up (I0
+
+> sharp
+
+) = 0), so r1 = I1
+
+> sharp
+
+.We adopt a teacher forcing strategy, using the ground-truth sharp image from the previous scale as the prior (rather than the predicted value) to avoid error accumulation affecting training stability. During inference, the prior is replaced by the predicted ˆIs−1
+
+> sharp
+
+. In this setting, the residual formulation (predicting only the scale-wise increment) and the conditioning on Is 
+
+> blur
+
+help mitigate cross-scale error amplification, and an optional consistency term (Sec. Loss Function) can further stabilize the trajectory. 
+
+Condition Injection Mechanism The current-scale generation should be aware of (i) the partially generated content from the previous scale and (ii) the observation at the current scale. We therefore integrate multi-source information through channel concatenation: 
+
+vθ = fθ
+
+
+
+[xst , Is
+
+> blur
+
+, Up (ˆIs−1
+
+> sharp
+
+)] , Emb (t, s )
+
+
+
+, (3) where the square brackets [·] denote channel-wise concatenation. The three input components are: the intermediate state at the current time xst (3 channels), the blurred image at the current scale Is 
+
+> blur
+
+(3 channels), and the upsampled sharp estimate from the previous scale Up (ˆIs−1
+
+> sharp
+
+) (3 channels), totaling 9 channels. For the coarsest scale ( s = 1 ), we set Up (ˆI0
+
+> sharp
+
+) = 0.6 Xin et al. 
+
+Emb (t, s ) is the joint embedding of time and scale, which is added to in-termediate features through linear projection in each residual block, achieving global modulation of spatiotemporal conditions. The scale condition scalar is normalized as sscalar = ( s − 1) /(S − 1) ∈ [0 , 1] , where S is the total number of scales, ensuring scale information is uniformly distributed in the [0 , 1] interval. 
+
+3.3 Rectified Flow Generative Modeling 
+
+With the autoregressive prior Up (ˆIs−1
+
+> sharp
+
+) providing a coarse estimate, the re-maining task at scale s becomes generating the residual ˆrs that completes the image. We model this residual distribution with Rectified Flow, so that sampling reduces to solving a short ODE whose dynamics are conditioned on the blurry observation and the previous-scale prior. 
+
+Rectified Flow Basics Rectified Flow [13] is a class of generative models based on Continuous Normalizing Flow [5] and Neural ODE [1] formulations that map a simple prior distribution (e.g., Gaussian noise) to the target data distribution by learning a time-varying vector field. Its core is solving an ordinary differential equation (ODE): 
+
+dx
+
+dt = vθ (xt, t, c), x(0) = z0 ∼ N (0 , σ 20 I), (4) where xt denotes the state variable at time t, vθ is the parameterized vector field network, c is the conditioning information (in this work, including the blurred image and the result from the previous scale), z0 is the initial noise, σ0 is the noise standard deviation (default 1.0), and I is the identity matrix. This equation describes the continuous evolution trajectory from the noise distribution to the target distribution. 
+
+Flow Matching Given the target residual rs at scale s, we construct interme-diate states using a linear interpolation path in Flow Matching [12]: 
+
+xst = (1 − t)z0 + trs, t ∼ U (0 , 1) , (5) where t is randomly sampled from the uniform distribution U(0 , 1) . This simple path yields a constant target vector field, 
+
+vs 
+
+> target
+
+= rs − z0, (6) which makes training particularly stable: the network only needs to predict the straight-line transport direction under the given condition cs. The training loss is the mean squared error: 
+
+Lflow = 1
+
+S
+
+> S
+
+X
+
+> s=1
+
+Et, z0
+
+h
+
+vθ (xst , t, cs) − vs
+
+> target
+> 22
+
+i
+
+, (7) where S is the total number of scales. Autoregressive Flow for UHD Deblurring 7
+
+ODE Solving During inference, sampling ˆrs corresponds to integrating the ODE from t = 0 to t = 1 starting from noise. Since each scale only needs to produce a residual (rather than a full image), we can use very few integration steps without sacrificing quality. We employ the Heun method (second-order Runge-Kutta) for numerical integration. Let the step size be ∆t = 1 /N s, where 
+
+Ns is the number of sampling steps at the current scale. The update rule is: 
+
+xe = xk + ∆t · vθ (xk, t k, cs), (8) 
+
+xk+1 = xk + ∆t 
+
+2 [vθ (xk, t k, cs) + vθ (xe, t k+1 , cs)] , (9) where tk = k∆t . The final residual estimate is ˆrs = x(t = 1) . In our implementa-tion, Ns is specified by a coarse-to-fine schedule (default [8 , 8, 6, 4, 3, 2, 1] ). If the actual number of scales S differs, we truncate the schedule to the first S entries (when S ≤ 7) or pad it by repeating the last value (when S > 7). When Ns = 1 ,Heun reduces to a single Euler step, and we use the Euler update for efficiency. In addition, supplementary materials provide further details regarding net-work structure and time step embedding. 
+
+3.4 Condition-Number Regularization Attention Matrix Construction Given the vector field prediction vs 
+
+> pred
+
+∈
+
+RB×3×Hs×Ws at scale s (where B is the batch size, 3 is the number of RGB channels, and Hs and Ws are the spatial dimensions), we construct an “induced attention matrix” to quantify the similarity structure among features: i) Adaptive Pooling : Pool the features to a fixed grid: 
+
+F = P vs
+
+> pred
+
+, (M, M ) , (10) where P(·) denotes adaptive average pooling ( AdaptiveAvgPool2d ), and M = 16 
+
+(default). This operation uniformly downsamples features of arbitrary spatial dimensions to a 16 × 16 grid, reducing subsequent computational complexity. ii) Tokenization and Normalization : Flatten to T ∈ RB×N ×C , where N =
+
+M 2 = 256 is the number of spatial positions (token count) and C = 3 is the number of channels. Perform centering and L2 normalization on each token: 
+
+T ← T − 1
+
+N
+
+> N
+
+X
+
+> i=1
+
+Ti, Ti ← Ti
+
+∥Ti∥2 + ε , (11) where the centering subtracts the mean over the token dimension (for each channel), and the normalization is applied along the channel dimension with 
+
+ε = 10 −6. This makes the subsequent similarity computation depend mainly on direction rather than magnitude. iii) Self-Attention Computation :
+
+A = softmax 
+
+ TT ⊤
+
+√C · temp 
+
+
+
+∈ RB×N ×N , (12) 8 Xin et al. 
+
+where TT ⊤ computes token-pair similarities, √C is the standard attention scal-ing, temp is an optional temperature (default 1), and softmax normalizes along the last dimension. 
+
+Condition Number Constraint To prevent A from approaching singularity (maximum singular value much larger than minimum singular value), we add a small diagonal term and penalize large condition numbers: 
+
+Lcond = E [ReLU (log κ2(A + ϵI) − log κthr )] , (13) where ϵ = 10 −3, κ2(·) is the spectral (2-norm) condition number (implemented via torch.linalg.cond ), and κthr = 100 . In the implementation, we compute this penalty on a small subsample of the batch (default: at most one image) and clamp condition numbers via nan_to_num for numerical safety. Essentially, the condition number reflects a matrix’s sensitivity. This regularization term is applied only to the final model’s output scale to save training time. Further-more, an excessively large condition number indicates that the attention struc-ture is approaching singularity, which amplifies perturbations and compromises training/inference stability. 
+
+Why the ill-conditioned constraint matters ? In UHD autoregressive resid-ual generation with few-step ODE sampling, small errors from discretization, upsampling, and feature mixing are inevitable. The key issue is whether these perturbations get amplified. We therefore measure the worst-case amplification capability of the feature-induced attention matrix using the spectral (2-norm) condition number. Define: 
+
+˜A = A + εI, κ2( ˜A) = ∥ ˜A∥2∥ ˜A−1∥2 = σmax ( ˜A)
+
+σmin ( ˜A) , (14) where κ2 increases sharply when σmin is small (near singularity), meaning the attention structure is ill-conditioned; the diagonal shift εI prevents exact singu-larity and stabilizes computation. To connect this to stability, view attention mixing locally as a linear map 
+
+y = ˜Ax . For an input perturbation δx, we have δy = ˜Aδx, and the singular-value bounds yield 
+
+∥δy∥2
+
+∥y∥2
+
+= ∥ ˜Aδx∥2
+
+∥ ˜Ax ∥2
+
+≤ σmax ( ˜A)
+
+σmin ( ˜A) · ∥δx∥2
+
+∥x∥2
+
+= κ2( ˜A) · ∥δx∥2
+
+∥x∥2
+
+. (15) This shows κ2( ˜A) directly upper-bounds worst-case relative error amplification; thus, a large condition number implies that tiny perturbations can be magnified, harming multi-step ODE trajectory consistency and cross-scale fusion stability in UHD. Motivated by this amplification bound, we penalize only overly ill-conditioned cases to suppress instability while preserving capacity: 
+
+Lcond = E
+
+h
+
+ReLU   log κ2(A + εI) − log κthr 
+
+i
+
+. (16) Autoregressive Flow for UHD Deblurring 9
+
+The log( ·) compresses the dynamic range for stable optimization, and ReLU 
+
+activates the penalty only when κ2 exceeds κthr . Therefore, the ill-conditioned constraint is a principled, stability-driven regularizer that directly targets worst-case error amplification, making it both reasonable and important. 
+
+3.5 Resolution Control Strategy 
+
+To avoid high-frequency information loss caused by downsampling, we extract detail residuals from the original blurred image and add them back: 
+
+D = Ifull blur − Up (Down (Ifull blur )) , (17) 
+
+ˆIfull sharp = Up (ˆIlow sharp ) + αD, (18) where Ifull blur is the original full-resolution blurred image, and Down (·) and Up (·)
+
+are bilinear downsampling/upsampling operations, respectively. The first line computes a Laplacian-pyramid style detail layer. The second line upsamples the low-resolution prediction ˆIlow sharp and adds the weighted detail αD. In the implementation, this compensation is only applied when the input was actually downsampled (i.e., d > 1). The weight α controls the texture–efficiency trade-off (default α = 1 .0); when the input contains strong noise or unreliable high-frequency components, α can be reduced (or the compensation can be disabled) to avoid amplifying artifacts. 
+
+3.6 Loss Function 
+
+The overall objective balances four effects: learning the correct vector field (Lflow ), providing a direct end-point supervision signal ( Lfinal ), discouraging inconsistent trajectories ( Lcons ), and suppressing ill-conditioned feature inter-actions ( Lcond ). The total loss consists of four components with configurable weights: 
+
+Ltotal = wflow Lflow + wfinal Lfinal + wcons Lcons + wcond Lcond . (19) Flow matching loss Lflow is the primary training objective (default wflow =1.0). To accelerate convergence, we additionally introduce a cheap final super-vision loss Lfinal (default wfinal = 1 .0). Concretely, we run a single vector-field forward pass at t = 1 with a zero residual state and zero previous estimate: 
+
+˜r = vθ
+
+ [0, Ilow blur , 0], t =1 , s scalar =1 , ˜Ilow sharp = ˜ r, (20) then restore it to the original resolution (upsampling plus optional analytical detail compensation) and compute an L1 loss: 
+
+Lfinal = Restore (˜Ilow sharp ) − Ifull sharp 1
+
+, (21) where Ilow blur is the (optionally downsampled) blurry input used by the model during training, Restore (·) denotes the restore operation, Ifull sharp is the ground-truth full-resolution sharp image, and ∥ · ∥ 1 is the L1 norm. This auxiliary loss is 10 Xin et al. 
+
+introduced purely for faster convergence and does not replace ODE-based multi-step sampling at test time; empirically, it provides a direct “one-pass” supervision signal that complements flow matching. Note that even when Ilow blur is obtained by downsampling, we set sscalar =1 in this auxiliary pass to align the supervision with the final-scale restoration target after Restore (·); it is a heuristic training aid rather than a statement about the sampling trajectory. Consistency constraint Lcons extrapolates from the current time to the end-point using the predicted vector field and computes the L1 distance to the target residual to enhance trajectory consistency: 
+
+Lcons = 1
+
+S
+
+> S
+
+X
+
+> s=1
+
+E
+
+h
+
+xst + (1 − t)vs 
+
+> pred
+
+− rs
+
+> 1
+
+i
+
+, (22) where xst + (1 − t)vs 
+
+> pred
+
+represents the estimated position at the endpoint by extrapolating from the current state xst along the predicted vector field vs
+
+> pred
+
+for the remaining time (1 − t), and rs is the ground-truth target residual. This constraint is enabled by default (default wcons = 0 .1) and can be disabled by setting wcons = 0 .0. Condition number regularization Lcond is enabled by default with wcond = 0 .01 .
+
+4 Experiments 
+
+4.1 Implementation Details and Datesets 
+
+All experiments are implemented in PyTorch and conducted on a single NVIDIA RTX 3090 GPU. We train the model using paired blurry and sharp images with random cropping and data augmentation. Specifically, we use a crop size of 512 × 512 with random horizontal/vertical flips, and normalize all images to [−1, 1] before feeding them into the network. We optimize the network us-ing AdamW [15] with an initial learning rate of 2 × 10 −4 and weight decay 0.Training is performed for 50 epochs with batch size 8, mixed-precision training (AMP) [18], gradient clipping [20] (max norm 1.0), and an exponential moving average (EMA) [21] of model weights with decay 0.999. We evaluate on six datasets covering both UHD deblurring and high-resolution (but non-UHD) deblurring. We first evaluate on two UHD-scale datasets: UHD-Blur [31], a synthetic motion-blur UHD dataset (approximately 3840 × 2160 
+
+and higher) with about 2K paired samples for UHD evaluation; and MC-Blur (UHDM) [39], a large-scale UHD dataset with synthetic motion blur and large-kernel degradations (tens of thousands of images), which serves as a multi-factor generalization testbed. We further evaluate on four commonly used high-resolution benchmarks: GoPro [19], DVD [27], RealBlur-J and RealBlur-R [24], which contain blurry and sharp pairs with realistic degradations. All comparison algorithms employ the same algorithmic environment as ours, including cropped patch resolution, learning rate, learning mechanism (opti-mizer), and number of iterations. Autoregressive Flow for UHD Deblurring 11 
+
+Table 1: Quantitative comparison on UHD deblurring benchmarks (PSNR, SSIM, per-image inference time in seconds, and FLOPs in G). Method Source Params ↓ (M) UHD-Blur MC-Blur(UHDM) PSNR ↑ SSIM ↑ Time ↓ (s) FLOPs ↓ (G) PSNR ↑ SSIM ↑ Time ↓ (s) FLOPs ↓ (G) MIMO-UNet++ [3] ICCV’22 16.10 25.025 0.7517 0.625 20,061 22.565 0.7328 1.055 27,082 Restormer [38] CVPR’22 26.10 25.210 0.7522 5.647 49,693 22.780 0.7341 9.611 67,086 Uformer [33] CVPR’22 20.60 25.267 0.7515 3.400 27,436 22.857 0.7329 5.846 37,038 Stripformer [28] ECCV’22 19.70 25.052 0.7501 2.999 49,392 22.602 0.7307 5.097 66,679 FFTformer [9] CVPR’23 16.60 25.409 0.7571 15.285 42,289 23.019 0.7394 25.979 57,091 MixNet [2] Neurocomputing’25 5.22 29.430 0.8550 0.405 11,235 26.910 0.8345 0.680 15,167 UHDformer [31] AAAI’24 0.44 28.821 0.2370 6.334 985 26.481 0.2210 10.777 1,330 MambaIR [7] ECCV’24 2.01 30.400 0.8694 32.027 82,666 27.850 0.8493 54.419 111,599 TriFormer [17] ICASSP’25 1.09 28.910 0.8450 8.035 11,283 26.440 0.8262 6.753 15,249 AdaIR [4] ICLR’25 1.05 28.838 0.8516 6.872 51,895 26.338 0.8324 11.673 70,058 D2Net [36] WACV’25 5.22 28.460 0.8520 7.743 11,523 26.020 0.8337 5.952 15,556 UHDDIP [32] TCSVT’25 0.81 29.517 0.8585 1.877 711 26.987 0.8385 3.163 960 ERR [40] CVPR’25 1.13 29.720 0.8610 2.743 807 27.230 0.8420 4.397 1,089 UHDPromer [30] IJCV2026 0.74 29.527 0.8585 1.462 640 27.039 0.8387 1.920 864 
+
+ARF-IC Ours 3.83 30.838 0.8816 0.725 2,799 28.328 0.8619 0.984 3,571 
+
+Table 2: Quantitative comparison on non-UHD deblurring benchmarks (PSNR, SSIM, per-image inference time in seconds, and FLOPs in G). Method GoPro DVD RealBlur-R RealBlur-J PSNR ↑ SSIM ↑ Time ↓ (s) FLOPs ↓ (G) PSNR ↑ SSIM ↑ Time ↓ (s) FLOPs ↓ (G) PSNR ↑ SSIM ↑ Time ↓ (s) FLOPs ↓ (G) PSNR ↑ SSIM ↑ Time ↓ (s) FLOPs ↓ (G) MIMO-UNet++ [3] 32.60 0.9580 0.1104 3,009 32.85 0.9180 0.0936 3,009 35.70 0.9490 0.0660 2,006 27.80 0.8420 0.0935 3,009 Restormer [38] 32.92 0.9610 0.8462 7,454 33.52 0.9410 0.8623 7,454 36.19 0.9570 0.5647 4,969 28.96 0.8790 0.8464 7,454 Uformer [33] 32.97 0.9670 0.6005 4,115 33.57 0.9470 0.6218 4,115 36.22 0.9570 0.4101 2,744 29.06 0.8840 0.6383 4,115 Stripformer [28] 33.08 0.9620 0.4510 7,409 33.68 0.9420 0.4504 7,409 36.08 0.9540 0.3030 4,939 28.82 0.8760 0.4511 7,409 FFTformer [9] 34.21 0.9680 2.2933 6,343 35.21 0.9580 2.2938 6,343 40.11 0.9753 1.5272 4,229 32.62 0.9326 2.2935 6,343 MixNet [2] 33.60 0.9650 0.0592 1,685 34.05 0.9350 0.0653 1,685 36.00 0.9560 0.0547 1,123 28.50 0.8720 0.0735 1,685 UHDformer [31] 31.60 0.9500 0.3079 148 31.85 0.9100 0.3157 148 34.70 0.9420 0.2137 99 27.20 0.8250 0.3642 148 MambaIR [7] 34.00 0.9660 4.7920 12,400 34.60 0.9460 4.7858 12,400 36.20 0.9570 3.1938 8,267 28.90 0.8780 4.7893 12,400 TriFormer [17] 33.40 0.9640 0.4580 1,693 33.85 0.9340 0.4350 1,693 35.90 0.9530 0.4850 1,128 28.40 0.8700 0.4940 1,693 AdaIR [4] 34.20 0.9670 1.2418 7,784 34.80 0.9470 1.2081 7,784 36.28 0.9580 0.8448 5,189 29.00 0.8820 1.2906 7,784 D2Net [36] 33.60 0.9650 0.5790 1,728 34.05 0.9350 0.3890 1,728 36.00 0.9560 0.3520 1,152 28.60 0.8740 0.4520 1,728 UHDDIP [32] 32.80 0.9600 0.2770 107 33.05 0.9200 0.2699 107 35.50 0.9490 0.1812 71 28.00 0.8600 0.2813 107 ERR [40] 33.00 0.9610 0.4128 121 33.25 0.9210 0.3680 121 35.60 0.9500 0.2384 81 28.10 0.8620 0.3784 121 UHDPromer [30] 32.79 0.9583 0.2190 96 33.03 0.9403 0.2169 96 35.27 0.9471 0.1496 64 27.92 0.8595 0.2221 96 ARF-IC (Ours) 33.85 0.9664 0.3021 378 34.39 0.9443 0.3311 378 36.18 0.9548 0.6534 208 28.82 0.8729 0.2948 378 
+
+4.2 Experimental Results UHD Image Deblurring We first evaluate on two UHD deblurring bench-marks, UHD-Blur and the UHDM subset of MC-Blur, and compare with repre-sentative recent restoration backbones. Table 1 reports parameter counts, com-putational cost (FLOPs, in G), PSNR, and SSIM [34], as well as inference time per-image (s), on both datasets. Overall, our approach achieves optimal perfor-mance on quality evaluation metrics and demonstrates relatively optimal tempo-ral inference speed. Qualitative visual comparisons on the two UHD benchmarks are provided in Fig. 3. 
+
+Non-UHD Image Deblurring Table 2 summarizes the quantitative results of ARF-IC on four non-UHD deblurring benchmarks, including per-image infer-ence time (s) and FLOPs (in G). Although our method is primarily designed for UHD image deblurring, it still demonstrates strong generalization and com-petitive performance on standard-resolution settings. In addition to restoration quality, ARF-IC maintains practical per-image inference time on all four non-UHD benchmarks under our setup. Qualitative visual comparisons on the four non-UHD benchmarks are shown in Fig. 4. 12 Xin et al.  
+
+> Fig. 3: Qualitative comparison on UHD deblurring benchmarks. From top to bot-tom, the first and second rows are UHD-Blur, and the third and fourth rows are MC-Blur(UHDM).
+
+4.3 Ablation Study Experimental Setup We conduct ablation studies on the UHD Blur dataset, a UHD synthetic motion blur benchmark with resolutions around 3840 by 2160 and above, containing approximately 2K paired samples. We report PSNR for restoration quality, and we additionally report per-image inference time for set-tings that affect deployment cost. 
+
+Autoregressive residual modeling MS ARF performs autoregressive fusion over a scale sequence by propagating an upsampled previous estimate to the current scale and adding a predicted residual. We ablate by removing the au-toregressive feedback input, removing the multi-scale progression, and removing the residual formulation by predicting sharp images directly. Fig. 5(d) shows that removing autoregressive feedback reduces PSNR to 29.45 dB, while remov-ing multi-scale progression leads to a larger drop to PSNR 27.78 dB. Autoregressive Flow for UHD Deblurring 13  
+
+> Fig. 4: Qualitative comparison on non-UHD deblurring benchmarks. From top to bot-tom, the rows correspond to GoPro, DVD, RealBlur-R, and RealBlur-J.
+
+Resolution aware downsampling To accelerate our method inference, we downsample the input by a factor of 2 ×, solve in low resolution, and then upsample back. To compensate for high frequency loss, we show an analytical approach as the difference between the original blurry image and its downsam-pled and then upsampled reconstruction, and inject it with a detail weight (see Fig. 5(a)). We also attempted to use adaptive pooling on the input images, but the results were unsatisfactory. 
+
+Condition number regularization To mitigate ill conditioning in UHD sce-narios, we introduce condition number regularization on a feature-induced atten-tion matrix, and ablate removing it or applying it at all scales. Fig. 5(b) shows that removing this regularization decreases PSNR to 29.62 dB, suggesting re-duced stability in UHD settings. Applying the regularization at all scales further improves quality but increases inference time, indicating that stronger stability constraints may introduce additional computation. 14 Xin et al. 0.800 1.000 1.200 1.400 
+
+> Time (s/img)
+> 29.5
+> 30.0
+> 30.5
+> 31.0
+> 31.5
+> PSNR (dB)
+> d=2 (vary α)
+> No downsampling (d=1)
+> α=0
+> α=0.5
+> α=1.0
+> α=1.5
+> d=1
+
+(a) Downsampling & detail weight. 0.715 0.720 0.725 0.730 0.735 
+
+> Time (s/img)
+> 29.5
+> 30.0
+> 30.5
+> 31.0
+> PSNR (dB)
+> w/o
+> last scale
+> all scales
+
+(b) Condition regularization. 0.400 0.600 0.800 1.000 1.200 1.400   
+
+> Time (s/img)
+> 27.0
+> 28.0
+> 29.0
+> 30.0
+> 31.0
+> 32.0
+> PSNR (dB)
+> Heun
+> Euler
+> 1 step
+> half
+> default
+> default double
+
+(c) ODE solver & steps. 28 29 30 31 
+
+> PSNR (dB)
+> Full
+> w/o AR feedback
+> Direct prediction
+> Single scale
+> 30.84
+> 29.45
+> 28.74
+> 27.78
+
+(d) MS-ARF core design. 29.0 29.5 30.0 30.5 31.0  
+
+> PSNR (dB)
+> Full
+> w/o Lcons
+> w/o Lfinal
+> w/o both
+> 30.84
+> 30.10
+> 30.02
+> 29.36
+
+(e) Loss terms. 28.0 28.5 29.0 29.5 30.0 30.5 31.0  
+
+> PSNR (dB)
+> Full
+> w/o Emb MLP
+> Time only
+> w/o Emb
+> 30.84
+> 29.98
+> 29.54
+> 28.20
+
+(f) Time–scale embedding. 
+
+Fig. 5: Ablation study visualizations. Top row: PSNR–time trade-offs for settings af-fecting runtime. Bottom row: PSNR-only ablations. 
+
+ODE solver and sampling steps At inference, we solve an ODE using nu-merical integration. We use Heun by default, degenerate to Euler when using one step per scale, and adopt a coarse-to-fine step schedule. Fig. 5(c) demonstrates a clear quality-speed trade-off. Euler is faster than Heun under the same step budget but yields lower PSNR. 
+
+Loss terms and embedding We evaluate the contribution of the cheap fi-nal supervision term and the consistency constraint term. Fig. 5(e) shows that disabling the consistency term reduces PSNR to 30.10 dB, indicating that trajec-tory consistency improves endpoint agreement. Removing the final supervision term yields a further drop to PSNR 30.02 dB, suggesting that one-pass supervi-sion complements flow matching by providing a denser training signal. . Fig. 5(f) shows that removing scale conditioning and the embedding using concatenation only also degrades results. 
+
+5 Discussion and Conclusion 
+
+Beyond the aforementioned ablation experiments, we discuss the approach’s per-formance on downstream tasks (MS COCO 2017 [11]), across datasets (image deraining dataset Rain100L [37]), and on edge devices (on the iPhone 16 Pro, our method achieves millisecond-level response times for rendering a 1080p blurred image) (see supplementary materials). This paper focuses on UHD image deblurring, balancing 4K/8K fine-detail restoration and inference efficiency via an autoregressive flow framework sta-bilized by ill-conditioning constraints. It decomposes restoration into a coarse-to-fine residual process, using Rectified Flow for few-step ODE sampling with Autoregressive Flow for UHD Deblurring 15 
+
+efficient solvers. The condition-number regularization suppresses UHD numerical instability and hallucinated textures, improving convergence. Extensive experi-ments validate the effectiveness of our approach. 
+
+References 
+
+1. Chen, R.T., Rubanova, Y., Bettencourt, J., Duvenaud, D.K.: Neural ordinary dif-ferential equations. NeurIPS 31 (2018) 6 2. Chen, W., Sun, S., Zhang, Y., Zheng, Z.: Mixnet: Efficient global modeling for ultra-high-definition image restoration. Neurocomputing p. 131130 (2025) 3, 11 3. Cho, S.J., Ji, S.W., Hong, J.P., Jung, S.W., Ko, S.J.: Rethinking coarse-to-fine approach in single image deblurring. In: ICCV (2021) 11 4. Cui, Y., Zamir, S.W., Khan, S., Knoll, A., Shah, M., Khan, F.S.: Adair: Adaptive all-in-one image restoration via frequency mining and modulation. In: ICLR (2025) 3, 11 5. Grathwohl, W., Chen, R.T., Bettencourt, J., Sutskever, I., Duvenaud, D.: Ffjord: Free-form continuous dynamics for scalable reversible generative models. In: ICLR (2018) 6 6. Guo, B., Zhang, X., Wu, H., Wang, Y., Zhang, Y., Wang, Y.F.: Lar-sr: A local autoregressive model for image super-resolution. In: CVPR (2022) 3 7. Guo, H., Li, J., Dai, T., Ouyang, Z., Ren, X., Xia, S.T.: Mambair: A simple baseline for image restoration with state-space model. In: ECCV (2024) 11 8. Ho, J., Jain, A., Abbeel, P.: Denoising diffusion probabilistic models. NeurIPS (2020) 2 9. Kong, L., Dong, J., Ge, J., Li, M., Pan, J.: Efficient frequency domain-based trans-formers for high-quality image deblurring. In: CVPR (2023) 11 10. Kong, X., Wu, R., Liu, S., Sun, L., Zhang, L.: Nsarm: Next-scale autore-gressive modeling for robust real-world image super-resolution. arXiv preprint arXiv:2510.00820 (2025) 3 11. Lin, T.Y., Maire, M., Belongie, S., Hays, J., Perona, P., Ramanan, D., Dollár, P., Zitnick, C.L.: Microsoft coco: Common objects in context. In: ECCV (2014) 14 12. Lipman, Y., Chen, R.T., Ben-Hamu, H., Nickel, M., Le, M.: Flow matching for generative modeling. In: ICLR (2022) 2, 6 13. Liu, X., Gong, C., et al.: Flow straight and fast: Learning to generate and transfer data with rectified flow. In: ICLR (2022) 2, 6 14. Liu, Z., Xu, Z., Ma, J., Li, W., Wang, R., Du, B., Chen, H.: Conditional visual autoregressive modeling for pathological image restoration. In: ICCV (2025) 3 15. Loshchilov, I., Hutter, F.: Decoupled weight decay regularization. In: ICLR (2017) 10 16. Lu, C., Zhou, Y., Bao, F., Chen, J., Li, C., Zhu, J.: Dpm-solver: A fast ode solver for diffusion probabilistic model sampling in around 10 steps. NeurIPS (2022) 2 17. Ma, X., Lu, Y.: Triformer: Triple branch heterogeneous transformers for uhd image restoration. In: ICASSP (2025) 3, 11 18. Micikevicius, P., Narang, S., Alben, J., Diamos, G., Elsen, E., Garcia, D., Ginsburg, B., Houston, M., Kuchaiev, O., Venkatesh, G., et al.: Mixed precision training. In: ICLR (2018) 10 19. Nah, S., Hyun Kim, T., Mu Lee, K.: Deep multi-scale convolutional neural network for dynamic scene deblurring. In: CVPR (2017) 10 16 Xin et al. 20. Pascanu, R., Mikolov, T., Bengio, Y.: On the difficulty of training recurrent neural networks. In: ICML (2013) 10 21. Polyak, B.T., Juditsky, A.B.: Acceleration of stochastic approximation by averag-ing. SIAM journal on control and optimization 30 (4), 838–855 (1992) 10 22. Qu, Y., Yuan, K., Hao, J., Zhao, K., Xie, Q., Sun, M., Zhou, C.: Visual autore-gressive modeling for image super-resolution. In: ICML (2025) 3 23. Rajagopalan, S., Narayan, K., Patel, V.M.: Restorevar: Visual autoregressive gen-eration for all-in-one image restoration. arXiv preprint arXiv:2505.18047 (2025) 324. Rim, J., Lee, H., Won, J., Cho, S.: Real-world blur dataset for learning and bench-marking deblurring algorithms. In: ECCV (2020) 10 25. Song, J., Meng, C., Ermon, S.: Denoising diffusion implicit models. In: ICLR (2020) 226. Song, Y., Sohl-Dickstein, J., Kingma, D.P., Kumar, A., Ermon, S., Poole, B.: Score-based generative modeling through stochastic differential equations. In: ICLR (2020) 2 27. Su, S., Delbracio, M., Wang, J., Sapiro, G., Heidrich, W., Wang, O.: Deep video deblurring for hand-held cameras. In: CVPR (2017) 10 28. Tsai, F.J., Peng, Y.T., Lin, Y.Y., Tsai, C.C., Lin, C.W.: Stripformer: Strip trans-former for fast image deblurring. In: ECCV (2022) 11 29. Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones, L., Gomez, A.N., Kaiser, Ł., Polosukhin, I.: Attention is all you need. NeurIPS (2017) 2 30. Wang, C., Pan, J., Wang, L., Wang, W., Yang, Y.: Neural discrimination-prompted transformers for efficient uhd image restoration and enhancement. IJCV 134 (3), 84 (2026) 3, 11 31. Wang, C., Pan, J., Wang, W., Fu, G., Liang, S., Wang, M., Wu, X.M., Liu, J.: Correlation matching transformation transformers for uhd image restoration. In: AAAI (2024) 3, 10, 11 32. Wang, L., Wang, C., Pan, J., Liu, X., Zhou, W., Sun, X., Wang, W., Su, Z.: Ultra-high-definition image restoration: New benchmarks and a dual interaction prior-driven solution. IEEE TCSVT (2025) 3, 11 33. Wang, Z., Cun, X., Bao, J., Zhou, W., Liu, J., Li, H.: Uformer: A general u-shaped transformer for image restoration. In: CVPR (2022) 11 34. Wang, Z., Bovik, A.C., Sheikh, H.R., Simoncelli, E.P.: Image quality assessment: From error visibility to structural similarity. IEEE TIP 13 (4), 600–612 (2004) 11 35. Wei, H., Liu, S., Yuan, C., Zhang, L.: Perceive, understand and restore: Real-world image super-resolution with autoregressive multimodal generative models. In: ICCV (2025) 3 36. Wu, C., Wang, L., Peng, L., Lu, D., Zheng, Z.: Dropout the high-rate downsam-pling: A novel design paradigm for uhd image restoration. In: WACV (2025) 3, 11 37. Yang, W., Tan, R.T., Feng, J., Liu, J., Guo, Z., Yan, S.: Deep joint rain detection and removal from a single image. In: CVPR (2017) 14 38. Zamir, S.W., Arora, A., Khan, S., Hayat, M., Khan, F.S., Yang, M.H.: Restormer: Efficient transformer for high-resolution image restoration. In: CVPR (2022) 11 39. Zhang, K., Wang, T., Luo, W., Ren, W., Stenger, B., Liu, W., Li, H., Yang, M.H.: Mc-blur: A comprehensive benchmark for image deblurring. IEEE TCSVT 34 (5), 3755–3767 (2023) 10 40. Zhao, C., Chen, Z., Xu, Y., Gu, E., Li, J., Yi, Z., Wang, Q., Yang, J., Tai, Y.: From zero to detail: Deconstructing ultra-high-definition image restoration from progressive spectral perspective. In: CVPR (2025) 3, 11

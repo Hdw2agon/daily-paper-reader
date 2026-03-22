@@ -1,0 +1,985 @@
+Title: Adaptive Auxiliary Prompt Blending for Target-Faithful Diffusion Generation
+
+URL Source: https://arxiv.org/pdf/2603.19158v1
+
+Published Time: Fri, 20 Mar 2026 01:41:38 GMT
+
+Number of Pages: 24
+
+Markdown Content:
+# Adaptive Auxiliary Prompt Blending for Target-Faithful Diffusion Generation 
+
+## Kwanyoung Lee SeungJu Cha Yebin Ahn Hyunwoo Oh Sungho Koh Dong-Jin Kim Hanyang University, South Korea 
+
+{mobled37, sju9020, yeshine, komjii, ksh000906, djdkim }@hanyang.ac.kr 
+
+## Abstract 
+
+Diffusion-based text-to-image (T2I) models have made remarkable progress in generating photorealistic and se-mantically rich images. However, when the target con-cepts lie in low-density regions of the training distribu-tion, these models often produce semantically misaligned or structurally inconsistent results. This limitation arises from the long-tailed nature of text-image datasets, where rare concepts or editing instructions are underrepresented. To address this, we introduce Adaptive Auxiliary Prompt Blending (AAPB) — a unified framework that stabilizes the diffusion process in low-density regions. AAPB lever-ages auxiliary anchor prompts to provide semantic support in rare concept generation and structural support in im-age editing, ensuring faithful guidance toward the target prompt. Unlike prior heuristic prompt alternation meth-ods, AAPB derives a closed-form adaptive coefficient that optimally balances the influence between the auxiliary an-chor and the target prompt at each diffusion step. Grounded in Tweedie’s identity, our formulation provides a principled and training-free framework for adaptive prompt blending, ensuring stable and target-faithful generation. We demon-strate the effectiveness of adaptive interpolation over fixed interpolation through controlled experiments and empiri-cally show consistent improvements on the RareBench and FlowEdit datasets, achieving superior semantic accuracy and structural fidelity compared to prior training-free base-lines. Code is available here. 
+
+## 1. Introduction 
+
+Text-to-image (T2I) diffusion models have achieved re-markable progress in generating photorealistic and seman-tically rich images from natural language descriptions [6, 22, 26]. Recent advances in large-scale training have yielded impressive fidelity across diverse visual domains and styles [2, 5, 39]. However, a persistent challenge re-mains: when the target concepts lie in low-density regions 
+
+of the training distribution, these models often fail to pro-duce faithful or structurally consistent results [28]. “frog” 
+
+> Anchor: “ hairy animal”
+> Target: “ hairy frog”
+> Target Score
+> Anchor Score
+
+Figure 1. When the target concept lies in a low-density region, the generated samples tend to drift toward semantically dominant, high-density concepts [33] in the learned score space, resulting in the suppression of rare or compositional attributes. Our proposed adaptive coefficient γ∗ 
+
+> t
+
+, derived from auxiliary prompt blending between ˜cT and its anchor ˜cA, dynamically corrects this bias and produces target-faithful results. Unlike a fixed coefficient γt, the adaptive γ∗ 
+
+> t
+
+adjusts per timestep to maintain a target-aligned de-noising trajectory. 
+
+This problem stems from the inherently long-tailed na-ture of text–image datasets, where common concepts (e.g., “frog”, “cat”) dominate, while rare or compositional ones (e.g., “hairy frog”, “origami cat”) appear sparsely or not at all [21, 28]. Consequently, the learned score function be-comes under-constrained in these regions, causing genera-tions to drift toward semantically dominant concepts [33]. This issue manifests across two related settings: (1) in rare concept generation [21, 28], models fail to express target-specific attributes, and (2) in image editing [15, 19, 27, 37], models struggle to preserve the original structure under un-common or complex edits. To mitigate these failures, prior works leverage auxiliary prompts as stabilizing anchors—using semantically related frequent prompts for rare concept generation [21] and the original source prompt for image editing [15]. However, the key challenge lies in balancing the influence between the target prompt and its auxiliary anchor throughout the 1
+
+> arXiv:2603.19158v1 [cs.CV] 19 Mar 2026
+
+diffusion process. As shown in Fig. 1, an improper balance leads to two failure modes: over-reliance on the anchor sup-presses the target semantics, whereas insufficient anchoring yields unstable generations that deviate from the intended concept. This motivates the need for a principled formula-tion of how auxiliary and target prompts should be blended across timesteps. To address this, we introduce Adaptive Auxiliary Prompt Blending (AAPB) , a training-free framework that stabilizes diffusion generation by adaptively modulating the contribution of the auxiliary anchor throughout the denois-ing process. Prior methods, such as R2F [21], address this trade-off by using fixed and heuristic prompt schedules that vary across prompts and tasks. In contrast, we derive a 
+
+closed-form adaptive coefficient that dynamically balances the contributions of the target and anchor at each diffusion step, ensuring both semantic precision and structural sta-bility. Building on Tweedie’s identity [25], our goal is to align the posterior mean of the blended denoised estimate toward that of the target prompt. Then, we derive a closed-form adaptive coefficient that minimizes the distance be-tween the posterior mean, ensuring the blended denoising trajectory remains aligned with the target concept rather than drifting toward high-density modes. This framework naturally unifies rare concept generation and image editing, both of which involve target concepts that lie in low-density regions, under a single adaptive optimization principle. We build intuition for our approach through a controlled toy example and a supporting proposition showing that the adaptive coefficient achieves a lower squared 2-Wasserstein distance than fixed interpolation under idealized condi-tions, followed by empirical validation on real-world tasks. We validate AAPB across two distinct tasks—rare con-cept generation on RareBench [21] and image editing on FlowEdit [15] dataset—and observe substantial improve-ments over prior training-free baselines, notably enhancing semantic accuracy for rare concepts and delivering more structure-preserving edits. The main contributions of this work are summarized as follows: 1. We introduce AAPB , a unified and training-free ap-proach for target-faithful diffusion generation in low-density regions. 2. We derive a closed-form adaptive coefficient that re-places heuristic anchor scheduling by optimally balanc-ing target and anchor guidance through Tweedie-based score alignment. 3. We provide theoretical insight via a controlled toy ex-ample and proposition showing that adaptive blending yields a lower squared 2-Wasserstein distance than fixed interpolation, and verify this behavior empirically. 4. We demonstrate strong and consistent gains on RareBench and FlowEdit datasets, improving semantic accuracy and structural fidelity across both rare concept generation and image editing tasks. 
+
+## 2. Related Works 
+
+Rare Concept Generation. While large-scale pre-trained diffusion models [6, 22, 26] demonstrate strong visual qual-ity, they still struggle to synthesize semantically rare or visually underrepresented concepts. SynGen [24] tackles fine-grained misalignment via cross-attention modulation but remains confined to frequent concepts seen during train-ing. LLM-grounded diffusion frameworks [11, 17, 36] im-prove prompt understanding and compositional reasoning, yet still fail to generalize to tail concepts, causing unstable or inconsistent generations. Recent works, SeedSelect [28] and R2F [21], leverage head or frequent samples to improve rare concept synthesis—SeedSelect in the image space by retrieving optimal noise seeds, and R2F in the semantic space via LLM-based frequent prompts. However, both rely on external references or fixed LLM schedules, limiting zero-shot generalization. Specifically, R2F alternates be-tween target and anchor at the prompt level, preventing con-tinuous score-space interpolation and per-timestep adaptiv-ity. In contrast, we operate directly in score space, enabling closed-form adaptive coefficients to balance contributions per timestep. 
+
+Image Editing. Training-free editing methods such as SDEdit [19] perturb an input image with Gaussian noise and denoise it via diffusion priors, but often suffer from structural degradation. Deterministic ODE inversion [27] improves reconstruction by reversing diffusion trajectories, yet demands fine discretization or prompt optimization for controllable edits. iRFDS [37] leverages rectified flow dis-tillation to achieve inversion and editing without stochas-tic noise, but struggles with local attribute consistency. FlowEdit [15] employs an inversion-free ODE that effec-tively maintains structural consistency, although it may lose original content structure under stronger or more complex edit instructions. Building on this line, our AAPB frame-work targets zero-shot semantic editing with strong struc-tural fidelity. We adopt the inversion-free formulation of FlowEdit as our foundation and introduce adaptive auxil-iary prompt blending in the score space to achieve prompt-faithful, structure-preserving generation without retraining or optimization. 
+
+## 3. Backgrounds 
+
+Before delving into details of our work, we briefly review several key concepts related to diffusion-based generative models. We provide an overview of diffusion models with an emphasis on their score-based formulation [31], which serves as the foundation of our framework. We next review two key components that ground our method: Tweedie’s de-noising formula [25] and the classifier-free guidance (CFG) 2mechanism [9], which together form the theoretical basis of adaptive prompt blending. 
+
+3.1. Diffusion Models 
+
+Diffusion-based generative models [10, 30, 31] define a forward noising process that gradually perturbs clean data 
+
+x0 ∼ pdata into Gaussian noise through a Markov chain. At timestep t, the forward process admits the closed form 
+
+qα(xt | x0) = N (xt; √αtx0, (1 − αt)I) , (1) where αt = Qts=1 (1 − βs) with {βs}Ts=1 the variance schedule. As t → T , xT approaches the standard Gaussian prior, xT ∼ N (0 , I ).The generative process corresponds to reversing this Markov chain, which requires access to the score function 
+
+∇xt log qα(xt | x0). In practice, one trains a neural score network sθ (xt, t ) to approximate the true score. Following denoising score matching [31], the training objective is a weighted sum of per-timestep score errors. For simplicity, we write sθ (xt) for sθ (xt, t ).For notational convenience, we define 
+
+Et[·] := Ex0∼pdata , x t∼qt(·| x0)[·], (2) where qt(xt | x0) denotes the forward noising distribution at timestep t. With this shorthand, the objective becomes 
+
+min 
+
+> θT
+
+X
+
+> t=1
+
+wt Et
+
+h
+
+∥sθ (xt) − ∇ xt log qt(xt | x0)∥22
+
+i
+
+, (3) where wt = 1 − αt is a time-dependent weighting fac-tor. With sufficient data and model capacity, the opti-mal solution s∗ 
+
+> θ
+
+recovers the exact perturbed score function 
+
+s∗ 
+
+> θ
+
+(xt) = ∇xt log qα(xt) almost everywhere [33]. 
+
+3.2. Tweedie’s Formula in Diffusion Models 
+
+Tweedie’s formula [25] defines the Bayes-optimal denoiser under Gaussian corruption as 
+
+E[x0 | xt] = xt + (1 − αt)∇xt log p(xt), (4) which represents the posterior mean—the minimum-mean-square-error (MMSE) estimate of the clean sample given its noisy observation. Given the forward process qα(xt|x0) in Eq. (1), the true score can be expressed as 
+
+s∗(xt) = Eqα(x0|xt)[∇xt log qα(xt|x0)] , (5) where the expectation is taken over qα(x0|xt) ∝
+
+qα(xt|x0)p(x0). As Um et al. [33] point out, this expec-tation inherently biases the posterior mean toward majority features of p(x0) because frequent samples dominate the conditional averaging process. Consequently, denoised es-timates E[x0|xt] tend to drift toward high-density regions of the data distribution. 
+
+3.3. Classifier-Free Guidance (CFG) 
+
+Let t denote the diffusion timestep and sθ (xt) the uncondi-tional score estimator. Classifier-Free Guidance (CFG) [9] jointly trains conditional and unconditional score estimators within a shared network, where the unconditional branch is obtained by randomly dropping the condition token during training. During inference, the two scores are linearly com-bined as 
+
+˜sCFG  
+
+> θ
+
+(xt, c ; w) = ws θ (xt, c ) + (1 − w)sθ (xt), (6) where w controls the strength of conditional guidance. In-creasing w biases the generation toward well-learned, high-likelihood regions of the conditional distribution p(x|c),thereby improving semantic alignment [13, 33]. 
+
+## 4. Method 
+
+Our goal is to enhance low-density diffusion generation by introducing an adaptive blending mechanism that blends the target prompt with an auxiliary anchor prompt. We refer to this unified framework as Adaptive Auxiliary Prompt Blending (AAPB) . AAPB generalizes classifier-free guid-ance by adaptively modulating the contribution of an auxil-iary anchor—either a semantically aligned frequent prompt (in rare concept generation) or the unedited source prompt (in image editing)—at each diffusion step. At the core of AAPB is a per-timestep adaptive coefficient γ∗ 
+
+> t
+
+, which gov-erns the balance between target fidelity and anchor stability. We denote the target prompt by ˜cT and the auxiliary anchor prompt by ˜cA. In rare concept generation, (˜ cT , ˜cA) rep-resent the rare target concept and its frequent anchor [21]. In image editing, (˜ cT , ˜cA) correspond to the edited target prompt and the original source prompt, respectively. Recall that standard CFG [9] combines unconditional and conditional scores as in Eq. (6). We generalize this by redefining the conditional score as a linear blending be-tween the target and auxiliary anchor scores: 
+
+sθ (xt, c ) = (1 − γt) sθ (xt, ˜cT ) + γt sθ (xt, ˜cA), (7) where γt is the blending coefficient. Substituting Eq. (7) into Eq. (6) yields our blended guidance formulation: 
+
+˜sθ (xt; w, γ t) = sθ (xt)+ w (1 − γt) sθ (xt, ˜cT ) + γt sθ (xt, ˜cA) − sθ (xt), (8) where sθ (xt) is the unconditional score, sθ (xt, ˜cT ) the target-conditioned score, and sθ (xt, ˜cA) the auxiliary anchor-conditioned score. 
+
+4.1. Posterior Mean Alignment 
+
+Building on the analysis in Sec. 3.2, we leverage the drift of Tweedie’s posterior mean toward high-density regions of 3(d) W2 distance over (a) Train Distribution (b) Fixed (c) Adaptive 
+
+> Wasserstein -2 Distance
+> Gamma
+
+Figure 2. Toy Example of the target concept generation. (a) Training distributions: frequent samples N ((0 , −6) , I ) (orange) and rare-prior samples N ((0 , 3) , 1.5I) (purple) with mean positions marked by crosses; (b) Generated samples using fixed linear interpolation 
+
+plerp (x|˜cA, ˜cT ; γt = 0 .8) ; (c) Generated samples using adaptive interpolation p(x|˜cA, ˜cT ; γ∗ 
+
+> t
+
+); (d) 2-Wasserstein distance between gen-erated distributions and the target N ((0 , 3) , 1.5I) as a function of interpolation parameter γt (blue line). The distance curve shows that while fixed interpolation achieves a minimum distance around γt ≈ 0.8, the adaptive method (red dashed line) consistently outperforms any fixed interpolation choice. 
+
+the data distribution as the key insight for our loss formu-lation. R2F [21] has shown that leveraging a semantically related frequent concept as an auxiliary anchor prompt dur-ing generation reduces the gap between generated and real data distributions. However, because the blended score lin-early combines target and anchor guidance, we conjecture that its corresponding posterior mean also shifts toward the anchor’s majority region while remaining distant from the target data distribution. To explicitly reduce this bias, we define a regularization loss based on the posterior-mean dis-tance between the blended denoiser ˜μθ and the target de-noiser μTθ :
+
+Lreg (γt) = ∥˜μθ (xt; w, γ t) − μTθ (xt)∥22. (9) To make this objective tractable, we apply Tweedie’s for-mula (Eq. (4)) to express both ˜μθ and μTθ in terms of their respective score functions [18]: 
+
+μθ (xt) = 1
+
+√αt
+
+ xt − √1 − αt · ϵθ (xt) , (10) where the predicted noise ϵθ (xt) is directly related to the score via the identity sθ (xt) = −ϵθ (xt)/√1 − αt. More critically, this implies that the squared error between any two score functions is directly proportional to the squared error between their corresponding denoisers: 
+
+∥˜μθ (xt;w, γ t) − μTθ (xt)∥22
+
+= (1 − αt)2
+
+αt
+
+∥˜sθ (xt; w, γ t) − sθ (xt, ˜cT )∥22, (11) where ˜cT is the target prompt. This equivalence is central to our framework: it estab-lishes that optimizing for target-faithful generation in image space is equivalent to minimizing score-space error. Since the pre-factor αt depends only on the noise schedule and does not affect the optimal γt, we can directly optimize: 
+
+L(γt) = ∥˜sθ (xt; w, γ t) − sθ (xt, ˜cT )∥22. (12) While this equivalence is a direct algebraic consequence of Tweedie’s formula, its conceptual importance is central to our work: it provides the formal justification for our score-space objective. 
+
+4.2. Closed-Form Adaptive Coefficient 
+
+We extend CFG by replacing its single conditional score with a dynamic interpolation between the target and aux-iliary anchor scores, leading to the blended score formula-tion in Eq. (8). We then determine the optimal blending weight γ∗ 
+
+> t
+
+by minimizing our score-space alignment loss 
+
+L(γt) from Eq. (12). Solving ∇γt L(γt) = 0 yields the closed-form solution: 
+
+γ∗ 
+
+> t
+
+(xt) = 1 − ww · ⟨sθ (xt, ˜cT ) − sθ (xt), s θ (xt, ˜cA) − sθ (xt, ˜cT )⟩∥sθ (xt, ˜cA) − sθ (xt, ˜cT )∥22
+
+.
+
+(13) This adaptive coefficient dynamically modulates the con-tribution of the auxiliary anchor at each timestep, ensuring the guidance direction remains maximally aligned with the target score while still benefiting from anchor-driven stabi-lization. Derivation is provided in Appendix 8 and the full algorithm is provided in Appendix 10. Theoretically, this step-wise projection can be viewed as an optimal adaptation process under log-concave target distributions. The following proposition formalizes that adaptive projection yields a tighter squared 2-Wasserstein 
+
+W 22 [34] bound than any fixed interpolation. 
+
+Proposition 1. (Extension to the log-concave case.) Con-sider two distributions: qγt , which uses a fixed coefficient 
+
+4Single Object Multi Objects Models Property Shape Texture Action Complex Concat Relation Complex Avg SD1.5 [26] 55.0 38.8 33.8 23.1 36.9 23.1 24.4 36.3 33.9 SDXL [22] 60.0 56.9 71.3 47.5 58.1 39.4 35.0 47.5 52.0 PixArt [5] 49.4 58.8 76.9 56.3 63.1 35.6 30.0 48.1 52.3 SD3.0 [6] 49.4 76.3 53.1 71.9 65.0 55.0 51.2 70.0 61.5 FLUX [2] 58.1 71.9 47.5 52.5 60.0 55.0 48.1 70.3 57.9 SynGen [24] 61.3 59.4 54.4 33.8 50.6 30.6 33.1 29.4 44.1 LMD [17] 23.8 35.6 27.5 23.8 35.6 33.1 34.4 33.1 30.9 RPG [36] 33.8 54.4 66.3 31.9 37.5 21.9 15.6 29.4 36.4 ELLA [11] 31.3 61.6 64.4 43.1 66.3 42.5 50.6 51.9 51.5 R2F (SD3) [21] 89.4 79.4 81.9 80.0 72.5 70.0 58.8 73.8 75.7 Ours (SD3) 96.9 89.4 87.5 85.6 80.0 82.5 65.6 85.0 84.1  
+
+> Table 1. Text-to-image alignment performances in the RareBench with other baselines with GPT-4o based evaluation. Best values are denoted with bold , second-best with underlined.
+
+γt at timestep t, and qproj , which adaptively projects γ∗ 
+
+> t
+
+to minimize local score error. Suppose pT is k-strongly log-concave and satisfies the transport-information inequal-ity [3, 20] :
+
+W 22 (q, p T ) ≤ 1
+
+k2 J(q∥pT ), (14) 
+
+where k > 0 is the strong log-concavity constant, and 
+
+J(q∥p) := Eq
+
+∥∇ log q − ∇ log p∥22
+
+ denotes the Fisher divergence [20]. Then 
+
+∀γt ∈ R, W 22 (qproj , p T ) ≤ 1 
+
+> k2
+
+J(qproj ∥pT )
+
+≤ 1 
+
+> k2
+
+J(qγt ∥pT ). (15) 
+
+Hence, in the idealized log-concave case, pointwise projec-tion leads to a smaller Fisher divergence J and correspond-ingly tighter squared 2-Wasserstein bound in compared to any fixed interpolation strategy. Proof. The complete proof is available in Appendix 7. 
+
+## 5. Experiments 
+
+Implementation Details. For the rare image generation, we build upon SD3.0 and use T = 50 sampling steps with a fixed random seed of 42. The classifier-free guidance scale w = 7 .0 follows the default configuration of the base-line model. Evaluation is conducted on the RareBench [21] benchmark, which assesses rare-concept generation quality across eight categories: five single-attribute cases (property, shape, texture, action, complex) and three multi-attribute cases (concatenation, relation, complex). For image editing, we build upon the FlowEdit frame-work [15], which employs an inversion-free ODE formu-lation for structure-preserving, text-guided editing. Exper-iments are conducted on the FlowEdit benchmark dataset, which comprises over 70 real images from DIV2K [12] and royalty-free online sources, paired with approximately 250 manually curated source–target text prompts. We set the classifier-free guidance scale to w = 20 .5 for all image edit-ing experiments, while keeping all other hyperparameters identical to those used in the original FlowEdit configura-tion. All implementations are based on PyTorch 2.8.0 and executed on a single NVIDIA RTX 6000 Blackwell GPU. 
+
+Baselines. We compare our method against ten representa-tive baselines across both rare concept generation and im-age editing tasks. For rare concept generation, we eval-uate three groups of approaches: (1) pre-trained T2I dif-fusion models, including SD1.5 [26], SDXL [22], PixArt-
+
+α [5], SD3.0 [6], and FLUX [2]; (2) a linguistic binding method, SynGen [24]; and (3) LLM-grounded diffusion models, LMD [17], RPG [36], ELLA [11], and R2F [21]. For image editing experiments, we compare our method with four representative diffusion- and flow-based ap-proaches: SDEdit [19], ODE Inversion [27], iRFDS [37], and FlowEdit [15]. All baselines are reproduced follow-ing the FlowEdit experiments configuration, ensuring con-sistent classifier-free guidance and noise scheduling. 
+
+Experimental Setup. We evaluate our approach on two representative tasks: rare concept generation and image editing. Given a user prompt, we employ auxiliary anchors differently depending on the evaluation setting. For rare concept generation, each prompt is decomposed into a set of concept pairs {ci}mi=1 , where each ci = ( ciT , c iA) comprises a target (rare) concept ciT and its semantically aligned an-chor (frequent) counterpart ciA (predicted by an LLM), with 
+
+m denoting the number of target (rare) concepts. Two com-plete prompts are then reconstructed: 
+
+˜cT = Reconstruct ({ciT }mi=1 ), (16) 
+
+˜cA = Reconstruct ({ciA}mi=1 ), (17) where Reconstruct (·) reinserts the concept set into the origi-nal sentence structure. In this case, the auxiliary anchor cor-responds to the frequent prompt ˜cA. For image editing, we instead define the auxiliary anchor as the source (unedited) prompt, allowing the edited target prompt to be guided toward semantic fidelity without compromising structural consistency with the original image. LLM instructions for 5R2F                 
+
+> Ours
+> ELLA
+> SynGen
+> SD3.0
+> PixArt -𝛼
+> “A wooly alligator” “A banana shaped
+> car”
+> “A tiger striped
+> dalmatian”
+> “A dancing vase” “A moon made of
+> living vines”
+> “A thorny clam and a
+> horned monkfish”
+> “A horned elephant is
+> balancing awrinkled
+> glob e”
+> “A walrus made of
+> glass in a detective
+> trench coat examining
+> ancient hieroglyphs
+> inside a pyramid
+> guarded by robot
+> cobras ”
+> Property Shape Texture Action Complex And Relation Complex
+
+Figure 3. Qualitative comparison with state-of-the-art diffusion models on RareBench. All models are executed with the same random seed. Our method achieves stronger text-to-image alignment without additional training. 
+
+rare concept generation and their effects are provided in the Appendix 18. 
+
+5.1. Main Results of AAPB 
+
+Toy Example. To illustrate the effect of adaptive interpo-lation under controlled conditions, we train a conditional diffusion model on a mixture of two 2D Gaussian distri-butions: an auxiliary anchor N ((0 , −6) , I ) and a target-prior N ((0 , 3) , 1.5I) identical to the true target distribu-tion. This mixture, visualized in Fig. 2(a), serves as the training data, where the anchor samples constitute 80% and the target-prior samples 20% of the dataset. We further in-clude an unconditional branch for 10% of the data follow-ing the standard classifier-free guidance scheme [9]. After training on these distributions, we generate samples using two interpolation strategies: Fig. 2(b) fixed γt interpolation 
+
+plerp (x | ˜cA, ˜cT ; γt = 0 .8) and Fig. 2(c) adaptive interpola-tion p(x | ˜cA, ˜cT ; γ∗ 
+
+> t
+
+), where γ∗ 
+
+> t
+
+is dynamically optimized at each denoising step. The resulting samples are then com-pared to the true target data distribution N ((0 , 3) , 1.5I),with Fig. 2(d) reporting the 2-Wasserstein distance as a function of γt. While fixed interpolation achieves its min-imum around γt ≈ 0.8, the adaptive method consistently attains a lower distance, confirming the benefit of step-wise optimization. This toy example validates that adap-tive blending dynamically balances anchor stability and tar-get fidelity. This property is essential for extending the ap-proach to real image generation and editing tasks. 
+
+RareBench. Tab. 1 compares our method with pre-trained diffusion models (SD1.5, SDXL, PixArt, SD3.0, FLUX), a linguistic binding model (SynGen), and LLM-grounded models (LMD, RPG, ELLA, R2F) on RareBench. We eval-uate text-to-image alignment with GPT-4o, as introduced by [21]. Our approach achieves the highest T2I alignment across all categories, covering both single-object (property, shape, texture, action, complex) and multi-object (concate-nation, relation, complex) prompts. As illustrated in Fig. 3, our model produces visually stable and prompt-aligned im-ages, whereas R2F often exhibits compositional artifacts, and both SynGen and ELLA struggle with rare attribute 6Real image FlowEdit Ours             
+
+> Gray cat ->Lion, Crown ->Top ha t
+> …Wooden sculpture
+> Gray kitten -> Puppy
+> Cat -> Raccon
+> Real image FlowEdit Ours
+
+Figure 4. Qualitative comparison of image editing results using FlowEdit [15] and our method. All edits are performed with the same random seed. Compared to FlowEdit, our approach better preserves source content while faithfully applying the instructed edits.                                        
+
+> CLIP-T ↑CLIP-I ↑LPIPS ↓DINO ↑DreamSim ↓
+> SDEdit 0.2 [19] 0.330 0.885 0.251 0.634 0.213 SDEdit 0.4 0.340 0.854 0.316 0.564 0.273 ODE Inv [27] 0.337 0.813 0.318 0.549 0.326 iRFDS [37] 0.335 0.822 0.376 0.534 0.327 FlowEdit [15] 0.344 0.872 0.181 0.719 0.259 Ours 0.341 0.905 0.155 0.814 0.155
+
+Table 2. Quantitative results on FlowEdit dataset. CLIP-T ↑
+
+evaluates text adherence, while CLIP-I ↑, LPIPS ↓, DINO ↑, and DreamSim ↓ assess structure preservation. Our method achieves superior performance on structure preservation while maintaining strong text alignment. 
+
+binding. Overall, we obtain an average score of 84.1, out-performing R2F by 8.4 points and substantially surpass-ing SD3.0 and PixArt, with large gains in property (+7.5), shape (+10.0), and multi-object relation (+6.8). These re-sults highlight the robustness of our rare-to-frequent align-ment strategy in boosting semantic faithfulness and struc-tural realism. Further results with various diffusion base-lines, user studies, and image quality evaluations are pre-sented in Appendix 11, 17, and 20, respectively. 
+
+FlowEdit. Fig. 4 and Tab. 2 present qualitative and quan-titative comparisons on the FlowEdit dataset. Our method achieves comparable text alignment to FlowEdit while sub-stantially improving structure preservation metrics (CLIP-I [23], LPIPS [38], DINO [4], and DreamSim [7]). Qual-itatively, our model better preserves the spatial and textu-ral integrity of the original image while faithfully executing the instructed edits, avoiding over-modification or seman-tic drift frequently observed in FlowEdit. Quantitatively, we achieve the highest CLIP-I (0.905) and DINO (0.814) scores, alongside the lowest LPIPS (0.155) and DreamSim (0.155), demonstrating robust content retention and edit precision. These results highlight that our approach main-tains fine-grained realism and faithful edit alignment. Ad-ditional qualitative results are provided in Appendix 22. 
+
+5.2. Ablation Studies 
+
+Adaptive vs. Fixed Interpolation Scale. To validate the necessity of our adaptive coefficient, we evaluate fixed γt
+
+values ranging from 0.0 to 1.0 in increments of 0.1 for both rare concept generation and image editing tasks. As shown in Fig. 5, performance follows a distinct convex trend: intermediate coefficients (around γt ≈ 0.3–0.5)achieve peak accuracy, while both extremes sharply de-grade generation quality. This behavior mirrors our toy example (Fig. 2), where the same convex pattern emerges in the idealized 2D Gaussian setting. This trend appears consistently across both toy and real image settings, indi-cating that the anchor–target trade-off generalizes beyond idealized conditions. Consequently, no single fixed coeffi-cient can maintain optimal alignment throughout the diffu-sion process. In contrast, our AAPB method adaptively ad-justs γt throughout denoising, consistently outperforming 7Avg  Scores Figure 5. Comparison between fixed γt, R2F [21], and our adap-tive coefficient on RareBench. The blue line denotes fixed γt, the green line denotes R2F, and the red line represents our adaptive approach, which consistently outperforms the fixed baseline. 
+
+all fixed-coefficient baselines and the R2F model without any manual tuning. For image editing, we further examine the trade-off be-tween structure preservation (CLIP-I) and text alignment (CLIP-T) across various fixed γt values, as illustrated in Fig. 6. When γt is 0.0, edits overly distort the source im-age—improving text consistency but severely compromis-ing structural fidelity. Conversely, large γt values retain structure but weaken text alignment, indicating that fixed in-terpolation cannot balance both fidelity dimensions simulta-neously. Our adaptive strategy occupies a Pareto-favorable region in this trade-off space, preserving competitive image structure while achieving stronger text alignment than all fixed configurations and existing editing baselines. Lastly, we provide a comprehensive analysis of varying classifier-free guidance scales w and the behavior of the adaptive co-efficient γ∗ 
+
+> t
+
+in Appendix 12 and Appendix 13, respectively. 
+
+Anchor Sensitivity Analysis. We assess robustness to an-chor prompt quality using four anchor generation strategies on RareBench (Tab. 3), each representing a different level of semantic guidance: (i) human-annotated anchors from R2F reflecting expert prior knowledge, (ii) arbitrary anchors randomly selected without regard to target concepts, (iii) a minimal “objects” replacement that replaces rare concepts with the generic term object (e.g., “hairy frog” → “hairy object”), and (iv–v) LLaMA3 (LLaMA3-8B-Instruct [8]) and GPT-4o generated anchors that utilize LLM-generated content to follow given instructions (Appendix 18). Across all strategies, AAPB consistently outperforms R2F, show-ing strong robustness even under weak or noisy semantic anchors. Notably, GPT-4o-generated anchors achieve the best performance, surpassing both human annotations and LLaMA3. This validates two key findings: (1) AAPB re-mains effective even with minimal or imperfect semantic anchors, as the adaptive coefficient (Eq. (13)) automatically balances anchor influence based on alignment strength; and CLIP -I → 
+
+> CLIP -T →
+
+Figure 6. Trade-off between structure preservation (CLIP-I) and text alignment (CLIP-T) across different fixed γt values in FlowEdit dataset. Our method consistently resides in a Pareto-favorable region, balancing structural preservation and text align-ment more effectively than fixed baselines.                                                                         
+
+> Models Property Shape Texture Action Complex Avg SD3.0 49.4 76.3 53.1 71.9 65.0 63.1 Human Generated (R2F) 79.8 68.8 76.3 78.5 -75.9 Human Generated (Ours) 93.1 74.4 83.7 79.2 -82.6
+> Arbitrary (R2F) 57.5 80.0 63.1 70.0 69.4 68.0 Arbitrary (Ours) 65.6 83.7 62.5 73.1 70.0 71.0
+> “objects” (R2F) 90.0 78.1 80.6 78.8 80.6 81.6 “objects” (Ours) 89.4 74.4 87.5 80.6 83.7 83.1
+> LLaMA3 (R2F) 81.9 77.1 76.3 78.8 67.7 76.4 LLaMA3 (Ours) 82.5 77.5 80.6 85.6 78.8 81.0
+> GPT-4o (R2F) 89.4 79.4 81.9 80.0 72.5 80.6 GPT-4o (Ours) 96.9 89.4 87.5 85.6 80.0 87.9
+
+Table 3. Experiments with different anchor prompt strategies. Our method consistently outperforms R2F [21] regardless of the an-chor prompts. 
+
+(2) state-of-the-art LLMs can automate anchor selection, surpassing manual annotation while enabling practical and scalable deployment without expert intervention. Addi-tional analysis is provided in Appendix 14. 
+
+## 6. Conclusion 
+
+We proposed Adaptive Auxiliary Prompt Blending (AAPB), a unified and training-free framework that sta-bilizes the diffusion process in low-density regions. By adaptively balancing the influence between target and anchor prompts, AAPB achieves both semantic faithfulness and structural consistency. Grounded in Tweedie’s identity, we derived a closed-form adaptive coefficient that provides a principled mechanism for prompt blending. Experiments on RareBench and FlowEdit confirm that AAPB consis-tently improves rare concept generation and zero-shot editing. These findings highlight adaptive score-space modulation as a promising direction for future controllable diffusion generation and editing systems. 8Acknowledgments 
+
+This was partly supported by the Institute of Information & Communications Technology Planning & Evaluation (IITP) grant funded by the Korean government (MSIT) (No. 1RS-2020-II201373, Artificial Intelligence Graduate School Pro-gram(Hanyang University)) and the Institute of Informa-tion & Communications Technology Planning & Evaluation (IITP) grant funded by the Korea government (MSIT) (No. 
+
+> 2
+
+RS-2025-02219062, Self-training framework for VLM-based defect detection and explanation model in manufac-turing process). 
+
+## References 
+
+[1] David Beniaguev. Synthetic faces high quality (sfhq) dataset, 2022. 7 [2] BlackForestLabs. Flux: A powerful tool for text generation. 
+
+https://blackforestlabs.ai/ , 2024. 1, 5 [3] Stefano Bruno, Ying Zhang, Dong-Young Lim, ¨ Omer Deniz Akyildiz, and Sotirios Sabanis. On diffusion-based gen-erative models and their error bounds: The log-concave case with full convergence estimates. arXiv preprint arXiv:2311.13584 , 2023. 5, 1 [4] Mathilde Caron, Hugo Touvron, Ishan Misra, Herv´ e J´ egou, Julien Mairal, Piotr Bojanowski, and Armand Joulin. Emerg-ing properties in self-supervised vision transformers. In Pro-ceedings of the IEEE/CVF international conference on com-puter vision , pages 9650–9660, 2021. 7 [5] Junsong Chen, Jincheng Yu, Chongjian Ge, Lewei Yao, Enze Xie, Yue Wu, Zhongdao Wang, James Kwok, Ping Luo, Huchuan Lu, et al. Pixart-α: Fast training of diffusion transformer for photorealistic text-to-image synthesis. arXiv preprint arXiv:2310.00426 , 2023. 1, 5 [6] Patrick Esser, Sumith Kulal, Andreas Blattmann, Rahim Entezari, Jonas M¨ uller, Harry Saini, Yam Levi, Dominik Lorenz, Axel Sauer, Frederic Boesel, et al. Scaling recti-fied flow transformers for high-resolution image synthesis. In Forty-first international conference on machine learning ,2024. 1, 2, 5, 3, 7 [7] Stephanie Fu, Netanel Tamir, Shobhita Sundaram, Lucy Chai, Richard Zhang, Tali Dekel, and Phillip Isola. Dream-sim: Learning new dimensions of human visual similar-ity using synthetic data. arXiv preprint arXiv:2306.09344 ,2023. 7 [8] Aaron Grattafiori, Abhimanyu Dubey, Abhinav Jauhri, Ab-hinav Pandey, Abhishek Kadian, Ahmad Al-Dahle, Aiesha Letman, Akhil Mathur, Alan Schelten, Alex Vaughan, et al. The llama 3 herd of models. arXiv preprint arXiv:2407.21783 , 2024. 8 [9] Jonathan Ho and Tim Salimans. Classifier-free diffusion guidance. arXiv preprint arXiv:2207.12598 , 2022. 3, 6, 2 [10] Jonathan Ho, Ajay Jain, and Pieter Abbeel. Denoising dif-fusion probabilistic models. Advances in neural information processing systems , 33:6840–6851, 2020. 3 [11] Xiwei Hu, Rui Wang, Yixiao Fang, Bin Fu, Pei Cheng, and Gang Yu. Ella: Equip diffusion models with llm for enhanced semantic alignment. arXiv preprint arXiv:2403.05135 , 2024. 2, 5, 3 [12] Andrey Ignatov, Radu Timofte, et al. Pirm challenge on per-ceptual image enhancement on smartphones: report. In Eu-ropean Conference on Computer Vision (ECCV) Workshops ,2019. 5 [13] Tero Karras, Miika Aittala, Tuomas Kynk¨ a¨ anniemi, Jaakko Lehtinen, Timo Aila, and Samuli Laine. Guiding a diffu-sion model with a bad version of itself. Advances in Neural Information Processing Systems , 37:52996–53021, 2024. 3 [14] Yuval Kirstain, Adam Polyak, Uriel Singer, Shahbuland Ma-tiana, Joe Penna, and Omer Levy. Pick-a-pic: An open dataset of user preferences for text-to-image generation. Ad-vances in neural information processing systems , 36:36652– 36663, 2023. 7 [15] Vladimir Kulikov, Matan Kleiner, Inbar Huberman-Spiegelglas, and Tomer Michaeli. Flowedit: Inversion-free text-based editing using pre-trained flow models. arXiv preprint arXiv:2412.08629 , 2024. 1, 2, 5, 7 [16] Martha Lewis, Nihal V Nayak, Peilin Yu, Qinan Yu, Jack Merullo, Stephen H Bach, and Ellie Pavlick. Does clip bind concepts? probing compositionality in large image models. 
+
+arXiv preprint arXiv:2212.10537 , 2022. 8 [17] Long Lian, Boyi Li, Adam Yala, and Trevor Darrell. Llm-grounded diffusion: Enhancing prompt understanding of text-to-image diffusion models with large language models. 
+
+arXiv preprint arXiv:2305.13655 , 2023. 2, 5, 3 [18] Calvin Luo. Understanding diffusion models: A unified per-spective. arXiv preprint arXiv:2208.11970 , 2022. 4 [19] Chenlin Meng, Yutong He, Yang Song, Jiaming Song, Jia-jun Wu, Jun-Yan Zhu, and Stefano Ermon. Sdedit: Guided image synthesis and editing with stochastic differential equa-tions. arXiv preprint arXiv:2108.01073 , 2021. 1, 2, 5, 7 [20] F. Otto and C. Villani. Generalization of an inequality by talagrand and links with the logarithmic sobolev inequality. 
+
+Journal of Functional Analysis , 173(2):361–400, 2000. 5, 1 [21] Dongmin Park, Sebin Kim, Taehong Moon, Minkyu Kim, Kangwook Lee, and Jaewoong Cho. Rare-to-frequent: Un-locking compositional generation power of diffusion mod-els on rare concepts with llm guidance. arXiv preprint arXiv:2410.22376 , 2024. 1, 2, 3, 4, 5, 6, 8, 7 [22] Dustin Podell, Zion English, Kyle Lacey, Andreas Blattmann, Tim Dockhorn, Jonas M¨ uller, Joe Penna, and Robin Rombach. Sdxl: Improving latent diffusion mod-els for high-resolution image synthesis. arXiv preprint arXiv:2307.01952 , 2023. 1, 2, 5, 3 [23] Alec Radford, Jong Wook Kim, Chris Hallacy, Aditya Ramesh, Gabriel Goh, Sandhini Agarwal, Girish Sastry, Amanda Askell, Pamela Mishkin, Jack Clark, et al. Learning transferable visual models from natural language supervi-sion. In International conference on machine learning , pages 8748–8763. PmLR, 2021. 7 [24] Royi Rassin, Eran Hirsch, Daniel Glickman, Shauli Rav-fogel, Yoav Goldberg, and Gal Chechik. Linguistic bind-ing in diffusion models: Enhancing attribute correspondence through attention map alignment. Advances in Neural Infor-mation Processing Systems , 36:3536–3559, 2023. 2, 5 
+
+9[25] Herbert E. Robbins. An Empirical Bayes Approach to Statis-tics , pages 388–394. Springer New York, New York, NY, 1992. 2, 3, 1 [26] Robin Rombach, Andreas Blattmann, Dominik Lorenz, Patrick Esser, and Bj¨ orn Ommer. High-resolution image synthesis with latent diffusion models. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pages 10684–10695, 2022. 1, 2, 5 [27] Litu Rout, Yujia Chen, Nataniel Ruiz, Constantine Carama-nis, Sanjay Shakkottai, and Wen-Sheng Chu. Semantic im-age inversion and editing using rectified stochastic differen-tial equations. arXiv preprint arXiv:2410.10792 , 2024. 1, 2, 5, 7 [28] Dvir Samuel, Rami Ben-Ari, Simon Raviv, Nir Darshan, and Gal Chechik. Generating images of rare concepts using pre-trained diffusion models. In Proceedings of the AAAI Con-ference on Artificial Intelligence , pages 4695–4703, 2024. 1, 2[29] Christoph Schuhmann, Romain Beaumont, Richard Vencu, Cade Gordon, Ross Wightman, Mehdi Cherti, Theo Coombes, Aarush Katta, Clayton Mullis, Mitchell Worts-man, et al. Laion-5b: An open large-scale dataset for training next generation image-text models. Advances in neural in-formation processing systems , 35:25278–25294, 2022. 7 [30] Yang Song and Stefano Ermon. Generative modeling by esti-mating gradients of the data distribution. Advances in neural information processing systems , 32, 2019. 3 [31] Yang Song, Jascha Sohl-Dickstein, Diederik P Kingma, Ab-hishek Kumar, Stefano Ermon, and Ben Poole. Score-based generative modeling through stochastic differential equa-tions. arXiv preprint arXiv:2011.13456 , 2020. 2, 3 [32] Weiwei Sun, Lingyong Yan, Xinyu Ma, Shuaiqiang Wang, Pengjie Ren, Zhumin Chen, Dawei Yin, and Zhaochun Ren. Is chatgpt good at search? investigating large language mod-els as re-ranking agents. arXiv preprint arXiv:2304.09542 ,2023. 6 [33] Soobin Um, Suhyeon Lee, and Jong Chul Ye. Don’t play favorites: Minority guidance for diffusion models. arXiv preprint arXiv:2301.12334 , 2023. 1, 3, 2 [34] C´ edric Villani. Optimal transport: old and new , chapter vol-ume 338. Springer, 2009. 4 [35] Jiazheng Xu, Xiao Liu, Yuchen Wu, Yuxuan Tong, Qinkai Li, Ming Ding, Jie Tang, and Yuxiao Dong. Imagere-ward: Learning and evaluating human preferences for text-to-image generation. Advances in Neural Information Pro-cessing Systems , 36:15903–15935, 2023. 7 [36] Ling Yang, Zhaochen Yu, Chenlin Meng, Minkai Xu, Ste-fano Ermon, and Bin Cui. Mastering text-to-image diffu-sion: Recaptioning, planning, and generating with multi-modal llms. In Forty-first International Conference on Ma-chine Learning , 2024. 2, 5, 3 [37] Xiaofeng Yang, Cheng Chen, Xulei Yang, Fayao Liu, and Guosheng Lin. Text-to-image rectified flow as plug-and-play priors. arXiv preprint arXiv:2406.03293 , 2024. 1, 2, 5, 7 [38] Richard Zhang, Phillip Isola, Alexei A Efros, Eli Shecht-man, and Oliver Wang. The unreasonable effectiveness of deep features as a perceptual metric. In Proceedings of the IEEE conference on computer vision and pattern recogni-tion , pages 586–595, 2018. 7 [39] Xinchen Zhang, Ling Yang, Guohao Li, Yaqi Cai, Jiake Xie, Yong Tang, Yujiu Yang, Mengdi Wang, and Bin Cui. Iter-comp: Iterative composition-aware feedback learning from model gallery for text-to-image generation. arXiv preprint arXiv:2410.07171 , 2024. 1, 3 
+
+10 Adaptive Auxiliary Prompt Blending for Target-Faithful Diffusion Generation 
+
+# Supplementary Material 
+
+## 7. Theoretical Extension: Log-Concave Set-ting. 
+
+To provide theoretical insight into why our adaptive co-efficient outperforms fixed interpolation, we analyze the idealized case where the target distribution satisfies log-concavity and a transport-information inequality [20, 25]. Under these conditions, we formally establish that point-wise adaptive projection yields a provably tighter upper bound on the squared Wasserstein-2 distance compared to any fixed coefficient strategy. 
+
+Proposition 1 (Extension to the log-concave case) . Con-sider two distributions: qγt , which uses a fixed coefficient 
+
+γt at timestep t, and qproj , which adaptively projects γ∗ 
+
+> t
+
+to minimize local score error. Suppose pT is k-strongly log-concave and satisfies the transport-information inequal-ity [3, 20]. 
+
+W 22 (q, p T ) ≤ 1
+
+k2 J(q∥pT ), (18) 
+
+where k > 0 is the strong log-concavity constant, and 
+
+J(q∥p) := Eq
+
+∥∇ log q − ∇ log p∥22
+
+ denotes the Fisher divergence [20]. Then 
+
+∀γt ∈ R, W 22 (qproj , p T ) ≤ 1 
+
+> k2
+
+J(qproj ∥pT )
+
+≤ 1 
+
+> k2
+
+J(qγt ∥pT ). (19) 
+
+Hence, in the idealized log-concave case, pointwise projec-tion leads to a smaller Fisher divergence J and correspond-ingly tighter squared 2-Wasserstein bound compared to any fixed interpolation strategy. Remark. While this result relies on the assumption of global log-concavity—which natural image distributions typically do not satisfy—it provides a theoretical motivation for min-imizing the local score error pointwise. 
+
+Proof. The Fisher divergence between a distribution q (at time t) and the target pT is defined as the expected squared error between their score functions: 
+
+J(q∥pT ) = Ex∼q
+
+h
+
+∥∇ x log q(x) − ∇ x log pT (x)∥22
+
+i
+
+.
+
+(20) In our framework, we aim to approximate the target score 
+
+∇ log pT using the blended model ˜sθ . For clarity, let 
+
+sT (xt) := ∇xt log pT (xt) denote the true target score (ap-proximated by the learned rare score in practice). Consider the comparison at a specific timestep t.The score for our projection model is sproj (xt) =˜sθ (xt; w, γ ∗ 
+
+> t
+
+(xt)) . The score for the baseline model with a scalar coefficient is given by sγt (xt) = ˜ sθ (xt; w, γ t), where 
+
+γt ∈ R denotes the coefficient applied at timestep t and is fixed across all timesteps. By definition, our adaptive coefficient γ∗ 
+
+> t
+
+(xt) is the so-lution that minimizes the squared error to the target score 
+
+sT (xt) at each spatial point xt:
+
+γ∗ 
+
+> t
+
+(xt) = arg min 
+
+> γt∈R
+
+∥˜sθ (xt; w, γ t) − sT (xt)∥22 . (21) Since γ∗ 
+
+> t
+
+(xt) is the minimizer over R for every individual 
+
+xt, the error is guaranteed to be lower than or equal to the error yielded by any scalar γt:
+
+∀γt ∈ R, ∥sproj (xt) − sT (xt)∥22 ≤ ∥ sγt (xt) − sT (xt)∥22 .
+
+(22) Since this pointwise inequality holds for all xt in the support of qt, taking the expectation over xt ∼ qt preserves the inequality: 
+
+Ext∼qt
+
+h
+
+∥sproj (xt) − sT (xt)∥22
+
+i
+
+≤ Ext∼qt
+
+h
+
+∥sγt (xt) − sT (xt)∥22
+
+i
+
+.
+
+(23) This implies that our method achieves a minimized instan-taneous Fisher divergence compared to any scalar choice 
+
+γt:
+
+J(qproj ∥pT ) ≤ J(qγt ∥pT ). (24) Via the transport-information inequality ( W 22 ≤ 1 
+
+> k2
+
+J), this lower Fisher divergence implies a tighter upper bound on the squared Wasserstein-2 distance to the target distribution at each timestep. 
+
+## 8. Derivation of Closed-Form Adaptive Coeffi-cient 
+
+We provide a detailed derivation of the closed-form solution for our adaptive coefficient γ∗ 
+
+> t
+
+presented in Eq. (13) of the main paper. 
+
+Proposition 2 (Optimal Adaptive Coefficient) . For agiven (xt, t ) with w > 0, assume that ∥sθ (xt, ˜cA) −
+
+sθ (xt, ˜cT )∥22 > 0. Then the optimal adaptive coefficient 
+
+γ∗ 
+
+> t
+
+that minimizes the score-space alignment loss L(γt) = 
+
+∥˜sθ (xt; w, γ t) − sθ (xt, ˜cT )∥22 has the closed-form solution: 
+
+γ∗ 
+
+> t
+
+(xt) = 1 − ww · ⟨sθ (xt, ˜cT ) − sθ (xt), s θ (xt, ˜cA) − sθ (xt, ˜cT )⟩∥sθ (xt, ˜cA) − sθ (xt, ˜cT )∥22
+
+.
+
+(25) 1Proof. Recall our blended score function from Eq. (8): 
+
+˜sθ (xt;w, γ t) = sθ (xt)+ w ((1 − γt)sθ (xt, ˜cT ) + γtsθ (xt, ˜cA) − sθ (xt)) ,
+
+(26) where sθ (xt) is the unconditional score, sθ (xt, ˜cT ) is the target-conditioned score, and sθ (xt, ˜cA) is the auxiliary anchor-conditioned score. Our objective is to minimize the score-space alignment loss from Eq. (12): 
+
+L(γt) = ∥˜sθ (xt; w, γ t) − sθ (xt, ˜cT )∥22. (27) First, we simplify the blended score by distributing w:
+
+˜sθ (xt; w, γ t) = sθ (xt) + w(1 − γt)sθ (xt, ˜cT )+ wγ tsθ (xt, ˜cA) − ws θ (xt)= (1 −w)sθ (xt)+ w(1 −γt)sθ (xt, ˜cT )+ wγ tsθ (xt, ˜cA).
+
+(28) Substituting into the loss: 
+
+L(γt) = ∥(1 − w)sθ (xt) + w(1 − γt)sθ (xt, ˜cT )+ wγ tsθ (xt, ˜cA) − sθ (xt, ˜cT )∥22
+
+= ∥(1 − w)sθ (xt) − γtws θ (xt, ˜cT ) + wγ tsθ (xt, ˜cA)+ ws θ (xt, ˜cT ) − sθ (xt, ˜cT )∥22
+
+= ∥(1 − w)sθ (xt) + ( w − 1) sθ (xt, ˜cT )+ wγ t (sθ (xt, ˜cA) − sθ (xt, ˜cT )) ∥22. (29) For notational convenience, define: 
+
+r := (1 − w)( sθ (xt) − sθ (xt, ˜cT )) , (30) 
+
+d := sθ (xt, ˜cA) − sθ (xt, ˜cT ). (31) Then the loss becomes: 
+
+L(γt) = ∥r + wγ td∥22. (32) 
+
+L(γt) = ⟨r + wγ td, r + wγ td⟩
+
+= ∥r∥22 + 2 wγ t⟨r, d⟩ + w2γ2 
+
+> t
+
+∥d∥22. (33) This is a quadratic function in γt. Taking the derivative with respect to γt:
+
+∂L
+
+∂γ t
+
+= 2 w⟨r, d⟩ + 2 w2γt∥d∥22. (34) Setting the derivative to zero: 
+
+2w⟨r, d⟩ + 2 w2γ∗ 
+
+> t
+
+∥d∥22 = 0 
+
+γ∗ 
+
+> t
+
+= − ⟨r, d⟩
+
+w∥d∥22
+
+. (35) Recall that r = (1 − w)( sθ (xt) − sθ (xt, ˜cT )) and d =
+
+sθ (xt, ˜cA) − sθ (xt, ˜cT ):
+
+γ∗ 
+
+> t
+
+(xt)= ⟨(w − 1)( sθ (xt) − sθ (xt, ˜cT )) , s θ (xt, ˜cA) − sθ (xt, ˜cT )⟩
+
+w∥sθ (xt, ˜cA) − sθ (xt, ˜cT )∥22
+
+= (w − 1) ⟨sθ (xt) − sθ (xt, ˜cT ), s θ (xt, ˜cA) − sθ (xt, ˜cT )⟩
+
+w∥sθ (xt, ˜cA) − sθ (xt, ˜cT )∥22
+
+= w − 1
+
+w · ⟨sθ (xt) − sθ (xt, ˜cT ), s θ (xt, ˜cA) − sθ (xt, ˜cT )⟩∥sθ (xt, ˜cA) − sθ (xt, ˜cT )∥22
+
+= 1 − ww · ⟨sθ (xt, ˜cT ) − sθ (xt), s θ (xt, ˜cA) − sθ (xt, ˜cT )⟩∥sθ (xt, ˜cA) − sθ (xt, ˜cT )∥22
+
+.
+
+(36) which matches Eq. (13) in the main paper. To confirm this is a minimum, we check the second derivative: 
+
+∂2L
+
+∂γ 2
+
+> t
+
+= 2 w2∥d∥22 = 2 w2∥sθ (xt, ˜cA) − sθ (xt, ˜cT )∥22 > 0,
+
+(37) confirming that γ∗ 
+
+> t
+
+is indeed a global minimum of the quadratic loss function. 
+
+## 9. Toy Example. 
+
+We empirically validate our method on a toy problem, gen-erating samples from a 2D Gaussian target distribution using interpolation with an auxiliary anchor distribution. This simplified setup highlights the effectiveness of adap-tive blending compared to fixed blending strategies. The target data distribution pdata (x | ˜cT ) is defined as 
+
+N ((0 , 3) , 1.5I). We train a conditional diffusion model on a mixture of two distributions: an auxiliary anchor distribu-tion N ((0 , −6) , I ), positioned distant from the target, and a target-prior distribution N ((0 , 3) , 1.5I) that is identical to the target distribution. This setup represents an ideal-ized scenario in which the target prior provides the same information as the target distribution itself—corresponding to accurate score estimation under sufficient model capac-ity [31, 33]. The auxiliary anchor samples constitute 80% 
+
+of the training data, while the target-prior samples account for the remaining 20% . Additionally, following the standard classifier-free guidance (CFG) training scheme [9], we in-clude an unconditional branch for 10% of the training data, where the conditioning input is randomly dropped. Fig. 2 shows generated samples under two different γt
+
+strategies. (a) visualizes the training distributions, with aux-iliary anchor samples (orange) clearly separated from the target-prior samples (purple) that overlap with the target re-gion. (b) shows samples generated using fixed γt interpola-tion plerp (x | ˜cA, ˜cT ; γt = 0 .8) , which linearly combines 2Single Object Multi Objects Models Property Shape Texture Action Complex Concat Relation Complex Avg 
+
+> SDXL
+
+SDXL [22] 60.0 56.9 71.3 47.5 58.1 39.4 35.0 47.5 52.0 LMD [17] 23.8 35.6 27.5 23.8 35.6 33.1 34.4 33.1 30.9 RPG [36] 33.8 54.4 66.3 31.9 37.5 21.9 15.6 29.4 36.4 ELLA [11] 31.3 61.6 64.4 43.1 66.3 42.5 50.6 51.9 51.5 R2F (SDXL) [21] 71.3 77.5 73.8 54.4 70.6 50.6 36.0 52.8 60.9 Ours (SDXL) 85.6 83.1 86.9 70.0 80.0 64.4 55.0 63.8 73.6 
+
+> IterComp
+
+IterComp [39] 63.8 66.9 61.3 65.6 61.9 41.3 29.4 53.1 55.4 R2F (IterComp) [21] 78.1 77.5 79.4 66.9 63.9 41.5 36.6 53.4 62.2 Ours (IterComp) 90.6 77.5 88.1 86.3 84.4 75.0 66.3 65.6 79.2 
+
+> SD3.0
+
+SD3.0 [6] 49.4 76.3 53.1 71.9 65.0 55.0 51.2 70.0 61.5 R2F (SD3) [21] 89.4 79.4 81.9 80.0 72.5 70.0 58.8 73.8 75.7 Ours (SD3) 96.9 89.4 87.5 85.6 80.0 82.5 65.6 85.0 84.1 
+
+Table 4. Text-to-image alignment on RareBench with SDXL, SD3.0, and IterComp, comparing our method integrated into each model. Results demonstrate consistent robustness across diverse pre-trained diffusion backbones. 
+
+the anchor and target-prior score functions. (c) demon-strates our adaptive interpolation p(x | ˜cA, ˜cT ; γ∗ 
+
+> t
+
+), where 
+
+γ∗ 
+
+> t
+
+is dynamically optimized at each denoising step. (d) re-ports 2-Wasserstein distance between the generated distri-butions and the target N ((0 , 3) , 1.5I) as a function of γt.The blue curve shows that fixed interpolation achieves its minimum distance around γt ≈ 0.8. In contrast, the adap-tive method (red dashed line) consistently achieves a lower distance, confirming the benefit of step-wise optimization. The key insight from this toy example is that the opti-mal interpolation parameter γ∗ 
+
+> t
+
+varies across the denoising process. Fixed interpolation requires manual tuning and re-mains suboptimal, while our adaptive approach automati-cally balances target fidelity and anchor stability at each step, leading to a more accurate approximation of the tar-get distribution. 
+
+## 10. Full Algorithm 
+
+Let sθ (xt, t, ·) denote a pretrained score estimator (either unconditional or conditional) evaluated at state xt and dif-fusion/flow timestep t. We write sθ (xt, t ) ≡ sθ (xt, t, ∅) for the unconditional score, and sθ (xt, t, ˜c) for the score condi-tioned by prompt ˜c. Classifier-Free Guidance (CFG) com-bines unconditional and conditional scores linearly with a guidance scale w. Following the main text, the blended con-ditional score is defined as 
+
+sθ (xt, t, ˜c) = (1 − γt) sθ (xt, t, ˜cT ) + γt sθ (xt, t, ˜cA),
+
+(38) and the final guided score is given by 
+
+˜sθ (xt; t, w, γ t) = sθ (xt, t ) + w (sθ (xt, t, ˜c) − sθ (xt, t )) .
+
+(39) Using Tweedie’s identity under the Gaussian corruption model, the image-domain denoising loss is equivalent to a score-space ℓ2 loss, which yields a closed-form per-timestep optimum γt (see main text, Eq. (9) – (13)). 
+
+Algorithm 1 Adaptive Auxiliary Prompt Blending (AAPB) Generation 
+
+Require: Target prompt ˜cT , Anchor prompt ˜cA, pre-trained score model sθ , guidance scale w, timesteps T
+
+Ensure: Generated image x0 
+
+> 1:
+
+xT ∼ N (0 , I) 
+
+> 2:
+
+for t = T down to 1 do  
+
+> 3:
+
+su ← sθ (xt, t ) ▷ Unconditional score  
+
+> 4:
+
+sT ← sθ (xt, t, ˜cT ) ▷ Target-conditioned score  
+
+> 5:
+
+sA ← sθ (xt, t, ˜cA) ▷ Anchor-conditioned score  
+
+> 6:
+
+γ∗ 
+
+> t
+
+← 1−ww · ⟨sT −su,s A−sT ⟩∥sA−sT ∥22
+
+▷ Eq. (13)  
+
+> 7:
+
+˜sθ ← su + w ((1 − γ∗ 
+
+> t
+
+)sT + γ∗ 
+
+> t
+
+sA − su) 
+
+> 8:
+
+xt−1 ← SamplerStep (xt, ˜sθ , t ) 
+
+> 9:
+
+end for  
+
+> 10:
+
+return x0
+
+## 11. Robustness across Various Diffusion Mod-els. 
+
+Tab. 4 shows the robustness across three different pre-trained diffusion models on RareBench, including SDXL, IterComp [39], and SD3.0. Our method yields substan-tial performance improvements compared to R2F across all models, achieving consistent average gains of +12 .7,
+
++17 .0, and +8 .4 on SDXL, IterComp, and SD3.0, respec-tively. These results demonstrate that our method gener-alizes effectively across different architectures and training settings, confirming its robustness and broad applicability. As illustrated in Fig. 7, our AAPB framework consis-tently preserves the semantic meaning of the input prompt across diverse pre-trained diffusion backbones, including SDXL, IterComp, and SD3.0. While baseline models of-3Ours (IterComp)  
+
+> R2F (IterComp) IterComp
+> “A thorny dolphin” “A horned pelican”
+> Ours (SD3.0)
+> R2F (SD3.0) SD3.0
+> Ours (SDXL)
+> “A hairy octopus”
+> R2F (SDXL) SDX L
+
+Figure 7. Qualitative comparison on different pre-trained diffusion baselines, SDXL, SD3.0, and IterComp. Comparing our method integrated with these pre-trained models. CLIP -I → 
+
+> CLIP -T →
+
+Figure 8. Quantitative comparison on varying classifier-free guid-ance scale w on the FlowEdit dataset. 
+
+ten exhibit incomplete attribute binding or geometric distor-tion in rare or complex prompts, our method accurately con-veys the intended semantics while maintaining visual coher-ence and structural realism. This demonstrates that adaptive prompt blending effectively generalizes across architectural variations, allowing the model to maintain semantic faith-fulness even under different backbone configurations. 
+
+## 12. Varying Classifier-Free Guidance Scale 
+
+For rare concept generation, Fig. 15 shows qualitative re-sults for varying classifier-free guidance scales w. When w
+
+is too small (e.g., w = 1 .0 or 2.0), the generated images lack visual fidelity and semantic alignment with the input prompt. Conversely, overly large scales (e.g., w = 9 .0 or 
+
+10 .0) lead to noticeable artifacts and structural distortions. We adopt w = 7 .0 as our default setting, which is also the standard guidance scale used in SD3. Our adaptive coef-ficient operates on top of this baseline to further refine the balance between fidelity and semantic consistency. timestep 
+
+Figure 9. Evolution of the adaptive coefficient γ∗ 
+
+> t
+
+across diffusion timesteps in image editing (FlowEdit). The coefficient exhibits clear saturation in later steps as structural guidance from the source image becomes dominant. timestep 
+
+Figure 10. Evolution of the adaptive coefficient γ∗ 
+
+> t
+
+across dif-fusion timesteps in rare concept generation (RareBench). Unlike image editing, γ∗ 
+
+> t
+
+maintains stable values throughout the denois-ing process, reflecting continuous need for anchor stabilization. 
+
+For image editing, Fig. 8 presents a quantitative com-parison across different classifier-free guidance scales w in terms of text–image alignment (CLIP-T) and image–image fidelity (CLIP-I). When w is near 13.5, the model exhibits strong structural preservation of the original image but weak semantic alignment with the target prompt. Conversely, when w becomes near 23.5 semantic consistency improves marginally, yet structural distortions emerge and the over-all gain over SDEdit 0.2 remains limited. We therefore set 
+
+w = 20 .5 as a balanced configuration that jointly maxi-mizes both CLIP-T and CLIP-I scores, achieving an optimal trade-off between fidelity and semantic accuracy. 
+
+## 13. Adaptive Coefficient Progress. 
+
+Fig. 9 presents the mean adaptive coefficient γ∗ 
+
+> t
+
+over all samples in image editing, showing a shift from stronger an-chor (source prompt) reliance in early noisy steps to more target-conditioned guidance in later stages. Following the FlowEdit configuration, we report γ∗ 
+
+> t
+
+only after step 17, as the early steps do not reflect meaningful guidance be-havior. Geometrically, γ∗ 
+
+> t
+
+can be viewed as the projection 4of the target score residual (sθ (xt, ˜cT ) − sθ (xt)) onto the anchor–target direction. As the diffusion progresses, their dot product approaches zero, implying near-orthogonality between target and anchor gradients. This indicates that the target score moves toward a self-consistent manifold region requiring less auxiliary correction. Hence, γ∗ 
+
+> t
+
+naturally de-cays as the model adaptively balances anchor and target in-fluences, producing stable and controllable generations. In contrast, Fig. 10 shows that γ∗ 
+
+> t
+
+in rare concept gener-ation maintains relatively stable values throughout the de-noising process (mean ≈ 0.5), without the saturation ob-served in image editing. This difference stems from the fundamental distinction in task structure: image editing benefits from strong structural guidance provided by the source image, which progressively dominates the genera-tion process and reduces the need for anchor support in later steps. However, rare concept generation operates without such structural constraints—the model must synthesize im-ages purely from textual descriptions. Consequently, the anchor continues to provide essential semantic stabilization throughout the entire denoising trajectory, preventing drift toward high-density regions while maintaining consistent guidance toward the target concept. 
+
+## 14. Additional Analysis for Anchor Sensitivity Analysis with Anchor Quality Metric 
+
+Building upon Sec. 4.2, we now analyze what constitutes an effective anchor. Although Eq. (13) guarantees optimal blending for any given anchor, different anchor construc-tion strategies (Tab. 3) exhibit surprisingly competitive per-formance. This observation suggests that the practical ef-fectiveness of an anchor is not determined solely by its di-rectional alignment with the target–unconditional axis, but also by its overall deviation within the score space. Substituting γ∗ 
+
+> t
+
+into Eq. (12) yields the minimum attain-able loss at timestep t:
+
+L∗ 
+
+> t
+
+(sA) = ∥r∥2 − ⟨r, d⟩2
+
+∥d∥2 , (40) where r = (1 − w)( su − sT ) is the fixed residual and d =
+
+sA − sT is the anchor displacement. To understand how anchor choice affects this loss, we decompose the displacement into components parallel and orthogonal to r:
+
+d = d∥ + d⊥, d∥ = ⟨sA − sT , s u − sT ⟩∥su − sT ∥2 (su − sT ).
+
+(41) Since ⟨r, d⊥⟩ = 0 , the numerator of Eq. (40) depends only on d∥, while the denominator grows with both components: 
+
+L∗ 
+
+> t
+
+(sA) = ∥r∥2 − ⟨r, d∥⟩2
+
+∥d∥∥2 + ∥d⊥∥2 . (42)                           
+
+> Strategy ∥d∥∥∥d⊥∥Total ↓T2I ↑
+> Arbitrary 42.2 47.9 90.1 71.0 Objects 32.5 26.6 59.1 83.1 Human Generated 30.2 28.4 58.6 82.6 GPT-4o 27.3 28.0 55.3 87.9
+> LLaMA3 26.8 27.0 53.8 81.0 Table 5. Anchor quality comparison across different anchor gen-eration strategies. Lower displacement indicates anchors closer to the target with fewer artifacts. T2I scores are evaluated using GPT-4o. All correlations are negative.
+
+This reveals a key trade-off: while d∥ provides the guidance signal, excessive ∥d⊥∥ dilutes its effectiveness by inflating the denominator. Motivated by this insight, we propose a simple anchor quality metric: Disp (sA) = ∥d∥∥ + ∥d⊥∥. (43) As shown in Tab. 5, this displacement metric exhibits a consistent trend with T2I alignment performance. Strate-gies with moderate displacement (e.g., GPT-4o: 55.3, Hu-man Generated: 58.6, Objects: 59.1) achieve strong T2I scores (82.6–87.9), while anchors with excessive displace-ment (e.g., Arbitrary: 90.1) show significantly degraded performance (71.0), likely due to orthogonal drift that in-troduces spurious features from distant regions of the score space. Crucially, however, geometry is not the sole determinant. While LLaMA3 achieves the lowest displacement (53.8), it trails GPT-4o (55.3) in T2I accuracy (81.0 vs. 87.9). This suggests that the alignment between anchor and target se-mantics—beyond geometric displacement alone—also con-tributes to performance. GPT-4o’s superior language un-derstanding may produce anchors that better preserve task-relevant categorical structure (e.g., substituting “hairy frog” with “hairy animal” rather than generic “object”), enabling more effective guidance even at comparable displacement levels. However, this does not require the anchor itself to be semantically detailed or rare; rather, the anchor should maintain appropriate semantic alignment with the target’s core attributes. In summary, effective anchors should satisfy two com-plementary criteria: (1) maintain a well-calibrated geomet-ric displacement from the target score—close enough to avoid drift into spurious modes, yet sufficiently separated to provide stabilization in low-density regions; and (2) pre-serve basic semantic alignment with task-relevant attributes, even when substituting rare concepts with frequent ones. By ensuring anchors meet these criteria, AAPB’s adaptive coefficient γ∗ 
+
+> t
+
+can reliably modulate their influence across timesteps, enabling even simple, frequent anchors to per-form competitively without requiring rich semantic detail. 5Models RareBench Multi Concat Relation Complex SD3.0 55.0 51.2 70.0 R2F+ 74.4 63.7 64.8 Ours (R2F+) 83.8 83.6 80.3 
+
+Table 6. Quantitative comparison on RareBench-Multi between R2F+ and our method built upon the R2F+ baseline.                 
+
+> Models Rare Concept Image Editing SD3 R2F Ours FlowEdit Ours Peak Memory (GB) 31.52 31.76 32.22 19.97 19.97 GPU Time (sec) 27.14 26.12 37.94 7.41 7.54
+
+Table 7. GPU time and memory required to generate an image. “A thorny shark and a mustachioed dolphin” “A hairy shark and two spotted clams”     
+
+> R2F Ours R2F Ours
+> Prompt Reconstruction Prompt Reconstruction
+
+Figure 11. Comparison of prompt reconstruction between R2F and our method. R2F often collapses multiple rare concepts into a single entity, leading to entangled generations. In contrast, our method explicitly preserves each rare concept by directly pairing it with its frequent counterpart, resulting in disentangled and faithful generations. 
+
+## 15. Results on R2F+ Baseline 
+
+The R2F+ [21] framework extends R2F to region-controlled generation, where LLMs extract per-object rare–frequent concept pairs with bounding boxes and visual detail lev-els. Our Adaptive Auxiliary Prompt Blending (AAPB) in-tegrates seamlessly into R2F+’s diffusion pipeline without retraining, operating directly on per-timestep denoising tra-jectories. During alternating region guidance, the adaptive coefficient γt dynamically modulates frequent-anchor influ-ence to preserve both semantic fidelity and local structure across object-wise generations. Tab. 6 presents a quantitative comparison between R2F+ and our method built upon the same R2F+ baseline. Across all RareBench-Multi categories, our framework consistently outperforms the original R2F+ in text–image alignment ac-curacy, achieving notable improvements of +9 .4 on the 
+
+Concat , +19 .9 on the Relation , and +16 .5 on the Com-plex . These results demonstrate that our adaptive auxiliary prompt blending mechanism effectively complements the alternating rare–frequent concept scheduling in R2F+. 
+
+## 16. GPU Time and Memory Analysis. 
+
+Tab. 7 reports computational costs measured on an NVIDIA RTX 6000 Blackwell GPU. For rare concept generation, the peak memory usage remains comparable (33.22GB vs. 31.52GB), indicating that AAPB introduces minimal mem-ory overhead. The longer computation time of AAPB is due to the evaluation of three score functions per timestep (unconditional, target, and anchor) instead of two (uncon-ditional, conditional). For image editing, the overhead is minimal (7.54s vs. 7.41s) with identical peak memory, as FlowEdit already performs three-branch scores (uncon-ditional, source, and target). In this case, AAPB simply reuses the source branch as an adaptive anchor, preserv-ing efficiency while enhancing edit faithfulness. In return, AAPB delivers a clear performance advantage, significantly surpassing state-of-the-art baselines in both semantic align-ment and structural preservation. 
+
+## 17. User Study 
+
+We conducted a user study with eleven participants on the RareBench dataset. For each prompt, images generated by Ours, R2F, and SD3 were shown simultaneously to enable direct side-by-side comparison across methods [32], facil-itating a more accurate assessment of semantic alignment and visual consistency. To prevent bias, model names were anonymized and the display order was randomized for ev-ery prompt. Participants scored each result using the crite-ria in Tab. 8, with the {1, 2, 3, 4, 5} scale linearly mapped to {0, 25 , 50 , 75 , 100 } for analysis (see Fig. 14). As summarized in Tab. 9, participants frequently noted that our method delivered clearer attribute grounding and reduced compositional inconsistencies, particularly in multi-object scenes. The most pronounced qualitative gains appeared in the Concat and Relation categories, where users consistently favored our results. We attribute this to more explicit entity separation and improved preservation of indi-vidual attributes, which enhances visual clarity in complex settings. This finding is consistent with the disentangled prompt reconstruction results in Fig. 11, demonstrating that our binary alignment strategy better supports multi-entity generation. 
+
+## 18. LLM Instruction for Rare Concept Gener-ation 
+
+Tab. 11 and Tab. 12 detail the full LLM prompt and the in-context examples for AAPB, respectively. Unlike R2F, which decomposes each rare concept into a step-wise se-quence with detailed annotations (including an explicit Vi-sual Detail Level for heuristic scheduling), our instruction employs a direct binary pairing between rare and frequent concepts. R2F generates an expanded, hierarchical reason-ing trace before concatenating them into the final sequence. 6<Task >
+
+Evaluate how well each image matches the given text prompt. Focus on whether the objects in the image and their attributes (e.g., color, shape, texture), spatial arrangement, and actions align with the text. 
+
+<Rating Scale >
+
+5: The image perfectly matches the text prompt with no noticeable mistakes. 4: The image matches most of the prompt, with only minor inconsistencies. 3: The image reflects the prompt partially, but some important details are missing or incorrect. 2: The image shows only a few elements from the prompt, and many key parts are missing or wrong. 1: The image does not match the prompt at all or fails to convey the main idea.                                         
+
+> Table 8. User study task and rating criteria for evaluating text–image alignment.
+> Single Object Multi Objects Models Property Shape Texture Action Complex Concat Relation Complex Avg SD3 [6] 46.3 58.3 46.0 43.5 53.1 40.8 46.7 60.5 49.4 R2F (SD3) [21] 71.9 66.2 71.4 63.7 69.3 42.6 44.6 67.3 62.1 Ours (SD3) 76.7 68.5 71.9 65.0 70.1 59.8 49.7 68.7 66.3
+> Table 9. Qualitative comparison based on our user study. For each prompt, participants were shown multiple images generated by different models in random order and without model names (Fig. 14). Participants selected the preferred result according to the evaluation criteria define in Tab. 8. Original FlowEdit Ours
+> Figure 12. Qualitative results for face-accessory image editing. We extract the source prompt using GPT and augment the target prompt by adding “glasses” as an accessory. Our method preserves facial details more faithfully than FlowEdit.
+
+In contrast, our approach streamlines this process by focus-ing solely on semantic substitution: it replaces the rare noun phrase with its frequent counterpart in a single pass and di-rectly constructs the rare-frequent pair. Furthermore, R2F decomposes a prompt into multiple sub-prompts (e.g., “Two spotted sea creatures” and “A hairy aquatic creature”), which are sequentially substituted to form the final sentence. In contrast, our formulation en-forces a direct rare–frequent pairing (e.g., “A hairy animal and two spotted objects”), enabling the entire prompt to be reconstructed in a single pass. In Fig. 11, we compare the reconstruction strategy of R2F with our binary alignment approach. Our binary alignment approach resulting in im-proved disentanglement and fidelity in multi-entity genera-tions. 
+
+## 19. Image Editing for Face Accessories 
+
+Fig. 12 presents image editing results for adding facial ac-cessories on the SFHQ dataset [1]. We extract the source prompt using GPT and augment the target prompt by ap-pending “glasses” as an accessory. Compared to FlowEdit, our method preserves fine facial details—particularly in the hair and ear regions—while generating the glasses faith-fully. 
+
+## 20. Quantitative Image Quality Analysis 
+
+For quantitative image quality evaluation, we employ three widely used metrics: LAION-Aesthetic [29], PickScore [14], and ImageReward [35]. Tab. 10 presents a comparison among AAPB, R2F, and SD3.0. Our method achieves the highest scores on ImageReward and PickScore, indicating superior human preference alignment and seman-tic consistency, while SD3.0 attains a slightly higher aes-7Models LAION-aesthetic ImageReward PickScore SD3.0 6.317±0.190 0.915±0.151 21.771±0.462 R2F 6.215±0.220 1.048±0.266 22.155±0.239 Ours 6.191±0.166 1.123±0.328 22.177±0.222 
+
+Table 10. Aesthetic and preference evaluation on RareBench .LAION-aesthetic measures visual appeal, ImageReward models human preference, and PickScore evaluates text–image alignment. Our method achieves the best preference and alignment scores. “A thorny snake is coiling around a star shaped drum” 
+
+R2F Ours 
+
+> “A tiger striped pine tree is leaning against a wigged
+> octopus”
+
+Figure 13. Failure results on RareBench where both ours and R2F exhibit attribute-object mismatches. This behaviors aligns with previously reported limitations in CLIP’s ability to bind composi-tional concpets faithfully [16]. 
+
+thetic score. This minor trade-off in visual appeal is accept-able, as AAPB prioritizes rare concept fidelity and prompt-faithful generation over conventional aesthetics—aligning well with the objective of our task. 
+
+## 21. Limitations 
+
+Although our approach substantially improves rare-concept alignment, it still inherits the inherent limitations of CLIP-based text encoders, which struggle to preserve composi-tional bindings when multiple attributes and objects co-exist in a prompt (Fig. 13). As also reported by Lewis et al. [16], CLIP often fails to maintain correct attribute–object associations in multi-component scenarios, leading to oc-casional entanglement or attribute leakage in our gener-ations. Overcoming this limitation would likely require representation-level advances (e.g., more compositionally robust vision–language encoders) or additional architectural modules explicitly designed for attribute binding, which we leave for future exploration. 
+
+## 22. More Visualization Results 
+
+Fig. 16 presents uncurated generations of our model on RareBench across multiple random seeds. Most results ex-hibit strong alignment with the input prompts while preserv-ing naturalness and visual quality. Furthermore, Fig. 17 pro-vides additional qualitative results on the FlowEdit bench-mark, where leveraging the blended score yields higher anchor-image fidelity compared to the baseline FlowEdit method. 8<System Prompt >
+
+You are a helper language model for a text-to-image generation program that aims to create images based on input text. The program often struggles to accurately generate images when the input text contains rare concepts that are not commonly found in reality. To address this, when a rare concept is identified in the input text, you should replace it with relevant yet more frequent concepts. 
+
+<User Prompt >
+
+Extract rare concepts from the input text and replace them with relevant yet more frequent ones. Perform the following process step by step: 
+
+a. Identify and extract any rare concepts from the provided input text. If the text contains one or more rare concepts, extract them all. If there are no rare concepts present, do not extract any concepts. The extracted rare concepts should not overlap. 
+
+b. Given the rare concepts extracted at a., replace each extracted rare concept with a more frequent concept. Specifically, replace the main noun subject with a more frequent noun subject that is likely to appear in a similar context. Ensure that the replaced frequent noun subject retains the properties of the original main noun subject as much as possible. 
+
+c. Generate a text sequence that starts from the text with replaced frequent concepts and ends with the text with the original rare concepts. The output should follow the format of the examples below: 
+
+<In-context Examples >
+
+Input: {USER PROMPT }
+
+Output: Table 11. Full LLM instruction for AAPB to generate target-to-anchor concept mappings for rare concept generation. 
+
+9Input: A banana shaped apple 
+
+Output: Num Rare Concepts: 1a. Rare concept: A banana shaped apple b. A banana shaped apple does not exist in reality, while the possibility of a banana shaped red object existing is much higher. Main noun object: apple, Replaced frequent object: red object c. A banana shaped red object BREAK A banana shaped apple 
+
+Final Prompt Sequence: A banana shaped red object BREAK A banana shaped apple 
+
+Input: A running dog 
+
+Output: Num Rare Concepts: 0No rare concept was found in the given input text. 
+
+Final Prompt Sequence: A running dog 
+
+Input: A horned lion and a hairy frog 
+
+Output: Num Rare Concepts: 2a. Rare concept: A horned lion b. A horned lion does not exist in reality, while a horned animal does. Main noun subject: lion, Replaced frequent subject: animal c. A horned animal BREAK A horned lion AND a. Rare concept: A hairy frog b. A hairy frog does not exist in reality, while a hairy animal does. Main noun subject: frog, Replaced frequent subject: animal c. A hairy animal BREAK A hairy frog 
+
+Final Prompt Sequence: A horned animal AND a horned animal BREAK A horned lion AND a hairy frog 
+
+Input: A horned lion is sitting on a tiger striped rock 
+
+Output: Num Rare Concepts: 2a. Rare concept: A horned lion b. A horned lion does not exist in reality, while a horned animal does. Main noun subject: lion, Replaced frequent subject: animal c. A horned animal BREAK A horned lion AND a. Rare concept: a tiger striped rock b. A tiger striped rock does not exist in reality, while a tiger striped object does. Main noun subject: rock, Replaced frequent subject: object c. a tiger striped object BREAK a tiger striped rock 
+
+Final Prompt Sequence: A horned animal AND a tiger striped object BREAK A horned lion AND a tiger striped rock 
+
+Table 12. In-context examples of the LLM prompt for AAPB. 
+
+10 Figure 14. User study interface for evaluating text-to-image alignment. Participants were asked to rate how well each generated image matched the given text prompt based on semantic accuracy and visual consistency. The image order was randomized, and model identities were hidden to avoid bias. 
+
+11 A spotted rhino 
+
+An ax -shaped chocolate 
+
+A black -white checkered crocodile 
+
+A swimming clock 
+
+A pink crocodile paragliding between skyscrapers 
+
+A hairless yak and a spotted tulip 
+
+A wooly alligator is guarding a banana shaped bottle 
+
+A brown hamster piloting a miniature spaceship navigating through a forest of gigantic broccoli trees, with a mustachioed mou se co -pilot 
+
+w= 1.0 w= 2.0 w= 3.0 w= 4.0 w= 5.0 w= 6.0 w= 7.0 w= 8.0 w= 9.0 w= 10.0 Figure 15. Ablation study with varying classifier-free guidance scale w.
+
+12 “A stork made of diamonds and a tulip made of diamonds” 
+
+“A wrinkled globe is resting beside an ax shaped chocolate” 
+
+“A blue ant hides in the forest in military uniform, aiming a gun at a red enemy ant on horseback” 
+
+“A mustachioed monkey” 
+
+“A donut shaped train” 
+
+“A flamingo made of glass” 
+
+“A dancing koala” 
+
+“A blue elephant spitting fire while floating in the air” Figure 16. Uncurated qualitative visualizations of our method on RareBench, generated from eight randomly selected prompts across all categories and eight random seeds. 
+
+13 … Origami Brown bear -> Polar bear 
+
+White dog -> Dalmatian, Cat -> Tiger Cat -> Tiger 
+
+… Wooden sculpture … Crochet 
+
+Horse -> Unicorn Orange lizard -> Green lizard 
+
+Clown fish -> Small sea turtle … Lego bricks 
+
+Original FlowEdit Ours Original FlowEdit Ours Figure 17. Qualitative results of the image editing. 
+
+14

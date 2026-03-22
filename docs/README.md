@@ -6,26 +6,41 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-03-13 ~ 2026-03-22
-- 运行时间：2026-03-22 10:07:14 UTC
+- 最新运行日期：2026-03-22
+- 运行时间：2026-03-22 19:15:52 UTC
 - 运行状态：成功
-- 本次总论文数：1
+- 本次总论文数：6
 - 精读区：0
-- 速读区：1
+- 速读区：6
 
 ### 今日简报（AI）
-今日探索 Cubic Discrete Diffusion 架构，攻克高维表征 Token 的离散视觉生成难题。
-该研究通过创新的立方体扩散机制，有效提升了高维离散特征在复杂视觉建模中的生成表现。
-建议关注生成式 AI 的读者重点了解其如何在高维数据环境下优化离散扩散过程。
-- 详情：[/20260313-20260322/README](/20260313-20260322/README)
+今日速览 6 篇视觉领域前沿，重点聚焦无参考图像质量评估与文本引导的图像精准操控。
+值得关注 SHAMISA 提出的自监督结构建模新方法，以及文本嵌入插值在实现图像连续转向中的“不合理”高效性。
+建议对 AI 绘画精准控制感兴趣的读者，深入了解如何通过简单的嵌入插值实现丝滑的图像属性调节。
+- 详情：[/202603/22/README](/202603/22/README)
 
 ### 精读区论文标签
 - 本次无精读推荐。
 
 ### 速读区论文标签
-1. [Cubic Discrete Diffusion: Discrete Visual Generation on High-Dimensional Representation Tokens](/20260313-20260322/2603.19232v1-cubic-discrete-diffusion-discrete-visual-generation-on-high-dimensional-representation-tokens)  
+1. [SHAMISA: SHAped Modeling of Implicit Structural Associations for Self-supervised No-Reference Image Quality Assessment](/202603/22/2603.13669v1-shamisa-shaped-modeling-of-implicit-structural-associations-for-self-supervised-no-reference-image-quality-assessment)  
+   标签：评分：6.0/10、query:q7
+   evidence：从无标签失真图像中进行自监督学习以评估质量
+2. [SHAMISA: SHAped Modeling of Implicit Structural Associations for Self-supervised No-Reference Image Quality Assessment](/202603/22/2603.13669v2-shamisa-shaped-modeling-of-implicit-structural-associations-for-self-supervised-no-reference-image-quality-assessment)  
+   标签：评分：6.0/10、query:q7
+   evidence：无标签图像质量评估的自监督框架
+3. [The Unreasonable Effectiveness of Text Embedding Interpolation for Continuous Image Steering](/202603/22/2603.17998v1-the-unreasonable-effectiveness-of-text-embedding-interpolation-for-continuous-image-steering)  
    标签：评分：6.0/10、query:q4
-   evidence：使用细粒度掩码进行视觉生成的离散扩散模型
+   evidence：无需训练的图像编辑框架
+4. [Epistemic Generative Adversarial Networks](/202603/22/2603.18348v1-epistemic-generative-adversarial-networks)  
+   标签：评分：6.0/10、query:q4
+   evidence：为像素预测质量函数的生成模型
+5. [Adaptive Auxiliary Prompt Blending for Target-Faithful Diffusion Generation](/202603/22/2603.19158v1-adaptive-auxiliary-prompt-blending-for-target-faithful-diffusion-generation)  
+   标签：评分：6.0/10、query:q4
+   evidence：基于扩散模型的图像编辑与生成
+6. [RPiAE: A Representation-Pivoted Autoencoder Enhancing Both Image Generation and Editing](/202603/22/2603.19206v1-rpiae-a-representation-pivoted-autoencoder-enhancing-both-image-generation-and-editing)  
+   标签：评分：6.0/10、query:q4
+   evidence：用于图像编辑和重建的生成模型
 
 
 <div class="dpr-home-promo-card">

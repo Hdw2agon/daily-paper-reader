@@ -6,34 +6,26 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-03-21
-- 运行时间：2026-03-21 19:21:14 UTC
+- 最新运行日期：2026-03-13 ~ 2026-03-22
+- 运行时间：2026-03-22 10:07:14 UTC
 - 运行状态：成功
-- 本次总论文数：4
-- 精读区：1
-- 速读区：3
+- 本次总论文数：1
+- 精读区：0
+- 速读区：1
 
 ### 今日简报（AI）
-今日聚焦生成式多帧超分与人像修复，深度探索从低光增强到3D生成的视觉前沿。
-重点推荐 GenMFSR 在多帧图像恢复上的生成式突破，以及 PaAgent 结合强化学习实现的人像主客观修复。
-建议关注生成式模型在画质提升中的应用，并尝试利用点云先验优化 3D 建模的结构准确度。
-- 详情：[/202603/21/README](/202603/21/README)
+今日探索 Cubic Discrete Diffusion 架构，攻克高维表征 Token 的离散视觉生成难题。
+该研究通过创新的立方体扩散机制，有效提升了高维离散特征在复杂视觉建模中的生成表现。
+建议关注生成式 AI 的读者重点了解其如何在高维数据环境下优化离散扩散过程。
+- 详情：[/20260313-20260322/README](/20260313-20260322/README)
 
 ### 精读区论文标签
-1. [GenMFSR: Generative Multi-Frame Image Restoration and Super-Resolution](/202603/21/2603.19187v1-genmfsr-generative-multi-frame-image-restoration-and-super-resolution)  
-   标签：评分：8.0/10、query:q4
-   evidence：生成式多帧图像修复与超分辨率
+- 本次无精读推荐。
 
 ### 速读区论文标签
-1. [PaAgent: Portrait-Aware Image Restoration Agent via Subjective-Objective Reinforcement Learning](/202603/21/2603.17055v1-paagent-portrait-aware-image-restoration-agent-via-subjective-objective-reinforcement-learning)  
-   标签：评分：7.0/10、query:q7
-   evidence：使用多模态大语言模型的图像修复智能体
-2. [DST-Net: A Dual-Stream Transformer with Illumination-Independent Feature Guidance and Multi-Scale Spatial Convolution for Low-Light Image Enhancement](/202603/21/2603.16482v1-dst-net-a-dual-stream-transformer-with-illumination-independent-feature-guidance-and-multi-scale-spatial-convolution-for-low-light-image-enhancement)  
-   标签：评分：6.0/10、query:q7
-   evidence：低光照图像增强与修复
-3. [Points-to-3D: Structure-Aware 3D Generation with Point Cloud Priors](/202603/21/2603.18782v1-points-to-3d-structure-aware-3d-generation-with-point-cloud-priors)  
-   标签：评分：6.0/10、query:q1
-   evidence：用于3D生成的结构修复网络
+1. [Cubic Discrete Diffusion: Discrete Visual Generation on High-Dimensional Representation Tokens](/20260313-20260322/2603.19232v1-cubic-discrete-diffusion-discrete-visual-generation-on-high-dimensional-representation-tokens)  
+   标签：评分：6.0/10、query:q4
+   evidence：使用细粒度掩码进行视觉生成的离散扩散模型
 
 
 <div class="dpr-home-promo-card">

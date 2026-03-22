@@ -1,6 +1,9 @@
 * <a class="dpr-sidebar-root-link" href="#/">首页</a>
 * <a class="dpr-sidebar-root-link dpr-sidebar-noactive-link" href="javascript:void(0)" data-dpr-hash="#/tutorial/README">使用教程</a>
 * Daily Papers
+  * 2026-03-13 ~ 2026-03-22 <!--dpr-date:20260313-20260322-->
+    * 速读区
+      * <a class="dpr-sidebar-item-link dpr-sidebar-item-structured" href="#/20260313-20260322/2603.19232v1-cubic-discrete-diffusion-discrete-visual-generation-on-high-dimensional-representation-tokens" data-sidebar-item="{&quot;title&quot;: &quot;Cubic Discrete Diffusion: Discrete Visual Generation on High-Dimensional Representation Tokens&quot;, &quot;link&quot;: &quot;https://arxiv.org/abs/2603.19232v1-cubic-discrete-diffusion-discrete-visual-generation-on-high-dimensional-representation-tokens&quot;, &quot;score&quot;: &quot;6.0&quot;, &quot;tags&quot;: [{&quot;kind&quot;: &quot;query&quot;, &quot;label&quot;: &quot;q4&quot;}], &quot;evidence&quot;: &quot;使用细粒度掩码进行视觉生成的离散扩散模型&quot;}">Cubic Discrete Diffusion: Discrete Visual Generation on High-Dimensional Representation Tokens</a>
   * 2026-03-21 <!--dpr-date:20260321-->
     * 精读区
       * <a class="dpr-sidebar-item-link dpr-sidebar-item-structured" href="#/202603/21/2603.19187v1-genmfsr-generative-multi-frame-image-restoration-and-super-resolution" data-sidebar-item="{&quot;title&quot;: &quot;GenMFSR: Generative Multi-Frame Image Restoration and Super-Resolution&quot;, &quot;link&quot;: &quot;https://arxiv.org/abs/2603.19187v1-genmfsr-generative-multi-frame-image-restoration-and-super-resolution&quot;, &quot;score&quot;: &quot;8.0&quot;, &quot;tags&quot;: [{&quot;kind&quot;: &quot;query&quot;, &quot;label&quot;: &quot;q4&quot;}], &quot;evidence&quot;: &quot;生成式多帧图像修复与超分辨率&quot;}">GenMFSR: Generative Multi-Frame Image Restoration and Super-Resolution</a>

@@ -6,41 +6,32 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-03-22
-- 运行时间：2026-03-22 19:15:52 UTC
+- 最新运行日期：2026-03-23
+- 运行时间：2026-03-23 19:48:28 UTC
 - 运行状态：成功
-- 本次总论文数：6
+- 本次总论文数：3
 - 精读区：0
-- 速读区：6
+- 速读区：3
 
 ### 今日简报（AI）
-今日速览 6 篇视觉领域前沿，重点聚焦无参考图像质量评估与文本引导的图像精准操控。
-值得关注 SHAMISA 提出的自监督结构建模新方法，以及文本嵌入插值在实现图像连续转向中的“不合理”高效性。
-建议对 AI 绘画精准控制感兴趣的读者，深入了解如何通过简单的嵌入插值实现丝滑的图像属性调节。
-- 详情：[/202603/22/README](/202603/22/README)
+今日聚焦 3D 生成、低光增强及图像篡改检测，探索从结构感知到像素修复的前沿视觉技术。
+重点关注利用点云先验提升 3D 生成的结构稳定性，以及针对 VLM 图像篡改提出的全新分类体系与评测基准。
+建议关注 3D 建模与内容安全领域的交叉应用，尝试将结构化先验引入现有的视觉生成工作流。
+- 详情：[/202603/23/README](/202603/23/README)
 
 ### 精读区论文标签
 - 本次无精读推荐。
 
 ### 速读区论文标签
-1. [SHAMISA: SHAped Modeling of Implicit Structural Associations for Self-supervised No-Reference Image Quality Assessment](/202603/22/2603.13669v1-shamisa-shaped-modeling-of-implicit-structural-associations-for-self-supervised-no-reference-image-quality-assessment)  
+1. [Points-to-3D: Structure-Aware 3D Generation with Point Cloud Priors](/202603/23/2603.18782v2-points-to-3d-structure-aware-3d-generation-with-point-cloud-priors)  
+   标签：评分：7.0/10、query:q1
+   evidence：用于3D生成的结构补全网络
+2. [Anchor then Polish for Low-light Enhancement](/202603/23/2603.15472v1-anchor-then-polish-for-low-light-enhancement)  
    标签：评分：6.0/10、query:q7
-   evidence：从无标签失真图像中进行自监督学习以评估质量
-2. [SHAMISA: SHAped Modeling of Implicit Structural Associations for Self-supervised No-Reference Image Quality Assessment](/202603/22/2603.13669v2-shamisa-shaped-modeling-of-implicit-structural-associations-for-self-supervised-no-reference-image-quality-assessment)  
-   标签：评分：6.0/10、query:q7
-   evidence：无标签图像质量评估的自监督框架
-3. [The Unreasonable Effectiveness of Text Embedding Interpolation for Continuous Image Steering](/202603/22/2603.17998v1-the-unreasonable-effectiveness-of-text-embedding-interpolation-for-continuous-image-steering)  
-   标签：评分：6.0/10、query:q4
-   evidence：无需训练的图像编辑框架
-4. [Epistemic Generative Adversarial Networks](/202603/22/2603.18348v1-epistemic-generative-adversarial-networks)  
-   标签：评分：6.0/10、query:q4
-   evidence：为像素预测质量函数的生成模型
-5. [Adaptive Auxiliary Prompt Blending for Target-Faithful Diffusion Generation](/202603/22/2603.19158v1-adaptive-auxiliary-prompt-blending-for-target-faithful-diffusion-generation)  
-   标签：评分：6.0/10、query:q4
-   evidence：基于扩散模型的图像编辑与生成
-6. [RPiAE: A Representation-Pivoted Autoencoder Enhancing Both Image Generation and Editing](/202603/22/2603.19206v1-rpiae-a-representation-pivoted-autoencoder-enhancing-both-image-generation-and-editing)  
-   标签：评分：6.0/10、query:q4
-   evidence：用于图像编辑和重建的生成模型
+   evidence：图像修复与增强框架
+3. [From Masks to Pixels and Meaning: A New Taxonomy, Benchmark, and Metrics for VLM Image Tampering](/202603/23/2603.20193v1-from-masks-to-pixels-and-meaning-a-new-taxonomy-benchmark-and-metrics-for-vlm-image-tampering)  
+   标签：评分：6.0/10、query:q1
+   evidence：包含图像修复在内的图像篡改检测分类法
 
 
 <div class="dpr-home-promo-card">

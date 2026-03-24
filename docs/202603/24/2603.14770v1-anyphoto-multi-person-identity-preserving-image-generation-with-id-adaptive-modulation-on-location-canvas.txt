@@ -1,0 +1,595 @@
+Title: AnyPhoto: Multi-Person Identity Preserving Image Generation with ID Adaptive Modulation on Location Canvas
+
+URL Source: https://arxiv.org/pdf/2603.14770v1
+
+Published Time: Tue, 17 Mar 2026 02:56:25 GMT
+
+Number of Pages: 25
+
+Markdown Content:
+# AnyPhoto: Multi-Person Identity Preserving Image Generation with ID Adaptive Modulation on Location Canvas 
+
+Longhui Yuan 
+
+Abstract. Multi-person identity-preserving generation requires bind-ing multiple reference faces to specified locations under a text prompt. Strong identity/layout conditions often trigger copy–paste shortcuts and weaken prompt-driven controllability. We present AnyPhoto, a diffusion-transformer finetuning framework with (i) a RoPE-aligned location canvas plus location-aligned token pruning for spatial grounding, (ii) AdaLN-style identity-adaptive modulation from face-recognition embeddings for persistent identity injection, and (iii) identity-isolated attention to prevent cross-identity interference. Training combines conditional flow matching with an embedding-space face similarity loss, together with reference-face replacement and location-canvas degradations to discourage shortcuts. On MultiID-Bench, AnyPhoto improves identity similarity while reducing copy–paste tendency, with gains increasing as the number of identities grows. AnyPhoto also supports prompt-driven stylization with accurate placement, showing great potential application value. 
+
+Keywords: Image generation · multi-identity preservation · spatial con-trol · diffusion transformers 
+
+1 Introduction 
+
+In recent years, image generation has witnessed significant progress [8,11,15,24,32]. The subfield, identity-preserving image generation, has considerable application value in areas such as social content, film production, and virtual humans, and has consequently attracted considerable research attention [4,9,12 –14,19,20,23,27,30, 31, 33, 34, 38, 40, 41, 44, 49, 51, 53 –56, 58, 59]. ID-preserving image generation aims to synthesize images that follow a text prompt while faithfully rendering one or multiple reference identities. In real applications, identity control is often coupled with explicit spatial constraints: each identity should appear at a designated region in the generated image. This setting is challenging. First, identity is intrinsically local (mainly carried by facial details), whereas text describes global semantics, requiring the model to balance ROI-specific (Region of Interest) control with global coherence. Second, multi-identity conditioning is prone to cross-identity interference, i.e ., differ-ent identities may leak into each other without explicit structural constraints. Moreover, when reference faces are constructed from the target image during finetuning, the model may exploit a copy-paste shortcut by directly replicating the reference patch, resulting in visually rigid artifacts.      
+
+> arXiv:2603.14770v1 [cs.CV] 16 Mar 2026 2L. Yuan et al. Two stylish young men ,...
+> AnyPhoto
+> Fig. 1: AnyPhoto is capable of generating identity-preserving, location-controlled, high-quality images conditioned on reference faces and a text prompt.
+
+Existing solutions typically inject spatial control either by explicitly encoding locations (e.g., boxes/masks) as additional conditions [26,43,50], or by restricting condition-to-image interactions with ROI-masked attention [13,14,23,42,51,57,59]. While effective in certain cases, these designs may increase the learning burden or weaken global-context interactions. Recent findings further suggest that Rotary Position Embedding (RoPE) can provide an implicit mechanism for spatial grounding: when condition tokens share aligned RoPE with image tokens, the model can naturally align conditions to the corresponding regions [33, 35, 36, 54]. However, spatial grounding alone does not guarantee identity fidelity. A prevalent approach for identity conditioning is to incorporate an identity em-bedding as additional input tokens or integrate it directly into the attention mechanism [13, 38, 41, 49, 53, 55, 59]. In practice, this forces the model to learn a nontrivial mapping from a face-recognition embedding space (unseen during pretraining) into the latent generation space, which increases adaptation diffi-culty, for example, InfU [20] requires the introduction of ControlNet-like auxiliary networks along with extensive training data and complex training procedures. Meanwhile, prior work has shown that AdaLN-style modulation provides a more effective conditioning interface in diffusion transformers, significantly amplifying the influence of conditioning signals by controlling feature normalization and residual gating across layers [4, 10]. This motivates us to inject identity not merely as additional tokens, but into the modulation pathway that repeatedly governs the denoising computation, so that the model is encouraged to emphasize identity-invariant cues throughout the network. Building upon the above observations, we introduce AnyPhoto for multi-person identity-preserving image generation with explicit spatial control, as shown in Fig. 1. AnyPhoto converts each reference face into location canvas to provide spatially grounded identity evidence, and injects the corresponding identity embedding through modulation to strengthen identity control over the designated region. Specifically, AnyPhoto consists of three components: (1) Location-Aligned Token Pruning converts each location canvas into compact ROI tokens with RoPE-aligned coordinates, enabling precise location controllability. (2) Identity-Adaptive Modulation uses a face recognition embedding to modulate AdaLN-style conditioning for the associated identity tokens, enforcing consistent identity emphasis across transformer blocks. (3) Identity-Isolated Attention structures attention connectivity so that global tokens coordinate all conditions while each identity branch remains disentangled, supporting stable multi-person AnyPhoto 3
+
+composition. We finetune AnyPhoto with a combined objective of conditional flow matching and an embedding-space face similarity loss, which jointly optimizes image realism and identity fidelity, and mitigate copy-paste collapse via same-ID reference replacement and location-canvas degradations. The contributions of this work can be summarized as follows: 
+
+– We propose AnyPhoto, a finetuning framework generates identity-preserving, location-controlled, and high-quality images for multi-person scenarios. 
+
+– We introduce Location-Aligned Token Pruning for RoPE-aligned ROI repre-sentation, Identity-Adaptive Modulation for stronger identity-specific control, and Identity-Isolated Attention for disentangled multi-identity interaction. 
+
+– Experiments demonstrate that AnyPhoto achieves higher face similarity and more accurate spatial placement in multi-person generation, while producing more natural results with fewer copy-paste artifacts. 
+
+2 Preliminaries 
+
+2.1 Flow Matching 
+
+Flow matching trains generative models by learning a time-dependent velocity field transporting a simple noise distribution q1 to the data distribution q0, and it underlies modern systems such as Stable Diffusion 3 [8] and FLUX [24]. Concretely, flow-based generative modeling defines an ordinary differential equation (ODE) 
+
+ddt x(t) = μ(x(t), t ), (1) where x(1) ∼ q1 and integrating the dynamics backward to t = 0 yields x(0) ∼ q0.Flow matching aims to learn a parameterized vector field μθ (x, t ) whose induced probability path matches a target path. Conditional Flow Matching (CFM) [28] solves the problem by constructing a conditional probability path pt(xt | x0),which induces the marginal path 
+
+pt(xt) = 
+
+Z
+
+pt(xt | x0)q0(x0) dx 0, (2) and satisfies the boundary conditions p0 = q0 and p1 = q1.Let μ∗(xt, t | x0) denote a conditional vector field that generates the condi-tional path pt(xt | x0), and define the corresponding marginal vector field by 
+
+μ∗(xt, t ) = 
+
+Z
+
+μ∗(xt, t | x0) pt(xt | x0)q0(x0)
+
+pt(xt) dx 0. (3) Lipman et al . [28] show that if μ∗(xt, t | x0) generates pt(xt | x0), then μ∗(xt, t )
+
+generates the marginal path pt(xt). Accordingly, flow matching minimizes the mean squared error between the learned field and the target field: 
+
+LF M (θ) = Et, x t∼pt
+
+h
+
+μθ (xt, t ) − μ∗(xt, t ) 2i
+
+, (4) 
+
+LCF M (θ) = Et, x 0∼q0, x t∼pt(·| x0)
+
+h
+
+μθ (xt, t ) − μ∗(xt, t | x0) 2i
+
+. (5) 4 L. Yuan et al. 
+
+Moreover, LF M (θ) and LCF M (θ) share the same gradient with respect to θ, so one can train using the conditional objective without explicitly computing the intractable marginal target field. Rectified Flow (RF) [29] can be viewed as a special case of CFM obtained by choosing a deterministic linear probability path. Specifically, sample x0 ∼ q0 and 
+
+x1 ∼ q1, and define for t ∈ [0 , 1] the interpolation 
+
+xt = (1 − t)x0 + tx 1. (6) In this case, the conditional dynamics are deterministic and the corresponding conditional vector field is simply 
+
+μ∗(xt, t | x0, x 1) = ddt xt = x1 − x0. (7) Substituting this choice into the conditional flow matching objective yields the rectified flow training loss 
+
+LRF (θ) = Et∼U [0 ,1] , x 0∼q0, x 1∼q1
+
+h
+
+∥μθ (xt, t ) − (x1 − x0)∥2i
+
+. (8) After training, samples are generated by solving the ODE from t = 1 to t = 0 
+
+with the learned vector field μθ and initial condition x(1) ∼ q1.
+
+2.2 Modulation in DiTs 
+
+Modern diffusion transformers commonly inject conditions through AdaLN-style modulation with gated residual updates, a design that traces back to StyleGAN [22]. Importantly, this design explicitly strengthens the influence of conditioning by modulating normalized activations at every block, so that the prompt reliably steers the denoising dynamics across layers and timesteps. Stable Diffusion 3 [8] and FLUX [24] adopt this mechanism: timestep and text embeddings are fused and mapped to global conditioning vector 
+
+y = MLP (t, f prompt ). (9) A following MLP produces per-block (or per-sublayer) modulation parameters 
+
+[α, β, γ ]. For an activation x, AdaLN applies a feature-wise affine transformation to the LayerNorm output, 
+
+˜x = (1 + α) ⊙ LN( x) + β,  (10) which is then processed by the attention/MLP sublayer F (·) and injected via a gated residual connection, 
+
+x ← x + γ ⊙ F (˜ x). (11) Here, (α, β ) provide StyleGAN-like feature scaling and shifting, while γ controls the update strength under the current timestep and prompt. AnyPhoto 5A man and a 
+
+> woman are st …
+> and joyful.
+> Face
+> LoRA
+> DiT
+> Location
+> -Aligned
+> Token
+> Pruning
+> ID -Adaptive
+> Modulation
+> ℒ!"
+> ℒ!#
+> Extract face
+> embedding
+
+Fig. 2: AnyPhoto. Location-Aligned Token Pruning constructs the input from the text prompt, noised image, and location reference. Reference face embeddings modulate the aligned tokens. Training uses conditional flow matching and face similarity losses. 
+
+3 AnyPhoto 
+
+3.1 Problem Definition 
+
+We study identity-preserving image generation with explicit spatial constraints. Given a text prompt s and a set of n reference pairs R = {(ri, l i)}ni=1 , where ri
+
+is the i-th reference face image (norm-cropped) and li specifies its target location (e.g., face keypoints) in the generated image, our goal is to synthesize an image x
+
+that (i) is semantically consistent with s, and (ii) renders each identity ri at its designated location li. Formally, we aim to learn a conditional generative model parameterized by θ that approximates the target distribution 
+
+pθ (x | s, R), (12) so that samples x ∼ pθ (· | s, R) satisfy both the textual description and the location-aligned multi-identity constraints. In this work, we propose the AnyPhoto method to achieve this goal, and an overview is shown in Fig. 2. 
+
+3.2 Location-Aligned Token Pruning 
+
+In prior work, explicit positional control is typically achieved in two ways. One is to encode spatial cues (e.g., coordinates, or boxes) as additional inputs [26,43,50], which is simple but increases the learning burden because the model must learn both the target semantics and how to interpret these spatial representations. The other is ROI-masked attention [13, 14, 23, 42, 51, 57, 59], which localizes control by restricting attention between condition tokens and ROI tokens, but may weaken global-context interactions and lead to visually inconsistent or fragmented results. Recent work such as OmniControl [35, 36] reveals the importance of Rotary Position Embedding (RoPE) for condition tokens. When a condition map (e.g., depth, canny) matches the target image resolution, assigning aligned RoPE to condition tokens yields strong spatial control. This suggests that RoPE provides an implicit spatial alignment mechanism: sharing same rotational basis makes 6 L. Yuan et al. RoPE : [1, x, y]                                
+
+> RoPE : [1, x, y]
+> RoPE : [0, x, y]
+> A man and a
+> woman are
+> st …and joyful. RoPE : [0, 0, 0]
+> VAE
+> Text
+> Mod. 1 Mod. 1 Mod. 1 Mod. 1
+> Mod. 2 Mod. 2 Mod. 2 Mod. 2
+> FFN T FFN I FFN I FFN I
+> Scale 1 &
+> Residual
+> Scale 1 &
+> Residual
+> Scale 1 &
+> Residual
+> Scale 1 &
+> Residual
+> Scale 2 &
+> Residual
+> Scale 2 &
+> Residual
+> Scale 2 &
+> Residual
+> Scale 2 &
+> Residual
+> Linear TLinear ILinear ILinear I
+> MM -Attention
+> 𝑇 𝐹 !𝐹 "𝐼
+> 𝑦 𝑦 𝑦 +Δ#!𝑦 +Δ#"
+> Identity -Isolated Attention ID -Adaptive Modulation Location -Aligned Token Pruning
+> Text Token
+> Image Token
+> Face Tokens
+> Dropped Token
+> Frozen LoRA Tunable
+> Visible Attention Masked Attention
+
+Fig. 3: Detailed components illustration of AnyPhoto. 
+
+condition tokens comparable to image tokens in positional phase, enabling region-level alignment without explicit attention masking or extra positional encoding. To fully exploit this implicit spatial controllability, we propose a Location-Aligned Token Pruning module. Given a norm-cropped reference face image ri
+
+and its target location li, we first construct a location canvas Li by resizing 
+
+ri according to li and pasting it onto an otherwise blank white canvas, which has the same resolution as the target image. This operation also yields a binary pasted-region mask Mi indicating the spatial support of the reference face on the canvas. We then encode Li with the VAE encoder to obtain a dense latent feature map (tokens) Fi. Next, we downsample Mi to the token resolution and remove background (blank) tokens by indexing with the mask, 
+
+Fi ← Fi[Mi], (13) thereby retaining only tokens that correspond to the pasted face region and discarding tokens from the blank canvas. In parallel, we construct a 3-D RoPE coordinate for each token as [1 , x, y ],where the leading dimension indicates the token type (location condition) and 
+
+(x, y ) are the spatial coordinates. We prune RoPE coordinates using the same mask to obtain the RoPE assigned to the retained face tokens. For the remaining inputs, we encode the text prompt using a text encoder to obtain text tokens T and assign them RoPE coordinates [0 , 0, 0] . We encode the noised image using the VAE to obtain visual tokens I with RoPE coordinates 
+
+[0 , x, y ]. Finally, we concatenate all tokens as 
+
+X = [ T, I, {Fi}ni=1 ], (14) and likewise concatenate their corresponding RoPE coordinates, enabling the model to attend over text, image, and location-aligned identity tokens within a unified rotary positional framework. And since each face is processed individually, the model can learn the mutual occlusion relationships between different subjects. We graphically illustrate this process on the left side of Fig. 3. 
+
+3.3 Identity-Adaptive Modulation 
+
+Location-Aligned Token Pruning enables the model to place identity evidence at the desired spatial region by providing location-aligned identity tokens Fi. Yet, AnyPhoto 7
+
+preserving identity is not only determined by whether the model can attend to Fi,but also by whether the network consistently emphasizes the identity-invariant cues contained in Fi (e.g., facial structure and characteristic appearance) across the denoising trajectory. In diffusion transformers, such persistent emphasis is naturally implemented through AdaLN-style modulation, where a conditioning vector is repeatedly mapped to per-block scale/shift/gating parameters that control feature statistics and residual strength. Motivated by this, we inject identity into the modulation pathway, so that identity-related processing is encouraged at every block rather than being left to emerge implicitly from attention. Specifically, for each reference face ri, we extract an identity embedding using a pretrained face recognition network (e.g., ArcFace [7]), 
+
+eri = FaceNet( ri). (15) We then map eri to an additive modulation offset through an MLP, 
+
+∆Fi = MLP id (eri ), (16) where ∆Fi has the same dimensionality as the transformer conditioning vector y
+
+(derived from timestep and text). During the forward pass, whenever a modu-lation layer operates on tokens originating from Fi, we use an identity-adapted conditioning vector 
+
+yi = y + ∆Fi , (17) and compute the corresponding modulation parameters from yi,
+
+[α, β, γ ] = MLP mod (yi), for tokens in Fi. (18) Because AdaLN modulation directly controls normalized feature scaling and the effective residual update, adding ∆Fi biases the network to allocate more capacity to those components of Fi that are predictive of the target identity, while sup-pressing spurious, identity-irrelevant variations. As a result, identity information is reinforced in a layer-by-layer manner, yielding stronger identity consistency without globally overwriting non-identity tokens and without requiring additional mask supervision. For a more intuitive understanding, please refer to the middle part of Fig. 3. 
+
+3.4 Identity-Isolated Attention 
+
+We introduce an Identity-Isolated Attention mask to prevent cross-identity inter-ference. The input sequence contains text tokens T , noised image tokens I, and 
+
+n sets of location-aligned identity tokens {Fi}ni=1 . We let the global tokens (T, I )
+
+gather information from all sources, while restricting each identity branch Fi to interact only with (T, I ) and itself. Concretely, the attention rule is: (i) T and I
+
+attend to all tokens in [T, I, F 1, . . . , F n]; (ii) Fi attends to T , I, and Fi, but not to Fj for j̸ = i. This forms a star-shaped topology centered at (T, I ). Formally, 8 L. Yuan et al. 
+
+for X = [ T, I, F 1, . . . , F n] and mask A ∈ { 0, 1}|X|×| X|,
+
+Apq =
+
+
+
+1, p ∈ (T ∪ I),
+
+1, p ∈ Fi and q ∈ (T ∪ I ∪ Fi),
+
+0, otherwise ,
+
+(19) where p and q index the query and key/value tokens. This design preserves global coherence while explicitly isolating different identities (see the right of Fig. 3). 
+
+3.5 AnyPhoto Training 
+
+We finetune our model with a combined objective consisting of a conditional flow matching loss and a face similarity regularization. Given a training sample 
+
+(x, s, R), where x is the target image, s is the text prompt, and R = {(ri, l i)}ni=1 
+
+are identity-location pairs, we adopt conditional flow matching to learn the mapping from the newly introduced conditions to the target image distribution. Let x0 ∼ pdata and x1 ∼ pnoise denote a data sample and a noise sample, respectively. We consider the linear interpolation path xt = (1 − t)x0 + tx 1 with 
+
+t ∼ U (0 , 1) , and train a velocity field μθ (·) conditioned on (s, R). The conditional flow matching loss is written as 
+
+Lf m = Et,x 0,x 1,s, R
+
+h
+
+μθ (xt, s, R, t ) − (x1 − x0) 22
+
+i
+
+. (20) Optimizing Lf m encourages the model to capture how the additional identity-and-location conditions translate into the target image. 
+
+Avoiding copy-paste collapse. We observe that if reference faces are always constructed from the same image x being reconstructed, the model easily falls into a copy-paste shortcut, i.e., directly replicating the reference face patches onto the specified locations, leading to visually rigid and unnatural generations. To mitigate this, for each (ri, l i) ∈ R we randomly replace ri with another face ˜ri
+
+sampled from a reference face bank that belongs to the same identity as ri, forming an augmented set ˜R = {( ˜ri, l i)}ni=1 . Meanwhile, when constructing the location canvas Li (used to derive Fi), we apply a series of degradations (e.g., blur, color jitter and so on) to the pasted face region, improving robustness and discouraging trivial pixel-level copying. Ideally, faces of the same identity yield similar ArcFace embedding; thus, through ID-adaptive modulation, the model is encouraged to attend to identity-invariant cues within Fi rather than superficial appearance variations. It is worth noting that, following the concept of curriculum learning [2], we gradually and incrementally increase the face replacement probability during the training process to achieve end-to-end training. 
+
+Face similarity loss. Nevertheless, Lf m alone mainly encourages reconstruction and may not sufficiently force the model to preserve identity-discriminative characteristics. We therefore introduce an additional face similarity loss based on ArcFace embeddings. Given xt = (1 − t)x0 + tx 1 and 
+
+μt = μθ (xt, s, ˜R, t ), (21) AnyPhoto 9
+
+we obtain a one-step estimate of the clean image 
+
+ˆx0 = xt − t μ t. (22) For each location li, we obtain ˆri by 
+
+ˆri = CROP(ˆ x0, l i). (23) We then compute ArcFace embeddings for both the reference face and the predicted face, eri = FaceNet (ri) and eˆri = FaceNet ( ˆri), and define the cosine-distance loss as 
+
+Lf s = 1
+
+n
+
+> n
+
+X
+
+> i=1
+
+
+
+1 − cos( eri , e ˆri )
+
+
+
+. (24) 
+
+Overall objective. The final training objective is 
+
+L = Lf m + λ Lf s , (25) where λ controls the strength of the identity-preservation regularization. 
+
+4 Experiments 
+
+4.1 Experimental Setup 
+
+Datasets. AnyPhoto is finetuned on MultiID-2M [53], a large-scale dataset of multi-identity images paired with identity reference images. During preprocessing, we filter out samples that do not meet the data requirements (e.g., missing/low-quality references) or fail in our processing pipeline, resulting in about 0.7M images used for training. We evaluate AnyPhoto on MultiID-Bench [53]. For each reference identity, we detect the target subject location in the reference image and use it as the spatial control condition for location guidance. 
+
+Baselines. Compare with representative methods, including, (1) General cus-tomization models, DreamO [30], OmniGen [52], OminiGen2 [46], Qwen-Image-Edit [45], FLUX.1 Kontext [25],UNO [48], USO [47], UMO [5], and native GPT-4o-Image [18]. (2) face customization methods, InfU [20], UniPortrait [13], ID-Patch [58], PuLID [12], InstantID [41], WithAnyOne [53]. 
+
+Implementation Details. We build AnyPhoto upon FLUX.1-[dev] [24]. To ac-commodate the newly introduced condition tokens, we attach a LoRA [17] module (rank r=128 ) to the image branch, and use an MLP to process the ArcFace embed-ding. We optimize the model with AdamW (lr= 5×10 −4, betas= (0 .9, 0.95) , weight decay= 10 −3). We further adopt a curriculum for reference-face replacement, where the replacement probability is increased from 0 to 0.5 following the schedule 
+
+[0 .0, 0.05 , 0.1, 0.2, 0.3, 0.4, 0.5] at milestone steps [10k , 20k , 30k , 40k , 50k , 60k] . The loss balancing weight is set to λ=0.1. To enable classifier-free guidance (CFG) [16] at inference, we drop the identity conditions during training by setting both the lo-cation tokens and the ArcFace embeddings of each identity to zero with probability 15%. We train for 200k steps with batch size 1 per GPU on 64 NVIDIA H20 GPUs 10 L. Yuan et al. 
+
+Table 1: Comparison results on MultiID-Bench. ,, and denote the 1st/2nd/3rd best results. For Copy-Paste/Generation-Quality ranking, we only in-clude cases with Sim(GT) > 0.40 /Sim(Ref) > 0.50 .marks ignored cases in the ranking.                                                                                                                                                                                                                                                   
+
+> Method Identity Metrics Generation Quality
+> Sim(GT) ↑Sim(Ref) ↑CP ↓CLIP-I ↑CLIP-T ↑Aes ↑
+> 1-people subset DreamO 0.454 0.694 0.303 0.793 0.322 4.877 OmniGen 0.398 0.602 0.248 0.780 0.317 5.069 OmniGen2 0.365 0.475 0.142 0.787 0.331 4.991 FLUX.1 Kontext 0.324 0.408 0.099 0.755 0.327 5.319 Qwen-Image-Edit 0.324 0.409 0.093 0.776 0.316 5.056 GPT-4o-Image 0.425 0.579 0.178 0.794 0.311 5.344 UNO 0.304 0.428 0.141 0.765 0.314 4.923 USO 0.401 0.635 0.286 0.790 0.329 5.077 UMO 0.458 0.732 0.359 0.783 0.305 4.850 UniPortrait 0.447 0.677 0.265 0.793 0.319 5.018 ID-Patch 0.426 0.633 0.231 0.792 0.312 4.900 InfU 0.439 0.630 0.233 0.772 0.328 5.359 PuLID 0.452 0.705 0.315 0.779 0.305 4.839 InstantID 0.464 0.734 0.337 0.764 0.295 5.255 WithAnyone 0.460 0.578 0.144 0.798 0.313 4.783 AnyPhoto 0.448 0.600 0.176 0.788 0.315 5.011 GT 1.000 0.521 -0.999 N/A N/A N/A Ref 0.521 1.000 0.999 N/A N/A N/A 2-people subset DreamO 0.359 0.514 0.179 0.763 0.319 4.764 OmniGen 0.345 0.529 0.209 0.750 0.326 5.152 OmniGen2 0.283 0.353 0.081 0.763 0.334 4.547 GPT-4o-Image 0.332 0.400 0.061 0.774 0.328 5.676 UNO 0.223 0.274 0.043 0.735 0.325 4.805 UMO 0.328 0.491 0.176 0.743 0.316 4.772 UniPortrait 0.367 0.601 0.254 0.750 0.323 5.187 ID-Patch 0.350 0.517 0.183 0.767 0.326 4.671 WithAnyone 0.405 0.551 0.161 0.770 0.321 4.883 AnyPhoto 0.401 0.577 0.189 0.764 0.323 4.994 3-and-4-people subset DreamO 0.311 0.427 0.116 0.709 0.317 4.695 OmniGen 0.345 0.529 0.209 0.750 0.326 5.152 OmniGen2 0.288 0.374 0.099 0.734 0.329 4.664 GPT-4o-Image 10.445 0.484 0.048 0.815 0.320 5.647 UNO 0.228 0.276 0.046 0.717 0.319 4.880 UMO 0.318 0.465 0.180 0.717 0.309 4.946 UniPortrait 0.343 0.517 0.178 0.708 0.323 5.090 ID-Patch 0.379 0.543 0.195 0.781 0.329 4.547 WithAnyone 0.414 0.561 0.171 0.771 0.325 4.955 AnyPhoto 0.424 0.587 0.186 0.763 0.326 4.960
+
+(global batch size 64), which takes about 5 days. For in-ference, the CFG scale is set to 1.0 (effectively disabling it) with 28 sampling steps. 
+
+4.2 Main Results 
+
+Quantitative Results. Tab. 1 compares AnyPhoto with base-lines on MultiID-Bench, cov-ering identity similarity (Sim(GT/Ref)), copy-paste ten-dency (CP), and generation quality (CLIP-I/CLIP-T/Aes; see the ranking rules in the caption). Notably, the GT/Ref rows indicate a non-negligible gap between the two similar-ity references, so strong perfor-mance requires balancing both similarity scores while sup-pressing copy-paste behavior. Overall, AnyPhoto achieves the most robust balance across subsets, especially as the num-ber of identities increases. On the challenging 3–4-people subset, AnyPhoto ranks 
+
+1st on both similarity scores, while remaining among the best methods in CP, demonstrating that our identity control scales to crowded scenes without collaps-ing into reference pasting. On the 2-people subset, AnyPhoto stays consistently in the top-2 for both similarity scores and maintains low CP, reflecting stable controllability when multiple identities compete for attention. On the 1-people subset, some face-specialized methods attain higher similarity but also show more pronounced copy-paste tendency; in contrast, AnyPhoto preserves strong identity similarity while keeping CP among the lowest, indicating more compositional synthesis rather than direct copying. Meanwhile, AnyPhoto maintains competi-tive CLIP-T and aesthetic scores across all subsets, suggesting that improved identity controllability does not compromise prompt alignment or visual realism. 
+
+Qualitative Comparisons. Fig. 4 compares AnyPhoto with representative baselines under 1/2/3/4-identity conditioning. We observe several common failure modes in existing methods, including missing identities, hallucinating extra people, drifting away from the specified locations, and obvious copy-paste artifacts— issues that typically become more severe as the number of identities increases. In contrast, AnyPhoto produces consistently good results across these cases,  
+
+> 1
+
+We follow WithAnyone to exclude GPT in the similarity ranking. AnyPhoto 11 A woman wearing a white hooded jacket with a black inner garment. Her hair is styled loosely, and she has minimal makeup. The wo man is 
+
+posing with her head slightly tilted, showcasing a calm and composed demeanor. Her expression is neutral. 
+
+GT image Input Face Kontext QwenImage Edit UniPortrait PuLID InstantID WithAnyone AnyPhoto 
+
+A couple posing together. The woman wears a blue, sleeveless, V -neck dress, while the man dons a light blue, semi -buttoned shirt . Both are 
+
+smiling and standing close, with the man's arm around the woman, indicating a friendly or intimate relationship. 
+
+Three people, two women and one man, posing closely together. The woman on the left wears a white blazer, while the younger wo man in 
+
+front has a strapless top. The man has a white shirt. All are smiling warmly at the camera. 
+
+Four people dressed in white shirts posing together. The group includes three males and one female, with one male and one female in the 
+
+center. They are smiling and standing closely, suggesting a family or close -knit group. The attire is casual and coordinated. 
+
+Fig. 4: Visual comparisons of AnyPhoto with baselines conditioned on 1/2/3/4 persons. 
+
+preserving each identity while keeping them in the desired regions with fewer artifacts and more coherent compositions. 
+
+4.3 Ablation Studies 
+
+Setup. Tab. 2 presents an incremental ablation on the MultiID-Bench 3–4-person subset, where we progressively add components of AnyPhoto. Variant (a) is the most basic baseline that directly uses face images as conditions, to-gether with a ROI-mask for attention. In (b), we replace this design with our location canvas representation and apply location-aligned token pruning, which better anchors each identity to its target region while discarding irrelevant canvas tokens. Building on (b), (c) further introduces identity-adaptive modula-tion to inject identity features more effectively. Variant (d) additionally adopts our training strategies, including reference-face replacement and location im-age degradations, improving robustness to appearance gaps and imperfect spa-tial cues. Finally, (e) removes the modulation module from the full method, highlighting its role in preserving identity under multi-person conditioning. 
+
+Table 2: Ablation study of AnyPhoto on MultiID-Bench 3-and-4-person subset.                                                                   
+
+> Variants Note Identity Metrics Generation Quality
+> Sim(GT) ↑Sim(Ref) ↑CP ↓CLIP-I ↑CLIP-T ↑Aes ↑
+> Base (a) 0.160 0.161 0.002 0.620 0.311 5.178
+> +location &pruning (b) 0.486 0.821 0.483 0.756 0.304 4.604
+> +modulation (c) 0.494 0.836 0.518 0.747 0.297 4.957
+> +replacement &aug. (d) 0.215 0.278 0.071 0.734 0.323 5.387
+> +Lf s (AnyPhoto) -0.424 0.587 0.186 0.763 0.326 4.960
+> −modulation (e) 0.365 0.583 0.276 0.741 0.317 5.260
+
+Meanwhile, the visual impact of each component is further illustrated by the qualitative comparisons in Fig. 5. 
+
+Analysis. We first observe that variant (a) yields low sim-ilarity to both GT and refer-ence, and it also exhibits inaccurate spatial control and fragmented compositions (e.g., Fig. 5a-top). This corroborates our earlier discussion on the limitations of 12 L. Yuan et al. + Line Art        
+
+> Cond (a) (b) (c) (d) AnyPhoto (e)
+> Fig. 5: Qualitative Ablations. The first row shows generations without a specified style, while the second row demonstrates outputs conditioned on a “Line Art” style.
+
+ROI-mask attention, which provides weak region grounding and tends to over-suppress useful context tokens. After introducing location-aligned token pruning in (b), both Sim(GT) and Sim(Ref) improve dramatically, and Fig. 5b-top shows precise location control. However, the CP score deteriorates sharply, leading to severe copy-paste behavior: when switching to a line-art prompt, the face region in Fig. 5b-bottom is largely insensitive to the target style and appears as a pasted face patch. Adding identity-adaptive modulation in (c) further amplifies this issue: similarity scores increase, but CP becomes even higher, and Fig. 5c shows more obvious pasted-face artifacts. We attribute this to the fact that (c) is trained only with the flow-matching reconstruction loss Lf m , which encourages pixel-level reconstruction; when the face condition is nearly identical to the target face, the modulation module is incentivized to emphasize reconstructing the entire input face, thus strengthening the copy-paste shortcut. To break this shortcut, (d) introduces reference-face replacement and location-canvas degradations. While these strategies effectively remove the one-to-one correspondence and keep the spatial control (Fig. 5d), the similarity scores are heavily affected, since Lf m 
+
+alone provides no explicit supervision to relate the same person under differ-ent views/illumination/degradations, making the learning problem substantially harder. Based on these findings, we incorporate the face similarity loss Lf s to form the full method. As shown in Tab. 2, similarity recovers while CP is also suppressed, and Fig. 5AnyPhoto demonstrates both faithful identity preservation and prompt-driven style changes on the face region, effectively eliminating the copy-paste artifacts. Finally, removing identity-adaptive modulation from the full method (e) leads to lower similarity and higher CP, and Fig. 5e again exhibits copy-paste tendency. This indicates that Lf s alone is insufficient; the key is that identity-adaptive modulation can receive the Lf s feedback and selectively ex-tract/amplify identity-relevant signals from conditions, which ultimately resolves copy-paste while maintaining identity. 
+
+4.4 Further Analysis 
+
+Style Diversity. Beyond photorealistic rendering, AnyPhoto supports prompt-driven stylization while maintaining both identity consistency and spatial control-lability. Fig. 6 shows that the same set of identities can be faithfully preserved under a wide range of artistic styles (e.g., watercolor, ukiyo-e, ink sketch, and pixel AnyPhoto 13         
+
+> Photoreal Film noir Watercolor Ukiyo-e Ink sketch Line art Flat vector Pixel art
+> Fig. 6: AnyPhoto is capable of generating high-quality images across diverse styles while preserving identity and enforcing accurate location control.
+
+art). Importantly, the stylization effect is applied coherently to the face region instead of being overridden by identity conditions, indicating that our design avoids the common copy-paste shortcut and enables compositional generation where identity cues and text styles jointly shape the final appearance. 
+
+Limitations/Failure Cases. Despite strong overall performance, AnyPhoto can fail under extreme conditions (Fig. 7). When target regions heavily overlap,     
+
+> Overlap +Line Art Small face Conflict
+> Fig. 7: Failure cases example of ex-treme conditioning.
+
+different identities may compete for the same spatial tokens, leading to identity mixing or local swaps. When the input face is extremely small, fine-grained facial details (e.g., eyes) be-come blurry and the synthesized head may be less compatible with the generated body due to insufficient identity evidence and weak spatial supervision at the effective token resolution. Moreover, conflicting or under-specified prompts can make the generation highly unstable—for example, providing two reference faces but asking the model to generate three people often yields uncontrollable identity assignment. Addressing these corner cases likely requires more research in future work. 
+
+5 Related Works 
+
+Identity-Preserving Image Generation aims to synthesize images that follow a text prompt while faithfully retaining the identity characteristics of a given reference subject. Early studies mainly focus on single-subject personaliza-tion [9, 17, 20, 27, 34, 37, 38, 41, 56]. A representative line is test-time tuning , where model parameters or embeddings are optimized per identity. For example, Textual Inversion [9] learns a dedicated identity token via prompt/embedding optimiza-tion, and its idea of injecting identity information in the text/embedding space inspires later works such as Face0 [38], PhotoMaker [27], and FaceStudio [55]. De-spite strong fidelity, test-time tuning is often inflexible in practice since it requires per-identity optimization and is costly when the number of identities grows. To improve flexibility, training-time tuning and tuning-free methods learn a general mapping from reference images to identity features, which can be plugged into the generator at inference. Representatively, IP-Adapter [56] encodes reference images into identity features via an image encoder and an MLP, and injects them through cross-attention. InstantID [41] further incorporates a dedicated face recognition model for identity extraction and introduces ControlNet-like control to focus identity injection on the face region. InstantCharacter [37] em-14 L. Yuan et al. 
+
+phasizes holistic subject preservation by combining global and local reference features, while InfiniteYou [20] integrates face keypoints and identity features through an InfuseNet to enhance robustness. Recently, identity-preserving gen-eration has been extended to the significantly more challenging multi-subject 
+
+setting [3,13,14,23,30,33,51,53,58,59], where multiple reference identities must be preserved simultaneously. One major direction follows identity feature extraction plus ROI-aware injection . StoryMaker [59] and WithAnyOne [53] extract identity features from references and inject them via ROI-attention to control where each identity appears. FastComposer [51] and InstantFamily [23] fuse identity features into the text stream and combine them with ROI-attention for localized control. UniPortrait [13] and AnyStory [14] further replace fixed ROI masks with learnable routing modules, allowing the model to automatically determine the spatial assignment of identities. Another line is inspired by OminiControl [35] and leverages aligned RoPE to anchor identity conditions to specific spatial to-kens [33,54]. ContextGen [54] proposes a contextual canvas (context image) where conditions are pasted onto an image-sized layout, and RoPE alignment is used to associate conditions with target regions. LayerComposer [33] builds upon this idea and introduces transparent-token cropping to better utilize spatial tokens. More recently, UMO [5] and Ar2Can [3] explore incorporating reinforcement learning objectives into multi-human generation. Our method is heavily inspired by LayerComposer [33] and XVerse [4], while differing in key designs. Compared to LayerComposer, we focus on the most identity-critical face region of the refer-ence (instead of full-body cues) and treat all reference faces symmetrically when designing RoPE alignment, rather than using asymmetric handling for different references. Additionally, we modulate condition tokens using face features so that the model can adaptively select, attend to, and amplify identity-relevant signals from the conditions, whereas XVerse modulates the text token corresponding to the identity to strengthen textual control. These differences reflect distinct design goals and lead to substantially different mechanisms for multi-identity control. 
+
+6 Conclusion 
+
+We study identity-preserving image generation with explicit location control, where existing approaches often suffer from inaccurate spatial grounding or short-cut behaviors such as copy–paste. To address these issues, we propose AnyPhoto, a simple yet effective framework built on diffusion transformers. Our key insight is to disentangle identity binding from free-form generation: we introduce identity-isolated attention to prevent identity leakage across regions, adopt location-aligned token pruning to strengthen spatial controllability, and design an id-adaptive modulation mechanism trained with a face-similarity objective to suppress copy– paste while maintaining high identity fidelity. Extensive experiments demonstrate that AnyPhoto consistently improves both quantitative metrics and visual quality, supports diverse styles under text prompts while preserving identity, and enables accurate position-controlled synthesis. We hope this work offers a practical step toward reliable multi-identity generation. AnyPhoto 15 
+
+References 
+
+1. Bai, S., Chen, K., Liu, X., Wang, J., Ge, W., Song, S., Dang, K., Wang, P., Wang, S., Tang, J., Zhong, H., Zhu, Y., Yang, M., Li, Z., Wan, J., Wang, P., Ding, W., Fu, Z., Xu, Y., Ye, J., Zhang, X., Xie, T., Cheng, Z., Zhang, H., Yang, Z., Xu, H., Lin, J.: Qwen2.5-vl technical report (2025) 20 2. Bengio, Y., Louradour, J., Collobert, R., Weston, J.: Curriculum learning. In: Proceedings of the 26th annual international conference on machine learning. pp. 41–48 (2009) 8 3. Borse, S., Pham, P., Farhadzadeh, F., Choi, S., Nguyen, P.H., Tran, A.T., Yun, S., Hayat, M., Porikli, F.: Ar2can: An architect and an artist leveraging a canvas for multi-human generation (2026) 14 4. Chen, B., Zhao, M., Sun, H., Chen, L., Wang, X., Du, K., Wu, X.: Xverse: Consistent multi-subject control of identity and semantic attributes via dit modulation. arXiv preprint arXiv:2506.21416 (2025) 1, 2, 14 5. Cheng, Y., Wu, W., Wu, S., Huang, M., Ding, F., He, Q.: Umo: Scaling multi-identity consistency for image customization via matching reward. arXiv preprint arXiv:2509.06818 (2025) 9, 14 6. Deng, J., Guo, J., Ververas, E., Kotsia, I., Zafeiriou, S.: Retinaface: Single-shot multi-level face localisation in the wild. In: CVPR (2020) 20 7. Deng, J., Guo, J., Xue, N., Zafeiriou, S.: Arcface: Additive angular margin loss for deep face recognition. In: Proceedings of the IEEE/CVF conference on computer vision and pattern recognition. pp. 4690–4699 (2019) 7, 19, 20 8. Esser, P., Kulal, S., Blattmann, A., Entezari, R., Müller, J., Saini, H., Levi, Y., Lorenz, D., Sauer, A., Boesel, F., et al.: Scaling rectified flow transformers for high-resolution image synthesis. In: Forty-first international conference on machine learning (2024) 1, 3, 4 9. Gal, R., Alaluf, Y., Atzmon, Y., Patashnik, O., Bermano, A.H., Chechik, G., Cohen-Or, D.: An image is worth one word: Personalizing text-to-image generation using textual inversion. arXiv preprint arXiv:2208.01618 (2022) 1, 13 10. Garibi, D., Yadin, S., Paiss, R., Tov, O., Zada, S., Ephrat, A., Michaeli, T., Mosseri, I., Dekel, T.: Tokenverse: Versatile multi-concept personalization in token modulation space. ACM Transactions On Graphics (TOG) 44 (4), 1–11 (2025) 2 11. Goodfellow, I.J., Pouget-Abadie, J., Mirza, M., Xu, B., Warde-Farley, D., Ozair, S., Courville, A., Bengio, Y.: Generative adversarial nets. Advances in neural information processing systems 27 (2014) 1 12. Guo, Z., Wu, Y., Zhuowei, C., Zhang, P., He, Q., et al.: Pulid: Pure and lightning id customization via contrastive alignment. Advances in neural information processing systems 37 , 36777–36804 (2024) 1, 9 13. He, J., Geng, Y., Bo, L.: Uniportrait: A unified framework for identity-preserving single-and multi-human image personalization. In: Proceedings of the IEEE/CVF International Conference on Computer Vision. pp. 14399–14408 (2025) 1, 2, 5, 9, 14 14. He, J., Tuo, Y., Chen, B., Zhong, C., Geng, Y., Bo, L.: Anystory: Towards unified single and multiple subject personalization in text-to-image generation. arXiv preprint arXiv:2501.09503 (2025) 1, 2, 5, 14 15. Ho, J., Jain, A., Abbeel, P.: Denoising diffusion probabilistic models. Neural Information Processing Systems,Neural Information Processing Systems (Jan 2020) 116. Ho, J., Salimans, T.: Classifier-free diffusion guidance. arXiv preprint arXiv:2207.12598 (2022) 9 16 L. Yuan et al. 17. Hu, E.J., Shen, Y., Wallis, P., Allen-Zhu, Z., Li, Y., Wang, S., Wang, L., Chen, W., et al.: Lora: Low-rank adaptation of large language models. Iclr 1(2), 3 (2022) 9, 13 18. Hurst, A., Lerer, A., Goucher, A.P., Perelman, A., Ramesh, A., Clark, A., Ostrow, A., Welihinda, A., Hayes, A., Radford, A., et al.: Gpt-4o system card. arXiv preprint arXiv:2410.21276 (2024) 9 19. Hyung, J., Shin, J., Choo, J.: Magicapture: High-resolution multi-concept portrait customization. In: Proceedings of the AAAI Conference on Artificial Intelligence. vol. 38, pp. 2445–2453 (2024) 1 20. Jiang, L., Yan, Q., Jia, Y., Liu, Z., Kang, H., Lu, X.: Infiniteyou: Flexible photo recrafting while preserving your identity. In: Proceedings of the IEEE/CVF In-ternational Conference on Computer Vision. pp. 10898–10907 (2025) 1, 2, 9, 13, 14 21. Jocher, G., Qiu, J.: Ultralytics yolo11 (2024) 20 22. Karras, T., Laine, S., Aila, T.: A style-based generator architecture for generative adversarial networks. In: 2019 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) (Jun 2019) 4 23. Kim, C., Lee, J., Joung, S., Kim, B., Baek, Y.M.: Instantfamily: Masked attention for zero-shot multi-id image generation. arXiv preprint arXiv:2404.19427 (2024) 1, 2, 5, 14 24. Labs, B.F.: Flux (2024) 1, 3, 4, 9, 19 25. Labs, B.F., Batifol, S., Blattmann, A., Boesel, F., Consul, S., Diagne, C., Dock-horn, T., English, J., English, Z., Esser, P., et al.: Flux. 1 kontext: Flow match-ing for in-context image generation and editing in latent space. arXiv preprint arXiv:2506.15742 (2025) 9 26. Li, W., Li, H., Peng, Y., Wu, S., Zhang, Y., Sun, X.: Create anything anywhere: Layout-controllable personalized diffusion model for multiple subjects. In: 2025 IEEE International Conference on Multimedia and Expo (ICME). pp. 1–6. IEEE (2025) 2, 5 27. Li, Z., Cao, M., Wang, X., Qi, Z., Cheng, M.M., Shan, Y.: Photomaker: Customizing realistic human photos via stacked id embedding. In: Proceedings of the IEEE/CVF conference on computer vision and pattern recognition. pp. 8640–8650 (2024) 1, 13 28. Lipman, Y., Chen, R.T., Ben-Hamu, H., Nickel, M., Le, M.: Flow matching for generative modeling. arXiv preprint arXiv:2210.02747 (2022) 3 29. Liu, X., Gong, C., Liu, Q.: Flow straight and fast: Learning to generate and transfer data with rectified flow. arXiv preprint arXiv:2209.03003 (2022) 4 30. Mou, C., Wu, Y., Wu, W., Guo, Z., Zhang, P., Cheng, Y., Luo, Y., Ding, F., Zhang, S., Li, X., et al.: Dreamo: A unified framework for image customization. In: Proceedings of the SIGGRAPH Asia 2025 Conference Papers. pp. 1–12 (2025) 1, 9, 14 31. Papantoniou, F.P., Lattas, A., Moschoglou, S., Deng, J., Kainz, B., Zafeiriou, S.: Arc2face: A foundation model for id-consistent human faces. In: European Conference on Computer Vision. pp. 241–261. Springer (2024) 1 32. Peebles, W., Xie, S.: Scalable diffusion models with transformers. In: Proceedings of the IEEE/CVF international conference on computer vision. pp. 4195–4205 (2023) 133. Qian, G.G., Zhang, R., Chen, T.S., Dalva, Y., Goyal, A.A., Menapace, W., Sko-rokhodov, I., Dong, M., Sahni, A., Ostashev, D., et al.: Layercomposer: Multi-human personalized generation via layered canvas. arXiv preprint arXiv:2510.20820 (2025) 1, 2, 14 AnyPhoto 17 34. Ruiz, N., Li, Y., Jampani, V., Pritch, Y., Rubinstein, M., Aberman, K.: Dream-booth: Fine tuning text-to-image diffusion models for subject-driven generation. In: Proceedings of the IEEE/CVF conference on computer vision and pattern recognition. pp. 22500–22510 (2023) 1, 13 35. Tan, Z., Liu, S., Yang, X., Xue, Q., Wang, X.: Ominicontrol: Minimal and universal control for diffusion transformer. In: Proceedings of the IEEE/CVF International Conference on Computer Vision. pp. 14940–14950 (2025) 2, 5, 14 36. Tan, Z., Xue, Q., Yang, X., Liu, S., Wang, X.: Ominicontrol2: Efficient conditioning for diffusion transformers. arXiv preprint arXiv:2503.08280 (2025) 2, 5 37. Tao, J., Zhang, Y., Wang, Q., Cheng, Y., Wang, H., Bai, X., Zhou, Z., Li, R., Wang, L., Wang, C., et al.: Instantcharacter: Personalize any characters with a scalable diffusion transformer framework. arXiv preprint arXiv:2504.12395 (2025) 13 38. Valevski, D., Lumen, D., Matias, Y., Leviathan, Y.: Face0: Instantaneously con-ditioning a text-to-image model on a face. In: SIGGRAPH Asia 2023 Conference Papers. pp. 1–10 (2023) 1, 2, 13 39. van der Walt, S., Schönberger, J.L., Nunez-Iglesias, J., Boulogne, F., Warner, J.D., Yager, N., Gouillart, E., Yu, T.: scikit-image: image processing in python. PeerJ 2,e453 (Jun 2014) 21 40. Wang, Q., Jia, X., Li, X., Li, T., Ma, L., Zhuge, Y., Lu, H.: Stableidentity: Inserting anybody into anywhere at first sight. IEEE Transactions on Multimedia (2025) 1 41. Wang, Q., Bai, X., Wang, H., Qin, Z., Chen, A., Li, H., Tang, X., Hu, Y.: Instantid: Zero-shot identity-preserving generation in seconds. arXiv preprint arXiv:2401.07519 (2024) 1, 2, 9, 13 42. Wang, X., Fu, S., Huang, Q., He, W., Jiang, H.: Ms-diffusion: Multi-subject zero-shot image personalization with layout guidance. arXiv preprint arXiv:2406.07209 (2024) 2, 5 43. Wang, X., Darrell, T., Rambhatla, S.S., Girdhar, R., Misra, I.: Instancediffusion: Instance-level control for image generation. In: Proceedings of the IEEE/CVF conference on computer vision and pattern recognition. pp. 6232–6242 (2024) 2, 5 44. Wang, Y., Zhang, W., Zheng, J., Jin, C.: High-fidelity person-centric subject-to-image synthesis. In: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition. pp. 7675–7684 (2024) 1 45. Wu, C., Li, J., Zhou, J., Lin, J., Gao, K., Yan, K., Yin, S.m., Bai, S., Xu, X., Chen, Y., et al.: Qwen-image technical report. arXiv preprint arXiv:2508.02324 (2025) 9 46. Wu, C., Zheng, P., Yan, R., Xiao, S., Luo, X., Wang, Y., Li, W., Jiang, X., Liu, Y., Zhou, J., et al.: Omnigen2: Exploration to advanced multimodal generation. arXiv preprint arXiv:2506.18871 (2025) 9 47. Wu, S., Huang, M., Cheng, Y., Wu, W., Tian, J., Luo, Y., Ding, F., He, Q.: Uso: Unified style and subject-driven generation via disentangled and reward learning. arXiv preprint arXiv:2508.18966 (2025) 9 48. Wu, S., Huang, M., Wu, W., Cheng, Y., Ding, F., He, Q.: Less-to-more generalization: Unlocking more controllability by in-context generation. In: Proceedings of the IEEE/CVF International Conference on Computer Vision. pp. 18682–18692 (2025) 949. Wu, Y., Li, Z., Zheng, H., Wang, C., Li, B.: Infinite-id: Identity-preserved per-sonalization via id-semantics decoupling paradigm. In: European Conference on Computer Vision. pp. 279–296. Springer (2024) 1, 2 50. Wu, Y., Zhou, X., Ma, B., Su, X., Ma, K., Wang, X.: Ifadapter: Instance feature control for grounded text-to-image generation. In: Proceedings of the IEEE/CVF International Conference on Computer Vision. pp. 15949–15959 (2025) 2, 5 18 L. Yuan et al. 51. Xiao, G., Yin, T., Freeman, W.T., Durand, F., Han, S.: Fastcomposer: Tuning-free multi-subject image generation with localized attention. International Journal of Computer Vision 133 (3), 1175–1194 (2025) 1, 2, 5, 14 52. Xiao, S., Wang, Y., Zhou, J., Yuan, H., Xing, X., Yan, R., Li, C., Wang, S., Huang, T., Liu, Z.: Omnigen: Unified image generation. In: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition. pp. 13294–13304 (2025) 953. Xu, H., Cheng, W., Xing, P., Fang, Y., Wu, S., Wang, R., Zeng, X., Jiang, D., Yu, G., Ma, X., et al.: Withanyone: Towards controllable and id consistent image generation. arXiv preprint arXiv:2510.14975 (2025) 1, 2, 9, 14, 20, 22 54. Xu, R., Zhou, D., Ma, F., Yang, Y.: Contextgen: Contextual layout anchoring for identity-consistent multi-instance generation. arXiv preprint arXiv:2510.11000 (2025) 1, 2, 14 55. Yan, Y., Zhang, C., Wang, R., Zhou, Y., Zhang, G., Cheng, P., Yu, G., Fu, B.: Facestudio: Put your face everywhere in seconds. arXiv preprint arXiv:2312.02663 (2023) 1, 2, 13 56. Ye, H., Zhang, J., Liu, S., Han, X., Yang, W.: Ip-adapter: Text compatible image prompt adapter for text-to-image diffusion models. arXiv preprint arXiv:2308.06721 (2023) 1, 13 57. Zhang, H., Duan, Z., Wang, X., Chen, Y., Zhang, Y.: Eligen: Entity-level con-trolled image generation with regional attention. In: Proceedings of the 7th ACM International Conference on Multimedia in Asia. pp. 1–7 (2025) 2, 5 58. Zhang, Y., Zhi, T., Liu, J., Sang, S., Jiang, L., Yan, Q., Liu, S., Luo, L.: Id-patch: Robust id association for group photo personalization. In: Proceedings of the Computer Vision and Pattern Recognition Conference. pp. 2986–2996 (2025) 1, 9, 14 59. Zhou, Z., Li, J., Li, H., Chen, N., Tang, X.: Storymaker: Towards holistic consistent characters in text-to-image generation. arXiv preprint arXiv:2409.12576 (2024) 1, 2, 5, 14 AnyPhoto 19 
+
+A Implementation Details 
+
+To facilitate reproducibility, we provide additional implementation details and hyperparameters that complement the main text. 
+
+A.1 Learnable Modules 
+
+We build AnyPhoto upon a frozen FLUX.1-[dev] backbone and only introduce lightweight learnable components: (i) LoRA adapters attached to the image branch to handle the newly introduced location-reference tokens, and (ii) a small MLP that projects a face-recognition embedding into an identity modulation offset for AdaLN-style conditioning. 
+
+LoRA. We use FLUX.1-[dev] [24] as the base model. To accommodate the newly introduced location-reference tokens (i.e., VAE tokens encoded from the location canvas), we attach LoRA adapters (rank r=128 ) to the linear layers along the same forward path used by the noised latent tokens. The target modules are selected by the following regex-based matching rules:                   
+
+> 1regex_pattern =(
+> 2r " .* x_embedder | "
+> 3r " .*(? <! single_ ) transformer_blocks \.[0 -9]+\. norm1 \. linear | "
+> 4r " .*(? <! single_ ) transformer_blocks \.[0 -9]+\. attn \. to_k | "
+> 5r " .*(? <! single_ ) transformer_blocks \.[0 -9]+\. attn \. to_q | "
+> 6r " .*(? <! single_ ) transformer_blocks \.[0 -9]+\. attn \. to_v | "
+> 7r " .*(? <! single_ ) transformer_blocks \.[0 -9]+\. attn \. to_out \.0| "
+> 8r " .*(? <! single_ ) transformer_blocks \.[0 -9]+\. ff \. net \.2| "
+> 9r " .* single _trans former _block s \.[0 -9]+\. norm \. linear | "
+> 10 r " .* single_ transf ormer_ blocks \.[0 -9]+\. proj_mlp | "
+> 11 r " .* single_ transf ormer_ blocks \.[0 -9]+\. proj_out | "
+> 12 r " .* single_ transf ormer_ blocks \.[0 -9]+\. attn \. to_k | "
+> 13 r " .* single_ transf ormer_ blocks \.[0 -9]+\. attn \. to_q | "
+> 14 r " .* single_ transf ormer_ blocks \.[0 -9]+\. attn \. to_v | "
+> 15 r " .* single_ transf ormer_ blocks \.[0 -9]+\. attn \. to_out "
+> 16 )
+
+To avoid degrading the original generation capability, LoRA is enabled only 
+
+when processing the location-reference tokens; it is disabled for the noised latent tokens. 
+
+Face Embedding Projector. As described in Section 3.3, we extract an identity embedding eri for each reference face ri using a pretrained face recognition model (e.g., ArcFace [7]). We map eri to an additive modulation offset ∆Fi via a lightweight MLP and inject identity through the modulation pathway by using 
+
+yi = y + ∆Fi only for tokens originating from the corresponding identity branch 
+
+Fi, where y is the original global conditioning vector from timestep and text. Concretely, the projector is a 2-layer MLP with the structure Linear → GELU 
+
+→ Linear , whose output dimension matches the DiT conditioning dimension (the same dimensionality as y). This design keeps the identity pathway lightweight while providing a persistent per-block identity bias through AdaLN-style modu-lation. 
+
+A.2 Data Processing 
+
+Pre-processing. Our data preprocessing pipeline contains four stages. (1) 
+
+Instance segmentation for human detection. Given an input image, we 20 L. Yuan et al. 
+
+first detect each person instance using a YOLO11x [21] model, producing person masks (or bounding boxes) to localize individual subjects. (2) Face detection and facial geometry. For each detected person instance, we run face detection using insightface (antelopev2 method) [6]. We extract (i) the face bounding box and (ii) five facial landmarks following the ArcFace 5-point protocol [7]. We use the bounding box in the following matching step and the landmarks as the face location li for training-time processing. (3) Reference matching. To assign each detected face to a known identity from MultiID-2M [53], we compute a weighted matching score that combines face-box IoU and face-embedding similarity, and perform greedy matching to obtain the reference identity mapping ( id-name )for each face. (4) Image annotation. Finally, we use Qwen-2.5-VL-72B [1] to generate textual annotations for each image. The prompt for Qwen-2.5-VL-72B is as follows:                                                                                                                                                                        
+
+> 1" " "
+> 2Generate avivid , natural scene description as if you ’ re directly observing it .
+> 3Avoid phrases like " this picture " or " in this image " or " this scene " or " the content of " . Instead , immerse the reader in the scene by :
+> 4-Focusing on subjects and their attributes ( clothing , appearance , actions and so on )
+> 5-Capturing meaningful spatial relationships
+> 6-Maintaining aflowing narrative style
+> 7-Environment and setting details
+> 8-Use present continuous tense for actions
+> 9-Be descriptive but concise
+> 10 Example one : " A young couple is embracing near awaterfront , with the woman resting her head on the man ’s shoulder as they watch the sunset ."
+> 11 Example two : " A group of friends is picnicking on agrassy lawn , with two women laughing as aman pours drinks from athermos , while children play with afrisbee in the background ."
+> 12 Example three : " A young woman in afloral dress is smiling while holding abouquet of flowers in asunlit garden ."
+> 13 The goal is to describe vividly and directly with descriptive and concise language .
+> 14 """
+
+Training Data Pipeline. During training, we apply the following pipeline to construct paired supervision for identity injection and location conditioning. (1) 
+
+Norm-cropped face extraction. For each detected face location li (ArcFace 5-point landmarks), we extract a normalized face crop ri (norm-crop ). (2) Refer-ence face replacement. Based on the matched id-name from the pre-processing stage, we load the corresponding reference face ˜ri from the reference set and, with probability p, replace ri by ˜ri. We adopt a curriculum schedule where p
+
+is increased from 0 to 0.5 following [0 .0, 0.05 , 0.1, 0.2, 0.3, 0.4, 0.5] at milestone steps [10k , 20k , 30k , 40k , 50k , 60k] . (3) Square-preserving image crop. We apply a square crop to fit the training resolution, while ensuring that all faces of interest remain inside the cropped region. (4) Location canvas construction with face degradations. We construct the location canvas used to produce location-reference tokens, and randomly apply degradations to each face region on the canvas to simulate imperfect references, including ColorJitter, Grayscale, Blur, Sharpness, Autocontrast, horizontal flip, salt-and-pepper noise, Gaussian noise, occlusion, illumination changes, JPEG artifacts, resolution degradation, and face aging. 
+
+A.3 Location Canvas Construction 
+
+We construct a location canvas by pasting a (possibly degraded) norm-cropped face patch onto a blank image-sized canvas at a location determined by facial AnyPhoto 21 
+
+landmarks. The resulting canvas is then encoded by the VAE to obtain the location-reference tokens. 
+
+Notation. Let I ∈ RH×W ×3 be the (square-cropped) training image and L ∈
+
+RH×W ×3 be an initially blank white canvas (all pixels set to 255 in RGB space). For each face i, we have a face patch fi (canonical size 112 × 112 ), its 5-point landmarks in the patch coordinate system Ksrc  
+
+> i
+
+∈ R5×2, and the corresponding 5-point landmarks in the image/crop coordinate system Kdst  
+
+> i
+
+∈ R5×2 (ArcFace protocol). We also maintain an alpha map ai ∈ [0 , 255] 112 ×112 ; if not provided, we use a fully opaque alpha. 
+
+Scale estimation (SimilarityTransform). We estimate a similarity transform between landmarks using SimilarityTransform [39]. Let the estimated affine parameters be 
+
+T =
+
+A t 
+
+0 1 
+
+
+
+, A ∈ R2×2, t ∈ R2, (26) where for a true similarity transform, A = sR with scale s and rotation R. In implementation, the scale is computed from the linear part as 
+
+ˆs = p|det( A)|. (27) Due to the argument ordering of the estimation call, we use the reciprocal to obtain the patch-to-image scale and clamp it to a reasonable range: 
+
+si = clip 
+
+ 1ˆs , 0.2, 5.0
+
+
+
+. (28) We then resize the face patch and alpha map to (112 si) × (112 si) (alpha uses nearest-neighbor resizing). 
+
+Translation by mean landmark residual. After scaling the source landmarks by si, we compute a translation offset as the mean residual over the 5 landmarks: 
+
+∆i = 15
+
+> 5
+
+X
+
+> j=1
+
+ Kdst  
+
+> i,j
+
+− siKsrc 
+
+> i,j
+
+ ∈ R2. (29) In practice we use integer offsets (⌊∆i,x ⌋, ⌊∆i,y ⌋) as the paste position on the image-sized canvas. 
+
+Alpha compositing and binary mask. We maintain a global mask M ∈{0, 1}H×W initialized as zeros. For each face, we paste the resized alpha map into M at the computed offset and binarize it: 
+
+M (x, y ) ← IM (x, y ) > 0, (30) which matches the implementation that thresholds the pasted alpha to obtain a binary location mask. Finally, we paste the resized face patch onto the canvas using alpha blending (PIL alpha compositing), i.e., pixels covered by higher alpha overwrite more strongly. The output of this stage is the location canvas L and its mask M .22 L. Yuan et al. 
+
+Remarks. If the pasted region exceeds image boundaries, the paste operation is automatically clipped by the image library. The face-region degradations described in the training pipeline are applied on fi (and/or ai) before pasting, so that the location reference remains robust to imperfect observations. 
+
+A.4 Metrics 
+
+Overview. We evaluate on MultiID-Bench [53], a unified benchmark for group-photo (multi-ID) generation with rare long-tail identities that do not overlap with training data. Each test case contains a ground-truth (GT) image with 1–4 people, the corresponding 1–4 reference images as inputs, and a prompt describing the GT. We report both identity fidelity and generation quality .
+
+Face embedding and cosine similarity. For each identity i in a test case, we compute face embeddings for the reference, GT, and generated faces, denoted as ri, ti, gi, respectively. We define the similarity between two embeddings by cosine similarity 
+
+Sim( a, b) = a⊤b
+
+∥a∥ ∥ b∥ . (31) We then define 
+
+Sim(Ref) = Sim( ri, gi), Sim(GT) = Sim( ti, gi). (32) While many prior works mainly report Sim Ref , it can inadvertently favor trivial copy-paste—directly replicating the reference maximizes the score even when the prompt implies changes in pose, expression, or viewpoint. Therefore, we use 
+
+Sim GT as the primary identity metric and additionally report Sim Ref to quantify reference consistency. 
+
+Copy-paste tendency (CP). To explicitly measure whether a method collapses to directly pasting the reference appearance, we compute the angular distance on the unit sphere, 
+
+θab = arccos  Sim( a, b). (33) The copy-paste metric is defined as 
+
+CP( gi | ti, ri) = θgiti − θgiri
+
+max( θtiri , ε ) , (34) where ε is a small constant for numerical stability. A larger CP indicates that the generated identity is biased toward the reference (copy-paste), while a smaller (more negative) CP indicates closer agreement with the GT identity. 
+
+Prompt fidelity and aesthetics. We further report generation quality using standard metrics: CLIP text alignment (CLIP-T) between the generated image and the prompt, CLIP image alignment (CLIP-I) between the generated image and the GT image, and an off-the-shelf aesthetic score (Aes). AnyPhoto 23 
+
+Table A: Effect of Identity-Isolated Attention.                          
+
+> Variants Identity Metrics Generation Quality
+> Sim(GT) ↑Sim(Ref) ↑CP ↓CLIP-I ↑CLIP-T ↑Aes ↑
+> All visible 0.353 0.414 0.113 0.746 0.302 4.764 Identity-Isolated (AnyPhoto) 0.424 0.587 0.186 0.763 0.326 4.960
+
+B Further Experiments 
+
+Effect of Identity-Isolated Attention. We ablate the proposed star-topology attention mask by allowing all identity branches to attend to each other ( All visible ), which can introduce cross-identity interference when multiple reference faces co-exist in the same sequence. As shown in Table A, Identity-Isolated Attention substantially improves identity fidelity and overall quality: Sim(GT) increases from 0.353 to 0.424 (+0.071) and Sim(Ref) from 0.414 to 0.587 (+0.173), accompanied by higher CLIP-I (0.746 →0.763), CLIP-T (0.302 →0.326), and aesthetics (4.764 →4.960). Although CP becomes larger (0.113 →0.186), indicating a stronger pull toward the reference, the simultaneous gain in Sim(GT) suggests that isolating identity branches primarily mitigates identity leakage/blending and stabilizes multi-person composition rather than merely encouraging trivial copy-paste. 
+
+Table B: Effect of curriculum reference face replacement.                            
+
+> Variants Identity Metrics Generation Quality
+> Sim(GT) ↑Sim(Ref) ↑CP ↓CLIP-I ↑CLIP-T ↑Aes ↑
+> Fixed p= 0 .50.403 0.529 0.141 0.762 0.316 4.871 Curriculum (AnyPhoto) 0.424 0.587 0.186 0.763 0.326 4.960
+
+Effect of Curriculum Reference Face Replacement. We compare using a fixed reference-face replacement probability ( p=0.5 throughout training) with our curriculum that gradually increases p (see the training pipeline in Appendix A.3). As shown in Table B, the curriculum yields consistently better identity fidelity and overall generation quality: it improves Sim(GT) from 0.403 to 0.424 (+0.021) and Sim(Ref) from 0.529 to 0.587 (+0.058), and also increases CLIP-T (0.316 →0.326) and aesthetics (4.871 →4.960). We observe a mild increase in CP (0.141 →0.186), suggesting a slightly stronger reference bias; nevertheless, the higher Sim(GT) indicates that the curriculum better balances leveraging reference identities while still matching the ground-truth identity implied by the prompt. 
+
+Sensitivity to Trade-off hyperparameter λ. We analyze the sensitivity to the trade-off weight λ in the training objective L = Lf m + λ Lf s (Section 3.5). As shown in Fig. A (left), very small λ provides insufficient identity-related supervision, resulting in reduced identity fidelity. Increasing λ strengthens identity consistency and improves identity metrics, with the best overall trade-off achieved at a moderate value. Meanwhile, the copy-paste tendency generally increases with 24 L. Yuan et al.              
+
+> −∞ −3−2−101
+> 0
+> 0.2
+> 0.4
+> 0.6
+> Trade-off hyperparameter log( λ)
+> Metric Score sim(GT) sim(Ref) CP
+> 32 128 256
+> LoRA Rank r
+> Fig. A: Sensitivity to the trade-off hyperparameter λand LoRA Rank r.
+
+larger λ, but remains tolerable (CP < 0.2) and does not exhibit a pronounced copy-paste effect. When λ becomes too large, the model is over-regularized and performance deteriorates, suggesting that overly emphasizing Lf s can hinder faithful generation. Unless otherwise specified, we set λ = 0 .1 in all experiments. 
+
+Sensitivity to LoRA Rank r. As shown in Fig. A (right), varying the LoRA rank r yields a clear capacity–generalization trade-off. With a small rank ( r=32 ), the adapter capacity is insufficient to model the newly introduced location-reference conditioning pathway, leading to underfitting and consistently weaker identity fidelity and overall generation quality. Increasing r improves adaptation and stabilizes training, but overly large ranks ( r=256 ) introduce excessive capacity relative to our training data scale, making the model prone to overfitting and thus hurting generalization at evaluation time. Overall, a moderate rank provides the best balance; unless otherwise specified, we use r=128 in all experiments. 
+
+C Qualitative Results AnyPhoto 25 AnyPhoto 
+
+Fig. B: Additional qualitative results of AnyPhoto. Across diverse scenes and 1–4 identity conditions, AnyPhoto preserves each identity while enforcing accurate location control, producing coherent compositions with fewer copy-paste artifacts.

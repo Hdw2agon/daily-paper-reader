@@ -1,0 +1,845 @@
+Title: Improving Image-to-Image Translation via a Rectified Flow Reformulation
+
+URL Source: https://arxiv.org/pdf/2603.20186v1
+
+Published Time: Mon, 23 Mar 2026 01:16:41 GMT
+
+Number of Pages: 38
+
+Markdown Content:
+# Improving Image-to-Image Translation via a Rectified Flow Reformulation 
+
+Satoshi Iizuka ⋆, Shun Okamoto ⋆, and Kazuhiro Fukui 
+
+University of Tsukuba 
+
+Abstract. In this work, we propose Image-to-Image Rectified Flow Re-formulation (I2I-RFR) , a practical plug-in reformulation that recasts standard I2I regression networks as continuous-time transport models. While pixel-wise I2I regression is simple, stable, and easy to adapt across tasks, it often over-smooths ill-posed and multimodal targets, whereas generative alternatives often require additional components, task-specific tuning, and more complex training and inference pipelines. Our method augments the backbone input by channel-wise concatenation with a noise-corrupted version of the ground-truth target and optimizes a simple t-reweighted pixel loss. This objective admits a rectified-flow interpretation via an induced velocity field, enabling ODE-based progressive refinement at inference time while largely preserving the standard supervised train-ing pipeline. In most cases, adopting I2I-RFR requires only expanding the input channels, and inference can be performed with a few explicit solver steps (e.g., 3 steps) without distillation. Extensive experiments across multiple image-to-image translation and video restoration tasks show that I2I-RFR generally improves performance across a wide range of tasks and backbones, with particularly clear gains in perceptual qual-ity and detail preservation. Overall, I2I-RFR provides a lightweight way to incorporate continuous-time refinement into conventional I2I models without requiring a heavy generative pipeline. 
+
+## 1 Introduction 
+
+Image-to-Image (I2I) translation is a fundamental problem in computer vision, spanning image super-resolution, restoration, low-light enhancement, and many others. A dominant I2I paradigm is formulated as regression: given an input image x, a neural network predicts the target image y and is trained with pixel-wise losses such as ℓ1 or mean squared error (MSE). This formulation is stable and practical, and a rich set of architectural advances, including U-Nets [39], residual designs [12], attention modules [49, 51], and multi-scale processing [26], has been accumulated and successfully deployed in real applications. However, many I2I problems are intrinsically ill-posed: severe degradations, missing re-gions, or strong information loss often make the conditional distribution p(y | x)
+
+multimodal. In such cases, pixel-wise regression tends to collapse toward a single  
+
+> ⋆
+
+These authors contributed equally to this work.                 
+
+> arXiv:2603.20186v1 [cs.CV] 20 Mar 2026 2Iizuka et al. Low-Light Blur Enhancement Underwater Enhancement
+> Input ℓ1Regression ℓ1RFR Input ℓ1Regression ℓ1RFR
+> Fig. 1: Comparison between conventional ℓ1regression and our ℓ1Rectified Flow Re-formulation (RFR). Both use the same image-to-image network; the only difference is the number of input channels. RFR reduces regression artifacts and improves percep-tual fidelity.
+
+point estimate (e.g., the conditional mean or median), often yielding perceptually suboptimal outputs such as detail loss and task-dependent artifacts, as shown in Fig. 1. A widely used remedy is adversarial training, introduced with Generative Adversarial Networks (GANs) [11], where a discriminator encourages outputs that look realistic. Although adversarial training is effective in many scenarios, adversarial objectives introduce additional discriminator networks and hyperpa-rameters that are sensitive to the balance between the generator and discrimi-nator, and may lead to training instability or artifacts, making it expensive to deploy and tune for each task. Diffusion models and related probabilistic generative models have recently achieved impressive image quality [13] and have also been extended to condi-tional generation for I2I tasks, including super-resolution [41], general image-to-image translation [40], and inpainting [29]. Although these models are well-suited to multimodal targets, they also bring diffusion-based training and inference pipelines that differ substantially from standard I2I regression. In particular, diffusion pipelines typically rely on specific parameterizations and conditioning mechanisms, noise schedules, and iterative sampling with tens to hundreds of denoising steps [13, 44]. When applied to task-specific I2I settings, this often in-creases implementation complexity and training cost, and can limit the extent to which established I2I architectures and loss designs can be reused. Latent diffusion [38] further requires an encoder–decoder, e.g., a variational autoen-coder [18], to define and learn a latent space, and relying on large pretrained models can restrict architectural flexibility and raise domain-gap concerns. As a result, there remains a practical gap between (i) standard regression-based I2I models that are easy to train and customize, and (ii) generative frameworks that better handle multimodality but require substantial additional design and computational overhead. In this paper, we address this gap by reformulating supervised I2I regression through the lens of Rectified Flow (RF), a continuous-time transport framework that learns a velocity field and generates samples by solving an ordinary differ-ential equation (ODE) [27, 28]. RF offers an appealing alternative to diffusion: it retains a principled transport view while making the sampling dynamics ex-plicit as an ODE, naturally supporting the use of off-the-shelf ODE solvers and flexible speed–quality trade-offs. Existing RF formulations have primarily been studied for unconditional generation or broad conditional generation (e.g., text-Improving Image-to-Image Translation via a Rectified Flow Reformulation 3
+
+to-image) [9], where models typically rely on generic time-conditioned backbones for synthesis, rather than exploiting the rich body of task-specific I2I architec-tures and modules. For many I2I tasks, however, strong performance is often driven by task-specialized architectural priors. For example, in low-light image restoration, DarkIR [10] uses an asymmetric encoder–decoder that combines Fourier-domain processing for enhancement with dilated spatial attention for deblurring, achieving strong results on low-light deblurring benchmarks. This motivates the following question: can we obtain the benefits of continuous-time transport models—in particular, progressive refinement and reduced averaging artifacts—without abandoning the simplicity, stability, and strong inductive bi-ases of existing I2I regressors? 
+
+We answer this question with Image-to-Image Rectified Flow Reformulation 
+
+(I2I-RFR), a plug-in training and inference scheme that recasts a wide range of standard I2I networks within an RF-inspired continuous-time formulation while preserving their regression-oriented design. Given an input image x and a ground-truth image y, we construct a noisy mixture yt = (1 − t)y + tε with 
+
+ε ∼ N (0 , I ) and t ∈ (0 , 1] , and feed the concatenation [x; yt] to an existing I2I backbone. The network is trained to reconstruct y from [x; yt] with a t-reweighted pixel-wise loss such as ℓ1, preserving the spirit of standard pixel-wise learning while admitting an RF interpretation via an induced velocity field. In most cases, adopting I2I-RFR requires only expanding the input channels from 
+
+Cx to Cx + Cy (often 2C), allowing existing backbones and training recipes to be reused with minimal changes. This yields a practical connection between supervised regression and continuous-time transport, without redesigning the backbone as a generic velocity or noise predictor. At inference time, we solve the corresponding ODE to progressively refine the prediction. Because x provides informative spatial cues, the state yt acts as a refinement variable rather than a fully unconstrained generative latent, and we find that a small number of explicit Euler steps already yields strong performance in practice. Moreover, since the concatenated input [x; yt] implicitly carries information about the corruption level, we observe that explicit time embeddings, which are common in diffusion and RF models [13, 28], are not necessary in our formulation under the evaluated settings. To improve training efficiency, we sample t non-uniformly using inverse-CDF Beta sampling, which places slightly more mass on the high-noise regime ( t ≈ 1). In our experiments, this serves as a simple and effective default. I2I-RFR is designed to be practical: it does not require adding a GAN dis-criminator, redesigning the backbone for velocity or noise prediction, introducing a latent autoencoder, or relying on large pretrained models. Instead, it builds directly on the accumulated engineering and architectural knowledge of super-vised I2I models and equips them with few-step ODE-based refinement. We vali-date I2I-RFR across multiple I2I tasks, where it generally improves performance over strong regression baselines. Because the reformulation is broadly applicable across architectures, it can also be extended to video-to-video translation models in the same manner, yielding gains on video restoration tasks. 4 Iizuka et al. 
+
+## 2 Related Work 
+
+2.1 Supervised Image-to-Image Translation 
+
+Many computer vision problems can be cast as image-to-image (I2I) transla-tion, including super-resolution [8, 24], image restoration [5, 31], low-light en-hancement [10, 57], underwater image enhancement [47, 55], and video restora-tion [17, 30]. A large body of work in these areas has been developed under paired supervision and relies on regression-style training with pixel-level objec-tives. This setting has produced a rich ecosystem of backbone architectures and modules tailored to different degradations and application domains. Classic encoder–decoder designs such as U-Net [39] and residual learning [12] remain widely used building blocks, while recent task-oriented backbones achieve strong performance through specialized attention, multi-scale processing, and frequency-domain priors. For example, SwinIR [24] targets image super-resolution with Transformer components, and Restormer [54] develops an efficient atten-tion architecture for general-purpose image restoration. In domain-specific set-tings, task-specialized designs can be particularly important; LEDNet [57] and DarkIR [10] are representative examples for low-light enhancement and low-light deblurring. These supervised I2I architectures constitute valuable engineering as-sets, motivating approaches that can improve perceptual quality while preserving the standard regression interface and enabling direct reuse of existing backbones. 
+
+2.2 Perceptual and Adversarial Objectives 
+
+To enhance perceptual fidelity, prior work frequently augments pixel losses with feature-space objectives. Perceptual losses compare deep features extracted from pretrained recognition networks such as VGG [43], and have been popularized for image translation tasks, including style transfer and super-resolution [16]. While effective, perceptual losses often only partially mitigate multimodality and may be insufficient under severe degradations or strong information loss. They also increase training cost due to feature extraction and require task-dependent choices of the feature network, layers, and loss weights. Another widely used approach is adversarial training. GANs [11] introduce a discriminator to encourage outputs that match the target distribution, and con-ditional GAN formulations have been applied to I2I translation [15]. GAN-based super-resolution, exemplified by SRGAN [20], can improve realism and recover high-frequency details. However, adversarial objectives add extra networks and hyperparameters, and can be sensitive to the generator–discriminator balance, potentially leading to instability or artifacts and increasing engineering overhead when adapting to new tasks or backbones. In contrast to prior approaches that mainly improve regression outputs through additional loss terms, our work reformulates the supervised I2I pipeline itself into a few-step continuous-time refinement procedure. Importantly, the core formula-tion works with a standard pixel loss alone, yet remains compatible with existing task-specific composite loss designs. Improving Image-to-Image Translation via a Rectified Flow Reformulation 5
+
+2.3 Diffusion Models for Conditional I2I Translation 
+
+Diffusion models provide a probabilistic alternative for multimodal conditional targets. DDPM [13] trains a denoiser across noise levels, and DDIM [44] enables faster sampling via deterministic trajectories. Conditional diffusion models have been adapted to I2I tasks, including super-resolution (SR3) [41] and general I2I translation (Palette) [40]. These approaches often yield strong perceptual qual-ity, but they typically rely on diffusion-specific pipelines, such as noise schedules, specialized conditioning, and iterative sampling with many denoising steps. La-tent diffusion further introduces an encoder–decoder, often a VAE [18], to define and learn a latent space [38], adding extra components and potentially con-straining architectural flexibility. Distillation-based acceleration can reduce step counts, but usually requires an additional training stage and careful tuning [42]. Overall, diffusion-based I2I methods can be powerful, yet their pipeline complex-ity and multi-step inference can make drop-in reuse of task-specialized regression backbones less straightforward and can be costly for large backbones, interactive applications, and video processing. 
+
+2.4 Rectified Flow 
+
+Rectified Flow [28] is closely related to Flow Matching [27] and learns a time-dependent velocity field that transports samples between two endpoint distri-butions. Let x0 ∼ π0 and x1 ∼ π1 denote samples drawn from the source and target distributions, respectively. Following [28], the linear interpolation path is given by 
+
+xt = (1 − t)x0 + tx 1, t ∈ [0 , 1] . (1) The velocity field is parameterized by a neural network vθ (xt, t ) and trained by minimizing 
+
+min  
+
+> θ
+
+E ∥(x1 − x0) − vθ (xt, t )∥ , (2) where the expectation is taken over empirical draws of (x0, x 1) and the sampling of t. For conditional generation, the same formulation applies by conditioning the velocity field on an external signal c and using vθ (xt, c, t ), as in recent rectified-flow models for text-to-image generation [9]. After training, samples are gener-ated by solving the ODE dx t = vθ (xt, c, t ) dt , which transports π0 to π1, or vice versa via time reversal. Most existing rectified-flow formulations are developed for unconditional or weakly conditioned synthesis (e.g., text-to-image) [9]. They rely on generic time-conditioned backbones and operate in settings where the evolving state is treated as a general generative latent. In contrast, our setting is paired image-to-image translation with pixel-aligned conditioning. I2I-RFR introduces a supervised I2I reformulation that preserves regression backbones and interprets the ODE state as a refinement variable guided by the input image, rather than as an uncon-strained generative latent. 6 Iizuka et al. 
+
+## 3 Proposed Method 
+
+We propose Image-to-Image Rectified Flow Reformulation (I2I-RFR), a practi-cal plug-in reformulation that places standard supervised I2I regression within a rectified-flow-inspired continuous-time refinement framework, without redesign-ing the backbone architecture. The core idea is to realize rectified-flow transport using a conventional image regression network fed with a pair consisting of the conditioning input and a noise-corrupted target state. This plug-in reformulation requires only minimal changes to existing I2I models, yet provides a continuous-time refinement view that can substantially improve detail preservation across diverse I2I tasks. 
+
+3.1 Image-to-Image Rectified Flow Reformulation 
+
+Let fθ be a generic I2I translation network that maps an input image x ∈
+
+RCin ×H×W to an output image in RCout ×H×W . Given paired training data (x, y )
+
+with y ∈ RCout ×H×W , conventional supervised training minimizes a pixel-wise regression objective: 
+
+min  
+
+> θ
+
+E ∥y − fθ (x)∥pp
+
+, (3) where ∥ · ∥ p denotes the ℓp norm and ∥e∥pp = P 
+
+> i
+
+|ei|p. The parameter p = 1 
+
+corresponds to the ℓ1 loss and p = 2 corresponds to the squared ℓ2 loss. In the following, we set p = 1 throughout and denote the ℓ1 norm by ∥ · ∥ for simplicity. Starting from a standard I2I regressor, I2I-RFR introduces a reformulated supervised learning problem in which a generic I2I network fθ′ receives the pair of the input image and a noise-corrupted target state, and is trained to reconstruct the target image. Under this formulation, standard supervised I2I regression can be interpreted through the lens of rectified flow as a continuous-time transport process, while preserving the original regression-oriented backbone interface. The resulting objective is given by 
+
+min  
+
+> θ′
+
+E
+
+ y − fθ′ ([ x; yt]) 
+
+t
+
+
+
+. (4) Here, [a; b] denotes channel-wise concatenation, and yt is a noisy target obtained by mixing the ground-truth image y with Gaussian noise ε ∼ N (0 , I ) using an interpolation parameter t ∈ (0 , 1] :
+
+yt = (1 − t) y + t ε.  (5) In this formulation, the image translation network fθ′ is identical to the orig-inal network fθ except for the number of input channels to accommodate the concatenated input: 
+
+fθ : RCin ×H×W → RCout ×H×W ,fθ′ : R(Cin +Cout )×H×W → RCout ×H×W .Improving Image-to-Image Translation via a Rectified Flow Reformulation 7
+
+Algorithm 1 Training of image-to-image rectified flow reformulation 
+
+Require: dataset D, I2I network fθ′ , learning rate η, lower bound tmin > 0 for t
+
+Ensure: θ′: updated model parameters 1: repeat 
+
+2: Sample (x, y ) from D
+
+3: u ∼ U (0 , 1) 
+
+4: ε ∼ N (0 , I )
+
+5: t ← max  u1/2, t min 
+
+ ▷ Inverse-CDF Beta(2, 1) sampling 6: yt ← (1 − t) y + t ε 
+
+7: θ′ ← θ′ − η∇θ′ y−fθ′ ([ x;yt])  
+
+> t
+
+▷ [x; yt] : Concat(x , yt)
+
+8: until convergence 
+
+Consequently, I2I-RFR can be applied to existing regression models by (i) ex-panding the input-channel dimension and (ii) feeding the noise-corrupted targets alongside the inputs during training. This makes the reformulation compatible with a broad range of carefully engineered I2I architectures for tasks such as im-age super-resolution, restoration, and enhancement. Furthermore, I2I-RFR ap-plies to video-to-video translation models in the same manner and yields gains on video restoration tasks. The training procedure is summarized in Algorithm 1. 
+
+Parameterization and induced velocity interpretation. Given paired data 
+
+(x, y ) ∼ D , we sample t ∈ (0 , 1] and ε ∼ N (0 , I ). To match the rectified-flow notation, we set c := x, x0 := y and x1 := ε, and form the linear path xt =(1 − t)x0 + tx 1. Along this path, the ground-truth velocity is constant, v⋆ =
+
+x1 − x0, and we also have the identity xt − x0 = t(x1 − x0). The rectified-flow dynamics are then obtained implicitly by defining an induced velocity field 
+
+vθ′ (xt, c, t ) = xt−fθ′ ([ c;xt])  
+
+> t
+
+. Using xt − x0 = t(x1 − x0), we immediately obtain 
+
+(x1 − x0) − vθ′ (xt, c, t ) = fθ′ ([ c;xt]) −x0 
+
+> t
+
+. Therefore, minimizing the t-reweighted regression loss E
+
+h x0−fθ′ ([ c;xt]) 
+
+> t
+
+i
+
+is equivalent to minimizing the corresponding induced velocity regression residual E[∥(x1 − x0) − vθ′ (xt, c, t )∥]. In this sense, the proposed objective admits a rectified-flow interpretation while preserving the interface of a conventional I2I regressor. Note that the endpoint labeling is purely a convention: swapping (x0, x 1) corresponds to the time reversal t 7 →
+
+1 − t and flips the sign of the target velocity ( v 7 → − v), yielding an equivalent optimization problem. In this paper, we choose x0 as the data endpoint and x1
+
+as the noise endpoint mainly for notational simplicity. In practice, at inference time, we initialize at the prior endpoint and integrate backward in time. For numerical stability during training, we clamp t ≥ tmin to avoid the singularity as t → 0.
+
+Time conditioning in I2I-RFR. Diffusion models and many rectified-flow im-plementations often condition the network on the noise level by feeding t through a time-embedding module. In I2I-RFR, however, the input is the channel-wise concatenation [x; yt]: the input image x provides strong spatial priors about the target y, while the corruption level is directly reflected in yt. As a result, explicit 8 Iizuka et al.  
+
+> Fig. 2: Comparison of sampling strategies for training (left) and validation (right).
+
+time embeddings are often unnecessary in our supervised I2I setting. Empir-ically, adding time embeddings provides no consistent improvement across our tasks and backbones, and can slightly degrade performance or increase optimiza-tion variance. We therefore omit explicit time embeddings in our default model, which simplifies implementation by avoiding an additional embedding module and facilitates the reuse of existing I2I backbones with minimal changes. 
+
+Sampling of the interpolation parameter. We construct noisy inputs via 
+
+yt = (1 −t)y+tε and train the regression network fθ′ ([ x, y t]) with a loss that con-tains an explicit factor of t−p, e.g., y−fθ′ ([ x;yt]) 
+
+> t
+> pp
+
+. If t were sampled uniformly on (0 , 1] , small t values would receive disproportionately large weight through 
+
+t−p and could induce high gradient variance. To stabilize optimization, we adopt a non-uniform sampling strategy based on a Beta distribution: 
+
+t ∼ Beta( p + 1 , 1) , t ← max( t, t min ), (6) whose density is proportional to tp on [0 , 1] and thus counterbalances the t−p
+
+factor in the loss, making the effective weighting approximately constant. We implement this sampling via inverse-CDF: u ∼ U (0 , 1) and t = u1/(p+1) , followed by clamping to tmin to avoid numerical issues near t = 0 . As a practical side effect, this sampling provides sufficient coverage of the high-noise regime ( t ≈ 1), which is important for robust refinement. Figure 2 provides an illustrative comparison of t-sampling strategies on low-light enhancement with LEDNet [57]. The plot shows the training loss and vali-dation PSNR as functions of training iterations for Beta(2 , 1) , logit-normal (0 , 1) ,and uniform sampling under the same training budget. In this setting, Beta(2 , 1) 
+
+sampling shows smoother convergence and achieves the best validation PSNR among the compared strategies. We do not claim that Beta(2 , 1) sampling is universally optimal; rather, it serves as an effective default in our experiments. 
+
+Relationship to x0-prediction in rectified flow and diffusion models. 
+
+Predicting the clean image, i.e., x0-prediction, is a recognized alternative param-eterization in diffusion and flow-based models, but it has been less commonly used as the primary training target in modern large-scale generative settings. For example, DDPM reports that directly predicting x0 led to worse sample quality in early experiments and adopts noise prediction as the default parame-terization [13]; many subsequent works follow this choice [4]. Alternative targets such as v-prediction have also been proposed to improve stability when sampling with few steps [42]. More broadly, flow-based frameworks such as Flow Match-ing and Rectified Flow are typically trained by regressing a time-dependent Improving Image-to-Image Translation via a Rectified Flow Reformulation 9
+
+Algorithm 2 Inference of Image-to-Image Rectified Flow 
+
+Require: input image x, trained I2I network fθ′ , number of time steps N
+
+Ensure: output image ˆy
+
+1: Sample yt ∼ N (0 , I ) ▷ initialization 2: for n = 0 to N − 1 do 
+
+3: t ← 1 − nN
+
+4: v ← yt−fθ′ ([ x;yt]) 
+
+> t
+
+5: yt ← yt − 1 
+
+> N
+
+v
+
+6: end for 
+
+7: ˆy ← yt
+
+vector field [27, 28], including recent large-scale rectified-flow Transformers for text-to-image generation [9]. In contrast, our work targets supervised image-to-image translation with a pixel-space condition x that provides informative, spatially aligned cues. Under this setting, the ODE state yt behaves as a refine-ment variable rather than a fully unconstrained generative latent, making an 
+
+x0-predictor particularly effective in practice. Thus, our contribution is not to advocate x0-prediction universally, as discussed in recent revisits for uncondi-tional and class-conditional generation [23], but to propose an image-to-image rectified flow reformulation that upgrades standard regression backbones with minimal architectural changes. Moreover, our formulation does not require ex-plicit time embeddings and introduces a Beta-based t-sampling strategy tailored to the reformulated objective, which helps stabilize training. 
+
+3.2 Inference 
+
+Given an input image x, we generate the output by solving the induced rectified-flow ODE with a fixed-step explicit Euler integrator, as summarized in Algo-rithm 2. We initialize the state at the prior endpoint ( t = 1 ) by sampling 
+
+yt ∼ N (0 , I ), and integrate backward in time from t = 1 toward t = 0 us-ing N uniform steps with step size ∆t = 1 /N . At step n, we set tn = 1 − nN
+
+and evaluate the induced velocity field as v = ytn −fθ′ ([ x;ytn ])  
+
+> tn
+
+. We then update 
+
+ytn+1 ← ytn − ∆t v , which corresponds to an explicit Euler discretization of the backward-time dynamics. Note that this update moves ytn toward the network prediction fθ′ ([ x; ytn ]) , since ytn − ∆t ytn −fθ′ ([ x;ytn ])  
+
+> tn
+
+= ytn + ∆t fθ′ ([ x;ytn ]) −ytn  
+
+> tn
+
+.After N steps, the final state (at t ≈ 0) is taken as the output ˆy.
+
+Efficiency. In standard rectified flow, inference typically requires tens of ODE solver steps (e.g., 25 steps). Although this is fewer than the 50–250 steps com-monly used by diffusion models with DDIM sampling, it can still be costly for large networks, interactive applications, and video processing. Distillation-based acceleration can reduce the number of steps, but it introduces an additional training stage and requires careful tuning. In contrast, our formulation works well with only a small number of explicit Euler steps in practice. We attribute this efficiency to the informative spatial 10 Iizuka et al. 
+
+cues in the input image x, which make the ODE state yt behave as a refinement variable rather than a fully unconstrained generative latent. By providing x
+
+alongside the current state via channel-wise concatenation, a few refinement steps are often sufficient. Throughout the paper, we use N = 3 as the default setting. 
+
+## 4 Results 
+
+I2I-RFR is evaluated on a diverse set of image-to-image (I2I) and video-to-video translation tasks, including image super-resolution , deblurring , low-light enhancement , underwater enhancement , and video restoration . For each task, I2I-RFR is applied to strong recent backbones, including task-specialized archi-tectures based on convolutional networks and Transformers. To assess robustness across model complexity and training pipelines, comparisons also include (i) a canonical U-Net [39] as a simple regression baseline and (ii) Palette [40], a rep-resentative diffusion-based framework for conditional I2I translation that unifies a wide range of I2I tasks within a single diffusion formulation. These baselines help isolate the benefit of the reformulation from backbone capacity and high-light practical differences in pipeline design, as diffusion-based I2I typically relies on diffusion-specific components such as noise schedules, explicit noise-level con-ditioning, and many-step denoising trajectories. All methods are trained from scratch unless official checkpoints are used as reference baselines (noted per task). For fair comparison, models that require ad-ditional inputs beyond the benchmark setting (e.g., text prompts) are excluded, and pretrained models that rely on large-scale external data are not used. The goal is not to exhaustively compete with every task-specific state-of-the-art, but to demonstrate that I2I-RFR can provide gains across diverse tasks and back-bones under simple and stable supervised training. In addition, while I2I-RFR performs strongly with an ℓ1 loss alone, a variant with commonly used com-posite losses is also reported to show that the reformulation is compatible with additional objectives such as perceptual losses. 
+
+Implementation details. Unless otherwise specified, all models are optimized with Adam using an initial learning rate of 10 −4 and a cosine learning-rate sched-ule down to 10 −6. Task-dependent settings such as input resolution, batch size, data augmentation, and training iterations follow standard practice for each benchmark and backbone. For I2I-RFR, t is sampled as t ∼ Beta(2 , 1) with 
+
+tmin = 10 −3, and the default loss is the t−1-reweighted ℓ1 distance. At infer-ence time, the induced ODE is solved with a fixed-step explicit Euler integrator. Unless stated otherwise, we use N = 3 steps, which serves as a practical compro-mise between speed and refinement quality; additional analyses of runtime and inference depth are provided in the appendix. For quantitative evaluation, we use a fixed random seed and generate a single sample per input. Classifier-free guidance is not used, and explicit time embedding modules are omitted to keep the architecture changes minimal and preserve direct reuse of existing regression backbones. Improving Image-to-Image Translation via a Rectified Flow Reformulation 11 
+
+Table 1: Super-resolution results on standard benchmarks. Best values are in red, and second-best values are in blue. Values in parentheses denote the relative changes compared to the original model. Set5 Set14 BSD100 Urban100 Model PSNR ↑ SSIM ↑ LPIPS ↓ PSNR ↑ SSIM ↑ LPIPS ↓ PSNR ↑ SSIM ↑ LPIPS ↓ PSNR ↑ SSIM ↑ LPIPS ↓                                                    
+
+> NLSN [32] 32.84 0.9020 0.1694 29.05 0.7920 0.2715 27.87 0.7459 0.3595 27.22 0.8176 0.1945 NLSN + I2I-RFR 32.58 (-0.26) 0.8998 (-0.0022) 0.1676
+> (-0.0018)
+> 28.88 (-0.17) 0.7888 (-0.0032) 0.2662
+> (-0.0053)
+> 27.75 (-0.12) 0.7430 (-0.0029) 0.3498
+> (-0.0097)
+> 26.83 (-0.39) 0.8079 (-0.0097) 0.1996 (+0.0051) SwinIR [24] 32.80 0.9025 0.1687 29.00 0.7922 0.2703 27.89 0.7469 0.3578 27.24 0.8199 0.1948 SwinIR + I2I-RFR 32.84
+> (+0.04)
+> 0.9028
+> (+0.0003)
+> 0.1665
+> (-0.0022)
+> 29.01
+> (+0.01)
+> 0.7916 (-0.0006) 0.2621
+> (-0.0082)
+> 27.85 (-0.04) 0.7461 (-0.0008) 0.3497
+> (-0.0081)
+> 27.19 (-0.05) 0.8180 (-0.0019) 0.1897
+> (-0.0051)
+> U-Net [39] 32.09 0.8934 0.1767 28.57 0.7806 0.2891 27.53 0.7347 0.3795 25.97 0.7810 0.2414 U-Net + I2I-RFR 31.63 (-0.46) 0.8884 (-0.0050) 0.1665
+> (-0.0102)
+> 28.16 (-0.41) 0.7704 (-0.0102) 0.2606
+> (-0.0285)
+> 27.18 (-0.35) 0.7244 (-0.0103) 0.3404
+> (-0.0391)
+> 25.55 (-0.42) 0.7707 (-0.0103) 0.2218
+> (-0.0196)
+> Palette [40] 22.28 0.6582 0.2079 21.49 0.5139 0.3059 24.72 0.6063 0.3967 19.58 0.5193 0.3035 Palette + I2I-RFR 32.09
+> (+9.81)
+> 0.8959
+> (+0.2377)
+> 0.1695
+> (-0.0384)
+> 28.47
+> (+6.98)
+> 0.7788
+> (+0.2649)
+> 0.2459
+> (-0.0600)
+> 27.40
+> (+2.68)
+> 0.7339
+> (+0.1276)
+> 0.3299
+> (-0.0668)
+> 26.40
+> (+6.82)
+> 0.7973
+> (+0.2780)
+> 0.1914
+> (-0.1121)
+
+Image Super-resolution. Image super-resolution aims to recover high-resolution (HR) images from low-resolution (LR) inputs. Representative regression-based SR models, NLSN [32] and SwinIR [24], are selected as baselines, where the former is CNN-based and the latter is Transformer-based. I2I-RFR is applied to both models by expanding the input layer to accept a 6-channel input. Both the original models and their I2I-RFR variants are trained on DF2K [1]. During training, HR patches are randomly cropped to 256 × 256 pixels, and the corre-sponding LR inputs are generated by ×4 bicubic downsampling. For I2I-RFR, the interpolation state is constructed in the LR domain to match the model input shape: the network is fed with [xLR ; yLR 
+
+t ], while the prediction target and the loss are defined in the HR domain, i.e., the model predicts the clean HR image yHR from the LR input state. Table 1 shows that I2I-RFR generally improves LPIPS across backbones, while PSNR and SSIM remain similar or can slightly decrease for some mod-els, reflecting the perception–distortion trade-off in ill-posed SR [3]. In particu-lar, SwinIR with I2I-RFR provides the best overall balance among the com-pared methods, improving LPIPS on all four benchmarks while largely pre-serving distortion metrics. Notably, applying I2I-RFR to the Palette denois-ing backbone substantially improves SR quality, suggesting that the regression-preserving transport formulation can be effective even when starting from a diffusion-oriented U-Net. 
+
+Image Deblurring. We evaluate I2I-RFR on three representative deblurring backbones, NAFNet [5], Restormer [54], and FFTFormer [19]. Training follows the GoPro protocol [34], and evaluation is performed on RealBlur-J [37], pro-viding a cross-dataset test relative to GoPro training. I2I-RFR is applied by expanding the input channels from 3 to 6 and replacing the pixel loss with its 
+
+t-reweighted version, without modifying the backbone structure. Metrics include PSNR, SSIM, and LPIPS. As shown in Table 2, I2I-RFR consistently improves perceptual quality over the baseline models. 
+
+Low-Light Blur Enhancement. Low-light blur enhancement targets images that are simultaneously under-exposed and blurred (e.g., due to motion or de-focus). The goal is to recover a clean, well-lit image by correcting illumination and removing blur to restore sharp edges and fine textures. Because both degra-12 Iizuka et al. 
+
+Table 2: Image deblurring results on RealBlur-J benchmark [37]. Best values are in red, and second-best values are in blue. Values in parentheses denote the relative changes compared to the original model. Model PSNR ↑ SSIM ↑ LPIPS ↓
+
+NAFNet [5] 28.62 0.8683 0.1557 NAFNet + I2I-RFR 28.74 (+0.12) 0.8737 (+0.0054) 0.1449 (-0.0108) 
+
+Restormer [54] 28.73 0.8677 0.1522 Restormer + I2I-RFR 29.04 (+0.31) 0.8812 (+0.0135) 0.1408 (-0.0114) 
+
+FFTFormer [19] 28.19 0.8535 0.1691 FFTFormer + I2I-RFR 28.58 (+0.39) 0.8685 (+0.0150) 0.1487 (-0.0204) 
+
+U-Net [39] 28.03 0.8440 0.1848 U-Net + I2I-RFR 27.93 (-0.10) 0.8476 (+0.0036) 0.1753 (-0.0095) 
+
+Palette [40] 26.29 0.6313 0.2826 Palette + I2I-RFR 29.05 (+2.76) 0.8831 (+0.2518) 0.1436 (-0.1390) Table 3: Low-light blur enhancement results on LOLBlur test set. Best values are in red, and second-best values are in blue. Values in parentheses denote the relative changes compared to the original model. Model PSNR ↑ SSIM ↑ LPIPS ↓
+
+LEDNet [57] 26.04 0.845 0.159 LEDNet + I2I-RFR 27.42 (+1.38) 0.874 (+0.029) 0.138 (-0.021) 
+
+LEDNet + I2I-RFR-CL 26.56 (+0.52) 0.869 (+0.024) 0.140 (-0.019) 
+
+DarkIR [10] 27.31 0.896 0.111 DarkIR + I2I-RFR 27.19 (-0.12) 0.897 (+0.001) 0.106 (-0.005) 
+
+DarkIR + I2I-RFR-CL 27.72 (+0.41) 0.900 (+0.004) 0.103 (-0.008) 
+
+U-Net [39] 20.45 0.764 0.267 U-Net + I2I-RFR 22.48 (+2.03) 0.826 (+0.062) 0.184 (-0.083) 
+
+Palette [40] 8.03 0.007 0.936 Palette + I2I-RFR 26.88 (+18.85) 0.875 (+0.868) 0.141 (-0.795) 
+
+dations destroy information and amplify noise, the task is highly ill-posed and requires balancing detail recovery against artifact suppression. We evaluate I2I-RFR on two strong low-light deblurring models, LEDNet [57] and DarkIR [10], following the LOLBlur training and evaluation protocol [57]. Official checkpoints are used as reference baselines, and the corresponding I2I-RFR variants are trained on the same LOLBlur training split. For the composite-loss setting, the original loss design is kept, and only the pixel term is replaced by its t-reweighted counterpart, denoted as I2I-RFR-CL. Evaluation is performed on the LOLBlur test set using PSNR, SSIM, and LPIPS. Table 3 shows that I2I-RFR substantially improves LEDNet, while for DarkIR the plain I2I-RFR variant mainly improves perceptual quality while keeping distortion metrics comparable to the original model. Notably, DarkIR is al-ready a state-of-the-art baseline for this benchmark, and combining it with the Improving Image-to-Image Translation via a Rectified Flow Reformulation 13 
+
+Table 4: Underwater image enhancement results on LSUI test set and UIEB test set. Best values are in red, and second-best values are in blue. Values in parentheses denote the relative changes compared to the original model. LSUI Test Set UIEB Test Set Model PSNR ↑ SSIM ↑ LPIPS ↓ PSNR ↑ SSIM ↑ LPIPS ↓                             
+
+> Tang et al. [47] 18.34 0.8320 0.1413 14.63 0.7110 0.2339 Tang et al. + I2I-RFR 29.27
+> (+10.93)
+> 0.9381
+> (+0.1061)
+> 0.0838
+> (-0.0575)
+> 19.56
+> (+4.93)
+> 0.8462
+> (+0.1352)
+> 0.1637
+> (-0.0702)
+> SFGNet [55] 27.54 0.9293 0.0834 18.82 0.8315 0.1738 SFGNet + I2I-RFR 26.09 (-1.45) 0.9190 (-0.0103) 0.1164 (+0.0330) 19.69
+> (+0.87)
+> 0.8515
+> (+0.0200)
+> 0.1640
+> (-0.0098)
+> SFGNet + I2I-RFR-CL 26.40 (-1.14) 0.9203 (-0.0090) 0.0907 (+0.0073) 19.63
+> (+0.81)
+> 0.8470
+> (+0.0155)
+> 0.1674
+> (-0.0064)
+> U-Net [39] 27.42 0.9244 0.1110 17.20 0.7957 0.2352 U-Net + I2I-RFR 28.34
+> (+0.92)
+> 0.9322
+> (+0.0078)
+> 0.0893
+> (-0.0217)
+> 17.69
+> (+0.49)
+> 0.8092
+> (+0.0135)
+> 0.2203
+> (-0.0149)
+> Palette [40] 23.36 0.7424 0.1838 17.73 0.6542 0.3113 Palette + I2I-RFR 29.26
+> (+5.90)
+> 0.9376
+> (+0.1952)
+> 0.0866
+> (-0.0972)
+> 20.00
+> (+2.27)
+> 0.8469
+> (+0.1927)
+> 0.1632
+> (-0.1481)
+
+composite-loss version of I2I-RFR further improves all three metrics, thereby pushing the state of the art further within this setting. This suggests that the proposed reformulation remains effective even on a strong task-specialized model, and that its benefit becomes clearest when the original loss design is preserved. A plausible reason is that DarkIR is tightly coupled with its original task-specific objective design, so reweighting only the pixel term while keeping the remaining composite losses intact leads to a better match with the backbone’s inductive bias and training dynamics. 
+
+Underwater Image Enhancement. We evaluate I2I-RFR on the LSUI bench-mark [35] using two strong recent baselines: the diffusion-based method by Tang 
+
+et al. [47] and SFGNet [55]. All models are trained on the LSUI training split and evaluated on the LSUI test set; in addition, we report results on the UIEB test set to assess cross-dataset generalization. For Tang et al. , the original DDPM training is replaced with I2I-RFR training using the same denoising backbone, enabling a direct architectural comparison. For SFGNet, I2I-RFR augments the input with the noisy target state while keeping the backbone unchanged. As shown in Table 4, I2I-RFR yields large gains for the diffusion backbone re-trained under the proposed formulation, and also improves the U-Net and Palette baselines on both LSUI and UIEB. For SFGNet, however, the effect is mixed: while the UIEB results improve, the LSUI in-domain metrics degrade under the plain I2I-RFR formulation. This suggests that the benefit of the reformulation can depend on how strongly the original backbone and training objective are tuned to the task. In particular, SFGNet appears to be more sensitive to replac-ing its original optimization recipe with the plain reformulated objective, while the composite-loss variant better preserves the original design and recovers much of the lost performance. 
+
+Video Restoration. We evaluate I2I-RFR on old film restoration using RTN [50] and the more recent RRTN [25]. Training follows the RRTN protocol on REDS [33] with the same synthetic degradation pipeline, and evaluation is performed on 14 Iizuka et al. 
+
+Table 5: Video restoration results on DAVIS test set. Best values are in red, and second-best values are in blue. Values in parentheses denote the relative changes com-pared to the original model. Model PSNR ↑ SSIM ↑ LPIPS ↓                            
+
+> RTN [50] 24.54 0.8294 0.1562 RTN + I2I-RFR 25.05 (+0.51) 0.8330 (+0.0036) 0.2100 (+0.0538) RTN + I2I-RFR-CL 25.52 (+0.98) 0.8395 (+0.0101) 0.1728 (+0.0166) RRTN [25] 22.66 0.7453 0.2379 RRTN + I2I-RFR 25.87 (+3.21) 0.8659 (+0.1206) 0.1699 (-0.0680)
+> RRTN + I2I-RFR-CL 25.80 (+3.14) 0.8505 (+0.1052) 0.1456 (-0.0923)
+
+Table 6: Parameterization effect. Best values are in red, and second-best are in blue. PSNR ↑ SSIM ↑ LPIPS ↓                            
+
+> Low-light image enhancement results on LOLBlur test set. LEDNet + I2I-RFR 27.42 0.874 0.138 LEDNet + I2I-RFR v-pred 11.57 0.060 0.803 DarkIR + I2I-RFR 27.19 0.897 0.106 DarkIR + I2I-RFR v-pred 16.73 0.431 0.512 Old film restoration results on DAVIS test set. RTN + I2I-RFR 25.05 0.8330 0.2100 RTN + I2I-RFR v-pred 20.76 0.7127 0.3025 RRTN + I2I-RFR 25.87 0.8659 0.1699 RRTN + I2I-RFR v-pred 24.72 0.8566 0.1565
+
+DAVIS with matched degradations. I2I-RFR is applied by expanding the in-put channels and replacing the pixel loss with its t-reweighted version. For the composite-loss setting, the original loss design is kept, and only the pixel term is reweighted, denoted as I2I-RFR-CL. Metrics include PSNR, SSIM, and LPIPS. As shown in Table 5, I2I-RFR improves the quality of the baselines in most cases and can even match or surpass GAN-trained variants without adversarial training. 
+
+Parameterization Study. I2I-RFR is formulated as a direct prediction of the clean target image. For comparison, the same backbones can also be trained in a velocity-prediction form by regressing the rectified-flow velocity, since the backbone interface is unchanged up to the choice of training target. The comparison between direct target prediction and v-prediction is con-ducted on low-light blur enhancement and video restoration. These tasks are representative ill-posed I2I settings in which perceptual fidelity and optimiza-tion stability are critical, and they jointly cover both image and video trans-lation. The training data and optimization setup are kept identical for both variants; the only difference lies in the prediction target and the corresponding loss parameterization. As shown in Table 6 and Fig. 3, v-prediction leads to a substantial performance drop in most cases. A plausible explanation is that the Improving Image-to-Image Translation via a Rectified Flow Reformulation 15 
+
+Input I2I-RFR v-pred I2I-RFR 
+
+Fig. 3: Comparison between v-prediction and our direct target prediction in I2I-RFR for DarkIR [10] on low-light blur enhancement (top) and RRTN [25] on video restora-tion (bottom). The v-prediction variant produces severe artifacts, whereas direct target prediction yields more plausible results. Zoom in for best view. Table 7: Effect of time embeddings. PSNR ↑ SSIM ↑ LPIPS ↓            
+
+> Low-light blur enhancement results on LOLBlur test set. DarkIR + I2I-RFR 27.19 0.897 0.106 DarkIR + I2I-RFR + time embedding 26.80 0.877 0.127 Old film restoration results on DAVIS test set. RRTN + I2I-RFR 25.87 0.8659 0.1699 RRTN + I2I-RFR + time embedding 23.18 0.7922 0.2530
+
+evaluated backbones, including LEDNet and DarkIR, are carefully engineered for direct I2I mapping with task-specific priors and modules, e.g., frequency-domain processing. These inductive biases are more naturally exploited when predicting the clean target image than when regressing a velocity field. Note that the LPIPS result for RRTN with an I2I-RFR v-prediction variant is the only case that improves, suggesting that the v-prediction form is not uniformly inferior to direct target prediction. Nevertheless, direct target prediction is gen-erally more suitable for I2I backbones, as they are originally designed for direct image prediction. 
+
+Effect of time embeddings. Table 7 presents a case study on low-light blur enhancement with DarkIR and on video restoration with RRTN, in which we add sinusoidal time embeddings to the intermediate features, as is commonly done in diffusion and rectified-flow models. Time embeddings degrade performance across all metrics in these settings. A likely reason is that I2I-RFR already ex-poses the corruption level through the concatenated input [x; yt], making explicit time conditioning redundant and, in some cases, less stable. We therefore omit time embeddings by default. 16 Iizuka et al. 
+
+## 5 Conclusion 
+
+This work introduced Image-to-Image Rectified Flow Reformulation (I2I-RFR), a practical plug-in reformulation that equips supervised image-to-image and video-to-video regression models with few-step ODE-based refinement while largely preserving the original backbone interface. By feeding a noise-corrupted target state alongside the input and training with a simple t-reweighted pixel loss, I2I-RFR reuses the inductive biases of task-specialized backbones and improves perceptual quality and detail preservation across diverse benchmarks in a prac-tical few-step inference regime. Future work includes extending the evaluation to broader domains and tasks, such as illustration and other non-photographic data, and further studying how the reformulation interacts with task-specific modules, composite loss designs, and inference depth. 
+
+## References 
+
+1. Agustsson, E., Timofte, R.: Ntire 2017 challenge on single image super-resolution: Dataset and study. In: Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition Workshops (CVPRW) (2017) 2. Bansal, A., Borgnia, E., Chu, H.M., Li, J., Kazemi, H., Huang, F., Goldblum, M., Geiping, J., Goldstein, T.: Cold diffusion: Inverting arbitrary image transforms without noise. Advances in Neural Information Processing Systems 36 , 41259– 41282 (2023) 3. Blau, Y., Michaeli, T.: The perception-distortion tradeoff. In: Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition (CVPR). pp. 6228–6237 (2018). https://doi.org/10.1109/CVPR.2018.00652 , https: //openaccess.thecvf.com/content_cvpr_2018/html/Blau_The_Perception-Distortion_Tradeoff_CVPR_2018_paper.html 
+
+4. Cao, H., Tan, C., Gao, Z., Xu, Y., Chen, G., Heng, P.A., Li, S.Z.: A survey on generative diffusion model. arXiv preprint arXiv:2209.02646 (2022) 5. Chen, L., Chu, X., Zhang, X., Sun, J.: Simple baselines for image restoration. In: European conference on computer vision. pp. 17–33. Springer (2022) 6. Cordts, M., Omran, M., Ramos, S., Rehfeld, T., Enzweiler, M., Benenson, R., Franke, U., Roth, S., Schiele, B.: The cityscapes dataset for semantic urban scene understanding. In: Proceedings of the IEEE conference on computer vision and pattern recognition. pp. 3213–3223 (2016) 7. Deng, J., Dong, W., Socher, R., jia Li, L., Li, K., Fei-fei, L.: Imagenet: A large-scale hierarchical image database. In: CVPR (2009) 8. Dong, C., Loy, C.C., He, K., Tang, X.: Image super-resolution using deep convo-lutional networks. IEEE TPAMI 38 (2), 295–307 (2016) 9. Esser, P., Kulal, S., Blattmann, A., Entezari, R., Müller, J., Saini, H., Levi, Y., Lorenz, D., Sauer, A., Boesel, F., Podell, D., Dockhorn, T., English, Z., Rombach, R.: Scaling rectified flow transformers for high-resolution image synthesis. In: Pro-ceedings of the 41st International Conference on Machine Learning. Proceedings of Machine Learning Research, vol. 235, pp. 12606–12633. PMLR (2024) 10. Feijoo, D., Benito, J.C., Garcia, A., Conde, M.V.: Darkir: Robust low-light image restoration. arXiv preprint arXiv:2412.13443 (Oct 2025), https://arxiv.org/ abs/2412.13443 , v3 Improving Image-to-Image Translation via a Rectified Flow Reformulation 17 11. Goodfellow, I.J., Pouget-Abadie, J., Mirza, M., Xu, B., Warde-Farley, D., Ozair, S., Courville, A.C., Bengio, Y.: Generative adversarial nets. pp. 2672–2680 (2014) 12. He, K., Zhang, X., Ren, S., Sun, J.: Deep residual learning for image recognition. In: Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition (CVPR). pp. 770–778 (2016). https://doi.org/10.1109/CVPR.2016.90 
+
+13. Ho, J., Jain, A., Abbeel, P.: Denoising diffusion probabilistic models. In: Advances in Neural Information Processing Systems. vol. 33, pp. 6840–6851 (2020) 14. Ho, J., Salimans, T.: Classifier-free diffusion guidance. arXiv preprint arXiv:2207.12598 (2022) 15. Isola, P., Zhu, J.Y., Zhou, T., Efros, A.A.: Image-to-image translation with condi-tional adversarial networks (2017) 16. Johnson, J., Alahi, A., Fei-Fei, L.: Perceptual losses for real-time style transfer and super-resolution. In: ECCV. pp. 694–711 (2016). https://doi.org/10.1007/978-3-319-46475-6_43 
+
+17. Kim, T.H., Sajjadi, M.S.M., Hirsch, M., Schölkopf, B.: Spatio-temporal transformer network for video restoration. In: ECCV (2018) 18. Kingma, D.P., Welling, M.: Auto-encoding variational bayes. In: International Con-ference on Learning Representations (ICLR) (2014) 19. Kong, L., Dong, J., Ge, J., Li, M., Pan, J.: Efficient frequency domain-based trans-formers for high-quality image deblurring. In: Proceedings of the IEEE/CVF con-ference on computer vision and pattern recognition. pp. 5886–5895 (2023) 20. Ledig, C., Theis, L., Huszar, F., Caballero, J., Cunningham, A., Acosta, A., Aitken, A., Tejani, A., Totz, J., Wang, Z., Shi, W.: Photo-realistic single image super-resolution using a generative adversarial network. In: CVPR. pp. 4681–4690 (2017). 
+
+https://doi.org/10.1109/CVPR.2017.19 
+
+21. Li, B., Xue, K., Liu, B., Lai, Y.K.: Bbdm: Image-to-image translation with brow-nian bridge diffusion models. In: Proceedings of the IEEE/CVF conference on computer vision and pattern Recognition. pp. 1952–1961 (2023) 22. Li, C., Guo, C., Ren, W., Cong, R., Hou, J., Kwong, S., Tao, D.: An underwater image enhancement benchmark dataset and beyond. IEEE transactions on image processing 29 , 4376–4389 (2019) 23. Li, T., He, K.: Back to basics: Let denoising generative models denoise. arXiv preprint arXiv:2511.13720 (2025) 24. Liang, J., Cao, J., Sun, G., Zhang, K., Van Gool, L., Timofte, R.: Swinir: Image restoration using swin transformer. In: Proceedings of the IEEE/CVF international conference on computer vision. pp. 1833–1844 (2021) 25. Lin, S., Simo-Serra, E.: Restoring degraded old films with recursive recurrent trans-former networks. In: Proceedings of the IEEE/CVF Winter Conference on Appli-cations of Computer Vision. pp. 6718–6728 (2024) 26. Lin, T.Y., Dollár, P., Girshick, R., He, K., Hariharan, B., Belongie, S.: Feature pyramid networks for object detection. In: Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition (CVPR). pp. 2117–2125 (2017). https: //doi.org/10.1109/CVPR.2017.106 
+
+27. Lipman, Y., Chen, R.T.Q., Ben-Hamu, H., Nickel, M., Le, M.: Flow matching for generative modeling. In: International Conference on Learning Representations (ICLR) (2023), notable Top 25% 28. Liu, X., Gong, C., Liu, Q.: Flow straight and fast: Learning to generate and transfer data with rectified flow. In: International Conference on Learning Representations (ICLR) (2023), notable Top 25% 18 Iizuka et al. 29. Lugmayr, A., Danelljan, M., Romero, A., Yu, F., Timofte, R., Van Gool, L.: Re-paint: Inpainting using denoising diffusion probabilistic models. In: Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition (CVPR). pp. 11451–11461 (2022). https://doi.org/10.1109/CVPR52688.2022.01117 
+
+30. Maggioni, M., Boracchi, G., Foi, A., Egiazarian, K.: Video denoising, deblocking, and enhancement through separable 4-d nonlocal spatiotemporal transforms. IEEE TIP 21 (9), 3952–3966 (2012) 31. Mao, X., Li, Q., Wang, Y.: Adarevd: Adaptive patch exiting reversible decoder pushes the limit of image deblurring. In: Proceedings of the IEEE/CVF conference on computer vision and pattern recognition. pp. 25681–25690 (2024) 32. Mei, Y., Fan, Y., Zhou, Y.: Image super-resolution with non-local sparse atten-tion. In: Proceedings of the IEEE/CVF conference on computer vision and pattern recognition. pp. 3517–3526 (2021) 33. Nah, S., Baik, S., Hong, S., Moon, G., Son, S., Timofte, R., Lee, K.M.: Ntire 2019 challenge on video deblurring and super-resolution: Dataset and study. In: Proceed-ings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition Workshops (CVPRW). pp. 1996–2005 (June 2019). https://doi.org/10.1109/ CVPRW.2019.00251 
+
+34. Nah, S., Kim, T.H., Lee, K.M.: Deep multi-scale convolutional neural network for dynamic scene deblurring. In: Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition (CVPR) (July 2017) 35. Peng, L., Zhu, C., Bian, L.: U-shape transformer for underwater image enhance-ment. IEEE Transactions on Image Processing 32 , 3066–3079 (2023). https: //doi.org/10.1109/TIP.2023.3276332 
+
+36. Pont-Tuset, J., Perazzi, F., Caelles, S., Arbeláez, P., Sorkine-Hornung, A., Van Gool, L.: The 2017 davis challenge on video object segmentation. In: arXiv preprint arXiv:1704.00675 (2017) 37. Rim, J., Lee, H., Won, J., Cho, S.: Real-world blur dataset for learning and bench-marking deblurring algorithms. In: Computer Vision – ECCV 2020: 16th Euro-pean Conference, Glasgow, UK, August 23–28, 2020, Proceedings, Part XXV. p. 184–201. Springer-Verlag, Berlin, Heidelberg (2020). https://doi.org/10.1007/ 978-3-030-58595-2_12 , https://doi.org/10.1007/978-3-030-58595-2_12 
+
+38. Rombach, R., Blattmann, A., Lorenz, D., Esser, P., Ommer, B.: High-resolution image synthesis with latent diffusion models. In: Proceedings of the IEEE Con-ference on Computer Vision and Pattern Recognition (CVPR). pp. 10674–10685 (2022). https://doi.org/10.1109/CVPR52688.2022.01042 
+
+39. Ronneberger, O., Fischer, P., Brox, T.: U-net: Convolutional networks for biomed-ical image segmentation. In: Navab, N., Hornegger, J., Wells, W.M., Frangi, A.F. (eds.) Medical Image Computing and Computer-Assisted Intervention – MICCAI 2015. Lecture Notes in Computer Science, vol. 9351, pp. 234–241. Springer (2015). 
+
+https://doi.org/10.1007/978-3-319-24574-4_28 
+
+40. Saharia, C., Chan, W., Chang, H., Lee, C.A., Ho, J., Salimans, T., Fleet, D.J., Norouzi, M.: Palette: Image-to-image diffusion models. ACM Transactions on Graphics 41 (6), 15:1–15:10 (2022). https://doi.org/10.1145/3528233.3530757 
+
+41. Saharia, C., Ho, J., Chan, W., Salimans, T., Fleet, D.J., Norouzi, M.: Image super-resolution via iterative refinement. arXiv preprint arXiv:2104.07636 (2021) 42. Salimans, T., Ho, J.: Progressive distillation for fast sampling of diffusion models. In: International Conference on Learning Representations (ICLR) (2022), spotlight 43. Simonyan, K., Zisserman, A.: Very deep convolutional networks for large-scale image recognition. In: ICLR (2015) Improving Image-to-Image Translation via a Rectified Flow Reformulation 19 44. Song, J., Meng, C., Ermon, S.: Denoising diffusion implicit models. In: International Conference on Learning Representations (ICLR) (2021) 45. Suvorov, R., Logacheva, E., Mashikhin, A., Remizova, A., Ashukha, A., Silvestrov, A., Kong, N., Goka, H., Park, K., Lempitsky, V.: Resolution-robust large mask inpainting with fourier convolutions. In: Proceedings of the IEEE/CVF winter conference on applications of computer vision. pp. 2149–2159 (2022) 46. Tan, Z., Wang, Z., Yang, X., Liu, S., Wang, X.: Vision bridge transformer at scale (2025), https://arxiv.org/abs/2511.23199 
+
+47. Tang, Y., Kawasaki, H., Iwaguchi, T.: Underwater image enhancement by transformer-based diffusion model with non-uniform sampling for skip strategy. In: Proceedings of the 31st ACM international conference on multimedia. pp. 5419– 5427 (2023) 48. Tyleček, R., Šára, R.: Spatial pattern templates for recognition of objects with reg-ular structure. In: German conference on pattern recognition. pp. 364–374. Springer (2013) 49. Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones, L., Gomez, A.N., Kaiser, Ł., Polosukhin, I.: Attention is all you need. In: Advances in Neural Information Processing Systems. vol. 30, pp. 5998–6008 (2017) 50. Wan, Z., Zhang, B., Chen, D., Liao, J.: Bringing old films back to life. In: Proceed-ings of the IEEE/CVF conference on computer vision and pattern recognition. pp. 17694–17703 (2022) 51. Wang, X., Girshick, R., Gupta, A., He, K.: Non-local neural networks. In: Pro-ceedings of the IEEE Conference on Computer Vision and Pattern Recognition (CVPR). pp. 7794–7803 (2018). https://doi.org/10.1109/CVPR.2018.00813 
+
+52. Xu, J., Li, W., Sun, H., Li, F., Wang, Z., Peng, L., Ren, J., Yang, H., Hu, X., Pei, R., et al.: Fast image super-resolution via consistency rectified flow. In: Proceedings of the IEEE/CVF International Conference on Computer Vision. pp. 11755–11765 (2025) 53. Yue, Z., Wang, J., Loy, C.C.: Resshift: Efficient diffusion model for image super-resolution by residual shifting. Advances in neural information processing systems 
+
+36 , 13294–13307 (2023) 54. Zamir, S.W., Arora, A., Khan, S., Hayat, M., Khan, F.S., Yang, M.H.: Restormer: Efficient transformer for high-resolution image restoration. In: Proceedings of the IEEE/CVF conference on computer vision and pattern recognition. pp. 5728–5739 (2022) 55. Zhao, C., Cai, W., Dong, C., Zeng, Z.: Toward sufficient spatial-frequency in-teraction for gradient-aware underwater image enhancement. In: ICASSP 2024-2024 IEEE International Conference on Acoustics, Speech and Signal Processing (ICASSP). pp. 3220–3224. IEEE (2024) 56. Zhou, B., Khosla, A., Lapedriza, À., Torralba, A., Oliva, A.: Places: An image database for deep scene understanding. CoRR abs/1610.02055 (2016) 57. Zhou, S., Li, C., Change Loy, C.: Lednet: Joint low-light enhancement and de-blurring in the dark. In: European conference on computer vision. pp. 573–589. Springer (2022) 20 Iizuka et al. 
+
+## A Computational Overhead and Runtime 
+
+Table 8 summarizes the parameter count, inference time, and peak memory usage of the original backbones and their I2I-RFR variants. These measurements were obtained by averaging over up to the first 100 evaluation samples of each benchmark on a system with an NVIDIA A6000 GPU and two AMD EPYC 7543 CPUs, using a batch size of 1. For the generic U-Net and Palette baselines, we report measurements at 1120 × 640 as a representative RGB I2I resolution. The parameter overhead of I2I-RFR is minimal because the backbone is reused almost unchanged, and the only architectural modification is the expansion of the input layer to accept the noisy target state. For regression backbones, the runtime increase mainly stems from iterative inference: with the default choice of 
+
+N = 3 , I2I-RFR requires three forward passes instead of one. For diffusion-based baselines, however, runtime is substantially reduced because the original multi-step denoising process is replaced by only a few explicit Euler steps. Overall, the memory overhead is generally modest, while the measured latency remains practical relative to the substantially higher cost of diffusion-style sampling. 
+
+Table 8: Computational overhead and runtime. Runtime is measured on the same GPU with a batch size of 1. All I2I-RFR variants use N = 3 inference steps. For the generic U-Net and Palette baselines, we report measurements at 1120 × 640 as a representative RGB I2I resolution. For each backbone, we report the transition from the original model to its I2I-RFR counterpart. Task Image Size Backbone Params (M) Time (s) VRAM (GB) Generic RGB I2I 1120 ×640 U-Net 31.0319 → 31.0336 
+
+> (+0 .0017 )
+
+0.0375 → 0.0775 
+
+> (+0 .0400 )
+
+1.32 → 1.58 
+
+> (+0 .26 )
+
+Palette (Diffusion) 62.6413 → 62.6413 
+
+> (+0 .0000 )
+
+13.5106 → 0.8149 
+
+> (−12 .6957 )
+
+20.93 → 20.93 
+
+> (+0 .00 )
+
+Super-Res 480 ×320 NLSN 44.1565 → 44.1634 
+
+> (+0 .0069 )
+
+0.0516 → 0.1194 
+
+> (+0 .0678 )
+
+1.39 → 1.39 
+
+> (+0 .00 )
+
+SwinIR 11.8998 → 11.9047 
+
+> (+0 .0049 )
+
+0.0785 → 0.1467 
+
+> (+0 .0682 )
+
+0.64 → 0.62 
+
+> (−0.02 )
+
+Deblur 670 ×763 NAFNet 67.8888 → 67.8906 
+
+> (+0 .0017 )
+
+0.1170 → 0.3027 
+
+> (+0 .1857 )
+
+2.11 → 2.25 
+
+> (+0 .14 )
+
+Restormer 26.1266 → 26.1279 
+
+> (+0 .0013 )
+
+0.3543 → 1.0436 
+
+> (+0 .6893 )
+
+4.37 → 4.39 
+
+> (+0 .02 )
+
+Low-light 1120 ×640 LEDNet 7.4089 → 7.4098 
+
+> (+0 .0009 )
+
+0.0683 → 0.1928 
+
+> (+0 .1245 )
+
+3.21 → 3.25 
+
+> (+0 .04 )
+
+DarkIR 12.9573 → 12.9590 
+
+> (+0 .0017 )
+
+0.1723 → 0.4722 
+
+> (+0 .2999 )
+
+2.37 → 2.40 
+
+> (+0 .03 )
+
+Underwater 256 ×256 Tang et al. (Diffusion) 10.7056 → 10.7056 
+
+> (+0 .0000 )
+
+0.1703 → 0.0603 
+
+> (−0.1100 )
+
+0.87 → 0.87 
+
+> (+0 .00 )
+
+SFGNet 1.2977 → 1.2979 
+
+> (+0 .0002 )
+
+0.0329 → 0.0654 
+
+> (+0 .0325 )
+
+0.61 → 0.62 
+
+> (+0 .01 )
+
+Video-Res 30 ×688 ×368 RTN 6.1779 → 6.1782 
+
+> (+0 .0003 )
+
+0.3721 → 0.8136 
+
+> (+0 .4415 )
+
+8.29 → 9.13 
+
+> (+0 .84 )
+
+RRTN 7.4933 → 7.4935 
+
+> (+0 .0001 )
+
+0.6408 → 1.3750 
+
+> (+0 .7342 )
+
+9.40 → 9.47 
+
+> (+0 .07 )
+
+Improving Image-to-Image Translation via a Rectified Flow Reformulation 21 
+
+Table 9: Ablation study on the number of inference steps ( N ). All models are evaluated using the proposed I2I-RFR with the ℓ1 loss. The results show that the optimal inference depth is backbone-dependent: increasing N often improves LPIPS, while PSNR and SSIM may saturate or decrease. The best and second-best values are highlighted in red and blue, respectively. Number of Inference Steps ( N )Model Metric 1 3 5 7 10 Image super-resolution results on Set5 benchmark. SwinIR [24] PSNR ↑ 32.85 32.84 32.78 32.63 32.58 SSIM ↑ 0.9028 0.9028 0.9019 0.9007 0.8994 LPIPS ↓ 0.1657 0.1665 0.1640 0.1646 0.1607 Image deblurring results on RealBlur-J benchmark. Restormer [54] PSNR ↑ 29.04 29.04 29.01 28.99 28.96 SSIM ↑ 0.8805 0.8812 0.8808 0.8802 0.8792 LPIPS ↓ 0.1422 0.1408 0.1400 0.1394 0.1387 Low-light blur enhancement results on LOLBlur test set. DarkIR [10] PSNR ↑ 27.35 27.19 27.05 26.96 26.86 SSIM ↑ 0.901 0.897 0.892 0.889 0.884 LPIPS ↓ 0.108 0.106 0.105 0.104 0.103 Underwater image enhancement results on LSUI test set. Tang et al. [47] PSNR ↑ 29.02 29.27 28.78 28.89 28.59 SSIM ↑ 0.9356 0.9381 0.9353 0.9335 0.9295 LPIPS ↓ 0.0865 0.0838 0.0834 0.0799 0.0789 Video restoration results on DAVIS test set. RRTN [25] PSNR ↑ 25.85 25.87 25.57 25.39 25.08 SSIM ↑ 0.8682 0.8659 0.8574 0.8503 0.8424 LPIPS ↓ 0.1888 0.1699 0.1723 0.1761 0.1815 
+
+## B Effect of the Number of Inference Steps 
+
+As mentioned in the main paper, I2I-RFR can be used with a small number of inference steps, and we use N = 3 by default in all main experiments. To study the role of inference depth, we vary the number of explicit Euler steps N at test time while keeping the same trained checkpoint for each backbone. Thus, the results at N = 3 are identical to those reported in the main paper. Table 9 shows that the optimal step count is backbone-dependent, but a clear perception–distortion trade-off [3] appears in many cases: larger N often improves LPIPS, while PSNR and SSIM tend to saturate or decrease. This sug-gests that the first few steps already capture most of the distortion-relevant information, and additional rollout mainly acts as perceptual refinement. Importantly, the N = 1 case is not equivalent to ordinary one-shot ℓ1 re-gression. Even with a single inference step, the model is still trained under the I2I-RFR formulation with noisy target states and the t-reweighted objective. Therefore, N = 1 should be understood as the shallowest transport-style in-ference regime of I2I-RFR, rather than as the original regression baseline. This 22 Iizuka et al.               
+
+> Input N= 1 N= 3 N= 5 N= 7 N= 10
+> Fig. 4: Qualitative effect of the number of inference steps. We compare repre-sentative outputs generated with different numbers of explicit Euler steps. From top to bottom, the three rows correspond to image deblurring, low-light enhancement, and underwater image enhancement, respectively. While larger step counts can continue to improve LPIPS in some cases, the dominant visual refinement is typically achieved within the first few steps, and the differences beyond N= 3 are often minor to the human eye.
+
+also helps explain why the N = 1 regime can already be competitive with, or even outperform, the corresponding standard regression baselines reported in the main paper. Although N = 3 is not universally optimal for every backbone and every met-ric, it provides a strong practical compromise between speed, distortion preser-vation, and perceptual refinement. Qualitatively, as shown in Fig. 4, we also observe that the dominant visual improvement is typically achieved within the first few steps, and the differences beyond N = 3 are often minor to the human eye. We therefore use N = 3 as the default operating point in the paper. These observations also highlight a practical difference from diffusion-based methods such as DDIM [44], which often require substantially more denoising steps to achieve strong performance. In contrast, I2I-RFR learns refinement tra-jectories that already work well in a few-step regime, which is important for practical image and video restoration applications. 
+
+## C Full Implementation Details 
+
+We provide the implementation details of the I2I-RFR variants of the baseline models used in the main paper, which could not be fully included there due to space constraints. Unless otherwise specified, all models are optimized with Adam using an initial learning rate of 10 −4 and a cosine learning-rate schedule Improving Image-to-Image Translation via a Rectified Flow Reformulation 23 
+
+down to 10 −6. For I2I-RFR, t is sampled as t ∼ Beta(2 , 1) with tmin = 10 −3,and the default loss is the t−1-reweighted ℓ1 distance. At inference time, the induced ODE is solved with a fixed-step explicit Euler integrator using N = 3 
+
+steps for all tasks unless stated otherwise. Classifier-free guidance and explicit time embedding modules are not used. All images are normalized to [0,1] before being mixed with Gaussian noise, and the final predictions are clipped back to the valid image range for evaluation. For quantitative evaluation, we use a fixed random seed and generate a single sample per input. For all models, we use the checkpoints with the lowest validation loss as the final models. The final check-points were selected at training iterations ranging from 200K to 4M, depending on the model. Training was performed on NVIDIA RTX 3090, RTX A6000, and H100 GPUs, depending on availability. Because video restoration models were more computationally demanding, we used H100 GPUs for them whenever pos-sible. For vanilla Palette [40], we use 50 DDIM [44] steps for inference and adopt the default noise schedule for all tasks during training and inference, namely a linear schedule with βmin = 10 −6 and βmax = 10 −2 over 2000 diffusion timesteps. We use AlexNet features to compute LPIPS. Further details for each task are as follows: 
+
+– Image Super-resolution. We train all models on the DF2K dataset [1], which consists of 3,450 training images, with batch sizes ranging from 8 to 32 depending on GPU memory constraints. During training, HR patches are randomly cropped to 256 × 256 pixels, and the corresponding LR inputs are generated by ×4 bicubic downsampling. We apply random horizontal and vertical flips and random 90-degree rotations for data augmentation. For I2I-RFR, the conditioning state is constructed in the LR domain to match the model input shape: the network is fed with [xLR ; yLR  
+
+> t
+
+], while the prediction target and the loss are defined in the HR domain. We evaluate the models on the standard benchmarks Set5, Set14, BSD100, and Urban100 at their original resolutions. In terms of evaluation metrics, we report PSNR and SSIM on the Y channel of the YCbCr color space as is standard practice. 
+
+– Image Deblurring. We train all models on the GoPro dataset [34], which consists of 2,103 training image pairs, with batch sizes ranging from 8 to 32 depending on GPU memory constraints. During training, input images are randomly cropped to 256 × 256 pixels, and we apply random horizontal and vertical flips for data augmentation. We evaluate the models on the RealBlur-J test set [37], which consists of 980 image pairs at their original resolutions. 
+
+– Low-Light Blur Enhancement. We train all models on the LOLBlur dataset [57] which consists of 10,200 training image pairs, with batch sizes ranging from 8 to 32 depending on GPU memory constraints. During train-ing, input images are randomly cropped to 256 × 256 pixels, and we apply random horizontal flips and random 90-degree rotations for data augmen-tation. We use the pretrained checkpoints of LEDNet and DarkIR provided by the original authors as the baselines, as retraining these models ourselves did not yield performance comparable to that of the released checkpoints. 24 Iizuka et al. 
+
+The corresponding I2I-RFR variants are trained from scratch on the LOL-Blur training split unless stated otherwise. We evaluate the models on the LOLBlur test set [57], which consists of 1,800 image pairs at their original resolutions. 
+
+– Underwater Image Enhancement. We train all models on the LSUI benchmark [35], which consists of 3,879 training image pairs in the updated version, with batch sizes ranging from 8 to 16 depending on GPU memory constraints. Following standard practice [47], training and evaluation are performed on 256 ×256 images: during training, image patches are randomly cropped from the original images, whereas during evaluation, the images are resized to 256 ×256 pixels. We apply random horizontal flips and random 90-degree rotations for data augmentation. We evaluate the models on the LSUI test set [35], which consists of 400 image pairs, and additionally report results on the UIEB test set [22], which contains 90 image pairs, to assess generalization beyond the synthetic LSUI distribution. 
+
+– Video Restoration. We train all models on the REDS dataset [33], which consists of 240 training video sequences, each containing 100 frames, with a batch size of 4. Following RRTN [25], the synthetic degradation pipeline is applied to the original videos on-the-fly during training, which replicates the old-film degradation process with grayscale conversion, random cropping to 
+
+128 × 128 pixels, random horizontal and vertical flips, and random 90-degree rotations. We use 7 consecutive frames as each input-output sequence pair. This task requires not only spatial modeling but also temporal modeling, and thus we do not provide U-Net and Palette baselines for this task. Following standard practice, we evaluate the models on the DAVIS test set [36] which consists of 30 video sequences. We apply the same synthetic degradation pipeline to the original videos in the test set for evaluation, and we resize the original videos in the test set such that the shorter side is 384 pixels. During inference, we process 30 consecutive frames at a time. We use the first 15 frames as reference frames for restoring the next 15 frames, and then slide this window forward by 15 frames until the end of the video sequence, following RRTN [25]. 
+
+## D Extended Ablations of the I2I-RFR Recipe 
+
+As discussed in the main paper, the default I2I-RFR recipe uses Beta-based t-sampling, no explicit time embeddings, and no adversarial training. Moreover, the performance gain is not solely due to the rectified-flow-style reformulation itself, but also to the choice of parameterization, namely predicting the clean image y rather than the velocity v. To further verify the role of each design choice, we provide additional analyses and ablation studies for the main components of the I2I-RFR recipe. Improving Image-to-Image Translation via a Rectified Flow Reformulation 25 0.0 0.2 0.4 0.6 0.8 1.0      
+
+> t
+> 0.00
+> 0.25
+> 0.50
+> 0.75
+> 1.00
+> 1.25
+> 1.50
+> 1.75
+> 2.00
+> Probability density
+> Comparison of t-sampling densities
+> Uniform(0,1)
+> Beta(2,1)
+> Logit-Normal(0,1) 0.0 0.2 0.4 0.6 0.8 1.0
+> t
+> 0
+> 2
+> 4
+> 6
+> 8
+> 10
+> 12
+> Effective weighting (unnormalized)
+> Effective weighting under p = 1
+> Uniform x t^-1
+> Beta(2,1) x t^-1
+> Logit-Normal(0,1) x t^-1
+
+(a) Sampling densities (b) Effective weighting under p = 1 
+
+Fig. 5: Visualization of the proposed Beta-based t-sampling strategy. (a) Comparison of the probability density functions used for sampling the interpolation parameter t, including uniform sampling, logit-normal (0 , 1) sampling, and the proposed 
+
+Beta(2 , 1) sampling used in the default p = 1 setting of I2I-RFR. Compared with uniform sampling, Beta(2 , 1) places slightly more probability mass near the high-noise regime t ≈ 1, while logit-normal (0 , 1) concentrates more mass around intermediate noise levels. (b) Effective weighting induced by the training objective when p = 1 . With uniform sampling, the explicit t−1 loss reweighting overemphasizes small t. In contrast, 
+
+Beta(2 , 1) has density proportional to t, which approximately counterbalances the loss reweighting and yields a flatter effective weighting over t.
+
+D.1 Visualization of the Beta-based t-Sampling Strategy 
+
+To clarify the role of our default Beta-based sampling strategy, Fig. 5 visualizes both the sampling densities and the effective weighting induced by the train-ing objective. In the default setting of I2I-RFR, we use p = 1 , which leads to 
+
+t ∼ Beta(2 , 1) . Since the reformulated loss contains an explicit t−1 factor, sam-pling t uniformly would overemphasize small-t regions and can increase gradient variance. In contrast, Beta(2 , 1) has density proportional to t, which approx-imately counterbalances the loss reweighting and produces a flatter effective weighting over t. Compared with logit-normal (0 , 1) sampling, it also allocates slightly more probability mass to the high-noise regime ( t ≈ 1), which can be beneficial for robust refinement. At the same time, this does not imply that Beta sampling is universally optimal in all settings. Different backbones or tasks may favor somewhat different sampling distributions, and alternatives such as logit-normal sampling may be competitive or even preferable depending on the desired balance across noise levels. We therefore view Beta(2 , 1) primarily as a simple and effective default choice rather than a universally optimal one. This interpretation is also consistent with the empirical comparison in Fig. 2 of the main paper, where Beta sampling converges more smoothly and yields the highest validation PSNR among the tested strategies in our default setup. 26 Iizuka et al.                
+
+> Table 10: Additional parameterization study. The main paper compares direct target prediction and velocity prediction on low-light blur enhancement and video restoration. Here, we further extend the same comparison to underwater image en-hancement and image deblurring. Best values for each task are highlighted in red. PSNR ↑SSIM ↑LPIPS ↓
+> Underwater image enhancement results on the LSUI test set. SFGNet + I2I-RFR 26.09 0.9190 0.1164 SFGNet + I2I-RFR ( v-pred.) 23.76 0.8817 0.1557 Image deblurring results on the RealBlur-J test set. Restormer + I2I-RFR 29.04 0.8812 0.1408 Restormer + I2I-RFR ( v-pred.) 28.52 0.8241 0.1483
+
+D.2 Additional Parameterization Study 
+
+In the main paper, we already compared direct target prediction and velocity prediction on low-light blur enhancement and video restoration, and observed that direct target prediction is consistently more effective in those settings. Here, we further extend the same comparison to two additional tasks: underwater im-age enhancement and image deblurring. As in the main paper, the default I2I-RFR formulation predicts the clean target image directly. For comparison, we also train the same backbones in a velocity-prediction form by regressing the rectified-flow velocity, while keeping the model interface unchanged apart from the choice of prediction target. The velocity-prediction variants are trained with the same data and optimization setup as the corresponding original I2I-RFR models, changing only the prediction target and the associated loss parameteri-zation. As shown in Table 10, the same trend remains clear in both additional tasks: the velocity-prediction variants lead to substantial performance degradation in both settings. This further supports the conclusion of the main paper that the choice of parameterization is crucial for I2I-RFR. A plausible explanation is that, in paired image-to-image problems, direct target prediction defines a more stable learning objective because the target image is strongly correlated with the con-ditioning input, whereas velocity prediction is more sensitive to the noise level and must preserve the residual noise information in the intermediate state. More-over, many image-to-image backbones are originally designed for direct image regression rather than vector-field prediction, so replacing the regression target with velocity prediction can be mismatched with their original inductive bias. Overall, these additional results reinforce the conclusion of the main paper that direct target prediction is the more effective parameterization for I2I-RFR on paired image-to-image tasks, even though velocity prediction is more commonly adopted in standard rectified-flow image generation. Improving Image-to-Image Translation via a Rectified Flow Reformulation 27 
+
+Table 11: Effect of an alternative bridge-style path design. We compare the default I2I-RFR formulations with a bridge-style variant that predicts the clean image from interpolation states between the input image and the target image. Values in parentheses indicate the change relative to the original DarkIR baseline. PSNR ↑ SSIM ↑ LPIPS ↓                 
+
+> DarkIR [10] 27.31 0.896 0.111 DarkIR + I2I-RFR 27.19 (-0.12) 0.897 (+0.001) 0.106 (-0.005)
+> DarkIR + I2I-RFR-CL 27.72 (+0.41) 0.900 (+0.004) 0.103 (-0.008)
+> DarkIR + I2I-RFR-CL (bridge path) 23.33 (-3.98) 0.766 (-0.13) 0.201 (+0.09)
+
+D.3 Additional Study on a Bridge-Style Formulation 
+
+Beyond the prediction target, we also examine an alternative path design for I2I-RFR. Our default formulation follows the standard rectified-flow choice of defining a straight path between Gaussian noise and the clean target image. As an alternative, one can instead define the path between the degraded input image and the clean target image, following a bridge-style formulation explored in several recent image-to-image and diffusion-related works [2, 21, 46, 52, 53]. In this alternative formulation, the model predicts the clean target image from intermediate states interpolated between the input image and the target image, without explicitly concatenating the input image as a separate condi-tioning signal. We evaluate this design under the same training setup as the original I2I-RFR-CL formulation. As shown in Table 11, this bridge-style vari-ant performs substantially worse than the original I2I-RFR formulation in this setting. A plausible explanation is twofold. First, more generally, the bridge-style path is less flexible for tasks whose input and output domains differ, because it assumes that the refinement state and the prediction target live in compatible spaces. Second, in the present low-light restoration setting, the model no longer receives the original input image explicitly at every refinement step, making it harder to exploit the conditioning information, especially in the high-noise regime where the intermediate state is dominated by noise. These results suggest that direct access to the conditioning input is important for effective I2I-RFR refinement, and that the interpolation state alone is insufficient to preserve the useful structure of the degraded input. 
+
+D.4 Comparative Study of Training Objectives and Formulation Variants 
+
+To further compare I2I-RFR with several commonly used alternatives for perceptual-quality-oriented image-to-image training, we conduct an additional controlled study on a representative low-light blur enhancement benchmark. Specifically, we compare standard ℓ1 regression, ℓ1 with perceptual loss, ℓ1 with perceptual and adversarial losses, DDPM training, and I2I-RFR variants with different pa-rameterizations and with/without classifier-free guidance (CFG) [14]. We use the LOLBlur dataset [57], train all models with a batch size of 8, and select the checkpoints with the lowest validation loss as the final models. 28 Iizuka et al.                              
+
+> Table 12: Comparative study of training objectives and formulation vari-ants. All models are trained on the LOLBlur benchmark. Best values are highlighted in red, and second-best values in blue. PSNR ↑SSIM ↑LPIPS ↓
+> ℓ124.35 0.8070 0.2427
+> ℓ1+ Perceptual 24.69 0.8110 0.2413
+> ℓ1+ Perceptual + Adversarial 23.63 0.7949 0.1942 DDPM 8.76 0.0957 0.7601 I2I-RFR ( v-pred.) + CFG 13.92 0.4220 0.4304 I2I-RFR ( v-pred.) 19.55 0.7749 0.1704 I2I-RFR + CFG 12.92 0.3558 0.4713 I2I-RFR 26.26 0.8593 0.1585
+
+For perceptual supervision, we use pretrained VGG-16 features. For adver-sarial training, we adopt a pix2pix-style discriminator [15]. The perceptual and adversarial loss weights are set to 0.01 and 0.05, respectively. When CFG is used, the conditioning input is dropped with probability 0.1 during training, and a guidance scale of 4 is used at inference. For sampling, DDPM-based mod-els use DDIM with 50 steps, whereas I2I-RFR-based models use Euler inference with 3 steps. The quantitative and qualitative results are presented in Table 12 and Fig. 6, respectively. Among all variants considered here, the default I2I-RFR formula-tion, namely direct target prediction without CFG, achieves the best overall performance. Adding perceptual or adversarial losses to standard ℓ1 regression can improve individual metrics, but the gains remain limited and the overall per-formance still falls short of I2I-RFR. The DDPM baseline performs much worse, which may reflect that learning a stochastic diffusion trajectory is considerably harder in this paired low-light enhancement setting and can lead to severe ar-tifacts such as color degradation. This is consistent with the observation in the main paper that the original DDPM version of Palette performs much worse than its I2I-RFR counterpart. We also find that CFG causes large degradation for both direct-prediction and velocity-prediction variants of I2I-RFR. A plausible explanation is that un-conditional dropout makes the task unnecessarily difficult in strongly image-conditioned restoration settings, weakening the model’s ability to learn a stable mapping from the noise-corrupted target state to the clean target image. Finally, consistent with the parameterization study, the velocity-prediction variant again performs much worse than direct target prediction, even when using the stan-dard Palette-style backbone. Overall, these results support the default I2I-RFR formulation as the strongest and most stable choice among the alternatives con-sidered here. Improving Image-to-Image Translation via a Rectified Flow Reformulation 29          
+
+> Input ℓ1ℓ1+Per ℓ1+Per+Adv DDPM
+> Input RFR-v+ CFG RFR-vRFR + CFG RFR
+> Fig. 6: Visual comparison with different training objectives and formulation variants.
+
+## E Practical Engineering Overhead 
+
+Beyond quantitative performance, another practical consideration is how much engineering overhead is introduced when a perceptual-quality-oriented method is integrated into an existing supervised image-to-image (I2I) system. Table 13 summarizes this aspect for several commonly used approach families. This com-parison is not intended as a formal computational-complexity analysis. Rather, the goal is to highlight the kinds of additional modules, design choices, balanc-ing requirements, and tuning effort that are often encountered in practice when extending a standard supervised I2I pipeline. Perceptual-loss-based approaches typically preserve the basic single-stage su-pervised training pipeline, but they often require introducing a pretrained feature extractor and making task-dependent choices about which feature layers to use and how to balance feature-space supervision against the original pixel-space ob-jective. Adversarial objectives further increase practical overhead by introducing a discriminator together with additional design and optimization choices, such as discriminator architecture, stabilization strategies, adversarial loss weighting, 30 Iizuka et al. 
+
+Table 13: Practical engineering overhead when integrating different perceptual-quality-oriented approaches into an existing supervised I2I sys-tem. This is not a formal computational complexity comparison. Instead, it sum-marizes the kinds of additional modules, design choices, balancing requirements, and tuning effort that are commonly encountered in practice.                              
+
+> Method family Extra modules Typical integration work in practice Inference steps Tuning burden
+> Perceptual loss Pretrained feature network
+> •Prepare a pretrained feature extractor (e.g., VGG).
+> •Decide which feature layer(s) to use.
+> •Tune the balance between perceptual loss and pixel loss. 1Low– Medium Adversarial loss Discriminator •Design the discriminator (e.g., depth, PatchGAN vs. full-image).
+> •Optionally choose normalization or stabilization strategies, such as spectral normalization.
+> •Sometimes adjust the generator to maintain a reasonable generator–discriminator balance.
+> •Tune the adversarial weight relative to other losses.
+> •Possibly tune the discriminator learning rate and training schedule.
+> •Training can be sensitive to these choices and may become unstable or introduce artifacts. 1High Diffusion-based I2I Diffusion-specific conditioning; sometimes latent encoder– decoder
+> •Choose the diffusion formulation, including parameterization, conditioning design, and noise schedule.
+> •Choose the sampler and the denoising step count.
+> •Latent variants additionally require an encoder–decoder (e.g., a VAE).
+> •Accelerated variants may require a separate distillation stage and careful tuning.
+> •Integration into existing task-specialized regression pipelines can be less straightforward. Many High
+> I2I-RFR (ours) No extra trainable module in the default form
+> •Expand the backbone input channels (e.g., 3 →6 for RGB I2I).
+> •Concatenate a noise-corrupted target state with the input and use the t-reweighted pixel loss during training.
+> •Use a small inference step count Nfor ODE refinement (3 by default).
+> Few Low
+
+and the generator–discriminator balance. In practice, these choices can make training more sensitive and may lead to instability or task-dependent artifacts. Diffusion-based I2I approaches can produce strong perceptual quality, but they usually rely on diffusion-specific training and inference pipelines, includ-ing parameterization choices, conditioning mechanisms, noise schedules, iterative samplers, and often many denoising steps. Latent variants may additionally re-quire an encoder–decoder such as a VAE, while accelerated variants may require a separate distillation stage together with further tuning. As a result, integrating diffusion-style pipelines into existing task-specialized regression systems can be less straightforward than extending a standard supervised regression baseline. In contrast, I2I-RFR is designed as a practical plug-in reformulation of stan-dard regression backbones. In the default setup, it requires only expanding the backbone input channels, concatenating a noise-corrupted target state dur-ing training, replacing the standard pixel objective with the reformulated t-reweighted pixel loss, and choosing a small inference step count for ODE re-finement. In our experiments, we use a fixed default recipe with Beta-based 
+
+t-sampling, no explicit time embeddings, and N = 3 Euler steps unless stated otherwise. This keeps the method close to the original supervised regression interface while introducing relatively little additional tuning burden. This practical difference is especially important in task-specialized I2I set-tings, where both architectures and training recipes are already carefully engi-Improving Image-to-Image Translation via a Rectified Flow Reformulation 31 
+
+neered, and introducing new modules or substantially altering the pipeline can incur a non-trivial development cost. 
+
+## F Additional I2I Applications 
+
+To further illustrate the breadth of I2I-RFR beyond the main benchmarks, we provide additional qualitative results on image inpainting and colorization (Fig. 7), as well as label-to-image translation (Fig. 8). These examples are in-tended as application showcases rather than exhaustive benchmark studies, and they also highlight that the proposed formulation extends beyond same-domain RGB restoration to tasks with different input/output representations. For all additional tasks, we use Palette [40] as the backbone and train it under the I2I-RFR formulation. For image inpainting, we train the model on the Places2 dataset [56] following the masking setup used in LaMa [45]. The loss is computed only on the masked region for efficiency. During inference, we follow RePaint [29] and replace the non-masked region of the intermediate state with the input image at the corresponding noise level at each refinement step, and we finally replace the non-masked region of the output with the input image to ensure pixel-level consistency in the known region. Since image inpainting is relatively complex and multimodal, we use an explicit Euler solver with 15 steps for this task. We show qualitative results on the Places2 validation set at a resolution of 256 × 256 . For image colorization, we train the model on ImageNet [7]. The input is the luminance channel L in the Lab color space, and the model predicts only the chrominance channels ab . We show qualitative results on the ImageNet validation set at a resolution of 256 × 256 . Moreover, following pix2pix [15], we train the model on the Cityscapes dataset [6] for labels-to-street-scene translation and on the CMP Facades dataset [48] for labels-to-facade translation. We present qualitative results on the corresponding test sets. 
+
+## G Additional Qualitative Results 
+
+We provide additional qualitative comparisons for the tasks studied in the main paper, including super-resolution (Fig. 9), deblurring (Fig. 10), low-light blur enhancement (Fig. 11), underwater image enhancement (Fig. 12), and video restoration (Fig. 13). These examples are intended to complement the quantita-tive results and to highlight the perceptual behavior of I2I-RFR under different settings. 32 Iizuka et al. Image inpainting Image colorization 
+
+Input I2I-RFR Input I2I-RFR 
+
+Fig. 7: Additional qualitative applications of I2I-RFR: image inpainting and image colorization. Improving Image-to-Image Translation via a Rectified Flow Reformulation 33 Labels to Street Scene 
+
+Labels to Facade 
+
+Input I2I-RFR Input I2I-RFR 
+
+Fig. 8: Additional qualitative applications of I2I-RFR: label-to-image trans-lation. We show representative results on street-scene and facade generation to further illustrate the flexibility of the proposed formulation. 34 Iizuka et al. 
+
+Input NLSN NLSN+I2I-RFR 
+
+SwinIR SwinIR+I2I-RFR GT 
+
+Input NLSN NLSN+I2I-RFR 
+
+SwinIR SwinIR+I2I-RFR GT 
+
+Fig. 9: Additional qualitative results on image super-resolution. We show representative examples to further illustrate the perceptual behavior of I2I-RFR in this setting. Improving Image-to-Image Translation via a Rectified Flow Reformulation 35 
+
+Input NAFNet NAFNet+I2I-RFR 
+
+Restormer Restormer+I2I-RFR GT 
+
+Input NAFNet NAFNet+I2I-RFR 
+
+Restormer Restormer+I2I-RFR GT 
+
+Fig. 10: Additional qualitative results on image deblurring. We show represen-tative examples to further illustrate the perceptual behavior of I2I-RFR in this setting. 36 Iizuka et al. 
+
+Input LEDNet LEDNet+I2I-RFR 
+
+DarkIR DarkIR+I2I-RFR GT 
+
+Input LEDNet LEDNet+I2I-RFR 
+
+DarkIR DarkIR+I2I-RFR GT 
+
+Fig. 11: Additional qualitative results on low-light blur enhancement. We show representative examples to further illustrate the perceptual behavior of I2I-RFR in this setting. Improving Image-to-Image Translation via a Rectified Flow Reformulation 37 
+
+Input Tang et al. Tang et al.+I2I-RFR 
+
+SFGNet SFGNet+I2I-RFR GT 
+
+Input Tang et al. Tang et al.+I2I-RFR 
+
+SFGNet SFGNet+I2I-RFR GT 
+
+Fig. 12: Additional qualitative results on underwater image enhancement. 
+
+We show representative examples to further illustrate the perceptual behavior of I2I-RFR in this setting. 38 Iizuka et al. 
+
+Input RTN RTN+I2I-RFR 
+
+RRTN RRTN+I2I-RFR GT 
+
+Input RTN RTN+I2I-RFR 
+
+RRTN RRTN+I2I-RFR GT 
+
+Fig. 13: Additional qualitative results on video restoration. We show represen-tative examples to further illustrate the perceptual behavior of I2I-RFR in this setting.

@@ -6,43 +6,46 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-03-24
-- 运行时间：2026-03-24 19:52:02 UTC
+- 最新运行日期：2026-03-25
+- 运行时间：2026-03-25 19:23:57 UTC
 - 运行状态：成功
-- 本次总论文数：7
-- 精读区：1
+- 本次总论文数：8
+- 精读区：2
 - 速读区：6
 
 ### 今日简报（AI）
-今日深度探索图像修复的推理侧缩放新范式，同步覆盖 3D 场景重建与多人群像生成的前沿突破。
-核心结论指出 Flow Matching 模型可通过推理时微调显著提升修复质量，且无需训练即可实现稀疏视图下的 3D 建模。
-推荐关注“推理侧缩放”这一趋势，并尝试将流匹配技术应用于高保真图像编辑与身份保持生成。
-- 详情：[/202603/24/README](/202603/24/README)
+今日深度解析 8 篇视觉前沿论文，聚焦 360° 全景补全与高效扩散修复。
+重点推荐 Gimbal360 的全景自动校准补全技术，以及 InverFill 实现的单步反转高效图像修复。
+建议关注少步扩散模型在图像编辑中的性能突破，探索全景技术在沉浸式场景中的应用潜力。
+- 详情：[/202603/25/README](/202603/25/README)
 
 ### 精读区论文标签
-1. [Tuning Real-World Image Restoration at Inference: A Test-Time Scaling Paradigm for Flow Matching Models](/202603/24/2603.22027v1-tuning-real-world-image-restoration-at-inference-a-test-time-scaling-paradigm-for-flow-matching-models)  
-   标签：评分：8.0/10、query:q3
-   evidence：无需重训的推理侧图像修复测试时缩放
+1. [Gimbal360: Differentiable Auto-Leveling for Canonicalized $360^\circ$ Panoramic Image Completion](/202603/25/2603.23179v1-gimbal360-differentiable-auto-leveling-for-canonicalized-360circ-panoramic-image-completion)  
+   标签：评分：10.0/10、query:q1
+   evidence：使用扩散模型进行全景图像补全和外扩
+2. [InverFill: One-Step Inversion for Enhanced Few-Step Diffusion Inpainting](/202603/25/2603.23463v1-inverfill-one-step-inversion-for-enhanced-few-step-diffusion-inpainting)  
+   标签：评分：10.0/10、query:q1
+   evidence：基于扩散模型的图像修复与语义信息注入
 
 ### 速读区论文标签
-1. [Training-Free Instance-Aware 3D Scene Reconstruction and Diffusion-Based View Synthesis from Sparse Images](/202603/24/2603.21166v1-training-free-instance-aware-3d-scene-reconstruction-and-diffusion-based-view-synthesis-from-sparse-images)  
-   标签：评分：7.0/10、query:q3
-   evidence：无需训练的场景重建与合成系统
-2. [AdaEdit: Adaptive Temporal and Channel Modulation for Flow-Based Image Editing](/202603/24/2603.21615v1-adaedit-adaptive-temporal-and-channel-modulation-for-flow-based-image-editing)  
+1. [Improving Image-to-Image Translation via a Rectified Flow Reformulation](/202603/25/2603.20186v1-improving-image-to-image-translation-via-a-rectified-flow-reformulation)  
    标签：评分：7.0/10、query:q4
-   evidence：基于流匹配模型的免训练图像操作与合成
-3. [AnyPhoto: Multi-Person Identity Preserving Image Generation with ID Adaptive Modulation on Location Canvas](/202603/24/2603.14770v1-anyphoto-multi-person-identity-preserving-image-generation-with-id-adaptive-modulation-on-location-canvas)  
+   evidence：通过修正流进行生成式图像到图像转换
+2. [Dynamic Exposure Burst Image Restoration](/202603/25/2603.21784v1-dynamic-exposure-burst-image-restoration)  
+   标签：评分：7.0/10、query:q1
+   evidence：多帧图像修复流水线
+3. [One View Is Enough! Monocular Training for In-the-Wild Novel View Generation](/202603/25/2603.23488v1-one-view-is-enough-monocular-training-for-in-the-wild-novel-view-generation)  
+   标签：评分：7.0/10、query:q2
+   evidence：处理遮挡区域的掩码训练公式，用于非人工标注图像
+4. [Accelerating Diffusion Decoders via Multi-Scale Sampling and One-Step Distillation](/202603/25/2603.19570v1-accelerating-diffusion-decoders-via-multi-scale-sampling-and-one-step-distillation)  
    标签：评分：6.0/10、query:q4
-   evidence：具有身份保留和空间定位的生成式图像合成
-4. [Workflow-Aware Structured Layer Decomposition for Illustration Production](/202603/24/2603.14925v2-workflow-aware-structured-layer-decomposition-for-illustration-production)  
+   evidence：基于扩散模型的解码器用于图像重建
+5. [DA-Flow: Degradation-Aware Optical Flow Estimation with Diffusion Models](/202603/25/2603.23499v1-da-flow-degradation-aware-optical-flow-estimation-with-diffusion-models)  
+   标签：评分：6.0/10、query:q3
+   evidence：图像修复模型的零样本对应能力
+6. [UniGRPO: Unified Policy Optimization for Reasoning-Driven Visual Generation](/202603/25/2603.23500v1-unigrpo-unified-policy-optimization-for-reasoning-driven-visual-generation)  
    标签：评分：6.0/10、query:q4
-   evidence：使用结构化图层分解的生成式图像编辑
-5. [SeeClear: Reliable Transparent Object Depth Estimation via Generative Opacification](/202603/24/2603.19547v1-seeclear-reliable-transparent-object-depth-estimation-via-generative-opacification)  
-   标签：评分：6.0/10、query:q4
-   evidence：基于扩散模型的生成式不透明化模块
-6. [GaussianSSC: Triplane-Guided Directional Gaussian Fields for 3D Semantic Completion](/202603/24/2603.21487v1-gaussianssc-triplane-guided-directional-gaussian-fields-for-3d-semantic-completion)  
-   标签：评分：6.0/10、query:q1
-   evidence：使用高斯场进行3D语义场景补全
+   evidence：推理驱动的视觉生成与合成
 
 
 <div class="dpr-home-promo-card">

@@ -1,0 +1,662 @@
+Title: InverFill: One-Step Inversion for Enhanced Few-Step Diffusion Inpainting
+
+URL Source: https://arxiv.org/pdf/2603.23463v1
+
+Published Time: Wed, 25 Mar 2026 01:41:30 GMT
+
+Number of Pages: 16
+
+Markdown Content:
+# InverFill: One-Step Inversion for Enhanced Few-Step Diffusion Inpainting 
+
+## Duc Vu 1⋆ Kien Nguyen 1⋆ Trong-Tung Nguyen 1⋆ Ngan Nguyen 1⋆
+
+## Phong Nguyen 1 Khoi Nguyen 1 Cuong Pham 1,2 Anh Tran 1 
+
+> 1
+
+Qualcomm AI Research † 2 Posts & Telecommunications Inst. of Tech., Vietnam         
+
+> {ducvu, kienn, tunnguy, ngannguy, phongnh, khoi, pcuong, anhtra }@qti.qualcomm.com cuongpv@ptit.edu.vn
+
+Figure 1. InverFill enhances few-step inpainting by generating semantically aligned inverted noise latents, while adding as little as 0.06 seconds of overhead on a single NVIDIA A100 40GB GPU. 
+
+## Abstract 
+
+Recent diffusion-based models achieve photorealism in im-age inpainting but require many sampling steps, limiting practical use. Few-step text-to-image models offer faster generation, but naively applying them to inpainting yields poor harmonization and artifacts between the background and inpainted region. We trace this cause to random Gaus-sian noise initialization, which under low function evalua-tions causes semantic misalignment and reduced fidelity. To overcome this, we propose InverFill, a one-step inversion method tailored for inpainting that injects semantic infor-mation from the input masked image into the initial noise, enabling high-fidelity few-step inpainting. Instead of train-ing inpainting models, InverFill leverages few-step text-to-image models in a blended sampling pipeline with semanti-cally aligned noise as input, significantly improving vanilla blended sampling and even matching specialized inpaint-ing models at low NFEs. Moreover, InverFill does not re-  
+
+> ⋆Equal Contribution
+> †Qualcomm AI Research is an initiative of Qualcomm Technologies, Inc.
+
+quire real-image supervision and only adds minimal infer-ence overhead. Extensive experiments show that InverFill consistently boosts baseline few-step models, improving im-age quality and text coherence without costly retraining or heavy iterative optimization. 
+
+## 1. Introduction 
+
+Recent generative models enable photorealistic and detail-rich visual synthesis across many tasks [3, 34, 39, 43, 52]. Among them, text-guided image inpainting has become a key direction, aiming to fill masked regions with con-tent that is semantically aligned with the prompt and vi-sually consistent with the background. Progress in this area is largely driven by large-scale text-to-image diffu-sion models [4, 20, 43]. To adapt pretrained models for inpainting, recent methods rely on blended sampling or fine-tuning with spatially aware architectures, exploiting strong pretrained priors for seamless results. Early ap-proaches fine-tune the full diffusion U-Net with mask con-ditioning [38, 43, 56], while adapter-based methods like 1
+
+> arXiv:2603.23463v1 [cs.CV] 24 Mar 2026
+
+BrushNet [16] add lightweight trainable branches to frozen backbones. Training-free methods [14, 22, 28] instead use guided sampling or attention manipulation. Despite their ef-fectiveness, most techniques require many sampling steps, resulting in high latency and limiting real-time deployment. This underscores the need for faster inpainting solutions. While many few-step text-to-image diffusion models ex-ist [5, 27, 46, 47], adapting them for image inpainting is nontrivial. A natural solution is blended sampling [2], where predictions are iteratively merged with the unmasked regions. This strategy works well for multi-step diffusion models, where gradual denoising allows the synthesized content to blend smoothly with the preserved context. In the few-step regime, however, each denoising step induces much larger updates, leading to semantic misalignment be-tween the initial noise and the masked content, and ulti-mately causing poor harmonization with the surrounding background. To the best of our knowledge, TurboFill [55] is the only successful few-step, text-guided specialized in-painting model. It reduces inference steps using a 3-step ad-versarial scheme that trains an inpainting adapter on top of a distilled few-step text-to-image model [59]. However, this design is complex, requires real-image supervision, and is computationally heavy. Moreover, prior inpainting methods follow the standard diffusion process [13, 49], which always starts from pure Gaussian noise. This gives the model no initial clue about the semantics or structure of the unmasked regions, often causing a semantic mismatch between the inpainted content and its surrounding context. Multi-step models can gradually correct this mismatch, but few-step or one-step models have no such allowance, leaving little room to recover from the initial randomness. As a result, inpainting under low NFEs tends to produce blurry, poorly integrated regions and degraded overall fidelity. To this end, we introduce InverFill , an efficient one-step inversion network that significantly improves performance of few-step inpainting with minimal overhead. As shown in Fig. 1, InverFill maps the masked image into an inverted noise latent, replacing random Gaussian initialization with a semantically informed noise for few-step inpainting. Al-though diffusion inversion has been explored for editing and inpainting [6, 22, 29, 30], we are the first to design a one-step inversion customized for inpainting. While SwiftE-dit [35] proposes a one-step inversion framework for im-age editing, a naive adaptation to inpainting fails for two reasons. First, training on masked images causes substan-tial leakage from the visible regions into the inverted noise latent. Second, its reconstruction objective does not con-strain the inverted latent to follow the required Gaussian distribution. To overcome this, we introduce Re-Blending to prevent information leakage and a Gaussian regulariza-tion loss to ensure the inverted noise latent aligns with the expected noise distribution. Our training pipeline is image-free, requiring no curated image–mask–text triplets and no multi-stage procedures. With these designs, InverFill en-hances few-step inpainting and enables few-step text-to-image models to perform on par with specialized inpainting systems, without any finetuning while introducing negligi-ble latency. Our contributions are summarized as follows: • We propose InverFill , an efficient one-step inversion net-work for few-step image inpainting, which generates se-mantically informed initial noise to improve inpainting quality while introducing minimal overhead. • We introduce the Re-Blending operation to mitigate in-formation leakage during training while preserving key semantics in the inverted noise latent for inpainting. • We introduce a Gaussian regularization loss to align the inverted noise latent with the expected Gaussian distribu-tion, enhancing stability and quality. • Our method features a highly simplified, image-free training pipeline that eliminates the need for image-mask-text triplets and complex multi-stage training. • We demonstrate that InverFill significantly boosts the performance of existing few-step inpainting models and enables few-step text-to-image models to perform high-quality inpainting without any task-specific fine-tuning. 
+
+## 2. Related Works 
+
+2.1. Fast Text-to-image Diffusion Models 
+
+Traditional multi-step diffusion models [4, 13, 39, 43] are known for slow sampling, often requiring dozens to hun-dreds of neural function evaluations (NFEs) per image. Re-cent diffusion distillation methods [7, 27, 33, 37, 44, 50] significantly accelerate generation by aligning the student model’s prediction trajectory with that of a pre-trained multi-step teacher, enabling few-step (4-8 step) inference. Progressive Distillation [44] repeatedly distills from the teacher while halving the number of steps at each stage, preserving high sample quality while reducing from thou-sands of steps. Consistency Model [27, 31, 50] enforces self-consistency in predictions via either distillation-based or distillation-free objectives. ADD [47] and LADD [46] employs a combination of adversarial training and score dis-tillation for turning pretrained multi-step diffusion models into few-step diffusion model. SANA-Sprint [5] accelerates sampling with a training-free transformation into TrigFlow [25], followed by few-step training with dense time embed-dings, QK-normalization, and max-time weighting. 
+
+2.2. Image Inpainting Approaches 
+
+Image inpainting fills missing regions so they blend natu-rally with the surrounding context. Early methods [6, 26, 40] use GANs or unconditional diffusion models trained on specific datasets [8, 18, 24]. For instance, RePaint [26] uses an unconditional DDPM [13] as a generative prior and 2Pretrained 1-step       
+
+> Text-to-image
+> GT Image Latent
+> Masked
+> Image Latent
+> 1-step
+> Inversion Model
+> Pretrained 1-step
+> Text-to-image
+> ReBlending Frozen parameter Trainable parameter
+> Masked
+> Image Latent Predicted
+> Noise Latent Predicted
+> Noise Latent
+> New
+> Random Noise
+> Blended
+> Noise Latent Predicted
+> Image Latent GT Image Latent
+> Mask Random Noise
+> Prompt
+> Random Mask Sampling
+> Prompt: “a photo of a dog sitting on the grass”
+> Prompt Prompt Nội dung đoạn văn bản của bạn
+> Data
+> Synthesis
+> Inversion
+> Training
+> Mask
+
+Figure 2. Inversion Network Training: We train an inversion network, Fθ , to invert a masked image to a noise latent ˆzT such that, after blending with random Gaussian noise to form ˆzblend  
+
+> T
+
+, the latent enables high-fidelity, well-harmonized reconstruction of the original image. Masked 
+
+> Image Latent
+> 1-step
+> Inversion Model
+> Predicted
+> Noise Latent
+> ReBlending
+> Mask Random Noise
+> Inference
+> Few-steps
+> Blended Sampling
+> “a photo of a red bicycle”
+> Inpainted
+> Image
+> Blended Noise
+> Latent
+
+Figure 3. Inpainting Pipeline: The inversion network extracts the latent ˆzT from a masked image, which is blended with random noise to form ˆzblend  
+
+> T
+
+and then fed into a few-step inpainting pipeline to generate the final image. (Zoom in for details) 
+
+blends available pixels into the sampling process. Text-to-image diffusion models provide strong image–text pri-ors for text-guided inpainting, which demands both real-istic content completion and semantic alignment with the prompt. BrushNet [16] fine-tunes both a pretrained text-to-image model and an additional conditional branch for in-painting, and then relies on multi-step sampling to produce coherent results. Meanwhile, Blended Latent Diffusion [2] guides the multi-step sampling process using a blending operation, gradually aligning the inpainting content with the surrounding background from the source image. Such methods require many NFEs to achieve high-quality results. As fast few-step generative models emerge [5, 27, 46], re-ducing the number of sampling steps becomes increasingly necessary, motivating the study of few-step inpainting. A straightforward idea is to apply similar blending strategies on few-step text-to-image models. However, extending in-painting to few-step diffusion models [5, 27, 46] remains challenging, as blended sampling alone is insufficient to produce coherent results, leading to poor visual quality, as shown in Fig. 1. TurboFill [55] addresses this by training an inpainting adapter on a few-step text-to-image generation model with a complex 3-step adversarial training scheme, which requires extensive real-image supervision. Moreover, TurboFill exclusively explores on UNet–based architectures [39, 43], leaving its generalization to other models question-able. Hence, few-step inpainting remains under-explored. 
+
+2.3. Diffusion-based Inversion 
+
+While diffusion models generate images by progressively denoising a noisy latent, diffusion inversion methods [11, 17, 30, 45, 49] perform the reverse: recovering an inverted latent that faithfully reconstructs the original image when re-denoised. Such inversion is essential for reconstruction, latent exploration, and downstream editing. DDIM Inver-sion [49] introduced a deterministic reverse process by lin-earizing noise prediction across adjacent steps, an approxi-mation effective for models with many sampling iterations [9, 20, 39, 43]. This enables reversed sampling for faith-ful reconstruction and editing. Null-text Inversion [30] re-fines null-text embeddings via costly iterative optimization, whereas Direct Inversion [17] eliminates this optimization by decoupling reconstruction and editing pathways. However, the linear approximation used in prior inver-sion methods breaks down for few-step diffusion mod-els [27, 47, 50], resulting in poor inversion quality. Re-cent works [11, 45] therefore develop inversion techniques tailored to few-step models [20, 39]. Renoise [11] re-fines noise latents using fixed-point iteration combined with step-wise averaging, while GNRI [45] formulates inver-sion as a scalar root-finding problem solved with 1-2 New-ton–Raphson iterations per step. These methods signifi-cantly accelerate and stabilize inversion compared to multi-step approaches. Recently, SwiftEdit [35] pushes this fur-ther with a one-step inversion network trained for one-step diffusion models [7, 23, 33, 59, 60]. This network directly 3maps source images into its noise latent in a single forward pass, enabling fast image reconstruction and editing with minimal overhead. Inspired by this, we incorporate a sim-ilar inversion network into our inpainting framework, en-hanced with refinements and dedicated training objectives to enable efficient, high-quality few-step inpainting. 
+
+## 3. Preliminaries 
+
+3.1. Text-to-Image Diffusion Models. 
+
+Text-to-image diffusion models synthesize images by align-ing textual inputs with corresponding visual features. State-of-the-art methods primarily use latent diffusion [39, 43], where a Variational Auto-Encoder (VAE) [19] encoder E
+
+maps an image I to a latent z. The denoising process com-prises a fixed forward noising step and a learned reverse step. In the forward process, a clean latent z0 = E(I) is gradually corrupted into Gaussian noise over T timesteps via a Markov chain q(zt|zt−1) with a variance schedule βt:
+
+q(zt|zt−1) = N (zt; p1 − βtzt−1, β tI). (1) 
+
+zt = p1 − βtzt−1 + pβtϵ, where ϵ ∼ N (0 , I). (2) Given an input noise zT sampled from Eq. (1) and a text prompt c, the training objective of the denoising network ϵθ
+
+at timestep t is defined as: 
+
+min  
+
+> θ
+
+Ez0,c,ϵ ∼U (1 ,T ),t ∼N (0 ,I ) ∥ϵ − ϵθ (zt, t, c )∥22 (3) During inference, ϵθ iteratively estimates and removes the noise from the noisy image across T timesteps. In practice, large T are required to gradually refine the image, ensuring high-quality generation. In contrast, few-step models apply large, discrete updates at each step, which limits the oppor-tunity for smooth adjustments. Any intermediate modifi-cation, such as blending, can easily disrupt the denoising trajectory, leading to artifacts or failed reconstructions. 
+
+3.2. Image Inpainting 
+
+Problem Definition. Given a masked image Im ∈
+
+RH×W ×C with missing content defined by a binary mask 
+
+M ∈ { 0, 1}H×W ×C , where 0 denotes unmasked regions and 1 denotes masked regions, image inpainting aims to generate Iinpaint within the masked region to form a com-posited image I = Im ⊙ (1 − M ) + Iinpaint ⊙ M such that the inpainted regions are semantically aligned with a text prompt c and visually consistent with the unmasked con-text, accurately reflecting what and where to inpaint. 
+
+Blended Sampling Strategy. This inpainting approach, ex-emplified by Blended Latent Diffusion (BLD) [2], gradu-ally blends known information from unmasked regions with generated content in the masked areas. Given a masked im-age Im and a corresponding binary mask M (resized to mw/  InverFill w/o  InverFill GT Image Mask w/  InverFill w/o  InverFill      
+
+> Figure 4. Failure of BLD in few-step models (SDXL-Turbo, 4 steps) is illustrated in Column 3 and corrected by our method in
+> Column 4 .(Zoom in for details)
+
+in the latent space), the initial masked latent representation is computed as zm 
+
+> 0
+
+= E(Im). During the reverse diffusion process, at each timestep t, BLD adds noise to the known regions of the original latent zm 
+
+> 0
+
+following Eq. (1), yielding 
+
+zmt . As described in Eq. (4), BLD then blends zmt with the predicted denoised latent ˆzt using the mask m. The result-ing blended latent serves as the input for the subsequent de-noising step at t − 1, ensuring a seamless transition between the unmasked context and the newly generated content. 
+
+zblend t = zmt ⊙ (1 − m) + ˆ zt ⊙ m (4) 
+
+## 4. Method 
+
+In Sec. 4.1, we analyze the failure of blended sampling in few-step models and outline the motivations behind Inver-Fill. The key component of our system is a one-step in-version network tailored for inpainting. We will present an overview on this network (Sec. 4.2), followed by our pro-posed components in training pipeline (Secs. 4.3 to 4.7). Fi-nally, we present our inpainting pipeline in Sec. 4.8. Fig. 2 illustrates the training pipeline of our inversion network, while Fig. 3 shows the full inpainting inference pipeline. 
+
+4.1. Motivation 
+
+Blended Sampling Strategy for Few-Step Model. While BLD is effective for multi-step diffusion models, applying it directly to few-step models significantly reduces inpainting quality. As shown in Fig. 4, blending under few-step infer-ence introduces semantic and stylistic inconsistencies be-tween the generated and unmasked regions, yielding visible artifacts. This limitation originates from the initialized ran-dom Gaussian noise in the reverse process: multi-step mod-els progressively refine this noise and adapt to the context of the unmasked regions within Im, whereas few-step mod-els make large ODE updates and lack sufficient refinement steps. When initialized from semantically distant noise, few coarse updates cannot correct the mismatch. Thus, effec-4tive few-step blending requires initializing zT semantically aligned with the unmasked regions of the image. 
+
+Inversion for Image Inpainting. A promising direction for mitigating semantic misalignment is diffusion inver-sion, which maps the unmasked image into the final noise latent zT . However, existing inversion methods are iter-ative and introduce considerable overhead, contradicting the efficiency requirements of few-step sampling. A one-step inversion is critical for fast inference, as demonstrated by SwiftEdit [35], which provides efficient and semanti-cally coherent initialization. Nonetheless, directly apply-ing SwiftEdit to inpainting is unsuitable for two reasons: (1) it is not explicitly designed for processing masked in-puts, which causes information leakage during training, and (2) its training objectives do not enforce the inverted noise to follow the required Gaussian prior, resulting in distribu-tional mismatch and degraded reconstructions. To overcome these limitations, we introduce InverFill ,a one-step inversion network designed for inpainting. In-verFill (1) operates directly on masked images to produce semantically aligned initial noise latents, and (2) explicitly regularizes the inverted noise to match the Gaussian prior. Addressing both issues enables InverFill to achieve high-fidelity, coherent inpainting within the few-step regime. 
+
+4.2. Masked Image Inversion Network 
+
+Problem Definition. Given a pretrained one-step text-to-image generator G, we aim to develop a one-step inver-sion network Fθ that is tailored for the inpainting purpose. Specifically, given a ground-truth image Igt and a masked image Im produced from Igt using a binary mask M , i.e., 
+
+Im = Igt ⊙ (1 − M ), their image latents are z0 = E(Igt )
+
+and zm 
+
+> 0
+
+= E(Im), where E is the VAE encoder. We train Fθ
+
+to map zm 
+
+> 0
+
+and text prompt c to an inverted noise latent. The network is optimized so that passing this latent through G
+
+produces a predicted image latent ˆz0 resembling the origi-nal latent z0. The predicted noise latent should yield a re-construction where (1) the background faithfully preserves 
+
+the masked input, and (2) the generated region harmonizes 
+
+with the background while remaining consistent with the text prompt and the unmasked content of Im.
+
+Inversion Network Architecture. Following [35], Fθ
+
+shares the architecture of the one-step generator G and in-herits its pretrained weights during as initialization. 
+
+Masked Image Training. To adapt our inversion network to masked image inputs, we leverage the one-step gener-ator G to synthesize training image–mask–prompt triplets on the fly. Given a text prompt c and random Gaussian noise ϵ ∼ N (0 , I ), G produces a ground-truth image latent 
+
+z0 = G(ϵ, c ) and its corresponding image Igt = D(z0),where D is the VAE decoder. To ensure robustness and prevent overfitting to specific masks, we randomly sample a mask M of diverse shapes and brush types and apply it     
+
+> Figure 5. Effects of the proposed Re-Blending operation during training, without Lreg .(Zoom in for details)
+
+to Igt to generate the masked image Im. The subsequent masked image latent zm 
+
+> 0
+
+= E(Im) serves as input to our one-step inversion network Fθ , which predicts the inverted noise latent ˆzT . In the following sections, we introduce our objective functions and describe how we optimize and inte-grate ˆzT to achieve a high-quality reconstruction of z0.
+
+4.3. Reconstruction Objectives 
+
+Similar to SwiftEdit [35], we apply reconstruction losses in both the noise latent ( Lnoise ) and image latent ( Limage )spaces. Since our inversion network operates on a masked image Im, applying Lnoise over the entire predicted latent 
+
+ˆzT is suboptimal: the regions of zm 
+
+> 0
+
+corresponding to the masked areas of Im contain no meaningful information, and penalizing these regions can hinder training. Therefore, we restrict Lnoise to the unmasked regions. Our reconstruction objectives are formulated as follows: 
+
+Lnoise = ∥(1 − m) ⊙ ˆzT − (1 − m) ⊙ ϵ∥22, (5) 
+
+Limage = ∥ˆz0 − z0∥22 (6) 
+
+Lrecons = λnoise ∗ L noise + λimage ∗ L image (7) 
+
+4.4. Re-Blending Operation 
+
+Our inversion network maps the unmasked image content to a noise latent ˆzT . In SwiftEdit [35], Lnoise ensures that the predicted noise latent ˆzT preserves details of the com-plete input image I in the noise latent space. However, for inpainting tasks, our inversion network Fθ only receives the incomplete masked image Im to predict ˆzT . Consequently, our masked loss Lnoise in Eq. (5) causes training bias to-wards the unmasked regions. This bias causes image-space structural patterns from Im to leak into ˆzT , while regions corresponding to the mask exhibit low variance and arti-facts. As a result, ˆzT deviates significantly from the Gaus-sian distribution expected by the diffusion model. During training, this distributional mismatch leads G to collapse when computing ˆz0 = G(ˆ zT , c ), producing the incoherent, artifact-filled outputs illustrated in Fig. 5. To address this, we introduce a Re-Blending operation. During training and inference, the masked regions of the predicted noise latent ˆzT are replaced with random Gaus-sian noise ϵ′ ∼ N (0 , I ), partially restoring the latent to the 5Blend Inverted Noise    
+
+> (w/o L_Reg )
+> Reconstructed Image
+> (w/o L_Reg )
+> Blend Inverted Noise
+> (w/ _Reg )
+> Reconstructed Image
+> (w/ L_Reg )
+> Masked GT
+> Image
+
+Figure 6. Ablation Study on Lreg . Without the regularization loss, the model fails to preserve the background during reconstruction and produces blurred, low-detail outputs. With the loss, the back-ground is well preserved and fine image details are restored. 
+
+expected distribution and recovering key semantic features, as shown in Fig. 5. Following Eq. (8), generator G inputs the corrected latent ˆzblend T to produce the final output ˆz0.
+
+ˆzblend T = ˆ zT ⊙ (1 − m) + ϵ′ ⊙ m, ˆz0 = G(ˆ zblend T , c ) (8) where m is latent-space mask downsampled from M .
+
+4.5. Gaussian Regularization 
+
+As shown in Fig. 5, Re-Blending mitigates information leakage and partially restores the Gaussian structure of 
+
+ˆzblend  
+
+> T
+
+, but the predicted latent ˆz0 recovers only key seman-tics. The output fails to preserve background, and the gen-erated content within masked regions remains blurry and low-detail, as shown in Fig. 6. Despite Re-Blending’s par-tial correction, ˆzblend  
+
+> T
+
+still deviates from the standard Gaus-sian expected by the generator. This occurs because Lnoise 
+
+in Eq. (5) focuses solely on the unmasked regions. While the image-space loss Limage in Eq. (6) indirectly encourages the injected noise ϵ′ to harmonize with ˆzT to better recon-struct image latent, it cannot fully enforce Gaussian consis-tency due to the lack of direct supervision with ground-truth Gaussian noise within the masked regions. As a result, the added ϵ′ remains visually distinct from the background in-verted noise in ˆzT (Column 2 in Fig. 6), indicating that ˆzblend 
+
+> T
+
+is still far from the target Gaussian distribution. To address this issue, inspired by [15], we introduce an additional Gaussian regularization term. This term explic-itly encourages Gaussian distribution on the blended latent 
+
+ˆzblend  
+
+> T
+
+by matching its statistical moments with the theoret-ical moments of a standard Gaussian. Let μn be the n-th theoretical moment of a standard Gaussian. The moment-matching loss for the n-th moment is defined as: 
+
+Ln = 1
+
+D
+
+> D
+
+X
+
+> k=1
+
+ ˆzblend T
+
+n
+
+> 1
+> n
+
+− μ 1 
+
+> n
+> n
+
+, (9) where D = c×h×w is the total number of pixels of ˆzblend T .Our final regularization loss, Lreg , is the sum of the losses for the first and second moments, corresponding to the mean and variance of Gaussian distribution: 
+
+Lreg = X
+
+> n∈{ 1,2}
+
+Ln (10) As shown in Fig. 6, Gaussian Regularization Loss during training helps ˆzblend  
+
+> T
+
+better align with the Gaussian prior, en-abling faithful reconstruction of the original image while preserving the background, as confirmed in Tab. 2. 
+
+4.6. Improving Quality with Adversarial Loss 
+
+Previous works [5, 59, 60] show that adversarial losses dur-ing training improve visual quality. Following LADD [46], we use the frozen teacher model to define a latent feature space for adversarial supervision, with multiple discrimina-tor heads on intermediate layers for stable, efficient distil-lation. In our training, we treat the original image latent z0
+
+as real and the predicted image latent ˆz0 as fake to train the inversion model and discriminator as follows: 
+
+LG
+
+> adv
+
+(θ) = −Eˆz0,t 
+
+"X
+
+> k
+
+Dψ,k (Gpre (ˆ zt, t, c )) 
+
+#
+
+(11) 
+
+LD
+
+> adv
+
+(ψ) = Ez0,t 
+
+"X
+
+> k
+
+ReLU (1 − Dψ,k (Gpre (zt, t, c ))) 
+
+#
+
++ Eˆz0,t 
+
+"X
+
+> k
+
+ReLU (1 + Dψ,k (Gpre (ˆ zt, t, c ))) 
+
+#
+
+(12) where zt, ˆzt are noisy versions of original image latent z0
+
+and predicted image latent ˆz0 at timesteps t. Gpre denotes a frozen multi-step teacher model. Dψ,k denotes discrimina-tor heads at the k-th intermediate layers of Gpre .
+
+4.7. Final Objectives 
+
+Our final training objective for Fθ is defined as follows: 
+
+Lfinal = λrecons ∗ L recons + λreg ∗ L reg + λadv ∗ L adv (13) 
+
+4.8. Inpainting Pipeline 
+
+Fig. 3 illustrates our inpainting pipeline, which closely fol-lows the blended sampling strategy described in Sec. 3.2. However, instead of initializing with random Gaussian noise, we employ our trained inversion model Fθ to predict the inverted noise latent ˆzT and obtain the blended latent 
+
+ˆzblend T using Eq. (8). This blended latent ˆzblend T serves as the Gaussian noise input to the inpainting process. 
+
+## 5. Experiments 
+
+5.1. Training Details 
+
+We train InverFill on Sana-Sprint 0.6B [5] and SDXL-Turbo [47], which represent two common diffusion archi-tectures: DiT and UNet. All training is performed on four 6Table 1. Quantitative comparison of InverFill against few-step and multi-step diffusion inpainting baselines on BrushBench and MagicBrush. NFEs denotes the number of function evaluations. ↑ indicates that higher is better, ↓ indicates that lower is better 
+
+Type Method NFEs BrushBench MagicBrush Runtime ↓
+
+IR ×10 ↑ HPS ×10 2 ↑ AS ↑ CLIP ↑ IR ×10 ↑ HPS ×10 2 ↑ AS ↑ CLIP ↑ (seconds) SANA-Sprint 0.6B 2 11.02 26.21 6.05 27.12 2.55 25.07 5.32 25.67 0.37 SANA-Sprint 0.6B + InverFill 2 11.65 27.93 6.15 27.17 3.04 25.37 5.42 25.71 0.43 (+0.06) SANA-Sprint 0.6B 4 10.82 26.34 6.00 27.11 2.56 25.12 5.37 25.63 0.45 SANA-Sprint 0.6B + InverFill 4 11.76 27.83 6.18 27.19 3.14 25.47 5.43 25.74 0.51 (+0.06) SDXL Turbo 4 11.42 28.20 6.06 27.26 3.51 25.76 5.46 25.79 0.66 SDXL Turbo + InverFill 4 12.38 28.44 6.08 27.67 3.75 25.84 5.48 26.08 0.70 (+0.04) SDXL Turbo + BrushNet 4 12.56 28.26 6.00 27.51 4.20 24.92 5.20 25.62 0.70 
+
+Few-step 
+
+SDXL Turbo + BrushNet + InverFill 4 12.63 28.43 6.03 27.62 4.15 25.10 5.23 25.68 0.74 (+0.04) SANA 0.6B 20 12.12 27.04 6.17 27.49 3.68 24.11 5.48 25.93 1.18 HD-Painter 30 12.82 28.17 6.30 27.43 3.59 24.60 5.65 25.87 23.45 SDXL-Inpainting 30 13.16 28.92 6.37 27.15 3.91 24.13 5.51 25.50 3.35 
+
+Multi-step 
+
+SDXL + BrushNet 30 13.26 28.28 6.26 27.54 3.94 24.28 5.46 25.60 4.31 
+
+Figure 7. Our method achieves qualitative results comparable to multi-step SDXL-Inpainting and is on par with BrushNet (4 steps), as shown in Columns 7 and 8. Notably, this performance is obtained using only text prompts during training, whereas competing methods rely on full text–image–mask supervision. Moreover, integrating our approach with BrushNet further enhances semantic coherence. 
+
+NVIDIA A100 40GB GPUs for 8-10 hours. During train-ing, we randomly sample text prompts from BrushData [16] and MSCOCO [21]. We use a total batch size of 32 and a learning rate of 1 × 10 −5 with AdamW optimizer. 7Table 2. Effects of Lreg on SANA-Sprint 0.6B [5] with 2 NFEs on BrushBench [16]. All models were evaluated at 5000 iterations.                
+
+> Method IR ×10 ↑HPS ×10 2↑AS ↑CLIP ↑
+> w/o Lreg 11.11 26.69 6.08 27.13 w/ Lreg 11.40 27.22 6.12 27.15
+
+5.2. Evaluation Setup 
+
+Dataset. We perform evaluation on inpainting Brush-Bench [16], with 600 images and annotated masks, and im-age editing MagicBrush [61] benchmark. For inpainting, we adapt MagicBrush’s 535-image test set using its cap-tions and masks. Each image includes multiple segmenta-tion and random masks, providing a diverse and challenging evaluation for inpainting performance. All experiments and evaluations were performed using 1024 2 resolution. 
+
+Evaluation Metrics. We evaluate our results from two cri-teria: image generation quality and text alignment. • Image Generation Quality. We use three human-aligned metrics: ImageReward (IR) [57], HPS v2 (HPS) [53], and Aesthetic Score (AS) [48]. IR and HPS are reward models trained on large-scale human preference data, while AS is a linear model trained to predict perceptual quality. • Text Alignment. We measure text–image alignment using CLIP Similarity (CLIP) [41], which quantifies how well the inpainted images match their prompts. 
+
+Baselines. We evaluate InverFill on state-of-the-art few-step text-to-image diffusion models, SANA-Sprint 0.6B [5] and SDXL-Turbo [47], using the blended sampling strategy in Sec. 3.2 for inpainting. We report results using 2- and 4-step NFE settings for SANA-Sprint and 4-step for SDXL-Turbo. Following [55], we integrate SDXL-Turbo [39] with BrushNet [16] to evaluate InverFill using few-step special-ized inpainting models that do not rely on the blended sam-pling strategy. For reference, we report results from multi-step models, including Sana 0.6B [54], HD-Painter [28], SDXL-Inpainting [39] and SDXL with BrushNet [16]. 
+
+5.3. Quantitative Results 
+
+As shown in Tab. 1, InverFill consistently improves perfor-mance across few-step diffusion settings. When integrated with SANA-Sprint and SDXL-Turbo under blended sam-pling, InverFill boosts all metrics on BrushBench and Mag-icBrush. For example, SANA-Sprint (2 NFEs) + InverFill raises IR from 11.02 to 11.65 on BrushBench and 2.55 to 
+
+3.04 on MagicBrush. InverFill also strengthens special-ized inpainting model. In BrushNet + InverFill (4 NFEs), IR improves from 12.56 to 12.63 and HPS from 28.26 to 
+
+28.43 . Regarding text alignment, InverFill achieves sub-stantial gains in CLIP scores. Notably, InverFill-equipped few-step models match or surpass multi-step methods while remaining efficient; SDXL-Turbo + InverFill (4 NFEs) out-
+
+Table 3. Quantitative comparison of InverFill against few-step and multi-step diffusion inpainting baselines on BrushBench with en-hanced prompts . ↑ indicates that higher is better.                                                                   
+
+> Method NFEs IR ×10 ↑HPS ×10 2↑AS ↑CLIP ↑
+> SANA-Sprint 0.6B 27.53 25.81 6.09 28.10 SANA-Sprint 0.6B + InverFill 28.55 26.49 6.19 28.26
+> SANA-Sprint 0.6B 47.32 25.81 6.11 28.15 SANA-Sprint 0.6B + InverFill 48.54 26.50 6.21 28.29
+> SDXL Turbo 48.09 26.85 6.12 28.25 SDXL Turbo + InverFill 49.00 27.11 6.12 28.70
+> SDXL Turbo + BrushNet 49.35 27.22 6.06 28.87
+> Few-step
+> SDXL Turbo + BrushNet + InverFill 49.53 27.37 6.10 28.91
+> SANA 0.6B 20 9.34 26.77 6.24 28.63 HD-Painter 30 9.60 27.83 6.35 28.63 SDXL-Inpainting 30 9.90 27.43 6.38 28.38
+> Multi-step
+> SDXL + BrushNet 30 10.41 28.11 6.34 28.76
+
+performs HD-Painter (30 NFEs) on key metrics. Despite these gains, InverFill introduces extremely minimal over-head, only 0.06s on SANA-Sprint and 0.04s on SDXL. 
+
+5.4. Qualitative Results 
+
+Fig. 7 shows that integrating InverFill improves coherence and background harmonization. Without using real im-ages, InverFill achieves quality comparable to BrushNet (4-step SDXL-Turbo), which relies on an inpainting dataset of real images [16]. Moreover, combining InverFill with the BrushNet + SDXL-Turbo pipeline further boosts semantic quality, indicating that InverFill can also strengthen special-ized few-step inpainting systems. 
+
+5.5. Enhanced Caption for BrushBench 
+
+Motivation. A limitation of BrushBench [16] is its re-liance on simple, short prompts, which limits evaluation of text understanding and compositional generation. Modern models, SDXL [39] with dual text encoders and SANA-Sprint [5] with Gemma-2 [42], are built for more context-heavy prompts. Therefore, we expand BrushBench captions using Qwen3 [58] with detailed foreground and background descriptions, enabling more comprehensive evaluation of text alignment and visual coherence in inpainting. 
+
+Quantitative Results. Tab. 3 shows that InverFill remains effective under detailed, complex prompts, improving all baselines and demonstrating robustness in text-rich settings. For SANA-Sprint, CLIP gains exceed those with simple prompts in Tab. 1, indicating stronger visual–text alignment and better use of large encoders like Gemma-2. 
+
+## 6. Conclusion 
+
+In this work, we introduce InverFill , a lightning-fast one-step inversion network explicitly designed for image in-painting that enhances existing few-step inpainting meth-ods. Extensive experiments show that InverFill produces high-quality inpainting results while adding as few as 0.06 seconds of overhead. 8References 
+
+[1] Eirikur Agustsson and Radu Timofte. Ntire 2017 challenge on single image super-resolution: Dataset and study. In The IEEE Conference on Computer Vision and Pattern Recogni-tion (CVPR) Workshops , 2017. 2 [2] Omri Avrahami, Ohad Fried, and Dani Lischinski. Blended latent diffusion. ACM transactions on graphics (TOG) , 42 (4):1–11, 2023. 2, 3, 4 [3] Manuel Brack, Felix Friedrich, Katharia Kornmeier, Linoy Tsaban, Patrick Schramowski, Kristian Kersting, and Apolin´ ario Passos. Ledits++: Limitless image editing using text-to-image models. In Proceedings of the IEEE/CVF con-ference on computer vision and pattern recognition , pages 8861–8870, 2024. 1 [4] Junsong Chen, Jincheng Yu, Chongjian Ge, Lewei Yao, Enze Xie, Zhongdao Wang, James Kwok, Ping Luo, Huchuan Lu, and Zhenguo Li. Pixart-α: Fast training of diffusion trans-former for photorealistic text-to-image synthesis. In The Twelfth International Conference on Learning Representa-tions (ICLR) , 2024. 1, 2 [5] Junsong Chen, Shuchen Xue, Yuyang Zhao, Jincheng Yu, Sayak Paul, Junyu Chen, Han Cai, Enze Xie, and Song Han. Sana-sprint: One-step diffusion with continuous-time con-sistency distillation. CoRR , 2025. 2, 3, 6, 8, 1 [6] Ciprian Corneanu, Raghudeep Gadde, and Aleix M Mar-tinez. Latentpaint: Image inpainting in latent space with diffusion models. In Proceedings of the IEEE/CVF winter conference on applications of computer vision , pages 4334– 4343, 2024. 2 [7] Trung Dao, Thuan Hoang Nguyen, Thanh Le, Duc Vu, Khoi Nguyen, Cuong Pham, and Anh Tran. Swiftbrush v2: Make your one-step diffusion model better than its teacher. In 
+
+European Conference on Computer Vision , pages 176–192. Springer, 2024. 2, 3 [8] Trung Tuan Dao, Duc Hong Vu, Cuong Pham, and Anh Tran. Efhq: Multi-purpose extremepose-face-hq dataset. In Pro-ceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pages 22605–22615, 2024. 2 [9] Prafulla Dhariwal and Alexander Quinn Nichol. Diffusion models beat GANs on image synthesis. In Advances in Neu-ral Information Processing Systems , 2021. 3 [10] Rohit Gandikota, Joanna Materzynska, Jaden Fiotto-Kaufman, and David Bau. Erasing concepts from diffusion models. In Proceedings of the IEEE/CVF international con-ference on computer vision , pages 2426–2436, 2023. 3 [11] Daniel Garibi, Or Patashnik, Andrey Voynov, Hadar Averbuch-Elor, and Daniel Cohen-Or. Renoise: Real image inversion through iterative noising. In European Conference on Computer Vision , pages 395–413. Springer, 2024. 3 [12] Martin Heusel, Hubert Ramsauer, Thomas Unterthiner, Bernhard Nessler, and Sepp Hochreiter. Gans trained by a two time-scale update rule converge to a local nash equilib-rium. Advances in neural information processing systems ,30, 2017. 3 [13] Jonathan Ho, Ajay Jain, and Pieter Abbeel. Denoising dif-fusion probabilistic models. In Advances in Neural Informa-tion Processing Systems (NeurIPS) , 2020. 2 [14] Teng-Fang Hsiao, Bo-Kai Ruan, Sung-Lin Tsai, Yi-Lun Wu, and Hong-Han Shuai. Freecond: Free lunch in the in-put conditions of text-guided inpainting. arXiv preprint arXiv:2412.00427 , 2024. 2 [15] Jisung Hwang, Jaihoon Kim, and Minhyuk Sung. Moment-and power-spectrum-based gaussianity regularization for text-to-image models. In The Thirty-ninth Annual Confer-ence on Neural Information Processing Systems , 2025. 6 [16] Xuan Ju, Xian Liu, Xintao Wang, Yuxuan Bian, Ying Shan, and Qiang Xu. Brushnet: A plug-and-play image inpainting model with decomposed dual-branch diffusion. In European Conference on Computer Vision , pages 150–168. Springer, 2024. 2, 3, 7, 8, 1 [17] Xuan Ju, Ailing Zeng, Yuxuan Bian, Shaoteng Liu, and Qiang Xu. Pnp inversion: Boosting diffusion-based editing with 3 lines of code. In The Twelfth International Conference on Learning Representations , 2024. 3 [18] Tero Karras, Samuli Laine, and Timo Aila. A style-based generator architecture for generative adversarial networks. In Proceedings of the IEEE/CVF conference on computer vi-sion and pattern recognition , pages 4401–4410, 2019. 2 [19] Diederik P. Kingma and Max Welling. Auto-encoding varia-tional bayes. In International Conference on Learning Rep-resentations (ICLR) , 2014. 4 [20] Black Forest Labs. Flux. https://github.com/ black-forest-labs/flux , 2024. 1, 3 [21] Tsung-Yi Lin, Michael Maire, Serge Belongie, James Hays, Pietro Perona, Deva Ramanan, Piotr Doll´ ar, and C Lawrence Zitnick. Microsoft coco: Common objects in context. In 
+
+European conference on computer vision , pages 740–755. Springer, 2014. 7 [22] Haipeng Liu, Yang Wang, and Meng Wang. One stone with two birds: A null-text-null frequency-aware diffusion mod-els for text-guided image inpainting. In The Thirty-ninth An-nual Conference on Neural Information Processing Systems .2[23] Xingchao Liu, Xiwen Zhang, Jianzhu Ma, Jian Peng, and Qiang Liu. Instaflow: One step is enough for high-quality diffusion-based text-to-image generation. In International Conference on Learning Representations , 2024. 3 [24] Ziwei Liu, Ping Luo, Xiaogang Wang, and Xiaoou Tang. Deep learning face attributes in the wild. In Proceedings of International Conference on Computer Vision (ICCV) , 2015. 2[25] Cheng Lu and Yang Song. Simplifying, stabilizing and scaling continuous-time consistency models. In The Thir-teenth International Conference on Learning Representa-tions , 2025. 2 [26] Andreas Lugmayr, Martin Danelljan, Andres Romero, Fisher Yu, Radu Timofte, and Luc Van Gool. Repaint: Inpainting using denoising diffusion probabilistic models. In Proceed-ings of the IEEE/CVF conference on computer vision and pattern recognition , pages 11461–11471, 2022. 2 [27] Simian Luo, Yiqin Tan, Longbo Huang, Jian Li, and Hang Zhao. Latent consistency models: Synthesizing high-resolution images with few-step inference, 2023. 2, 3 [28] Hayk Manukyan, Andranik Sargsyan, Barsegh Atanyan, Zhangyang Wang, Shant Navasardyan, and Humphrey Shi. 
+
+9Hd-painter: high-resolution and prompt-faithful text-guided image inpainting with diffusion models. In The Thir-teenth International Conference on Learning Representa-tions , 2023. 2, 8 [29] Daiki Miyake, Akihiro Iohara, Yu Saito, and Toshiyuki Tanaka. Negative-prompt inversion: Fast image inversion for editing with text-guided diffusion models. In 2025 IEEE/CVF Winter Conference on Applications of Computer Vision (WACV) , pages 2063–2072. IEEE, 2025. 2 [30] Ron Mokady, Amir Hertz, Kfir Aberman, Yael Pritch, and Daniel Cohen-Or. Null-text inversion for editing real im-ages using guided diffusion models. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 6038–6047, 2023. 2, 3 [31] Anh Nguyen, Viet Van Nguyen, Duc Vu, Trung Tuan Dao, Chi Tran, Toan Tran, and Anh Tuan Tran. Improved training technique for shortcut models. In The Thirty-ninth Annual Conference on Neural Information Processing Systems . 2 [32] Kien Nguyen, Anh Tran, and Cuong Pham. Suma: A sub-space mapping approach for robust and effective concept erasure in text-to-image diffusion models. In Proceedings of the IEEE/CVF International Conference on Computer Vi-sion , pages 19587–19596, 2025. 3 [33] Thuan Hoang Nguyen and Anh Tran. Swiftbrush: One-step text-to-image diffusion model with variational score distilla-tion. In Proceedings of the IEEE/CVF Conference on Com-puter Vision and Pattern Recognition , pages 7807–7816, 2024. 2, 3 [34] Trong-Tung Nguyen, Duc-Anh Nguyen, Anh Tran, and Cuong Pham. Flexedit: Flexible and controllable diffusion-based object-centric image editing. arXiv preprint arXiv:2403.18605 , 2024. 1 [35] Trong-Tung Nguyen, Quang Nguyen, Khoi Nguyen, Anh Tran, and Cuong Pham. Swiftedit: Lightning fast text-guided image editing via one-step diffusion. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pat-tern Recognition (CVPR) , pages 21492–21501, 2025. 2, 3, 5, 1 [36] Viet Nguyen and Vishal M Patel. Cgce: Classifier-guided concept erasure in generative models. arXiv preprint arXiv:2511.05865 , 2025. 3 [37] Viet Nguyen, Anh Nguyen, Trung Dao, Khoi Nguyen, Cuong Pham, Toan Tran, and Anh Tran. Supercharged one-step text-to-image diffusion models with negative prompts. In Proceedings of the IEEE/CVF International Conference on Computer Vision , pages 18004–18013, 2025. 2 [38] Alex Nichol, Prafulla Dhariwal, Aditya Ramesh, Pranav Shyam, Pamela Mishkin, Bob McGrew, Ilya Sutskever, and Mark Chen. Glide: Towards photorealistic image generation and editing with text-guided diffusion models. arXiv preprint arXiv:2112.10741 , 2021. 1 [39] Dustin Podell, Zion English, Kyle Lacey, Andreas Blattmann, Tim Dockhorn, Jonas M¨ uller, Joe Penna, and Robin Rombach. Sdxl: Improving latent diffusion models for high-resolution image synthesis. In The Twelfth Interna-tional Conference on Learning Representations , 2024. 1, 2, 3, 4, 8 [40] Konpat Preechakul, Nattanat Chatthee, Suttisak Wizad-wongsa, and Supasorn Suwajanakorn. Diffusion autoen-coders: Toward a meaningful and decodable representation. In Proceedings of the IEEE/CVF conference on computer vi-sion and pattern recognition , pages 10619–10629, 2022. 2 [41] Alec Radford, Jong Wook Kim, Chris Hallacy, Aditya Ramesh, Gabriel Goh, Sandhini Agarwal, Girish Sastry, Amanda Askell, Pamela Mishkin, Jack Clark, et al. Learning transferable visual models from natural language supervi-sion. In International conference on machine learning , pages 8748–8763. PmLR, 2021. 8 [42] Morgane Rivi` ere, Shreya Pathak, Pier Giuseppe Sessa, Cas-sidy Hardin, Surya Bhupatiraju, L´ eonard Hussenot, Thomas Mesnard, Bobak Shahriari, Alexandre Ram´ e, Johan Ferret, et al. Gemma 2: Improving open language models at a prac-tical size. CoRR , 2024. 8 [43] Robin Rombach, Andreas Blattmann, Dominik Lorenz, Patrick Esser, and Bj¨ orn Ommer. High-resolution image synthesis with latent diffusion models. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pages 10684–10695, 2022. 1, 2, 3, 4 [44] Tim Salimans and Jonathan Ho. Progressive distillation for fast sampling of diffusion models. In International Confer-ence on Learning Representations , 2022. 2 [45] Dvir Samuel, Barak Meiri, Haggai Maron, Yoad Tewel, Nir Darshan, Shai Avidan, Gal Chechik, and Rami Ben-Ari. Lightning-fast image inversion and editing for text-to-image diffusion models. In The Thirteenth International Confer-ence on Learning Representations , 2025. 3 [46] Axel Sauer, Frederic Boesel, Tim Dockhorn, Andreas Blattmann, Patrick Esser, and Robin Rombach. Fast high-resolution image synthesis with latent adversarial diffusion distillation. In SIGGRAPH Asia 2024 Conference Papers ,pages 1–11, 2024. 2, 3, 6 [47] Axel Sauer, Dominik Lorenz, Andreas Blattmann, and Robin Rombach. Adversarial diffusion distillation. In Computer Vi-sion – ECCV 2024: 18th European Conference, Milan, Italy, September 29–October 4, 2024, Proceedings, Part LXXXVI ,page 87–103, Berlin, Heidelberg, 2024. Springer-Verlag. 2, 3, 6, 8 [48] Christoph Schuhmann, Romain Beaumont, Richard Vencu, Cade Gordon, Ross Wightman, Mehdi Cherti, Theo Coombes, Aarush Katta, Clayton Mullis, Mitchell Worts-man, et al. Laion-5b: An open large-scale dataset for training next generation image-text models. Advances in neural in-formation processing systems , 35:25278–25294, 2022. 8 [49] Jiaming Song, Chenlin Meng, and Stefano Ermon. Denois-ing diffusion implicit models. In International Conference on Learning Representations , 2021. 2, 3 [50] Yang Song, Prafulla Dhariwal, Mark Chen, and Ilya Sutskever. Consistency models. In Proceedings of the 40th International Conference on Machine Learning . JMLR.org, 2023. 2, 3 [51] Roman Suvorov, Elizaveta Logacheva, Anton Mashikhin, Anastasia Remizova, Arsenii Ashukha, Aleksei Silvestrov, Naejin Kong, Harshith Goka, Kiwoong Park, and Victor Lempitsky. Resolution-robust large mask inpainting with 
+
+10 fourier convolutions. In Proceedings of the IEEE/CVF winter conference on applications of computer vision , pages 2149– 2159, 2022. 2 [52] Yufei Wang, Wenhan Yang, Xinyuan Chen, Yaohui Wang, Lanqing Guo, Lap-Pui Chau, Ziwei Liu, Yu Qiao, Alex C Kot, and Bihan Wen. Sinsr: diffusion-based image super-resolution in a single step. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition ,pages 25796–25805, 2024. 1 [53] Xiaoshi Wu, Yiming Hao, Keqiang Sun, Yixiong Chen, Feng Zhu, Rui Zhao, and Hongsheng Li. Human preference score v2: A solid benchmark for evaluating human preferences of text-to-image synthesis. CoRR , 2023. 8 [54] Enze Xie, Junsong Chen, Junyu Chen, Han Cai, Haotian Tang, Yujun Lin, Zhekai Zhang, Muyang Li, Ligeng Zhu, Yao Lu, et al. Sana: Efficient high-resolution image syn-thesis with linear diffusion transformers. arXiv preprint arXiv:2410.10629 , 2024. 8 [55] Liangbin Xie, Daniil Pakhomov, Zhonghao Wang, Zongze Wu, Ziyan Chen, Yuqian Zhou, Haitian Zheng, Zhifei Zhang, Zhe Lin, Jiantao Zhou, et al. Turbofill: Adapting few-step text-to-image model for fast image inpainting. In Proceed-ings of the Computer Vision and Pattern Recognition Con-ference , pages 7613–7622, 2025. 2, 3, 8 [56] Shaoan Xie, Zhifei Zhang, Zhe Lin, Tobias Hinz, and Kun Zhang. Smartbrush: Text and shape guided object inpainting with diffusion model. In Proceedings of the IEEE/CVF con-ference on computer vision and pattern recognition , pages 22428–22437, 2023. 1 [57] Jiazheng Xu, Xiao Liu, Yuchen Wu, Yuxuan Tong, Qinkai Li, Ming Ding, Jie Tang, and Yuxiao Dong. Imagere-ward: Learning and evaluating human preferences for text-to-image generation. Advances in Neural Information Pro-cessing Systems , 36:15903–15935, 2023. 8 [58] An Yang, Anfeng Li, Baosong Yang, Beichen Zhang, Binyuan Hui, Bo Zheng, Bowen Yu, Chang Gao, Chengen Huang, Chenxu Lv, et al. Qwen3 technical report. arXiv preprint arXiv:2505.09388 , 2025. 8, 2 [59] Tianwei Yin, Micha¨ el Gharbi, Taesung Park, Richard Zhang, Eli Shechtman, Fredo Durand, and Bill Freeman. Im-proved distribution matching distillation for fast image syn-thesis. Advances in neural information processing systems ,37:47455–47487, 2024. 2, 3, 6 [60] Tianwei Yin, Micha¨ el Gharbi, Richard Zhang, Eli Shecht-man, Fr´ edo Durand, William T Freeman, and Taesung Park. One-step diffusion with distribution matching distillation. In 
+
+CVPR , 2024. 3, 6 [61] Kai Zhang, Lingbo Mo, Wenhu Chen, Huan Sun, and Yu Su. Magicbrush: A manually annotated dataset for instruction-guided image editing. Advances in Neural Information Pro-cessing Systems , 36:31428–31449, 2023. 8 
+
+11 InverFill: One-Step Inversion for Enhanced Few-Step Diffusion Inpainting 
+
+# Supplementary Material 
+
+We first present ablations on the loss weights in Sec. 7. Sec. 8 compares our method with other regularization tech-niques, while Sec. 10 evaluates alternative inversion meth-ods. Additional ablations for our proposed components are in Sec. 9. Sec. 15 includes qualitative comparisons. 
+
+Note: All experiments in both the main paper and supple-mentary use 1024 2 resolution. For all supplementary re-sults, we use BrushBench [16] with its original captions. 
+
+## 7. Loss Weight Ablations 
+
+We evaluate the impact of reconstruction weights λnoise 
+
+and λimage in Lrecons (Sec. 4.3), along with the Gaussian regularization λreg (Sec. 4.5) and adversarial weights λadv 
+
+(Sec. 4.6), using SANA-Sprint 0.6B [5]. All experiments use the Re-Blending operation (Sec. 4.4) during training and inference. For LADD adversarial loss, the discrimi-nator learning rate is set to 1 × 10 −6. Detailed results are provided in Tab. 4. 
+
+Table 4. Ablation study on key hyperparameters for each compo-nent. The best setting from each block is propagated to the next.                                                                                
+
+> Method λnoise λimage λreg λadv IR ×10 ↑HPS ×10 2↑AS ↑CLIP ↑
+> Sec. 4.3 2.0 1.0 0011.09 26.69 6.04 27.10 1.0 2.0 0010.91 26.67 6.06 27.05
+> 1.0 1.0 0011.11 26.68 6.08 27.13
+> Sec. 4.5 1.0 1.0 0.25 011.12 26.55 6.09 27.13 1.0 1.0 0.5 011.40 27.22 6.12 27.15
+> 1.0 1.0 1.0 011.36 26.58 6.10 27.14 1.0 1.0 2.0 011.03 26.56 6.09 27.17 Sec. 4.6 1.0 1.0 0.5 0.25 11.57 27.36 6.14 27.16 1.0 1.0 0.5 0.5 11.65 27.93 6.15 27.17
+> 1.0 1.0 0.5 1.0 11.60 27.61 6.15 27.17
+
+Tab. 4 summarizes the ablation results on the loss-weight components. Based on this study, we use the final weights 
+
+λnoise = 1 .0, λimage = 1 .0, λreg = 0 .5, and λadv = 0 .5 for all experiments reported in Tabs. 1 and 3. 
+
+## 8. Comparison with Regularization Loss in SwiftEdit 
+
+We perform an ablation to compare our regularization loss 
+
+Lreg with the Score Distillation Sampling loss LSDS used in SwiftEdit [35]. As shown in Tab. 5, applying Lreg consis-tently outperforms LSDS across all metrics (IR, HPS, AS, and CLIP), demonstrating its effectiveness in preserving image fidelity. Fig. 8 illustrates the qualitative difference between the two losses. With the SDS-based loss, the recon-struction collapses, as the inverted noise is over-regularized and loses the semantic structure of the original image, pro-ducing blurry and unrecognizable results. In contrast, our Gaussian regularization loss Lreg preserves the semantic 
+
+Table 5. Quantitative comparison between the SDS loss LSDS and our Gaussian regularization loss Lreg . For a fair evaluation, both methods are tested on SANA-Sprint 0.6B using 2 NFEs. 
+
+Method IR ×10 ↑ HPS ×10 2 ↑ AS ↑ CLIP ↑LSDS [35] 11.18 26.50 6.10 27.12 
+
+Lreg (Ours) 11.40 27.22 6.12 27.15 Blend Inverted Noise   
+
+> (w/ L_Reg )
+> Reconstructed Image
+> (w/ L_Reg )
+> Blend Inverted Noise
+> (w/ _Reg )
+> Reconstructed Image
+> (w/ L_Reg )
+> Masked GT
+> Image
+
+Figure 8. Qualitative comparison between our proposed reg-ularization loss ( Lreg ) and the Score Distillation Sampling (SDS) loss ( LSDS ) from SwiftEdit [35]. This visualization shows that our Lreg is crucial for preserving the original image content, while using LSDS leads to significant information loss and poor re-construction. 
+
+content and enables high-fidelity reconstruction from the in-verted noise. 
+
+## 9. Ablation of Proposed Components 
+
+To better understand the contribution of each part in our framework, we conducted an ablation study on both SANA-Sprint 0.6B (Tab. 7) and SDXL-Turbo (Tab. 8). We estab-lished a baseline for comparison by training a model with the reconstruction loss from Sec. 4.3, using the masked im-age as input. From this starting point, we then incrementally added our proposed components: Re-Blending (Sec. 4.4), Gaussian Regularization (Sec. 4.5), and the LADD adver-sarial loss (Sec. 4.6). Our results show that each component contributes incre-mental gains in performance. As shown in Tab. 7, intro-ducing the Re-Blending operation increases the IR score from 7.93 to 11.11. The further addition of Gaussian Regu-larization expands this improvement, and incorporating the LADD adversarial loss leads to the highest scores, with an IR of 11.65 and an HPS of 27.93. A similar pattern of improvement is also noted in the experiments with SDXL-Turbo (Tab. 8). This evaluation suggests that all three com-ponents contribute effectively, collectively leading to the 1Method IR ×10 ↑ HPS ×10 2 AS ↑ CLIP ↑ Runtime (seconds) ↓
+
+DDIMInv ( w/o Blending) (50 steps) + SDXL-Turbo 4.10 22.95 5.30 26.40 4.18 DDIMInv ( w/ Blending) (50 steps) + SDXL-Turbo 12.11 28.21 6.04 27.32 4.32 
+
+InverFill (Ours) + SDXL-Turbo 12.38 28.44 6.08 27.67 0.74 
+
+Table 6. Quantitative comparison of one-step InverFill versus the 50-step DDIM inversion baseline on BrushBench. For a fair comparison, we run SDXL-Turbo with 4 NFEs. 
+
+performance of the full InverFill model. 
+
+Table 7. Ablation of components on SANA-Sprint 0.6B (2 NFEs).                      
+
+> Method IR ×10 ↑HPS ×10 2↑AS ↑CLIP ↑
+> Baseline [35] 7.93 24.79 5.96 26.40
+> InverFill
+> + Re-Blending (Sec. 4.4) 11.11 26.68 6.08 27.13 + Gaussian Reg. (Sec. 4.5) 11.40 27.22 6.12 27.15 + LADD (Sec. 4.6) 11.65 27.93 6.15 27.17
+
+Table 8. Ablation of components on SDXL-Turbo (4 NFEs).                      
+
+> Method IR ×10 ↑HPS ×10 2↑AS ↑CLIP ↑
+> Baseline [35] 10.64 26.46 6.03 26.56
+> InverFill
+> + Re-Blending (Sec. 4.4) 11.33 27.18 6.03 27.16 + Gaussian Reg. (Sec. 4.5) 12.14 28.14 6.06 27.57 + LADD (Sec. 4.6) 12.38 28.44 6.08 27.67
+
+## 10. Other Inversion Approaches 
+
+We quantitatively compare InverFill with a 50-step DDIM inversion process, using SDXL for inversion and SDXL-Turbo blended sampling for inpainting. Based on Fig. 9, di-rectly applying DDIM inversion to a masked image fails to encode the masked regions, producing smooth, gray, null-like structures in those areas. This loss of content signifi-cantly degrades performance, as reflected in the low scores reported in the first row of Tab. 6. Next, we apply our proposed Re-Blending operation (Sec. 4.4) to the DDIM-inverted noise. While this fills the previously null-like regions, the resulting model (Row 2 in Tab. 6) still struggles with scene harmonization. In con-trast, our one-step InverFill method (Row 3) achieves higher scores across all metrics and is significantly more efficient, running in just 0.74 seconds , nearly six times faster than the 50-step DDIM process (4.32 seconds). Combined with the improved qualitative harmonization in Fig. 10, these re-sults demonstrate that InverFill is both substantially more effective and practical. 
+
+## 11. Additional Experiments 
+
+We evaluate InverFill on FFHQ [18] and DIV2K [1] to as-sess robustness across diverse mask configurations and stan-dard benchmarks, with results reported in Tab. 9. For all Source Image DDIM Inverted 
+
+> Noise Source Image DDIM Inverted
+> Noise Source Image DDIM Inverted
+> Noise
+
+Figure 9. Visualization of DDIM Inversion results. The masked regions are not encoded, producing smooth, null-like areas in the inverted noise and causing loss of content. Ground Truth DDIM Inversion + 
+
+> SDXL-Turbo Mask ‘‘‘A bird perched on a branch of cherry blossoms’’’ ‘‘‘A close up of a cherry blossom with white flowers’’’ InverFill +
+> SDXL-Turbo ‘‘‘A cat looking at a fish bowl with a goldfish’’’
+
+Figure 10. Qualitative comparison between InverFill and DDIM Inversion. InverFill achieves substantially better scene harmoniza-tion and semantic consistency. 
+
+evaluations, we use the same checkpoints as in Sec. 5 with-out any modification or fine-tuning. 
+
+Datasets. For FFHQ, we sample 10K images. For DIV2K, we use 900 images from the training and validation sets. Following the same settings in Sec. 5.5, prompts are gener-ated using Qwen-3 [58]. 
+
+Mask Settings. For both FFHQ and DIV2K, we adopt LaMa’s [51] strategy with polygonal thick- and thin-stroke masks, and additionally include rectangular masks covering half of the image. Masks are randomly sampled from these configurations to ensure a diverse evaluation. 
+
+Additional Metrics. In addition to perceptual quality met-rics, we report LPIPS and SSIM to assess consistency, in-2Table 9. Quantitative results on FFHQ, DIV2K, and BrushBench. Red , Blue , and Black denote scores on FFHQ , DIV2K , and 
+
+BrushBench , respectively.                                                                                                                                           
+
+> Method NFEs FFHQ /DIV2K /BrushBench
+> FID ↓IR ×10 ↑HPS ×10 2↑AS ↑CLIP ↑LPIPS ↓SSIM ↑
+> SANA-Sprint 0.6B 227.12 2.81 / 5.22 22.42 / 26.78 5.12 / 5.77 23.55 / 28.26 0.184 / 0.193 / 0.144 0.704 / 0.572 / 0.769 SANA-Sprint 0.6B + InverFill 226.53 5.27 /5.87 23.26 /27.17 5.31 /5.89 23.65 /28.43 0.172 /0.182 /0.138 0.719 /0.575 /0.771
+> SANA-Sprint 0.6B 427.32 2.66 / 5.25 22.50 / 26.83 5.17 / 5.79 23.84 / 28.31 0.184 / 0.192 / 0.140 0.706 / 0.573 / 0.774 SANA-Sprint 0.6B + InverFill 426.42 5.27 /5.83 23.32 /27.15 5.37 /5.92 23.88 /28.38 0.169 /0.181 /0.134 0.708 /0.574 / 0.774 SDXL Turbo 426.32 7.37 / 4.71 25.73 / 26.81 5.67 / 5.92 25.24 / 28.21 0.269 / 0.292 / 0.139 0.626 / 0.454 / 0.813 SDXL Turbo + InverFill 425.90 8.35 /5.27 26.14 /27.03 5.76 /5.95 25.29 /28.25 0.262 /0.287 /0.133 0.655 /0.455 /0.815
+> SDXL Turbo + BrushNet 425.55 7.86 / 5.11 25.05 / 26.05 5.53 / 5.76 24.72 / 28.41 0.204 / 0.469 / 0.185 0.728 / 0.292 / 0.755 SDXL Turbo + BrushNet + InverFill 425.49 7.91 /5.17 25.17 /26.18 5.55 /5.79 24.85 / 28.39 0.206 / 0.469 / 0.178 0.727 / 0.293 /0.757
+
+cluding results from the BrushBench evaluation. For FFHQ, we additionally report FID [12]. 
+
+## 12. Analysis of the Inversion Effect 
+
+We analyze the effect of the inversion network to explain why initializing from well-aligned noise yields more coher-ent and consistent outputs. Our intuition is that such noise encodes the blending trajectory and preserves background information, thereby enabling smoother blending during the denoising process. To further validate this observation, we compute LPIPS between the predicted x0 in background regions at interme-diate timesteps and the input image, and report the results in Fig. 11. We observe that initialization with well-aligned noise consistently yields significantly lower LPIPS than random initialization, supporting our hypothesis. Moreover, Fig. 11 provides insight into the effectiveness of the Gaus-sian regularization loss: the Jensen–Shannon divergence (JSD) with respect to the Gaussian distribution is substan-tially reduced when this regularization is applied, leading to better-aligned latent noise while also satisfying the re-quired Gaussian distribution for diffusion models, and con-sequently yielding stable and coherent reconstructions. 
+
+## 13. Failure Cases 
+
+We report representative failure cases in Fig. 12. Overall, the main limitation of our method stems from color incon-sistencies between the inpainted region and the background. 
+
+## 14. Societal Impacts 
+
+Our work aims to provide a practical tool for creative pro-fessionals, facilitating tasks such as photo restoration and object removal. We acknowledge that realistic image ma-nipulation technologies can be misused to generate decep-tive content. To mitigate such risks, we advocate for the parallel development of detection methods [10, 32, 36] for AI-manipulated media and encourage the responsible use of these technologies. 0.0 0.1 0.2 0.3 0.4 0.5 0.6  
+
+> Metric Score (Lower is Better)
+> LPIPS
+> (SANA-Sprint)
+> LPIPS
+> (SDXL-Turbo)
+> JSD
+> (SANA-Sprint)
+> JSD
+> (SDXL-Turbo)
+> 0.453
+> 0.523
+> 0.048
+> 0.077
+> 0.355
+> 0.417
+> 0.015
+> 0.038 Without InverFill
+> With InverFill
+
+Figure 11. Quantitative analysis of inversion effects. We report LPIPS in background regions at intermediate timesteps and JSD with respect to the Gaussian prior. Lower values indicate better alignment. Red bars denote results without InverFill, while Green bars denote results with InverFill. 
+
+Figure 12. Representative failure cases of our method. While In-verFill improves overall coherence, it may produce color inconsis-tencies between the inpainted regions and the background. 
+
+## 15. More Qualitative Results 
+
+To provide a comprehensive visual comparison of InverFill, Figs. 13 and 14 present an expanded set of qualitative re-sults, further illustrating the improvements in coherence and background harmonization highlighted in our work. 3‘‘‘A colorful parrot with its wings spread out’’’ ‘‘‘Lion in business suit sitting at a table with laptop’’’ Ground Truth SDXL-Inpainting 
+
+(30 steps) Mask SANA-Sprint + 
+
+InverseFill 
+
+(2 steps) SDXL-Turbo + 
+
+BLD 
+
+(4 steps) SANA-Sprint + 
+
+BLD 
+
+(2 steps) ‘‘‘A vase with three flowers in it on a dark background’’’ ‘‘‘An angel with wings and a golden light above him’’’ ‘‘‘A small dog dressed in armor and gold’’’ SDXL-Turbo + 
+
+InverseFill 
+
+(4 steps) SDXL-Turbo + 
+
+BrushNet 
+
+(4 steps) SDXL-Turbo + 
+
+BrushNet + InverseFill 
+
+(4 steps) Figure 13. More qualitative comparison on BrushBench (Zoom in for best view) 
+
+4‘‘‘A brown bear sitting on the ground’’’ ‘‘‘A pink glass jar with a metal lid’’’ ‘‘‘A close up of a cat looking to the side’’’ ‘‘‘A silver sports car driving down the street’’’ ‘‘‘A female character in a blue uniform and boots’’’ Ground Truth SDXL-Inpainting 
+
+(30 steps) Mask SANA-Sprint + 
+
+InverseFill 
+
+(2 steps) SDXL-Turbo + 
+
+BLD 
+
+(4 steps) SANA-Sprint + 
+
+BLD 
+
+(2 steps) SDXL-Turbo + 
+
+InverseFill 
+
+(4 steps) SDXL-Turbo + 
+
+BrushNet 
+
+(4 steps) SDXL-Turbo + 
+
+BrushNet + InverseFill 
+
+(4 steps) Figure 14. More qualitative comparison on BrushBench (Zoom in for best view) 
+
+5

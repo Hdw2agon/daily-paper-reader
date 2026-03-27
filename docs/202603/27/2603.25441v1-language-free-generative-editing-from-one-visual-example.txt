@@ -1,0 +1,651 @@
+Title: Language-Free Generative Editing from One Visual Example
+
+URL Source: https://arxiv.org/pdf/2603.25441v1
+
+Published Time: Fri, 27 Mar 2026 01:27:45 GMT
+
+Number of Pages: 19
+
+Markdown Content:
+# Language-Free Generative Editing from One Visual Example 
+
+# Omar Elezabi Eduard Zamfir Zongwei Wu * Radu Timofte 
+
+Computer Vision Lab, CAIDAS & IFI, University of W¨ urzburg 
+
+# Abstract 
+
+Text-guided diffusion models have advanced image editing by enabling intuitive control through language. However, despite their strong capabilities, we surprisingly find that SOTA methods struggle with simple, everyday transforma-tions such as rain or blur. We attribute this limitation to weak and inconsistent textual supervision during training, which leads to poor alignment between language and vi-sion. Existing solutions often rely on extra finetuning or stronger text conditioning, but suffer from high data and computational requirements. We argue that diffusion-based editing capabilities aren’t lost but merely hidden from text. The door to cost-efficient visual editing remains open, and the key lies in a vision-centric paradigm that perceives and reasons about visual change as humans do, beyond words. Inspired by this, we introduce Visual Diffusion Condition-ing (VDC), a training-free framework that learns condi-tioning signals directly from visual examples for precise, language-free image editing. Given a paired example—one image with and one without the target effect—VDC derives a visual condition that captures the transformation and steers generation through a novel condition-steering mech-anism. An accompanying inversion-correction step miti-gates reconstruction errors during DDIM inversion, pre-serving fine detail and realism. Across diverse tasks, VDC outperforms both training-free and fully fine-tuned text-based editing methods. The code and models are open-sourced at omaralezaby.github.io/vdc/ 
+
+# 1. Introduction 
+
+Diffusion models have revolutionized visual synthesis, powering the current state-of-the-art in image editing [11, 16, 48]. Notably, text-guided diffusion models enable in-tuitive manipulation through natural language prompts [10, 41, 60], offering strong spatial and semantic control. Despite their impressive flexibility, we find that current text-guided diffusion models often struggle with simple vi-sual transformations such as rain, haze or blur. As we illus-trate in Fig. 1, their internal representations fail to match the   
+
+> *Corresponding Author Paired Edit
+> Test Sample
+> Objective
+> Text -Centric
+> Visio n-Centric
+> “Rain”
+> ✓Aligned ×Misaligned
+
+× ✓
+
+> Clean
+> Domain
+> VDC
+> LLM
+> Output Output
+> Features
+> Ours Text -based Model
+> Features
+
+Figure 1. Text–image misalignment in diffusion latent space. Text-guided generative models rely on language, which often fails to capture appearance-level transformations, e.g. rain, leading to se-mantic but visually misaligned directions. Our method, Visual Diffusion Conditioning (VDC), instead learns a vision-centric conditioning signal directly from paired visual examples, uncov-ering the correct transformation direction within the latent space. By steering the diffusion process along this aligned path, VDC achieves faithful and realistic edits, bridging the gap between text semantics and visual representations. 
+
+semantics of these textual descriptions. We link this behav-ior to weak and inconsistent supervision: diffusion models rely on image–caption pairs and thus learn only the concepts explicitly described in the training data. Consequently, vi-sual phenomena that are rarely or ambiguously captioned exhibit poor alignment between text prompts and their as-sociated visual features. A natural solution might be to fine-tune the model for these missing concepts [4, 28, 59, 67]. However, retrain-ing large diffusion models is computationally intensive and data-hungry, rendering it impractical for most editing sce-narios. Importantly, diffusion models already encode rich, structured visual representations that extend beyond their textual supervision [24]. The limitation arises from weak language-vision align-1
+
+> arXiv:2603.25441v1 [eess.IV] 26 Mar 2026
+
+ment, which obscures access to the full visual manifold, as shown in Fig. 2. We propose to bridge this gap through a 
+
+vision-centric perspective on editing. Rather than relying on language to approximate visual intent, our approach treats manipulation as a process grounded in perceptual change. Visual examples—unlike text—can unambiguously express such changes: a pair of images naturally encodes degrada-tions, or stylistic variations that are difficult to capture ver-bally. By extracting conditioning signals directly from vi-sual examples, we can translate observable differences into latent-space directions that operate on the model’s existing visual representations, c.f. Fig. 2. This motivates an editing framework driven by visual exemplars instead of language. Building on this, we introduce Visual Diffusion Con-ditioning (VDC), a training-free diffusion editing frame-work that learns visual conditioning signals from example image pairs. Instead of text prompts, VDC derives a com-pact representation that encodes the transformation between two visual domains ( e.g. , clean ↔ degraded). Once ex-tracted, this visual condition can be transferred to unseen images, enabling consistent and controllable edits. Prior training-free methods [5, 15, 18, 23, 31, 35–37, 51, 53– 55, 61] typically operate by inverting the diffusion process and modifying latent trajectories through textual guidance. While effective for semantic manipulation, they remain lim-ited by language–vision misalignment and struggle to ex-press fine-grained, appearance-level changes. Besides, cur-rent exemplar-driven approaches [13, 21, 38, 50, 56] par-tially address this issue by defining edits from image pairs, but most rely on pretrained vision–language models [40] or additional finetuning [56], which reduces generality and in-creases computational cost. In contrast, our VDC framework introduces pure visual conditioning, leveraging the pretrained latent structure. Our framework builds on two core components: (i) a 
+
+condition steering mechanism that modulates the sampling process via posterior score guidance [49], enabling precise and stable edits without retraining; and (ii) an inversion correction step that compensates for error accumulation in DDIM inversion [11, 48], preserving perceptual quality. In summary, our main contributions are: • A diffusion editing framework, termed Visual Diffusion 
+
+Conditioning , that learns directly from visual examples. • A stable, lightweight neural embedding that captures edit semantics from a single example pair, enabling training-free yet generalizable editing. • A sampling and inversion strategy that achieves precise editing while preserving perceptual fidelity. 
+
+# 2. Related Works 
+
+Text-based Image Editing. Instruction-based image edit-ing methods [4] were proposed to modify an input im-age according to text instructions. These approaches typ-Sample Text -Based VDC Sample Text -Based VDC   
+
+> Rain Haze
+> Figure 2. Language-Vision misalignment. The internal represen-tations of LDM [41] fail to accurately capture the semantics of degradations such as “rain” or “haze”. Attention maps under text-based conditioning remain object-centric and do not correspond to degradation-specific visual attributes. Our VDC framework re-aligns attention focus toward true visual cues, recovering mean-ingful features that correspond to rain streaks and hazy regions.
+
+ically employ generative models to synthesize large-scale instruction-based editing datasets, which are then used to fine-tune diffusion models for conditional image edit-ing. Subsequent works refined this paradigm by curating higher-quality datasets [65] and leveraging improved ar-chitectures and generative backbones [25, 28, 45, 59, 67]. To reduce the dependence on large-scale instruction data and computationally expensive training, train-free methods [5, 15, 18, 20, 23, 31, 35–37, 51, 53–55, 61] were intro-duced. These methods exploit the intrinsic generative and semantic capabilities of pretrained text-to-image (T2I) dif-fusion models to perform edits without retraining. They typically invert the diffusion process [11, 18, 48, 55, 61] to recover the latent noise representation of an input im-age, and then modify conditioning components such as the textual prompt [20, 36, 37], self-attention maps [5, 51, 53], or cross-attention modules [15, 23] to realize desired ed-its. Despite their flexibility, purely text-based methods of-ten struggle to capture fine-grained or compositional edits that go beyond what can be easily expressed in language. 
+
+Exemplar-based Editing. A core limitation of text-based editing lies in its reliance on natural language, which is of-ten ambiguous and insufficient for describing complex, lo-calized, or stylistic edits. To address this, visual exemplar-based editing methods incorporate visual examples to define edits more precisely [13, 21, 38, 50, 56]. These approaches learn from pairs of “before” and “after” example images to infer a transformation that can be applied to new inputs. Typically, they employ textual or joint vision–language rep-resentations to model the relationship between the visual example pair and the input image. However, even these methods depend on text-aligned latent spaces, inheriting the limitations of T2I diffusion models, such as the imperfect alignment between textual embeddings and visual features. Although some works attempt to fine-tune diffusion models directly for the visual instruction setting, they still rely on VLMs [40] to extract edit semantics [34, 56]. This depen-dence often leads to the loss of global context or fine visual details, constraining edit fidelity and controllability. 2Rain           
+
+> 𝑍 !"#𝑍 $
+> 𝑍 #
+> 𝑍 %
+> 𝐶 !
+> &
+> 𝐶 $
+> &
+> 𝐶 #
+> &
+> ∅∅∅
+> 𝑍 !𝑍 !"#𝑍 $𝑍 #𝑍 %
+> …
+> …
+> No Rain Condition Steering
+> DDIM Inversion (a) DDIM inversion with Condition Steering. 𝑤
+> 1−𝑤
+> 𝑍 !"#
+> 𝑍 $
+> 𝐶 !
+> %
+> ∅
+> 𝑍 !
+
+×
+
+×   
+
+> ×
+> DM
+> DM
+> … …
+> Token Index
+> d
+> N
+> Steering Cond.
+> [
+> 1
+> 2
+> 3
+> N[…
+> Condition
+> Generator t(b) Steering Condition Generation.
+
+Figure 3. Proposed VDC framework. (a) Given a real image, we first invert it through DDIM and apply the learned steering condition Cst
+
+to guide sampling toward the desired visual feature (e.g., removing rain) while preserving content and quality. (b) A lightweight Condition Generator produces per-step steering embeddings from token indices, representing the target visual feature. These conditions modulate the diffusion outputs through weighted score blending, enabling training-free visual editing without textual prompts. 
+
+Diffusion for Inverse Problems. Diffusion models have also been successfully applied to inverse problems [6, 7, 12, 57, 69] due to their powerful ability to model com-plex data distributions. By reformulating image restora-tion as a guided sampling task, diffusion models can re-cover clean images that correspond to a given degraded observation—achieving zero-shot restoration without addi-tional training. Initially introduced for image-space diffu-sion models, these approaches were later extended to la-tent diffusion models to better exploit their semantic pri-ors and efficiency [22, 42, 43, 47, 58, 64]. Nevertheless, these methods typically assume known degradation opera-tors ( e.g. , blur kernels, noise levels), which limits their gen-eralization to complex, spatially varying degradations such as haze, rain, or reflection removal. 
+
+# 3. Methodology 
+
+Diffusion Preliminaries. Diffusion models generate data by iteratively denoising a latent variable zt sampled from a Gaussian prior. At each timestep t, a noise prediction network ϵθ (zt, t, C ) estimates the denoised sample condi-tioned on C, which can be a text embedding or other guid-ance signal. Inversion methods such as DDIM [48] allow reconstruct-ing a latent trajectory from a real image, enabling editing in latent space. As shown in Fig. 3a, our framework builds on these foundations by replacing textual conditioning with a learned visual condition , used to steer the generative pro-cess toward appearance-level transformations. 
+
+3.1. Editing by Visual Conditioning 
+
+VDC builds on the observation that diffusion models im-plicitly recognize visual features even when these features lack corresponding textual representations. Although text prompts fail to access such features, they can be revealed by shifting from language-based to purely visual conditioning. We achieve this by identifying a condition that captures a specific transformation through visual examples. Given an 
+
+Algorithm 1 Steering Condition Generator Optimization 
+
+Input: RB Visual Example Before Editing, RA Visual Ex-ample After Editing, Itrs Number of optimization itera-tions, p ∼ [T, 0) Diffusion step for resampling start, N
+
+Number of tokens in the condition, ϕ Null Condition, E
+
+and D Encoder and Decoder respectively. 
+
+Output: Optimized Steering Condition Cs
+
+ZB , Z A = E(RB ), E (RA)
+
+▷ partial inversion to step p 
+
+ZBp = DDIM Inversion (ZB , t = (1 , ...p ), ϕ )
+
+for i = 1 , ...Itrs do for t = p, ... 1 do 
+
+▷ generate step condition 
+
+Cst = MLP t(1 , ...N )
+
+ϵinit = ϵθ (ZBt , t, ϕ ) ▷ adjust sampling 
+
+ϵsteering = ϵθ (ZBt , t, C st )ˆϵ = (1 − w) ∗ ϵsteering + w ∗ ϵinit 
+
+ZBt−1 = DDIM Step (ZBt , t, ˆϵ)
+
+end for 
+
+▷ Optimize Condition Generator 
+
+L = || ZB 
+
+> 0
+
+− ZA|| 22 + || D(ZB 
+
+> 0
+
+) − RA|| 22
+
+MLP 1,...t = MLP 1,...t + AdamGrad (L)
+
+end for return Cs ← MLP 1,...t (0 , ...N )
+
+image pair before and after editing, (RB , R A), we derive a visual condition Cs that encodes the transformation within the model’s learned data distribution, as shown in Fig. 3b. By inverting a real image and applying this condition dur-ing the generative process, we steer the model to reproduce the desired edit. This enables representation and manipu-lation of visual features without textual prompts, unlocking the full expressive capacity of the diffusion latent space. 
+
+3.2. Condition Steering 
+
+To completely detach from the textual space, we consider an unconditional generative process and manipulate the image by steering the sampling trajectory using a condition that 3Algorithm 2 DDIM Inversion Correction 
+
+Input: Z0 latent to be inverted , I number of iterations, 
+
+p ∼ [T, 0) Diffusion resampling start, ϕ Null Condition 
+
+Output: Corrected Noised Latent z∗
+
+> p
+
+¯Zp = DDIM Inversion (Z0, t = (1 , ...p ), ϕ )
+
+for i = 1 , ...I do 
+
+ˆZ0 = DDIM Forward ( ¯Zp, t = ( p, ... 1) , ϕ )
+
+L = || ˆZ0 − Z0|| 22
+
+¯Zp = ¯Zp − AdamGrad (L)
+
+end for return ¯Zp
+
+represents the visual feature to be edited or removed ( e.g. ,rain, fog, or noise). Given a condition representing a visual feature Cs, we steer the generative process according to the posterior score function [49] of the unconditional model: 
+
+∇x log p(x|Cs) = ∇x log p(x) + ∇x log p(Cs|x) (1) For tasks such as deraining or dehazing, where Cs de-notes the feature to be removed, the goal is to steer sampling away from the high-density region of that feature. This can be expressed as the posterior score function for −Cs:
+
+∇x log p(x|− Cs) = ∇x log p(x)−s∗∇ x log p(Cs|x) (2) Here, s is a hyperparameter controlling the steering inten-sity, and by Bayes’ rule, p(Cs|x) ∼ p(x|Cs)/p (x). Ex-panding this relation gives: 
+
+∇x log p(x| − Cs) = 
+
+∇x log( x) − s ∗ (∇x log p(x|Cs) − ∇ x log p(x)) (3) Adapting this to the noise prediction model in LDM, where 
+
+∇x log( x) ∼ ϵθ (zt, t, ϕ ) and log p(x|Cs) ∼ ϵθ (zt, t, C t),we can rewrite the formulation as: 
+
+ϵθ (zt, −Cs) = ϵθ (zt, ϕ ) − s ∗ (ϵθ (zt, C s) − ϵθ (zt, ϕ )) = ϵθ (zt, C s) + (1 + s) ∗ (ϵθ (zt, ϕ ) − ϵθ (zt, C s)) = (1 − w) ∗ ϵθ (zt, C s) + w ∗ ϵθ (zt, ϕ ) (4) where w = 1 + s. This formulation enables direct ma-nipulation of the visual feature represented by Cs by steer-ing the trajectory of the unconditional generative process used to invert the real image. Editing the image in this way avoids generative artifacts, since we update the inverted im-age ( out = Z(ϕ) + Z(Cθ )) rather than generating a new image ( out = Z(Cθ )), analogous to a global residual con-nection in image-to-image networks [39]. We visualize this process in Fig. 3a. 
+
+3.3. Condition Representation for Visual Features 
+
+In diffusion models, the conditioning input is typically rep-resented as a sequence of tokens, each corresponding to an encoded word in the textual prompt ( e.g. , Stable Dif-fusion [41] accepts up to 77 tokens as input). Optimizing textual embeddings has been used to improve diffusion in-version of real images [37] or to personalize the generative process by learning an embedding for a specific object [44]. This optimization treats text embeddings as trainable pa-rameters and updates them according to a chosen objective function. However, the process depends on an initial prompt embedding and is often unstable, allowing optimization of only a small number of tokens [37, 50]. To fully remove textual dependency, we generate a new embedding directly from a condition generator network. In-spired by Implicit Neural Representations (INR) [46, 52], which encode images as continuous functions over pixel co-ordinates, we represent the visual edit condition as a contin-uous function over token indices. Specifically, we employ a lightweight three-layer MLP and, following INR litera-ture, apply Fourier features to the input indices to improve expressiveness [52]. This formulation provides stable op-timization when learning the steering condition that repre-sents a desired edit. The improved stability allows optimiza-tion of all 77 tokens, enabling full access to the model’s vi-sual condition space. Further, since each token is generated from a continuous function conditioned on token indices, the network naturally establishes communication across to-kens, producing smooth and coherent condition representa-tions. For finer control during editing, we optimize a sepa-rate condition generator for each diffusion step. 
+
+Cst = MLP t(1 , ....N )
+
+min 
+
+> MLP t
+
+|| Z∗ 
+
+> t−1
+
+− Zt−1(Zt, t, C t)|| 22 (5) 
+
+3.4. Optimization and Inversion Refinement 
+
+Previous condition optimization methods typically optimize the condition using the output of a single diffusion step [37]. However, this approach forces most edits to occur during the early diffusion steps, leaving the later stages primarily for refinement. In contrast, our VDC optimizes all condition generators jointly based on the final output after the com-plete diffusion process. This formulation allows the model to decide how edits are distributed across the diffusion tra-jectory, rather than concentrating them in the initial steps. Accordingly, the optimization in 5 becomes: 
+
+Csp,... 1 = MLP 1,...p (1 , ....N )
+
+min 
+
+> MLP 1,...p
+
+|| Z∗ 
+
+> 0
+
+− Z0(Zp, t = ( p, ... 1) , C p,... 1)|| 22 (6) Here, N is the number of tokens in the condition, p ∼
+
+[T, 0) denotes the starting step of the partial diffusion pro-cess, and t ∼ [p, 0) represents the current diffusion step. z∗
+
+> 0
+
+is the ground-truth latent, while z0 is the model output ob-tained using the optimized steering condition Cp,... 1. This formulation provides the model with greater flexibility to adapt the applied edits dynamically at each diffusion step. 
+
+Inversion Correction. DDIM inversion assumes that 
+
+Zt−1 ∼ Zt, meaning that adjacent diffusion steps are nearly 4Table 1. Comparison to state-of-the-art image editing. FID ( ↓) and LPIPS( ↓) are reported on the full RGB images. Our method sets a new state-of-the-art on average across all benchmarks. ‘-’ represents unreported results. The best performances are highlighted.                                                                                                                                                                                                                               
+
+> Type Method SR DeBlur DeNoise DeRain DeHaze Colorization FID ↓LPIPS ↓FID ↓LPIPS ↓FID ↓LPIPS ↓FID ↓LPIPS ↓FID ↓LPIPS ↓FID ↓LPIPS ↓
+> T-Edit  P2P [15] 126.47 0.6662 45.62 0.5220 142.95 0.5593 139.19 0.3122 44.09 0.2183 121.87 0.2931 Null-Opt [37] 73.48 0.5510 51.89 0.5258 160.88 0.6059 167.61 0.5050 91.76 0.4917 197.81 0.5881 Negative-Cond [36] 63.22 0.4807 43.61 0.4528 96.19 0.4764 118.76 0.3157 43.20 0.2193 135.63 0.3407 I-Edit  Instruct-Pix2Pix [4] 92.79 0.5828 142.91 0.7081 155.12 0.6298 179.93 0.4285 36.42 0.2399 115.74 0.2975 OmniGen [59] 59.66 0.4596 46.18 0.4188 150.80 0.4663 119.87 0.3081 42.77 0.2169 134.43 0.3438 SuperEdit [28] 89.07 0.5481 56.22 0.5307 172.50 0.5866 185.98 0.4489 49.27 0.2960 116.37 0.3860 ICEdit [67] 50.14 0.4922 45.54 0.4734 128.55 0.5385 149.44 0.3300 170.11 0.5961 104.72 0.2882 Zero-IR  PSLD [42] 31.90 0.2839 42.89 0.3683 115.17 0.3660 ----202.71 0.6242 TReg[22] 49.15 0.5161 52.07 0.4379 94.11 0.5392 ----183.27 0.7713 DAPS[64] 47.14 0.3290 59.85 0.3413 148.42 0.4137 ----213.36 0.6266 IE-Edit  VISII [38] 110.39 0.4949 122.63 0.5465 248.79 0.8341 203.83 0.5011 198.69 0.6756 298.10 0.5402 Analogist [13] 83.88 0.4779 75.06 0.4692 143.62 0.5599 158.29 0.6006 68.02 0.3988 156.28 0.5779 EditClip [56] 77.64 0.5558 78.75 0.5114 99.00 0.5470 174.93 0.3809 44.69 0.2241 138.34 0.3008 One-Shot 41.41 0.2666 35.51 0.2654 89.51 0.2801 87.12 0.2559 35.52 0.1633 107.70 0.2908 Multi-Shot 45.89 0.2654 42.62 0.2651 88.58 0.2846 69.52 0.2214 34.18 0.1584 107.80 0.2744 VDC MS+Inverse-Correction 45.00 0.2624 41.09 0.2593 82.57 0.2768 66.92 0.2155 33.23 0.1560 105.26 0.2729
+
+identical. However, this assumption holds only for infinites-imally small step sizes, and in practice, it introduces ac-cumulated inversion errors across the diffusion trajectory. To improve inversion accuracy, we propose a refinement method for DDIM inversion. We first perform DDIM in-version up to the desired diffusion step to obtain the ini-tial noised latent zp. Next, we apply the forward diffusion process using the inverted latent to compute the reconstruc-tion error. Finally, we update the noised latent zp through gradient-based optimization to minimize this inversion er-ror. The full procedure is summarized in Algorithm 2. 
+
+Loss. Since our approach relies on visual examples, we convert the ground-truth image to the latent space and com-pute the loss directly in that domain. This avoids the dis-parity between pixel and latent spaces [42], where multi-ple images may correspond to the same latent representa-tion. However, encoding an image into latent space can re-sult in the loss of fine spatial details, producing inaccurate or overly smoothed edits. To address this, we additionally compute a pixel-space loss by decoding the diffusion latent output back to the image domain. Combining both latent and pixel losses helps preserve spatial fidelity while main-taining semantic consistency during editing: 
+
+# 4. Experiments 
+
+We conduct experiments across diverse editing and restora-tion tasks, comparing against works that adapt T2I diffusion models under different input modalities, training regimes, and optimization strategies. For fairness, we use the same diffusion backbone and include instruction-based models explicitly trained for image editing. 
+
+Implementation Details. VDC builds on Stable Diffu-sion v1.4 [41] with DDIM sampling [48] using 100 steps, operating only on the last 10 steps of the trajectory. The condition generator (CG) is a three-layer MLP network with dimensionality 128 . We optimize CG with Adam (β1=0 .9, β2=0 .999 ) for 200 iterations (batch size 4) using a cosine-annealed learning rate decaying from 5×10 −3 to 
+
+1×10 −3 [32]. The one-shot setup uses single visual exam-ple with flip, rotation, and color-jitter augmentations, while the multi-shot setup increases to eight examples. Condi-tion steering is set to a scale of 7. All experiments run on a single RTX 4090 GPU. We use identical settings across architectures (e.g., SD [41] vs. SANA [60]) and tasks. 
+
+Datasets. For super-resolution and deblurring, we use 1K FFHQ [19] samples following DPS [8] degradation. We choose BSD400 [3] testset σ=25 for denoising. For deraining and dehazing, we evaluate on Rain100L [62] and SOTS [26], respectively. For colorization, we convert DIV2K [2] to grayscale. We randomly pick one image per dataset as reference for works requiring visual examples. 
+
+Baselines. Text-edit (T-Edit) methods manipulate the gen-eration prompt without retraining. We use BLIP [27] to gen-erate captions ( e.g. , “photo of 3 bears in rain” → “photo of 3 bears”) as editing prompts. Instruction-edit (I-Edit) meth-ods are trained for text-instruction-based editing; we craft task-specific prompts ( e.g. , “Remove rain from the image”). 
+
+Zero-shot image restoration (Zero-IR) methods address in-verse problems using diffusion priors; we follow DPS [8] for degradation settings. Image-example (IE-Edit) methods transfer edits from a reference image to a target; we use the same visual examples as our method for fair comparison. Please refer to the supplementary for more details. 
+
+4.1. Comparison to State-of-the-Art Methods 
+
+In Tab. 1, VDC surpasses all prior approaches using only a single visual example. Its language-free design provides 5SR Blur Noise Rain Haze Color         
+
+> P2P ICEdit PSLD Edit -Clip VDC (Ours) Visual Example Query
+> NA
+> NA Figure 4. Visual comparison. Text- and example-based methods struggle with complex edits due to misalignment or degradation priors. Our one-shot VDC (shown results) yields clean results, with multi-shot and correction modules improving generalization and fidelity.
+
+stronger conditioning than text, overcoming the misalign-ment that limits text-based methods. IE-Edit methods un-derperform due to their reliance on joint text–image em-beddings, while Zero-IR methods perform better but require known degradation kernels, limiting generalization. Addi-tionally, we compare to diffusion fine-tuning methods like ControlNet [66] and LoRA [17] in Tab. 4, showing their ineffectiveness under low-data regime. Adding more vi-sual examples further improves performance, especially for tasks with diverse degradations (see Sec. 4.2). VDC ef-fectively captures multiple variations (e.g., rain patterns) within a single optimized condition, though too many exam-ples may cause slight overfitting on less variable tasks. De-spite inverting only 10% of the diffusion trajectory, the cor-rection inversion module in the multi-shot setup improves detail preservation, particularly for deraining and denois-ing. VDC is also efficient, requiring about 30 minutes of condition optimization for peak fidelity (200 optimization steps). However, Fig. 6 shows that VDC outperforms Om-niGen in just 10 steps ( ∼ 2 mins). Additionally, Inference incurs zero overhead (just 10 timesteps), as VDC replaces CFG, leaving latency determined by the underlying diffu-sion model. Please refer to supplementary for more results. 
+
+Visual Results. Fig. 4 illustrates that text-based meth-ods (P2P, ICEdit) fail to perform complex edits due to text–visual misalignment, often producing corrupted re-sults. Image-example approaches (Edit-CLIP) show simi-lar issues, as they still depend on textual space. Zero-IR methods generate cleaner outputs but introduce noise or color artifacts and rely on known degradation kernels, re-6Table 2. Contribution analysis. The upper half evaluates the impact of each module, while the lower half compares different configurations of the condition generator (CG). Best results are bolded; the final setup is highlighted.                                            
+
+> Method SR DeRain FID ↓LPIPs ↓FID ↓LPIPs ↓
+> Modules  w/o Data Augmentation 48.53 0.2958 131.82 0.3352 w/o Pixel Loss 46.93 0.2881 93.79 0.2723 w/o Condition Steering 55.08 0.2726 122.20 0.26858 w/o Condition Generator 44.31 0.2718 106.87 0.2568 Single/Not-Conditioned 41.74 0.3048 89.82 0.2567 Single/Step-Conditioned 46.49 0.3135 93.67 0.2585 Per-Step/Text-Conditioned 56.88 0.3331 119.59 0.2828 CG-Setup Per-Step/Not-Conditioned 41.41 0.2666 87.12 0.2559 Input One -Shot Mult i-Shot Inv -Correction
+> Colorization Denoise
+
+Figure 5. Number of visual examples. Increasing the number of examples improves results, especially for tasks with high variabil-ity such as colorization. The inversion correction module further enhances detail preservation and overall output quality. 
+
+ducing their applicability to tasks such as deraining and de-hazing. In contrast, our one-shot VDC accurately captures task-specific visual features, achieving clean, artifact-free results. As shown in Fig. 5, the multi-shot setup generalizes to more complex edits (e.g., colorization), while the cor-rection inversion module further improves fidelity and con-sistency. Together with the quantitative comparisons, these results showcase the effectiveness of our approach. 
+
+4.2. Ablations 
+
+We analyze the contribution of each component and design choice in our method, along with insights into diffusion be-havior from a conditioning perspective. All experiments use the One-Shot setup on SR and Derain tasks; additional re-sults are in the supplementary material. 
+
+Module Contributions. As shown in Tab. 2, we analyze the contribution of each proposed module. (I) Data aug-mentation is crucial in the One-Shot setup, preventing over-fitting to the single visual example and improving gener-alization across diverse patterns. (II) Pixel loss substan-tially enhances quality, as relying solely on latent-space loss discards fine details that the model may misinterpret as edits. (III) Condition Generator (CG) implemented as an MLP, improves stability and generalization by gener-ating the full condition jointly rather than optimizing to-0 50 100 150 200        
+
+> Num Optimization Steps
+> 45
+> 50
+> 55
+> 60
+> FID  VDC
+> OmniGen
+> (a) SR 050 100 150 200
+> Num Optimization Steps
+> 90
+> 100
+> 110
+> 120
+> 130
+> 140
+> 150
+> FID
+> VDC
+> OmniGen (b) DeRain.
+
+Figure 6. Optimization trade-off . VDC outperforms OmniGen in just 10 steps ( ∼ 2m); extended optimization is optional. 𝑍 !
+
+> ∗
+
+𝑍 # 
+
+> ∗
+
+.. 𝑡 .. 
+
+𝐶 $
+
+∅
+
+> SR
+
+∅
+
+𝐶 $
+
+> Rain
+
+𝐶 %
+
+𝐶 %
+
+Figure 7. Condition Steering ( Cs) vs. Condition Generation ( Cg ). 
+
+Cs adapts the unconditional path ϕ for the target edit, whereas Cg
+
+generates a new image from scratch. 
+
+kens independently. (IV) Condition Steering provides the largest improvement by optimizing a steering condition that guides the unconditional diffusion trajectory toward the de-sired edit instead of generating a new image. This focuses the optimization on the edit itself, avoiding entanglement with example content and reducing artifacts. As shown in Fig. 7, our method effectively steers samples within the data distribution toward the target output, producing cleaner and more faithful edits. 
+
+Condition Generator Setup. As shown in the lower half of Tab. 2, we evaluate different setups for condition gen-eration. Using a separate condition for each sampling step increases the number of optimization parameters but grants the model greater flexibility, allowing step-specific updates that improve results. We implement this either by feeding the step index as input to a single generator or by assigning a dedicated generator to each step. The latter performs better, 7Table 3. Diffusion path length. Extending the diffusion path in-creases variation at the cost of fidelity. Best results are bolded; the final setup is highlighted.                          
+
+> Path Length SR DeRain FID ↓LPIPS ↓FID ↓LPIPS ↓
+> 5% 56.86 0.3037 89.89 0.2470
+> 10% 41.41 0.2666 87.12 0.2559 20% 56.26 0.3134 104.33 0.2708 30% 58.12 0.3193 107.64 0.2856
+
+offering more expressive power and independence across steps. Initializing the generator with a text-based condition, however, reintroduces the text–visual misalignment prob-lem, as the conditioning shifts back into textual space, lead-ing to a notable performance drop. Our final setup employs independent generators for each diffusion step without any textual conditioning. Despite using multiple generators, the additional computational cost is negligible due to the small number of diffusion steps (10) and the compact size of each generator network (approx. 100K parameters). 
+
+VDC captures Degradation Attributes. To analyze how visual conditions represent image degradations, we opti-mized a separate condition for 10 samples per task and vi-sualized them in the condition space in Fig. 8. Conditions from the same task form compact clusters, indicating that similar degradations, such as rain or blur, are consistently encoded as related features, independent of textual repre-sentations. This confirms that our visually optimized con-ditions capture semantic similarities across varying appear-ances, enabling effective adaptation. Further, in Fig. 13, we report the performance variance across these models. De-spite minor fluctuations in complex tasks (DeRain), perfor-mance remains robust regardless of the chosen example. 
+
+Generalization and Expressiveness. Our method not only learns from synthetic examples but also generalizes to real data and diverse editing scenarios, highlighting the flex-ibility and scalability of visual conditioning. (I) Generaliza-tion to real data. Leveraging diffusion priors, VDC gener-alizes beyond synthetic data, performing well on real im-ages—only eight synthetic samples enable effective derain-ing on unseen rain patterns (Fig. 9a). (II) Expressiveness .Visual examples offer more precise and controllable condi-tioning. As shown in Fig. 9b, they clearly separate degrada-tions ( e.g. , haze vs. snow), whereas text prompts often blur this distinction. (III) Generality. VDC is model-agnostic and applicable to any conditional diffusion framework, in-cluding flow-matching models [30]. Since it learns edits directly from visual examples, it naturally extends beyond pixel-level tasks to broader semantic and object-level modi-fications. (IV) Multi-tasking. Fig. 9b proves a single embed-ding can learn concurrent tasks (e.g., DeSnow+DeHaze), consolidating multiple needs into one ”generalist” solution. 
+
+Diffusion Path Length. Following deeper into the dif-fusion trajectory introduces greater noise to the latent, ex-20 15 10 5 0 5 10 15  
+
+> 10
+> 5
+> 0
+> 5
+> 10
+> 15 Blur
+> SR
+> DeRain
+> DeNoise
+> DeHaze
+
+Figure 8. T-SNE visualization. Conditions from the same task form clear clusters, showing that similar visual features ( e.g. , rain, blur) are recognized without textual dependency. This enables one-shot adaptation via condition optimization. Inpu t DeHaze DeSnow Both    
+
+> (a)
+> (b)
+> Inpu tDeRain Inpu tDeRain
+
+Figure 9. Generalization & expressiveness. (a) VDC generalizes from synthetic to real data (RealRain-1K [29]). (b) Visual exam-ples enable fine-grained edits (CDD-11 [14]). 
+
+panding the output space but increasing deviations from the input image. As visualized in Tab. 3, using longer diffusion paths degrades performance, while overly short paths limit the reachable output space and prevent the desired edit. 
+
+# 5. Conclusion 
+
+Text-guided diffusion models remain limited by weak lan-guage–vision alignment, hiding much of their visual editing potential behind text conditioning. Visual Diffusion Condi-tioning (VDC) unlocks this potential by replacing text with visual examples as the source of guidance. VDC learns vi-sual conditions directly from paired examples and steers the diffusion process toward precise, language-free edits through a lightweight condition generator and a condition-steering mechanism. An inversion correction step further preserves fine details and realism. With as little as one example, VDC adapts text-to-image diffusion models for complex edits such as deraining, de-blurring, and dehazing—without retraining or fine-tuning. It achieves accurate, artifact-free results while remaining efficient, training-free, and generalizable to real-world data. Future work could explore extending VDC to unposed or in-the-wild images and studying its behavior on more diverse real-world conditions. 
+
+Acknowledgments: This work was supported by the Alexander von Humboldt Foundation. 8Language-Free Generative Editing from One Visual Example 
+
+# Supplementary Material 
+
+In the supplementary material, we first provide further details of the compared prior works in Sec. A. Additional ablations and analyses on out-of-distribution tasks are pre-sented in Sec. B, and Sec. E examines the sensitivity of VDC to its hyperparameters. We then analyze the compu-tational complexity of VDC in Sec. C. Finally, Sec. F dis-cusses the limitations of our approach, and Sec. G includes extended visual comparisons for all compared methods. 
+
+# A. Further Details on Prior Works 
+
+We provide additional details on prior works used for com-parison, highlighting their reliance on language. 
+
+Text-Prompt Editing Methods (T-Edit). These methods require a complete text description of the input image. We use this description as the text prompt to condition both the inversion and generation processes. To enable each edit, we manually append the visual attribute corresponding to the target task. Captions are generated using BLIP [27]. The text prompt for each degradation type is constructed as follows: (i) Rain: “[Text Description] + in the rain”, 
+
+(ii) Fog: “[Text Description] + in the fog”, (iii) SR: “Low-resolution image of [Text Description]”, (iv) Blur: “Blurry image of [Text Description]”, (v) Noise: “Noisy image of [Text Description]”, (vi) Colorization: “Grayscale image of [Text Description]” • Prompt-to-Prompt (P2P) [15]: Manipulates cross-attention during generation to adjust visual features as-sociated with specific prompt words. For our tests, we mask cross-attention features tied to the degradation be-ing removed (e.g., rain, fog, noise). • Null-Text Optimization (Null-Opt) [37]: Improves DDIM inversion for image editing. We apply this opti-mization jointly with P2P for all edits. • Negative Condition [36]: Replaces standard null-text conditioning in classifier-free guidance with negative prompts describing the unwanted degradation (e.g., ”fog, foggy, haze, hazy, blurry, blur” for dehazing; ”noise, noisy, low quality” for denoising). 
+
+Text-Instruction Editing (I-Edit.) These methods take an input image and a natural-language instruction describ-ing the desired edit. Each model is trained or fine-tuned to apply edits according to the instruction. We use the default configurations provided in the authors’ open-source imple-mentations. For text instruction, we used: for DeRain ”Remove rain and water drops from the image”, for DeHaze ”Remove fog and haze from the image”, for SR ”Increase image resolu-tion, improve quality and remove noise”, for DeBlur ”In-crease image sharpness, improve quality and remove noise” for DeNoise ”Remove noise from the image”, for Coloriza-tion ”Color this grayscale image”. 
+
+Zero-Shot Image Restoration (Zero-IR). Zero-IR meth-ods solve inverse problems using diffusion models as strong generative priors. They require a degradation kernel that models the corruption in the input image. These methods search the diffusion latent space for an image that degrades to an image that matches the input. We use the released code and default task-specific settings for each method. For colorization, we adopt the kernel settings from Zero-Null [57]. For the remaining tasks, we use the kernels de-fined in DPS [8]. 
+
+Image Exemplar-based Editing (IE-Edit). These meth-ods infer an edit from a before/after image pair and apply that edit to a new image. For fair comparison, we use the same reference example images employed to optimize our method. • VISII [38]: Builds on the text-instruction editing model Instruct-Pix2Pix [4]. It optimizes a text instruction that reproduces the edit shown in the example pair, then ap-plies the resulting instruction to new inputs. • Analogist [13]: Uses Stable Diffusion Inpainting [41] to-gether with a large language model that extracts the trans-formation between example images. It then applies this transformation to new inputs via inpainting. • EditClip [56]: Fine-tunes the CLIP image encoder [40] to capture relationships between the example images. It further fine-tunes Stable Diffusion [41] to condition on these relationships. The model is trained on hundreds of thousands of edited images paired with text instructions. 
+
+# B. Ablations on Generalization 
+
+B.1. VDC is model-agnostic 
+
+To demonstrate that our method is not tied to a specific gen-erative model and can generalize to any conditional genera-tive framework, we adapt the SANA model [60]—a condi-tional generative model based on Flow Matching [30]—for image editing using VDC. As shown in Tab. 4, VDC successfully enables SANA to perform image editing and restoration, and even surpasses the Stable Diffusion (SD)–based version on several tasks (DeNoise and De-Haze), benefiting from SANA’s more advanced generative prior. These improvements stem from SANA’s stronger prior, which yields higher-quality reconstructions of the in-verted image. However, SANA’s latent encoder applies a significantly higher compression rate (8× for SD versus 32× 9Table 4. VDC compared to fine-tuning and with different generative models. FID ( ↓) and LPIPS( ↓) are reported on the full RGB images. Our method highly surpasses diffusion fine-tuning methods in low data regime. Additionally, VDC can be utilized with different conditional generative models. The best performances are highlighted.                                                                                                                                         
+
+> Type Method Num. SR DeBlur DeNoise DeRain DeHaze Colorization Samples FID ↓LPIPS ↓FID ↓LPIPS ↓FID ↓LPIPS ↓FID ↓LPIPS ↓FID ↓LPIPS ↓FID ↓LPIPS ↓
+> F-T  ControlNet [66] 200 110.62 0.4291 80.03 0.3225 145.01 0.4777 153.29 0.4803 50.00 0.2750 143.50 0.4093 PairEdit [33] 898.68 0.3134 67.08 0.3959 168.68 0.4561 148.59 0.3924 85.69 0.3924 150.32 0.5089 SD  One-Shot 141.41 0.2666 35.51 0.2654 89.51 0.2801 87.12 0.2559 35.52 0.1633 107.70 0.2908 Multi-Shot 845.89 0.2654 42.62 0.2651 88.58 0.2846 69.52 0.2214 34.18 0.1584 107.80 0.2744 MS+Inv-Correc 845.00 0.2624 41.09 0.2593 82.57 0.2768 66.92 0.2155 33.23 0.1560 105.26 0.2729
+> SANA  One-Shot 150.20 0.2900 40.33 0.2587 82.72 0.2510 93.61 0.24807 29.20 0.1414 107.74 0.26254 Multi-Shot 848.25 0.2478 33.99 0.2140 73.57 0.2485 98.80 0.2432 29.46 0.1403 104.97 0.2596
+> MS+Inv-Correc 845.81 0.24834 32.38 0.2134 69.65 0.24816 97.54 0.2446 28.70 0.1398 105.13 0.2603
+
+Table 5. OOD Generalization. We compare our method to state-of-the-art All-in-One Image Restoration (IR) on real image De-Rain. We utilize RealRain-1k-L [29] dataset for testing. Our method is able to generalize to real data while prior works fail. 
+
+Best results are highlighted.               
+
+> Methods Instruct-IR [9] MoCE-IR [63] VDC ( ours )FID ↓124.82 154.94 106.89
+> LPIPS ↓0.2553 0.3646 0.2154 Input Instruct -IR MOE -IR VDC (ours)
+> DeRain DeNoise
+
+Figure 9. Visual comparison for OOD samples. We compare our method to SOTA restoration models on real data. Our method is able to work on real data, whereas IR methods trained on syntactic data fail to generalize. We utilize RealRain-1k-L [29] for Derain, and SIDD [1] for denoising. 
+
+for SANA), which can limit the preservation of fine details in the latent space—an effect visible in the DeRain results. Our inversion correction module is likewise model-agnostic and can be used with Flow Matching models. As shown, it consistently improves performance, particularly on tasks that rely heavily on detail preservation. Finally, the visual comparisons in Figs. 14–19 further illustrate that VDC suc-cessfully adapts SANA for high-quality image editing and restoration. 
+
+B.2. VDC improves over Fine-Tuning 
+
+Fine-tuning (F-T) and diffusion adaptation methods like ControlNet [66] rely on massive supervision. Tab. 4 shows that fine-tuning fails in the low-data regime: ControlNet [66] trained on 200 samples suffers from severe domain shift. Even a few-shot fine-tuning method like PairEdit [33], based on LoRA and fine-tuned on 8 samples, yields poor fi-delity. Additionally, it requires optimizing a new content LoRA for each inference image, requiring around 20-30 minutes of inference time. In contrast, VDC achieves strong results using only a single example and with zero inference overhead. 
+
+B.3. Out-of-distribution performance 
+
+A key advantage of adapting generative models for edit-ing is the ability to leverage their real-data generative pri-ors, enabling strong generalization to out-of-distribution in-puts. In our framework, the generative model itself per-forms the edit—VDC simply provides a mechanism to com-municate the desired transformation. In contrast, task-specific restoration or editing models learn the edit directly from training data, making their performance heavily de-pendent on the distribution and realism of that data. As a result, models trained on synthetic degradations often strug-gle to generalize to real-world scenarios. Despite using only synthetic examples to optimize the steering condition, our method generalizes effectively to real data. As shown in Tab. 5, VDC achieves strong real-world DeRain per-formance using just eight synthetic examples, successfully handling rain patterns that differ substantially from those in the examples. Meanwhile, specialized restoration models fail to generalize even when trained on large-scale synthetic datasets. 10 As shown in Fig. 9, the gap between synthetic and real rain patterns causes traditional image restoration methods to fail at detecting and removing real rain streaks. In con-trast, our approach leverages the generative model’s priors to correctly identify and remove these streaks, resulting in accurate edits. A similar trend is observed on real-world denoising data, where our method continues to generalize effectively while baseline restoration methods struggle. 
+
+B.4. Performance on general editing tasks 
+
+We center our benchmark on fine-detail edits, global adjust-ments, and image restoration tasks—categories where exist-ing methods often struggle due to visual–text misalignment. Nonetheless, our approach is a general editing framework: it extracts the transformation from a given example and ap-plies it to a new input. As illustrated in Fig. 10, by simply increasing diffusion path length (60%), our method supports a wide range of edits, including semantic and object-specific modifications, compared to EditCLIP [56], which is trained for visual-instruction–guided editing. Our method more reliably inter-prets the edits present in the example pair, particularly for global adjustments. EditCLIP may introduce unintended ar-tifacts because its behavior is influenced by CLIP represen-tation abilities and the common patterns in its large training corpus. 
+
+Semantic & Non-Rigid Edits. We clarify that VDC tar-gets visual attribute steering (e.g., restoration, stylization) where text is ambiguous. To ensure high fidelity, we rely on pixel-space losses, which inherently prioritize structural preservation over non-rigid flexibility (e.g., pose changes). However, VDC resolves this by supporting textual control: as shown in Fig. 11, VDC handles visual patterns (DeRain) while text drives semantic shifts (e.g., bears →cats) and non-rigid edits (e.g., closing eyes). 
+
+# C. Complexity Analysis 
+
+As shown in Tab. 7, the complexity of other methods is largely determined by the inference requirements of their underlying generative models. Zero-IR methods, in partic-ular, incur significantly higher cost due to their sampling-based search procedures. In contrast, by directly optimiz-ing the steering condition for the chosen sampling path, our approach minimizes the number of required inference steps. This yields the highest efficiency among the com-pared methods, requiring only 20 total steps for editing (10 DDIM inversion steps and 10 sampling steps) while still achieving the best performance. When the inversion cor-rection module is used, the total number of steps increases, but this module is optional and can be enabled based on the task or available computational resources. Although our method is entirely train-free, it still re-quires optimizing the steering condition for each adapted VE -Before VE -After VE -Query EditCLIP VDC (ours)         
+
+> Figure 10. General Image Editing. We show the output of our method on general edits. Our method is not just limited to fine details or global edits but can also extend to semantic and object-specific edits. Images from TOP-Bench [68] Dataset.
+> Input + ”Cats” Input + ”Eyes Closed”
+> Figure 11. Composability of VDC. VDC is used to steer the visual style while text independently controls the semantic content.
+
+task. This optimization consists of 200 full-path itera-tions (2000 diffusion steps) and needs to be performed only once per task. On an RTX 4090 GPU, this process takes roughly 30 minutes. This is comparable to other train-free methods that rely on test-time optimization—such as Null-Opt [37] (500 diffusion steps) and VISII [38] (5000 diffu-sion steps)—but with the advantage that our optimization is performed per task rather than per inference. Overall, train-free approaches remain substantially more efficient than methods that require training or fine-tuning on hundreds of thousands of images across multiple GPUs for several days. 
+
+# D. User Study 
+
+To better evaluate the tested methods, the mean opinion score (MOS) was calculated through a user study by asking 11 Table 6. User Study. This table represents the preferences of the participants in the user study from the compared methods’ outputs across different aspects. We report the choice percentage averaged across participants. ‘-’ represents unreported results. Best results are bolded.                                                          
+
+> Method SR DeRain Perceptual %Artifact-Free %Preservation %Overall %Perceptual %Artifact-Free %Preservation %Overall %
+> Negative-Cond [36] 13.5 6135 23.5 20.5 18.5 OmniGen [59] 0.5 4.5 22 0.5 26.5 26.5 41.5 20 PSLD [42] 67 23.5 33.5 47.5 ----EditClip [56] 003.5 04.5 110.5 0VDC 31.5 68.5 35 51 34 47.5 27.5 61.5
+
+the participants to choose their favorite output according to different criteria. For a better understanding of the under-lying task and accurate evaluation, the chosen user study participants are 10 imaging experts, including professional photographers. We conducted the user study on 2 different tasks (SR and DeRain) utilizing 20 samples from each task, selected randomly, and were fixed for all participants. We hide the names of the methods and randomly shuffle their position in the comparison grid to eliminate method bias. The comparison includes 5 different methods chosen by se-lecting the best overall performing method for its own type (Text Edit, Instruction Edit, etc). Our VDC method com-pared is the one-shot method optimized only on one visual example. We asked participants to choose their favorite out-put for four different categories: Best Perceptual Quality, Least Artifacts, Best Content Preservation, and lastly Best Overall for the task. MOS for all categories is represented in Tab. 6. As we see from the results, our method is the most preferred by the users, with 51% and 61% choice as the preferred method in SR and DeRain, respectively. In SR PSLD [42] produces sharper images, which results in a higher perceptual quality; however, this method produces noticeable artifacts and noise (Fig. 14, 15), resulting in our method being chosen as the best for the task. For DeRain, we notice a similar trend; however, because the other meth-ods tend to create artifacts and content changes to the input, our method is still preferred by a big margin. We can ap-preciate our method’s consistency across different tasks and compared aspects. 
+
+# E. Ablations on Hyperparameters 
+
+Performance Stability. Fig. 13 reports the variance across 10 models optimized on distinct reference pairs. De-spite minor fluctuations in complex tasks (DeRain), per-formance remains robust regardless of the chosen example. This aligns with Fig. 8, which shows optimized conditions for the same task are closely similar regardless of the chosen visual example, proving reliable single-shot extraction. 
+
+Number of Visual Examples. Increasing the number of visual examples helps optimize a more robust steering con-dition, especially for tasks with complex and highly variable patterns such as deraining. As shown in Tab. 8, performance 
+
+Table 7. Complexity Analysis. NFEs ↓ are Neural Function Eval-uations. Our method sets a new state-of-the-art while being the most inference-efficient. ‘-’ represents unreported results. The 
+
+best performances are highlighted.                                                                      
+
+> Type Method Train-Free NFEs Deblur DeRain T-Edit  P2P [15] ✓100 45.62 139.19 Null-Opt [37] ✓600 51.89 167.61 Negative-Cond [36] ✓100 43.61 96.19 I-Edit  Instruct-Pix2Pix [4] ×100 142.91 179.93 OmniGen [59] ×50 46.18 119.87 SuperEdit [28] ×100 56.22 185.98 ICEdit [67] ×28 45.54 149.44 Zero-IR  PSLD [42] ✓1000 42.89 -TReg[22] ✓200 52.07 -DAPS[64] ✓150 59.85 -IE-Edit  VISII [38] ✓40 122.63 203.83 Analogist [13] ✓50 75.06 158.29 EditClip [56] ×50 78.75 174.93 One-Shot ✓20 35.51 87.12 Multi-Shot ✓20 42.62 69.52 VDC MS+Inverse-Correction ✓220 41.09 66.92
+
+Table 8. Number of Visual Examples. Increasing the number of visual examples can introduce more variety for a more robust op-timized condition at the expense of increasing optimization time, which can affect the performance negatively. Best results are bolded; the final setup is highlighted.                          
+
+> Num Samples SR DeRain FID ↓LPIPS ↓FID ↓LPIPS ↓
+> 141.41 0.2666 87.12 0.2559 446.24 0.2668 72.94 0.2197
+> 845.89 0.2654 69.52 0.2214 16 47.30 0.2735 71.16 0.2227
+
+improves on the DeRain task as the number of examples in-creases. However, more examples also raise the optimiza-tion burden. When additional examples do not introduce new visual patterns, the added complexity can negatively impact performance. 
+
+DDIM Sampling Steps. Using more DDIM sampling steps provides additional opportunities to apply edits, im-proving the method’s editability. However, increasing the sampling length also expands the number of conditions that 12 Table 9. Ablations on sampling steps and steering condition scale. (a) Increasing DDIM sampling steps improves editability but also introduces more optimization constraints. (b) Increasing the steering condition scale allows stronger deviations from the generative path, enhancing edit strength at the cost of fidelity. Best results are bolded, and the final chosen configuration is highlighted.                                                
+
+> (a) DDIM Sampling Steps.
+> Steps SR DeRain FID ↓LPIPS ↓FID ↓LPIPS ↓
+> 50 45.43 0.2858 87.41 0.2566 100 41.41 0.2666 87.12 0.2559
+> 200 49.79 0.2815 91.94 0.2598 (b) Steering Condition Scale.
+> Scale SR DeRain FID ↓LPIPS ↓FID ↓LPIPS ↓
+> 547.17 0.2801 89.24 0.2612 741.41 0.2666 87.12 0.2559
+> 945.73 0.2877 92.62 0.2733 Input 5% 10% 30%
+> DeRain SR
+
+Figure 12. Diffusion path length effect . Extending the diffusion path increases variation, resulting in undesirable edits, while de-creasing the path limits edibility. 0.16 0.18 0.20 0.22 0.24 0.26 0.28 0.30 0.32  
+
+> LPIPS ( )
+> SR
+> DeBlur
+> DeRain
+> DeNoise
+> DeHaze
+
+Figure 13. Sensitivity analysis. We assess sensitivity by optimiz-ing 10 models on unique examples; reporting the variance per task. 
+
+must be optimized, making optimization more difficult and potentially degrading results. This trade-off is evident in Tab. 9a. 
+
+Steering Condition Scale. A higher steering condition scale increases the allowed deviation from the uncondi-tioned generative trajectory (i.e., deviation from the input), which boosts editing strength at the cost of fidelity. As shown in Tab. 9b, a small scale limits the model’s ability to apply the desired edits, while an excessively large scale expands the output space too aggressively, reducing perfor-mance. 
+
+Diffusion path length effect. As discussed in Tab. 3, starting the sampling process deeper in the diffusion trajec-tory injects more noise into the latent, enlarging the output space but lowering fidelity. This effect is visible in Fig. 12, where a longer diffusion path introduces unwanted content changes. Conversely, using too short a path overly restricts the output space, preventing the model from reaching suit-able solutions and resulting in suboptimal edits. 
+
+# F. Limitations 
+
+Our method leverages strong generative priors to handle complex edits on real images, but its performance ulti-mately depends on the capabilities of the underlying gen-erative model. Although we move beyond the limitations of text-based conditioning to operate entirely in the visual do-main, our results still reflect the strengths and weaknesses of this visual latent space. As seen in Figs. 14–19, some fine textures may be lost due to the limited generative fi-delity of Stable Diffusion [41], particularly when editing images processed through inversion. These limitations can be mitigated by adopting a more capable generative model, as demonstrated in Tab. 4. However, latent diffusion models introduce an additional constraint: images are compressed into latent representa-tions that may lose fine details. This affects both recon-struction quality and the ability to recognize subtle visual features. For instance, in Tab. 4, SANA-based methods un-derperform on the DeRain task due to SANA’s higher com-pression ratio. Employing a latent encoder specifically op-timized for detail preservation could alleviate this issue. Additionally, VDC prioritizes structural fidelity over non-rigid flexibility to prevent hallucinations, which lim-its large changes. Moreover, complex patterns (e.g., gen-eralization to real rain) can challenge one-shot alignment. However, Tab. 5 confirms that simply adding more visual examples (synthetic) effectively mitigates this. 
+
+# G. Visual Results 
+
+In Figs. 14–19, we provide additional visual comparisons across all baseline methods, as well as all variants of our ap-proach using different generative models—Stable Diffusion (SD) and SANA—and different setups: One-Shot (OS), Multi-Shot (MS), and Multi-Shot with Inversion Correction (MS+IC). 13 P2P Null -Opt Negative -Cond Ins -Pix2Pix         
+
+> VDC -SD -OS VDC -SD -MS VDC -SANA -OS VDC -SANA -MS
+> Analogist
+> Edit -Clip
+> ICEdit PSLD TReg DAPS VISII SuperEdit
+> Query OmniGen
+> VDC -SD -IC
+> Visual Example
+> VDC -SANA -IC
+
+Figure 14. Visual comparison on SR task. Text- and example-based approaches either fail to recognize the required edits or produce undesired changes and artifacts in the output. Our one-shot (OS) VDC yields clean results, with multi-shot (MS) and inversion correction (IC) modules improving generalization and fidelity. P2P Null -Opt Negative -Cond Ins -Pix2Pix         
+
+> VDC -SD -OS VDC -SD -MS VDC -SANA -OS VDC -SANA -MS
+> Analogist
+> Edit -Clip
+> ICEdit PSLD TReg DAPS VISII SuperEdit
+> Query OmniGen
+> VDC -SD -IC
+> Visual Example
+> VDC -SANA -IC
+
+Figure 15. Visual comparison on DeBlurring task. Text- and example-based approaches either fail to recognize the required edits or produce undesired changes and artifacts in the output. Our one-shot (OS) VDC yields clean results, with multi-shot (MS) and inversion correction (IC) modules improving generalization and fidelity. 
+
+14 P2P Null -Opt Negative -Cond Ins -Pix2Pix 
+
+VDC -SD -OS VDC -SD -MS VDC -SANA -OS VDC -SANA -MS 
+
+Analogist 
+
+Edit -Clip 
+
+ICEdit PSLD TReg DAPS VISII SuperEdit 
+
+Query OmniGen 
+
+VDC -SD -IC 
+
+Visual Example 
+
+VDC -SANA -IC Figure 16. Visual comparison on DeNoising task. Text- and example-based approaches either fail to recognize the required edits or produce undesired changes and artifacts in the output. Our one-shot (OS) VDC yields clean results, with multi-shot (MS) and inversion correction (IC) modules improving generalization and fidelity. P2P Null -Opt Negative -Cond Ins -Pix2Pix 
+
+VDC -SD -OS VDC -SD -MS VDC -SANA -OS VDC -SANA -MS 
+
+Analogist 
+
+Edit -Clip 
+
+ICEdit PSLD TReg DAPS VISII SuperEdit 
+
+Query OmniGen 
+
+VDC -SD -IC 
+
+Visual Example 
+
+VDC -SANA -IC 
+
+> NA
+> NA
+> NA
+
+Figure 17. Visual comparison on DeRaining task. Text- and example-based approaches either fail to recognize the required edits or produce undesired changes and artifacts in the output. Our one-shot (OS) VDC yields clean results, with multi-shot (MS) and inversion correction (IC) modules improving generalization and fidelity. 
+
+15 P2P Null -Opt Negative -Cond Ins -Pix2Pix 
+
+VDC -SD -OS VDC -SD -MS VDC -SANA -OS VDC -SANA -MS 
+
+Analogist 
+
+Edit -Clip 
+
+ICEdit PSLD TReg DAPS VISII SuperEdit 
+
+Query OmniGen 
+
+VDC -SD -IC 
+
+Visual Example 
+
+VDC -SANA -IC 
+
+> NA
+> NA
+> NA
+
+Figure 18. Visual comparison on DeHazing task. Text- and example-based approaches either fail to recognize the required edits or produce undesired changes and artifacts in the output. Our one-shot (OS) VDC yields clean results, with multi-shot (MS) and inversion correction (IC) modules improving generalization and fidelity. P2P Null -Opt Negative -Cond Ins -Pix2Pix 
+
+VDC -SD -OS VDC -SD -MS VDC -SANA -OS VDC -SANA -MS 
+
+Analogist 
+
+Edit -Clip 
+
+ICEdit PSLD TReg DAPS VISII SuperEdit 
+
+Query OmniGen 
+
+VDC -SD -IC 
+
+Visual Example 
+
+VDC -SANA -IC 
+
+Figure 19. Visual comparison on Colorization task. Text- and example-based approaches either fail to recognize the required edits or produce undesired changes and artifacts in the output. Our one-shot (OS) VDC yields clean results, with multi-shot (MS) and inversion correction (IC) modules improving generalization and fidelity. 
+
+16 References 
+
+[1] Abdelrahman Abdelhamed, Stephen Lin, and Michael S Brown. A high-quality denoising dataset for smartphone cameras. In Proceedings of the IEEE conference on com-puter vision and pattern recognition , pages 1692–1700, 2018. 10 [2] Eirikur Agustsson and Radu Timofte. Ntire 2017 challenge on single image super-resolution: Dataset and study. In Pro-ceedings of the IEEE conference on computer vision and pat-tern recognition workshops , pages 126–135, 2017. 5 [3] Pablo Arbelaez, Michael Maire, Charless Fowlkes, and Ji-tendra Malik. Contour detection and hierarchical image seg-mentation. IEEE transactions on pattern analysis and ma-chine intelligence , 33(5):898–916, 2010. 5 [4] Tim Brooks, Aleksander Holynski, and Alexei A Efros. In-structpix2pix: Learning to follow image editing instructions. In Proceedings of the IEEE/CVF conference on computer vi-sion and pattern recognition , pages 18392–18402, 2023. 1, 2, 5, 9, 12 [5] Mingdeng Cao, Xintao Wang, Zhongang Qi, Ying Shan, Xi-aohu Qie, and Yinqiang Zheng. Masactrl: Tuning-free mu-tual self-attention control for consistent image synthesis and editing. In Proceedings of the IEEE/CVF international con-ference on computer vision , pages 22560–22570, 2023. 2 [6] Hyungjin Chung, Jeongsol Kim, Michael T Mccann, Marc L Klasky, and Jong Chul Ye. Diffusion posterior sam-pling for general noisy inverse problems. arXiv preprint arXiv:2209.14687 , 2022. 3 [7] Hyungjin Chung, Byeongsu Sim, Dohoon Ryu, and Jong Chul Ye. Improving diffusion models for inverse prob-lems using manifold constraints. Advances in Neural Infor-mation Processing Systems , 35:25683–25696, 2022. 3 [8] Hyungjin Chung, Jeongsol Kim, Michael Thompson Mc-cann, Marc Louis Klasky, and Jong Chul Ye. Diffusion pos-terior sampling for general noisy inverse problems. In The Eleventh International Conference on Learning Representa-tions , 2023. 5, 9 [9] Marcos V Conde, Gregor Geigle, and Radu Timofte. Instruc-tir: High-quality image restoration following human instruc-tions. In European Conference on Computer Vision , pages 1–21. Springer, 2024. 10 [10] Xiaoliang Dai, Ji Hou, Chih-Yao Ma, Sam Tsai, Jialiang Wang, Rui Wang, Peizhao Zhang, Simon Vandenhende, Xi-aofang Wang, Abhimanyu Dubey, et al. Emu: Enhanc-ing image generation models using photogenic needles in a haystack. arXiv preprint arXiv:2309.15807 , 2023. 1 [11] Prafulla Dhariwal and Alexander Nichol. Diffusion models beat gans on image synthesis. Advances in neural informa-tion processing systems , 34:8780–8794, 2021. 1, 2 [12] Ben Fei, Zhaoyang Lyu, Liang Pan, Junzhe Zhang, Weidong Yang, Tianyue Luo, Bo Zhang, and Bo Dai. Generative dif-fusion prior for unified image restoration and enhancement. In Proceedings of the IEEE/CVF conference on computer vi-sion and pattern recognition , pages 9935–9946, 2023. 3 [13] Zheng Gu, Shiyuan Yang, Jing Liao, Jing Huo, and Yang Gao. Analogist: Out-of-the-box visual in-context learning with image diffusion model. ACM Transactions on Graphics (TOG) , 43(4):1–15, 2024. 2, 5, 9, 12 [14] Yu Guo, Yuan Gao, Yuxu Lu, Ryan Wen Liu, and Shengfeng He. Onerestore: A universal restoration framework for com-posite degradation. In European Conference on Computer Vision , 2024. 8 [15] Amir Hertz, Ron Mokady, Jay Tenenbaum, Kfir Aberman, Yael Pritch, and Daniel Cohen-Or. Prompt-to-prompt im-age editing with cross attention control. arXiv preprint arXiv:2208.01626 , 2022. 2, 5, 9, 12 [16] Jonathan Ho, Ajay Jain, and Pieter Abbeel. Denoising dif-fusion probabilistic models. Advances in neural information processing systems , 33:6840–6851, 2020. 1 [17] Edward J Hu, Yelong Shen, Phillip Wallis, Zeyuan Allen-Zhu, Yuanzhi Li, Shean Wang, Liang Wang, Weizhu Chen, et al. Lora: Low-rank adaptation of large language models. 
+
+Iclr , 1(2):3, 2022. 6 [18] Xuan Ju, Ailing Zeng, Yuxuan Bian, Shaoteng Liu, and Qiang Xu. Direct inversion: Boosting diffusion-based edit-ing with 3 lines of code. arXiv preprint arXiv:2310.01506 ,2023. 2 [19] Tero Karras, Samuli Laine, and Timo Aila. A style-based generator architecture for generative adversarial networks. In Proceedings of the IEEE/CVF conference on computer vi-sion and pattern recognition , pages 4401–4410, 2019. 5 [20] Bahjat Kawar, Shiran Zada, Oran Lang, Omer Tov, Huiwen Chang, Tali Dekel, Inbar Mosseri, and Michal Irani. Imagic: Text-based real image editing with diffusion models. In Pro-ceedings of the IEEE/CVF conference on computer vision and pattern recognition , pages 6007–6017, 2023. 2 [21] Hyunsoo Kim, Donghyun Kim, and Suhyun Kim. Difference inversion: Interpolate and isolate the difference with token consistency for image analogy generation. In Proceedings of the Computer Vision and Pattern Recognition Conference ,pages 18250–18259, 2025. 2 [22] Jeongsol Kim, Geon Yeong Park, Hyungjin Chung, and Jong Chul Ye. Regularization by texts for latent diffusion inverse solvers. arXiv preprint arXiv:2311.15658 , 2023. 3, 5, 12 [23] Jimyeong Kim, Jungwon Park, Yeji Song, Nojun Kwak, and Wonjong Rhee. Reflex: Text-guided editing of real images in rectified flow via mid-step feature extraction and attention adaptation. arXiv preprint arXiv:2507.01496 , 2025. 2 [24] Mingi Kwon, Jaeseok Jeong, and Youngjung Uh. Diffu-sion models already have a semantic latent space. In The Eleventh International Conference on Learning Representa-tions , 2023. 1 [25] Black Forest Labs, Stephen Batifol, Andreas Blattmann, Frederic Boesel, Saksham Consul, Cyril Diagne, Tim Dock-horn, Jack English, Zion English, Patrick Esser, et al. Flux. 1 kontext: Flow matching for in-context image generation and editing in latent space. arXiv preprint arXiv:2506.15742 ,2025. 2 [26] Boyi Li, Wenqi Ren, Dengpan Fu, Dacheng Tao, Dan Feng, Wenjun Zeng, and Zhangyang Wang. Benchmarking single-image dehazing and beyond. IEEE transactions on image processing , 28(1):492–505, 2018. 5 
+
+17 [27] Junnan Li, Dongxu Li, Silvio Savarese, and Steven Hoi. Blip-2: Bootstrapping language-image pre-training with frozen image encoders and large language models. In In-ternational conference on machine learning , pages 19730– 19742. PMLR, 2023. 5, 9 [28] Ming Li, Xin Gu, Fan Chen, Xiaoying Xing, Longyin Wen, Chen Chen, and Sijie Zhu. Superedit: Rectifying and facili-tating supervision for instruction-based image editing. arXiv preprint arXiv:2505.02370 , 2025. 1, 2, 5, 12 [29] Wei Li, Qiming Zhang, Jing Zhang, Zhen Huang, Xinmei Tian, and Dacheng Tao. Toward real-world single image deraining: A new benchmark and beyond. arXiv preprint arXiv:2206.05514 , 2022. 8, 10 [30] Yaron Lipman, Ricky TQ Chen, Heli Ben-Hamu, Maximil-ian Nickel, and Matt Le. Flow matching for generative mod-eling. arXiv preprint arXiv:2210.02747 , 2022. 8, 9 [31] Xihui Liu, Dong Huk Park, Samaneh Azadi, Gong Zhang, Arman Chopikyan, Yuxiao Hu, Humphrey Shi, Anna Rohrbach, and Trevor Darrell. More control for free! im-age synthesis with semantic diffusion guidance. In Proceed-ings of the IEEE/CVF winter conference on applications of computer vision , pages 289–299, 2023. 2 [32] Ilya Loshchilov and Frank Hutter. Sgdr: Stochas-tic gradient descent with warm restarts. arXiv preprint arXiv:1608.03983 , 2016. 5 [33] Haoguang Lu, Jiacheng Chen, Zhenguo Yang, Aurele To-hokantche Gnanha, Fu Lee Wang, Li Qing, and Xudong Mao. Pairedit: Learning semantic variations for exemplar-based image editing. arXiv preprint arXiv:2506.07992 ,2025. 10 [34] Ziwei Luo, Fredrik K Gustafsson, Zheng Zhao, Jens Sj¨ olund, and Thomas B Sch¨ on. Controlling vision-language models for multi-task image restoration. arXiv preprint arXiv:2310.01018 , 2023. 2 [35] Chenlin Meng, Yutong He, Yang Song, Jiaming Song, Jia-jun Wu, Jun-Yan Zhu, and Stefano Ermon. Sdedit: Guided image synthesis and editing with stochastic differential equa-tions. arXiv preprint arXiv:2108.01073 , 2021. 2 [36] Daiki Miyake, Akihiro Iohara, Yu Saito, and Toshiyuki Tanaka. Negative-prompt inversion: Fast image inversion for editing with text-guided diffusion models. In 2025 IEEE/CVF Winter Conference on Applications of Computer Vision (WACV) , pages 2063–2072. IEEE, 2025. 2, 5, 9, 12 [37] Ron Mokady, Amir Hertz, Kfir Aberman, Yael Pritch, and Daniel Cohen-Or. Null-text inversion for editing real im-ages using guided diffusion models. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pages 6038–6047, 2023. 2, 4, 5, 9, 11, 12 [38] Thao Nguyen, Yuheng Li, Utkarsh Ojha, and Yong Jae Lee. Visual instruction inversion: Image editing via image prompting. Advances in Neural Information Processing Sys-tems , 36:9598–9613, 2023. 2, 5, 9, 11, 12 [39] Yingxue Pang, Jianxin Lin, Tao Qin, and Zhibo Chen. Image-to-image translation: Methods and applications. 
+
+IEEE Transactions on Multimedia , 24:3859–3881, 2021. 4 [40] Alec Radford, Jong Wook Kim, Chris Hallacy, Aditya Ramesh, Gabriel Goh, Sandhini Agarwal, Girish Sastry, Amanda Askell, Pamela Mishkin, Jack Clark, et al. Learning transferable visual models from natural language supervi-sion. In International conference on machine learning , pages 8748–8763. PmLR, 2021. 2, 9 [41] Robin Rombach, Andreas Blattmann, Dominik Lorenz, Patrick Esser, and Bj¨ orn Ommer. High-resolution image synthesis with latent diffusion models. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pages 10684–10695, 2022. 1, 2, 4, 5, 9, 13 [42] Litu Rout, Negin Raoof, Giannis Daras, Constantine Cara-manis, Alex Dimakis, and Sanjay Shakkottai. Solving linear inverse problems provably via posterior sampling with latent diffusion models. Advances in Neural Information Process-ing Systems , 36:49960–49990, 2023. 3, 5, 12 [43] Litu Rout, Yujia Chen, Abhishek Kumar, Constantine Cara-manis, Sanjay Shakkottai, and Wen-Sheng Chu. Beyond first-order tweedie: Solving inverse problems using latent diffusion. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pages 9472– 9481, 2024. 3 [44] Nataniel Ruiz, Yuanzhen Li, Varun Jampani, Yael Pritch, Michael Rubinstein, and Kfir Aberman. Dreambooth: Fine tuning text-to-image diffusion models for subject-driven generation. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pages 22500– 22510, 2023. 4 [45] Shelly Sheynin, Adam Polyak, Uriel Singer, Yuval Kirstain, Amit Zohar, Oron Ashual, Devi Parikh, and Yaniv Taigman. Emu edit: Precise image editing via recognition and gen-eration tasks. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pages 8871– 8879, 2024. 2 [46] Vincent Sitzmann, Julien Martel, Alexander Bergman, David Lindell, and Gordon Wetzstein. Implicit neural representa-tions with periodic activation functions. Advances in neural information processing systems , 33:7462–7473, 2020. 4 [47] Bowen Song, Soo Min Kwon, Zecheng Zhang, Xinyu Hu, Qing Qu, and Liyue Shen. Solving inverse problems with latent diffusion models via hard data consistency. arXiv preprint arXiv:2307.08123 , 2023. 3 [48] Jiaming Song, Chenlin Meng, and Stefano Ermon. Denoising diffusion implicit models. arXiv preprint arXiv:2010.02502 , 2020. 1, 2, 3, 5 [49] Yang Song, Jascha Sohl-Dickstein, Diederik P Kingma, Ab-hishek Kumar, Stefano Ermon, and Ben Poole. Score-based generative modeling through stochastic differential equa-tions. arXiv preprint arXiv:2011.13456 , 2020. 2, 4 [50] Ad´ ela ˇ Subrtov´ a, Michal Luk´ aˇ c, Jan ˇ Cech, David Futschik, Eli Shechtman, and Daniel S` ykora. Diffusion image analo-gies. In ACM SIGGRAPH 2023 Conference Proceedings ,pages 1–10, 2023. 2, 4 [51] Wenhao Sun, Xue-Mei Dong, Benlei Cui, and Jingqun Tang. Attentive eraser: Unleashing diffusion model’s object re-moval potential via self-attention redirection guidance. In 
+
+Proceedings of the AAAI Conference on Artificial Intelli-gence , pages 20734–20742, 2025. 2 [52] Matthew Tancik, Pratul Srinivasan, Ben Mildenhall, Sara Fridovich-Keil, Nithin Raghavan, Utkarsh Singhal, Ravi Ra-
+
+18 mamoorthi, Jonathan Barron, and Ren Ng. Fourier features let networks learn high frequency functions in low dimen-sional domains. Advances in neural information processing systems , 33:7537–7547, 2020. 4 [53] Narek Tumanyan, Michal Geyer, Shai Bagon, and Tali Dekel. Plug-and-play diffusion features for text-driven image-to-image translation. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition ,pages 1921–1930, 2023. 2 [54] Bram Wallace, Akash Gokul, and Nikhil Naik. Edict: Exact diffusion inversion via coupled transformations. In Proceed-ings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pages 22532–22541, 2023. [55] Jiangshan Wang, Junfu Pu, Zhongang Qi, Jiayi Guo, Yue Ma, Nisha Huang, Yuxin Chen, Xiu Li, and Ying Shan. Tam-ing rectified flow for inversion and editing. arXiv preprint arXiv:2411.04746 , 2024. 2 [56] Qian Wang, Aleksandar Cvejic, Abdelrahman Eldesokey, and Peter Wonka. Editclip: Representation learning for im-age editing. arXiv preprint arXiv:2503.20318 , 2025. 2, 5, 9, 11, 12 [57] Yinhuai Wang, Jiwen Yu, and Jian Zhang. Zero-shot im-age restoration using denoising diffusion null-space model. 
+
+arXiv preprint arXiv:2212.00490 , 2022. 3, 9 [58] Jie Xiao, Ruili Feng, Han Zhang, Zhiheng Liu, Zhantao Yang, Yurui Zhu, Xueyang Fu, Kai Zhu, Yu Liu, and Zheng-Jun Zha. Dreamclean: Restoring clean image using deep diffusion prior. In The Twelfth International Conference on Learning Representations , 2024. 3 [59] Shitao Xiao, Yueze Wang, Junjie Zhou, Huaying Yuan, Xin-grun Xing, Ruiran Yan, Chaofan Li, Shuting Wang, Tiejun Huang, and Zheng Liu. Omnigen: Unified image genera-tion. In Proceedings of the Computer Vision and Pattern Recognition Conference , pages 13294–13304, 2025. 1, 2, 5, 12 [60] Enze Xie, Junsong Chen, Junyu Chen, Han Cai, Haotian Tang, Yujun Lin, Zhekai Zhang, Muyang Li, Ligeng Zhu, Yao Lu, et al. Sana: Efficient high-resolution image syn-thesis with linear diffusion transformers. arXiv preprint arXiv:2410.10629 , 2024. 1, 5, 9 [61] Sihan Xu, Yidong Huang, Jiayi Pan, Ziqiao Ma, and Joyce Chai. Inversion-free image editing with natural language. 
+
+arXiv preprint arXiv:2312.04965 , 2023. 2 [62] Fuzhi Yang, Huan Yang, Jianlong Fu, Hongtao Lu, and Bain-ing Guo. Learning texture transformer network for image super-resolution. In Proceedings of the IEEE/CVF con-ference on computer vision and pattern recognition , pages 5791–5800, 2020. 5 [63] Eduard Zamfir, Zongwei Wu, Nancy Mehta, Yuedong Tan, Danda Pani Paudel, Yulun Zhang, and Radu Timofte. Com-plexity experts are task-discriminative learners for any image restoration. In Proceedings of the Computer Vision and Pat-tern Recognition Conference , pages 12753–12763, 2025. 10 [64] Bingliang Zhang, Wenda Chu, Julius Berner, Chenlin Meng, Anima Anandkumar, and Yang Song. Improving diffusion inverse problem solving with decoupled noise annealing. In 
+
+Proceedings of the Computer Vision and Pattern Recognition Conference , pages 20895–20905, 2025. 3, 5, 12 [65] Kai Zhang, Lingbo Mo, Wenhu Chen, Huan Sun, and Yu Su. Magicbrush: A manually annotated dataset for instruction-guided image editing. Advances in Neural Information Pro-cessing Systems , 36:31428–31449, 2023. 2 [66] Lvmin Zhang, Anyi Rao, and Maneesh Agrawala. Adding conditional control to text-to-image diffusion models. In 
+
+Proceedings of the IEEE/CVF international conference on computer vision , pages 3836–3847, 2023. 6, 10 [67] Zechuan Zhang, Ji Xie, Yu Lu, Zongxin Yang, and Yi Yang. In-context edit: Enabling instructional image editing with in-context generation in large scale diffusion transformer. arXiv preprint arXiv:2504.20690 , 2025. 1, 2, 5, 12 [68] Ruoyu Zhao, Qingnan Fan, Fei Kou, Shuai Qin, Hong Gu, Wei Wu, Pengcheng Xu, Mingrui Zhu, Nannan Wang, and Xinbo Gao. Instructbrush: Learning attention-based in-struction optimization for image editing. arXiv preprint arXiv:2403.18660 , 2024. 11 [69] Yuanzhi Zhu, Kai Zhang, Jingyun Liang, Jiezhang Cao, Bi-han Wen, Radu Timofte, and Luc Van Gool. Denoising dif-fusion models for plug-and-play image restoration. In Pro-ceedings of the IEEE/CVF conference on computer vision and pattern recognition , pages 1219–1229, 2023. 3 
+
+19

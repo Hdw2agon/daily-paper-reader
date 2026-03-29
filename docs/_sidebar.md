@@ -1,6 +1,9 @@
 * <a class="dpr-sidebar-root-link" href="#/">首页</a>
 * <a class="dpr-sidebar-root-link dpr-sidebar-noactive-link" href="javascript:void(0)" data-dpr-hash="#/tutorial/README">使用教程</a>
 * Daily Papers
+  * 2026-03-29 <!--dpr-date:20260329-->
+    * 速读区
+      * <a class="dpr-sidebar-item-link dpr-sidebar-item-structured" href="#/202603/29/2603.24086v1-lgtm-training-free-light-guided-text-to-image-diffusion-model-via-initial-noise-manipulation" data-sidebar-item="{&quot;title&quot;: &quot;LGTM: Training-Free Light-Guided Text-to-Image Diffusion Model via Initial Noise Manipulation&quot;, &quot;link&quot;: &quot;https://arxiv.org/abs/2603.24086v1-lgtm-training-free-light-guided-text-to-image-diffusion-model-via-initial-noise-manipulation&quot;, &quot;score&quot;: &quot;6.0&quot;, &quot;tags&quot;: [{&quot;kind&quot;: &quot;query&quot;, &quot;label&quot;: &quot;q4&quot;}], &quot;evidence&quot;: &quot;无需训练的图像生成与操作生成模型&quot;}">LGTM: Training-Free Light-Guided Text-to-Image Diffusion Model via Initial Noise Manipulation</a>
   * 2026-03-28 <!--dpr-date:20260328-->
     * 速读区
       * <a class="dpr-sidebar-item-link dpr-sidebar-item-structured" href="#/202603/28/2603.21136v1-ms-customnet-controllable-multi-subject-customization-with-hierarchical-relational-semantics" data-sidebar-item="{&quot;title&quot;: &quot;MS-CustomNet: Controllable Multi-Subject Customization with Hierarchical Relational Semantics&quot;, &quot;link&quot;: &quot;https://arxiv.org/abs/2603.21136v1-ms-customnet-controllable-multi-subject-customization-with-hierarchical-relational-semantics&quot;, &quot;score&quot;: &quot;7.0&quot;, &quot;tags&quot;: [{&quot;kind&quot;: &quot;query&quot;, &quot;label&quot;: &quot;q4&quot;}], &quot;evidence&quot;: &quot;零样本集成与生成式图像合成&quot;}">MS-CustomNet: Controllable Multi-Subject Customization with Hierarchical Relational Semantics</a>

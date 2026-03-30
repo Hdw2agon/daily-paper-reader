@@ -6,26 +6,37 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-03-29
-- 运行时间：2026-03-29 19:49:08 UTC
+- 最新运行日期：2026-03-30
+- 运行时间：2026-03-30 20:02:38 UTC
 - 运行状态：成功
-- 本次总论文数：1
-- 精读区：0
-- 速读区：1
+- 本次总论文数：5
+- 精读区：2
+- 速读区：3
 
 ### 今日简报（AI）
-今日聚焦无需训练的光影控制技术，通过操纵初始噪声实现精准的文生图光影引导。
-LGTM 框架证明了仅需调整扩散模型的初始噪声，即可在不改变模型权重的前提下灵活定制生成图像的光照效果。
-推荐关注如何利用低成本的噪声干预手段，提升 AI 绘画在商业摄影和场景渲染中的光影表现力。
-- 详情：[/202603/29/README](/202603/29/README)
+今日聚焦图像修复与3D场景生成的最新进展，深度解析了从不确定性感知到自回归生成的5项前沿成果。
+重点推荐 URA-Net 异常检测网络与“修复-评估-重复”迭代框架，两者均通过优化反馈机制显著提升了复杂场景下的图像重建质量。
+建议优先研读两篇 8.0 分的修复类论文，并关注 GaussianGPT 如何将大模型思维引入 3D 场景的自动化构建。
+- 详情：[/202603/30/README](/202603/30/README)
 
 ### 精读区论文标签
-- 本次无精读推荐。
+1. [URA-Net: Uncertainty-Integrated Anomaly Perception and Restoration Attention Network for Unsupervised Anomaly Detection](/202603/30/2603.22840v1-ura-net-uncertainty-integrated-anomaly-perception-and-restoration-attention-network-for-unsupervised-anomaly-detection)  
+   标签：评分：8.0/10、query:q7
+   evidence：无监督异常修复网络
+2. [Restore, Assess, Repeat: A Unified Framework for Iterative Image Restoration](/202603/30/2603.26385v1-restore-assess-repeat-a-unified-framework-for-iterative-image-restoration)  
+   标签：评分：8.0/10、query:profile-1
+   evidence：迭代图像修复的统一框架
 
 ### 速读区论文标签
-1. [LGTM: Training-Free Light-Guided Text-to-Image Diffusion Model via Initial Noise Manipulation](/202603/29/2603.24086v1-lgtm-training-free-light-guided-text-to-image-diffusion-model-via-initial-noise-manipulation)  
+1. [Provably Contractive and High-Quality Denoisers for Convergent Restoration](/202603/30/2603.26168v1-provably-contractive-and-high-quality-denoisers-for-convergent-restoration)  
+   标签：评分：7.0/10、query:profile-1
+   evidence：收敛图像修复与去噪器
+2. [GaussianGPT: Towards Autoregressive 3D Gaussian Scene Generation](/202603/30/2603.26661v1-gaussiangpt-towards-autoregressive-3d-gaussian-scene-generation)  
+   标签：评分：7.0/10、query:q4
+   evidence：自回归3D场景生成，天然支持补全任务
+3. [Repurposing Geometric Foundation Models for Multi-view Diffusion](/202603/30/2603.22275v1-repurposing-geometric-foundation-models-for-multi-view-diffusion)  
    标签：评分：6.0/10、query:q4
-   evidence：无需训练的图像生成与操作生成模型
+   evidence：用于多视图合成和重建的生成式潜空间
 
 
 <div class="dpr-home-promo-card">

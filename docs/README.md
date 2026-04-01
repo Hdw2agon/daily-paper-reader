@@ -6,52 +6,52 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-03-31
-- 运行时间：2026-03-31 19:52:33 UTC
+- 最新运行日期：2026-04-01
+- 运行时间：2026-04-01 19:40:26 UTC
 - 运行状态：成功
 - 本次总论文数：10
-- 精读区：3
-- 速读区：7
+- 精读区：5
+- 速读区：5
 
 ### 今日简报（AI）
-今日聚焦图像“无痕擦除”技术，深度解析 PANDORA 等零样本物体移除的前沿突破。
-重点关注通过像素级注意力与潜空间引导实现的精准修复，有效解决了物体移除中意外内容残留的痛点。
-建议关注 AI 图像编辑从简单修补向高质量重构的演进，并留意其在 3D 场景补全与防伪检测中的新应用。
-- 详情：[/202603/31/README](/202603/31/README)
+今日聚焦 10 篇前沿成果，重点突破了从第一视角视频生成“无人化”环境漫游及扩散模型编辑的理论边界。
+最值得关注如何利用算法精准移除视频行人以还原纯净空间，以及扩散模型在图像编辑中的性能权衡规律。
+建议对 3D 场景扩展与自监督重建感兴趣的读者，可同步查阅 SceneExpander 等速读论文。
+- 详情：[/202604/01/README](/202604/01/README)
 
 ### 精读区论文标签
-1. [PANDORA: Pixel-wise Attention Dissolution and Latent Guidance for Zero-Shot Object Removal](/202603/31/2603.27555v1-pandora-pixel-wise-attention-dissolution-and-latent-guidance-for-zero-shot-object-removal)  
-   标签：评分：10.0/10、query:q3
-   evidence：使用预训练扩散模型且无需微调的零样本物体移除
-2. [You Only Erase Once: Erasing Anything without Bringing Unexpected Content](/202603/31/2603.27599v1-you-only-erase-once-erasing-anything-without-bringing-unexpected-content)  
-   标签：评分：9.0/10、query:q2
-   evidence：在无标签非成对数据上进行物体擦除
-3. [ColorFLUX: A Structure-Color Decoupling Framework for Old Photo Colorization](/202603/31/2603.28162v1-colorflux-a-structure-color-decoupling-framework-for-old-photo-colorization)  
-   标签：评分：8.0/10、query:q4
-   evidence：用于旧照片修复和上色的生成式扩散模型
+1. [Generating Humanless Environment Walkthroughs from Egocentric Walking Tour Videos](/202604/01/2603.29036v1-generating-humanless-environment-walkthroughs-from-egocentric-walking-tour-videos)  
+   标签：评分：9.0/10、query:q1
+   evidence：开发生成算法以真实地移除（修复）视频中的人物
+2. [Editing on the Generative Manifold: A Theoretical and Empirical Study of General Diffusion-Based Image Editing Trade-offs](/202604/01/2603.29736v1-editing-on-the-generative-manifold-a-theoretical-and-empirical-study-of-general-diffusion-based-image-editing-trade-offs)  
+   标签：评分：9.0/10、query:q4
+   evidence：基于扩散的图像编辑与修补工具
+3. [MEDiC: Multi-objective Exploration of Distillation from CLIP](/202604/01/2603.29009v1-medic-multi-objective-exploration-of-distillation-from-clip)  
+   标签：评分：8.0/10、query:q7
+   evidence：掩码图像建模与像素重构
+4. [A2BFR: Attribute-Aware Blind Face Restoration](/202604/01/2603.29423v1-a2bfr-attribute-aware-blind-face-restoration)  
+   标签：评分：8.0/10、query:q7
+   evidence：基于扩散生成模型的属性感知盲人脸修复
+5. [Beyond Ground-Truth: Leveraging Image Quality Priors for Real-World Image Restoration](/202604/01/2603.29773v1-beyond-ground-truth-leveraging-image-quality-priors-for-real-world-image-restoration)  
+   标签：评分：8.0/10、query:q3
+   evidence：利用质量先验进行无标签图像修复
 
 ### 速读区论文标签
-1. [Seen2Scene: Completing Realistic 3D Scenes with Visibility-Guided Flow](/202603/31/2603.28548v1-seen2scene-completing-realistic-3d-scenes-with-visibility-guided-flow)  
-   标签：评分：7.0/10、query:q1
-   evidence：从不完整的扫描中进行3D场景补全与生成
-2. [TGIF2: Extended Text-Guided Inpainting Forgery Dataset & Benchmark](/202603/31/2603.28613v1-tgif2-extended-text-guided-inpainting-forgery-dataset--benchmark)  
-   标签：评分：7.0/10、query:q1
-   evidence：文本引导的修复篡改数据集
-3. [Divide and Restore: A Modular Task-Decoupled Framework for Universal Image Restoration](/202603/31/2603.28658v1-divide-and-restore-a-modular-task-decoupled-framework-for-universal-image-restoration)  
-   标签：评分：7.0/10、query:profile-1
-   evidence：通用图像修复框架
-4. [Self-Corrected Image Generation with Explainable Latent Rewards](/202603/31/2603.24965v1-self-corrected-image-generation-with-explainable-latent-rewards)  
+1. [SceneExpander: Expanding 3D Scenes with Free-Form Inserted Views](/202604/01/2603.27084v2-sceneexpander-expanding-3d-scenes-with-free-form-inserted-views)  
    标签：评分：6.0/10、query:q4
-   evidence：用于图像合成与优化的生成模型
-5. [A training-free framework for high-fidelity appearance transfer via diffusion transformers](/202603/31/2603.26767v1-a-training-free-framework-for-high-fidelity-appearance-transfer-via-diffusion-transformers)  
-   标签：评分：6.0/10、query:q3
-   evidence：无需训练的外观迁移框架
-6. [SceneExpander: Expanding 3D Scenes with Free-Form Inserted Views](/202603/31/2603.27084v1-sceneexpander-expanding-3d-scenes-with-free-form-inserted-views)  
+   evidence：用于扩展3D场景和合成视图的生成模型
+2. [From None to All: Self-Supervised 3D Reconstruction via Novel View Synthesis](/202604/01/2603.27455v1-from-none-to-all-self-supervised-3d-reconstruction-via-novel-view-synthesis)  
+   标签：评分：6.0/10、query:q7
+   evidence：无真值的自监督重建
+3. [A Robust Low-Rank Prior Model for Structured Cartoon-Texture Image Decomposition with Heavy-Tailed Noise](/202604/01/2603.27579v1-a-robust-low-rank-prior-model-for-structured-cartoon-texture-image-decomposition-with-heavy-tailed-noise)  
    标签：评分：6.0/10、query:q1
-   evidence：通过合成视图扩展场景
-7. [Rethinking Structure Preservation in Text-Guided Image Editing with Visual Autoregressive Models](/202603/31/2603.28367v1-rethinking-structure-preservation-in-text-guided-image-editing-with-visual-autoregressive-models)  
+   evidence：图像分解与去噪修复
+4. [Extend3D: Town-Scale 3D Generation](/202604/01/2603.29387v1-extend3d-town-scale-3d-generation)  
+   标签：评分：6.0/10、query:q1
+   evidence：细化遮挡区域和图像条件的3D生成
+5. [MacTok: Robust Continuous Tokenization for Image Generation](/202604/01/2603.29634v1-mactok-robust-continuous-tokenization-for-image-generation)  
    标签：评分：6.0/10、query:q4
-   evidence：用于文本引导图像编辑的生成模型
+   evidence：用于生成模型的图像掩码技术
 
 
 <div class="dpr-home-promo-card">

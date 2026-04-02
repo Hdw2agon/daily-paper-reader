@@ -6,52 +6,44 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-04-01
-- 运行时间：2026-04-01 19:40:26 UTC
+- 最新运行日期：2026-04-02
+- 运行时间：2026-04-02 20:10:41 UTC
 - 运行状态：成功
-- 本次总论文数：10
-- 精读区：5
-- 速读区：5
+- 本次总论文数：7
+- 精读区：0
+- 速读区：7
 
 ### 今日简报（AI）
-今日聚焦 10 篇前沿成果，重点突破了从第一视角视频生成“无人化”环境漫游及扩散模型编辑的理论边界。
-最值得关注如何利用算法精准移除视频行人以还原纯净空间，以及扩散模型在图像编辑中的性能权衡规律。
-建议对 3D 场景扩展与自监督重建感兴趣的读者，可同步查阅 SceneExpander 等速读论文。
-- 详情：[/202604/01/README](/202604/01/README)
+今日速读 7 篇前沿论文，深度探索了掩码图像建模（MIM）的表征优化与屏下摄像头修复技术。
+重点关注 UCMNet 如何通过不确定性感知提升屏下成像质量，以及抑制非语义噪声对增强 MIM 表征能力的显著作用。
+建议读者关注底层视觉修复与自监督学习结合的趋势，以应对复杂成像环境下的视觉质量瓶颈。
+- 详情：[/202604/02/README](/202604/02/README)
 
 ### 精读区论文标签
-1. [Generating Humanless Environment Walkthroughs from Egocentric Walking Tour Videos](/202604/01/2603.29036v1-generating-humanless-environment-walkthroughs-from-egocentric-walking-tour-videos)  
-   标签：评分：9.0/10、query:q1
-   evidence：开发生成算法以真实地移除（修复）视频中的人物
-2. [Editing on the Generative Manifold: A Theoretical and Empirical Study of General Diffusion-Based Image Editing Trade-offs](/202604/01/2603.29736v1-editing-on-the-generative-manifold-a-theoretical-and-empirical-study-of-general-diffusion-based-image-editing-trade-offs)  
-   标签：评分：9.0/10、query:q4
-   evidence：基于扩散的图像编辑与修补工具
-3. [MEDiC: Multi-objective Exploration of Distillation from CLIP](/202604/01/2603.29009v1-medic-multi-objective-exploration-of-distillation-from-clip)  
-   标签：评分：8.0/10、query:q7
-   evidence：掩码图像建模与像素重构
-4. [A2BFR: Attribute-Aware Blind Face Restoration](/202604/01/2603.29423v1-a2bfr-attribute-aware-blind-face-restoration)  
-   标签：评分：8.0/10、query:q7
-   evidence：基于扩散生成模型的属性感知盲人脸修复
-5. [Beyond Ground-Truth: Leveraging Image Quality Priors for Real-World Image Restoration](/202604/01/2603.29773v1-beyond-ground-truth-leveraging-image-quality-priors-for-real-world-image-restoration)  
-   标签：评分：8.0/10、query:q3
-   evidence：利用质量先验进行无标签图像修复
+- 本次无精读推荐。
 
 ### 速读区论文标签
-1. [SceneExpander: Expanding 3D Scenes with Free-Form Inserted Views](/202604/01/2603.27084v2-sceneexpander-expanding-3d-scenes-with-free-form-inserted-views)  
-   标签：评分：6.0/10、query:q4
-   evidence：用于扩展3D场景和合成视图的生成模型
-2. [From None to All: Self-Supervised 3D Reconstruction via Novel View Synthesis](/202604/01/2603.27455v1-from-none-to-all-self-supervised-3d-reconstruction-via-novel-view-synthesis)  
+1. [Suppressing Non-Semantic Noise in Masked Image Modeling Representations](/202604/02/2604.00172v1-suppressing-non-semantic-noise-in-masked-image-modeling-representations)  
+   标签：评分：7.0/10、query:q7
+   evidence：自监督视觉范式与零样本性能提升
+2. [UCMNet: Uncertainty-Aware Context Memory Network for Under-Display Camera Image Restoration](/202604/02/2604.00381v1-ucmnet-uncertainty-aware-context-memory-network-for-under-display-camera-image-restoration)  
+   标签：评分：7.0/10、query:q1
+   evidence：屏下摄像头退化的图像修复
+3. [Xenon Signal Denoising via Supervised, Semi-Supervised, and Unsupervised Models](/202604/02/2603.27005v1-xenon-signal-denoising-via-supervised-semi-supervised-and-unsupervised-models)  
    标签：评分：6.0/10、query:q7
-   evidence：无真值的自监督重建
-3. [A Robust Low-Rank Prior Model for Structured Cartoon-Texture Image Decomposition with Heavy-Tailed Noise](/202604/01/2603.27579v1-a-robust-low-rank-prior-model-for-structured-cartoon-texture-image-decomposition-with-heavy-tailed-noise)  
+   evidence：无监督与半监督信号去噪
+4. [Complet4R: Geometric Complete 4D Reconstruction](/202604/02/2603.27300v1-complet4r-geometric-complete-4d-reconstruction)  
    标签：评分：6.0/10、query:q1
-   evidence：图像分解与去噪修复
-4. [Extend3D: Town-Scale 3D Generation](/202604/01/2603.29387v1-extend3d-town-scale-3d-generation)  
-   标签：评分：6.0/10、query:q1
-   evidence：细化遮挡区域和图像条件的3D生成
-5. [MacTok: Robust Continuous Tokenization for Image Generation](/202604/01/2603.29634v1-mactok-robust-continuous-tokenization-for-image-generation)  
+   evidence：动态场景的几何重建与补全
+5. [Test-Time Instance-Specific Parameter Composition: A New Paradigm for Adaptive Generative Modeling](/202604/02/2603.27665v1-test-time-instance-specific-parameter-composition-a-new-paradigm-for-adaptive-generative-modeling)  
    标签：评分：6.0/10、query:q4
-   evidence：用于生成模型的图像掩码技术
+   evidence：使用扩散和自回归网络的自适应生成建模
+6. [RawGen: Learning Camera Raw Image Generation](/202604/02/2604.00093v1-rawgen-learning-camera-raw-image-generation)  
+   标签：评分：6.0/10、query:q4
+   evidence：用于图像合成和反转的生成模型
+7. [TRACE: High-Fidelity 3D Scene Editing via Tangible Reconstruction and Geometry-Aligned Contextual Video Masking](/202604/02/2604.01207v1-trace-high-fidelity-3d-scene-editing-via-tangible-reconstruction-and-geometry-aligned-contextual-video-masking)  
+   标签：评分：6.0/10、query:q4
+   evidence：用于场景一致性物体添加与修改的生成模型
 
 
 <div class="dpr-home-promo-card">

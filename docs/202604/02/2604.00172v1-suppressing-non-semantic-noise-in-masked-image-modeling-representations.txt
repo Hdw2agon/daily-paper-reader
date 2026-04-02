@@ -1,0 +1,698 @@
+Title: Suppressing Non-Semantic Noise in Masked Image Modeling Representations
+
+URL Source: https://arxiv.org/pdf/2604.00172v1
+
+Published Time: Thu, 02 Apr 2026 00:13:29 GMT
+
+Number of Pages: 20
+
+Markdown Content:
+# Suppressing Non-Semantic Noise in Masked Image Modeling Representations 
+
+## Martine Hjelkrem-Tan 1, Marius Aasan 1, Rwiddhi Chakraborty 2,Gabriel Y. Arteaga 1, Changkyu Choi 1, Adín Ramírez Rivera 1
+
+> 1
+
+University of Oslo, 2UiT The Arctic University of Norway      
+
+> {matan, mariuaas, gabrieya, changkyc, adinr}@uio.no, rwiddhi.chakraborty@uit.no
+
+## Abstract 
+
+Masked Image Modeling (MIM) has become a ubiquitous self-supervised vision paradigm. In this work, we show that MIM objectives cause the learned representations to retain non-semantic information, which ultimately hurts perfor-mance during inference. We introduce a model-agnostic score for semantic invariance using Principal Component Analysis (PCA) on real and synthetic non-semantic im-ages. Based on this score, we propose a simple method, Semantically Orthogonal Artifact Projection (SOAP), to di-rectly suppress non-semantic information in patch repre-sentations, leading to consistent improvements in zero-shot performance across various MIM-based models. SOAP is a post-hoc suppression method, requires zero training, and can be attached to any model as a single linear head. Code available at: https://github.com/dsb-ifi/soap .
+
+## 1. Introduction 
+
+Self-supervised learning (SSL) via Masked Image Model-ing (MIM) objectives have become a popular source for strong, generalized vision backbones [1–3, 11, 16, 22, 26, 29, 33, 36, 53]. However, recent works have uncovered key issues with artifacts and noise in the representations in mod-els that rely on MIM-based objectives [16, 26, 27, 29, 36, 53]. Some of these issues can be traced to the objective itself—MIM requires predicting both the semantic content and location of the masked patches [5]. While positional collapse—where the model learns to predict the position of masked tokens instead of content—is a known issue with various suggested mitigation techniques [5, 16, 36], studies directly addressing the extent of this phenomenon are rela-tively unexplored. In this paper, we present a novel method to measure the amount of non-semantic noise in ViT tokens for state-of-the-art MIM-based models. We characterize non-semantic noise as components that are invariant to the semantic con-tent in the input. This can for example be positional encod-ing, which are necessary for attention mechanisms but sel-dom useful in inference, or structural artifacts as discussed in Darcet et al. [15]. Our central hypothesis in this work is that this noise persists in non-semantic images . As a result, isolating the noise can be approached as quantify-ing invariant responses between semantic and non-semantic images. This is useful, as suppressing the noise can lead to clearer semantic signals, improving representations for use in downstream tasks. Through our analysis, we dis-cover that strong principal components exhibit high levels of non-semantic noise, and that this feature is pervasive in MIM-based models while nearly non-existent in other, non MIM-based SSL models . Importantly, this holds regardless of which positional embedding method is employed [29] and whether predictions are conducted in latent or input-space, suggesting that this is an implicit issue in MIM .To suppress non-semantic information, we introduce a Semantically Orthogonal Artifact Projection (SOAP) to re-move unwanted artifacts that are not useful for inherently semantic tasks, such as instance level classification and salient segmentation—cf. Fig. 1. SOAP is flexible: It is computed directly from data using a Gram-Schmidt based projection, thus requiring no training, and can be attached as an external module to any pretrained SSL backbone. Our contributions include: (i) An in-depth analysis that shows that MIM objectives uniquely bias representations to-ward encoding positional noise rather than semantic infor-mation. (ii) A novel Semantic Invariance Score to measure the level of semantic invariance in a model’s representa-tions, allowing us to diagnose the semantic-positional noise trade-off in SSL representations. (iii) Finally, based on this score, we propose Semantically Orthogonal Artifact Projec-tion (SOAP), a post-hoc denoising strategy that suppresses non-semantic noise, and show improved performance in ze-ro-shot downstream tasks for all MIM-based models. 
+
+## 2. Related Work 
+
+Contrastive Learning. Contrastive learning by encour-aging representations to be invariant to minor augmenta-tions is a central paradigm for SSL [12, 14, 31, 39, 50]. Modern approaches utilize self-distillation by matching rep-1
+
+> arXiv:2604.00172v1 [cs.CV] 31 Mar 2026 MIM Encoder
+
+z
+
+> SOAP
+
+ˆz          
+
+> Ê
+> Ë
+> Salient Prediction
+> Principal components with positional noise and semantic info. SOAP removes noise.
+> !$
+> C○
+> "&b
+> Salient seg.
+> Salient seg.
+> Downstream task Repr.
+> Training Free!
+> Figure 1. Pipeline overview; a pretrained MIM encoder outputs dense representations zwhich are used for downstream tasks—we show salient segmentation as an example. By identifying and suppressing principal components encoding positional noise, our SOAP module improves the representations ˆzand enhances downstream performance in zero-shot settings.
+
+resentations between a teacher and a student network, with periodic exponential moving average (EMA) updates [10, 11, 13, 20]. These approaches typically rely on strong global cues that match local with global views via aggres-sive cropping without preserving relative spatial informa-tion. However, a stronger reliance on global cues limits per-formance on dense prediction tasks, as finer-grained seman-tic relationships are not fully exploited [24, 28, 40, 49]. 
+
+Masked Image Modeling. A strong alternative to learn-ing invariances through data augmentations, is through choosing reconstruction of masked patches as the pretext task [4, 22, 45]. As opposed to contrastive learning, MIM— popularized by MAE [22]—provides a robust and scalable approach by directly reconstructing the input data via a de-coder, thus circumventing representational collapse to triv-ial solutions. Reconstruction in the representation space, rather than the pixel space, removes the explicit need for a decoder, and has been shown to work in methods like I-JEPA [2]. The MIM objective has been adopted in the self-distillation setup quite successfully—iBOT [53] em-ploys the averaged cross entropy over the student’s masked view, and the teacher the non-masked view, and DINOv2 demonstrates additional improvements by separating the MLP projection heads, using adaptive resolutions, and ad-ditional regularization [26]. CAPI [16] adopts a pure MIM approach through clustering by generating pseudo-labels in the masked latent space, which removes the need for a del-icate balancing act between MIM and instance based con-trastive objectives. The recent release of DINOv3 employs modern positional encoding, and a denoised warmup train-ing phase [29]. Across all these approaches, our analysis in-dicates a consistent level of non-semantic noise not present in purely contrastive approaches. 
+
+Positional Noise in MIM Models. A recurring challenge in masked image modeling (MIM) frameworks is the pres-ence of positional noise in the learned embeddings. This has been indirectly addressed through a variety of architec-tural and training modifications, such as introducing register tokens [15], regularization mechanisms [16, 29], or disen-tangling positional cues [5, 36, 37, 48]. Despite these ef-forts, MIM representations typically show weaker out-of-the-box performance compared to frameworks with con-trastive objectives, and often require extensive fine-tuning to transfer effectively to downstream tasks. Some works analyze embedding variance to identify noisy or unstable tokens [35], while others propose selective aggregation to prune non-informative dimensions [27]. Venkataramanan et al. [36] introduce RASA, a post-hoc module that sup-presses explicit location cues by training to predict patch positions from pretrained embeddings. However, RASA only addresses patch-location noise and does not provide a broader analysis of non-semantic noise in other frame-works. In contrast, our proposed solution requires no train-ing. Additionally, our study directly identifies non-semantic components rather than learning positional cues, probing the nature of semantically invariant noise encoded by state-of-the-art SSL models, and proposing metrics to quantify and interpret these effects. 
+
+## 3. Semantically Orthogonal Artifact Projec-tion 
+
+Before introducing our proposal, we provide an exploratory analysis that sheds light on how to decompose the seman-tic and positional information from the data. Specifically, we use principal component analysis (PCA) to reveal struc-tural patterns that expose positional bias in MIM training (Sec. 3.1). Then, we formalize a linear decomposition of representations into semantic and non-semantic parts, pro-2DINOv2 
+
+> PC1, PC3
+> DINOv3
+> PC2, PC3
+> iBOT
+> PC2, PC4
+> MAE
+> PC2, PC3
+> CAPI
+> PC3, PC11
+> I-JEPA
+> PC2, PC4
+> DINO
+> PC1, PC2
+> DeiT3
+> PC1, PC2 Left / Right Top / Bottom
+> Figure 2. Representations from MIM models exhibit strong positional bias in leading principal components (PC), illustrated here by the response heatmap of selected PCs for one example image. MIM models show clear left/right and top/bottom bias. This behavior is not observed for non-MIM models. In Section 3, we propose a novel method to automatically isolate such positional bias in a post-hoc fashion.
+
+viding a foundation for quantifying the degree to which dif-ferent components capture meaningful information versus noise (Sec. 3.2). Following, we propose a score to mea-sure semantic invariance by contrasting real and synthetic inputs (Sec. 3.3). Finally, we introduce our Semantically Orthogonal Artifact Projection (SOAP), which uses this score to suppress non-semantic noise, enhancing zero-shot performance in MIM-based models on downstream tasks (Sec. 3.4). 
+
+3.1. PCA of Patch Embeddings 
+
+PCA is a natural tool to decompose the representation space into dominant variance directions. This allows us to exam-ine whether leading components reflect semantic content or non-semantic structure, such as positional bias. To this end, we estimate the covariance of the D-dimensional patch em-bedding space Z ⊆ RD under a given model f over Ima-geNet [17] using Welford’s online algorithm [42], and ob-tain the principal components by eigendecomposition of the covariance matrix Cov (Z) = V ΛV ⊤ ∈ RD×D, (1) with principal component vectors V = ( v1, . . . , v D ).For each component d = 1, ..., D , we define the re-sponse of an input z by the inner product ⟨z, v d⟩, which reflects how strongly each patch embedding z ∈ Z projects onto direction vd. By inspecting the responses, we observe that leading principal components in MIM models exhibit strong biases based on patch position. This indicates that a significant share of their variance is devoted to encoding po-sition, implying that positional bias arises as a direct conse-quence of MIM objectives . Fig. 2 shows the responses for an example image for selected principal components that were identified as having a strong positional bias. In contrast, models trained without MIM objectives, such as DINO and DeiT3, do not exhibit this behavior. To further characterize these components, we evaluate their behavior on a set of images. Let Ω be the input set of images, and f : Ω → Z a model that encodes an image x ∈
+
+Ω into N patch embedding representations z = {zn}Nn=1 .The binary activation of component d for x is then defined by thresholding the token responses: 
+
+Ad(x) = 1[zvd ≥ η] ∈ { 0, 1}N . (2) Here η is a scalar threshold; we set η = 0 in our experi-ments. The expectation ¯Ad = Ex[Ad(x)] ∈ RN yields an average activation map that highlights spatial patterns. With these definitions in place, we formulate two di-agnostic conditions to identify non-semantic components. First, when the average activation ¯Ad exhibits systematic dependence on patch location, we infer that component d
+
+predominantly encodes positional cues rather than seman-tic content. Second, when the per-sample activations Ad(x)
+
+exhibit minimal variation across different inputs, compo-nent d can be regarded as invariant to image content, which indicates that it captures non-informative signals. 
+
+3.2. Patch Embedding as Linear Combinations 
+
+To isolate the signals underlying a model’s representations, we express each patch embedding z as a mixture of seman-tic and non-semantic sources. Ideally, we want the model 
+
+f to capture the relevant semantic information in the in-put, like global class information and local structures of color, shape, texture, and fine-grained semantics useful for semantic downstream tasks. However, in standard ViTs, 
+
+f must also encode the positional information directly to each embedding z, since the attention operator is otherwise permutation-invariant. We formalize this by assuming that each embedding z
+
+can be decomposed as a mixture of sources, Φ for semantic information and P for non-semantic noise. Then we express 
+
+z = θϕϕ + θρρ + ε
+
+| {z }
+
+> non-semantic
+
+; ε ∼ P, (3) where θϕ, θ ρ ∈ R≥0 are scalar coefficients for ϕ ∈ Φ, ρ ∈
+
+P, and ε represents residual noise from some probability 3distribution P. The semantic information component ϕ ∈ Φ
+
+encodes both relevant information for global objectives, such as instance discrimination and classification, and dense objectives like segmentation. The non-semantic informa-tion component ρ ∈ P encodes local positions and relative geometry among the local patch embeddings z, based on their positions in the original image x.1
+
+Intuitively, both contrastive and MIM-based training ob-jectives encourage f to encode relevant semantic informa-tion. However, in line with the observations of previous work [5], we posit that the inpainting objective in MIM also drives f to encode a substantial amount of non-semantic information ρ, thereby increasing the coefficient θρ at the expense of the semantic coefficient θϕ. This raises the ques-tion of how much of a learned representation reflects seman-tic content, as opposed to non-semantic noise or other non-informative signals. To address this, we introduce a seman-tic invariance score to measure the degree of non-semantic information encoded by each principal component d in a learned patch representation space Z.
+
+3.3. Semantic Invariance 
+
+Semantic invariance refers to the property of a component yielding consistent responses even when the semantic con-tent of local representations varies. In other words, a com-ponent is semantically invariant if it produces similar ac-tivations regardless of whether the input carries meaning-ful semantic information. We posit that such components are uninformative for downstream understanding, as they do not encode or reflect actual image contents. Let X ⊂ Ω be the set of semantically informative im-ages, and let X c denote a complementary set without se-mantic information. In practice, X is instantiated as the ImageNet validation set [17], while X c is approximated by a synthetic noise generator. The synthetic images are gen-erated by a mixture of pink noise, modulated white noise, and random low-frequency gradient fields. The details are described in App. C—see the examples in Fig. C.1. For each component d, we compute binary activations Ad using Eq. (2) for samples x ∼ X and xc ∼ X c. This yields two empirical Bernoulli distributions of activations for the token index n = 1 , . . . , N , such that 
+
+Pd,n = Pr  Ad,n = 1 | x ∼ X , and (4) 
+
+Qd,n = Pr  Ad,n = 1 | xc ∼ X c. (5) If Pd,n ≈ Qd,n , then component d behaves similarly for semantic and non-semantic inputs for token index n, indi-cating semantic invariance. Conversely, large discrepancies                    
+
+> 1We note that positional information is given implicitly in certain mod-els that retain spatial order, like CNNs and MLPs. In this case fdoes not need to explicitly encode positional information into z. However, we restrict this study to ViTs.
+> 0
+> 0.510
+> 0.5
+> 1
+> 0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1
+> PQ
+> SI (P, Q )
+> SI Dice
+> Figure 3. Plot of the semantic invariance (SI) score (viridis). The SI-score increases when P≈Qand the probabilities are confident (close to 0or 1). In the uncertain case P≈0.5≈Q, the score is lower to reflect ambiguity of semantic invariance. For comparison we also show the Dice-Sørensen coefficient (gray), which does not have this property, and thus is unable to capture the uncertainty.
+
+between Pd,n and Qd,n indicate sensitivity to semantic con-tent at the position with index n, which posits Pd, Q d as multinomial distributions over all tokens. To quantify this discrepancy, we define a score to measure semantic invari-ance (SI) 
+
+sd = SI (Pd, Q d), (6a) 
+
+= 2 · Pd · Qd + (1 − Pd) · (1 − Qd)
+
+pP 2 
+
+> d
+
++ (1 − Pd)2 + pQ2 
+
+> d
+
++ (1 − Qd)2 , (6b) 
+
+= 2 · ⟨Pd, Q d⟩|| Pd|| + || Qd|| , (6c) which assigns high scores when Pd ≈ Qd, and vice versa. However, in the case where Pd,n ≈ Qd,n ≈ 0.5 for most token indices n, we cannot really say that the component is strongly semantically invariant, as the model is uncertain. We account for this uncertainty in our definition of the SI-score; it gives lower scores when the model is uncertain. This property is visualized in Fig. 3. Our score is similar in form to the Dice-Sørensen coefficient [9], but we take the inner products and norms over the support set rather than the multivariate dimensions; see App. B.1 for more details. A vectorial formulation of Eq. (6) is given in Eq. (B.1). 
+
+3.4. Semantically Orthogonal Artifact Projection (SOAP) 
+
+With the SI score in Eq. (6), we introduce Semantically Orthogonal Artifact Projection (SOAP), an off-the-shelf de-noising strategy that suppresses non-semantic noise. We hy-pothesize that suppressing components that are invariant to semantic content in the representation z acts as a denoising step, yielding representations that are closer to the semantic 4part θϕϕ in Eq. (3). To achieve this, we operate in the PCA basis, where these components vd are orthogonal by con-struction. Each component is assigned a weight wd, derived from its semantic invariance score sd and a scaling function 
+
+t, which determines how strongly it should be suppressed. Our SOAP projector Pϕ is defined by the Gram–Schmidt process, subtracting the contribution of components identi-fied as non-informative 
+
+Pϕ = I − V W V ⊤; ˆz = Pϕz. (7) Here, V are the PCA components from Eq. (1), I is the identity matrix, and W = diag (w1, . . . , w D ) is a diagonal weight matrix. Since directly weighting by the SI-scores leads to strong suppression across all components (see Fig. 3) we introduce a scaling function t so only the most invariant ones are sup-pressed. We propose filtering using a Fermi window [7, 8]—commonly used in MRI imaging—using the rank of the scores r. This corresponds to a smooth regularization of the scores [21] using a sigmoid gating approach [25] with ex-plicit control over truncation and smoothness. The scaling function is defined by 
+
+wd = t(sd, r ) = sd × σ(( μ − r)/τ )
+
+σ(μ/τ ) ; r = rank (sd). (8) Coupling statistical variance with semantic relevance, the hyperparameters μ and τ provide flexible control of the cut-off and smoothness of suppression, providing a simple way to adapt denoising strength to the spectral structure of the embeddings. Fig. D.1 shows the effect of the scaling func-tion on the semantic invariance scores. 
+
+## 4. Experiments 
+
+For our study, we consider MAE [22], I-JEPA [2] and CAPI [16] for models with MIM objectives, DINO [11] for global contrastive objective, and iBOT [53], DINOv2 [26], and DINOv3 [29] for models with both. For completeness we also evaluate the supervised model DeiT3 [32]. Tab. 1 provides an overview of the models. We estimate the principal components for the represen-tation space of each model over ImageNet train [17] as de-scribed in Sec. 3.1, and calculate the SI-scores using Im-ageNet validation paired with 50000 synthetic images as described in App. C. SOAP is directly computed from the principal components and corresponding SI scores. We show strong improvements in zero-shot salient segmenta-tion using the widely adopted TokenCut method [41] when applying SOAP prior to inference. Further, we show im-provements in kNN semantic segmentation and kNN classi-fication using patch embeddings. Additional details on our evaluation methods and ablations are given in App. E.                                                       
+
+> Table 1. Overview of models in our study. We select a represen-tative group of models by including models with different archi-tectures, objectives, MIM modes, and positional encoding in our experimental setup.
+> Model Arch. Objective MIM mode Pos. enc.
+> DINOv2 ViT-B/14 MIM + CL Latent Add. DINOv3 ViT-B/16 MIM + CL Latent RoPE iBOT ViT-B/16 MIM + CL Latent Add. MAE ViT-B/16 MIM Pixel Add. CAPI ViT-L/14 MIM Latent Add. I-JEPA ViT-H/14 MIM Latent Add. DINO ViT-B/16 CL NA Add. DeiT3 ViT-B/16 Supervised NA Add.
+> High SI Low SI
+> Rank 1Rank 2Rank 3Rank 4Rank 5
+> Real Synth Real Synth Real Synth Real Synth Real Synth DINOv2
+> DINOv3
+> MAE
+> DINO
+> Figure 4. Semantic Invariance (SI) scores reveal positional bias in top-ranked principal components. Real and Synth columns show activations for real and synthetic images, respectively. The top two components encode left/right and top/bottom biases (see Fig. 2), which diminish in lower-ranked components. MIM models exhibit clear semantic invariance, whereas the non-MIM model (DINO) does not. See Fig. B.2 for additional models and examples.
+
+4.1. Analyzing Information Content in SSL Tokens 
+
+We examine the nature of the non-semantic information re-vealed by the SI-score for each model. To do so, we ag-gregate the activation maps for each component over patch embeddings from ImageNet validation and generated syn-thetic images. Fig. 4 visualizes the averaged activations of the principal components with the highest SI-scores, where we selected a few models for demonstration. Extended re-sults for all models in our study is included in Fig. B.2. Across all MIM-based models, we observe strong positional bias in the form of left/right and top/bottom alignment (first two columns). In contrast, DINO and DeiT3 do not exhibit the same structured positional patterns. This empirically supports our claim that MIM objectives amplify the encod-ing of positional information in patch tokens. Notably, this phenomenon is present in both MIM-based models with standard additive positional embeddings (DINOv2, iBOT, CAPI, IJEPA) and those that inject positional information via RoPE in the attention mechanism (DINOv3). We also note that the two components with the highest semantic in-variance are the exact same components identified as encod-ing positional noise in Fig. 2 for all MIM models, demon-50.65 
+
+> 0.75
+> 0.85
+> 0.95
+
+(a) All principal components ranked by SI. 
+
+> SI Score
+> 0.65
+> 0.75
+> 0.85
+> 0.95
+
+(b) Top 10 principal components. 
+
+High SI Low SI High SI Low SI        
+
+> DINOv2 DINOv3 iBOT MAE CAPI IJEPA DINO DeiT3
+
+Figure 5. Semantic invariance (SI) score in descending order. All scores are shown in the left plot, while the right focuses on the top 10 semantically invariant scores. Note that all MIM-models have a max-score ≥ 0.75 , while all non MIM models have a lower score.  
+
+> DINO
+> DeiT3
+> CAPI
+> IJEPA
+> DINOv2
+> iBOT
+> DINOv3
+> MAE
+> 0.65
+> 0.75
+> 0.85
+> 0.95
+> max SI-score
+> Non-MIM MIM
+
+Figure 6. Models with MIM objectives exhibit higher max seman-tic invariance (SI) than models with other objectives. 
+
+strating that the SI-score indeed captures positional noise. Next, we take a closer look at the SI-scores for the princi-pal components of all the models—Fig. 5 shows the scores in descending order. We observe that MIM-models exhibit much higher maximum SI-scores than models trained with-out MIM. In particular, at least two components have an SI-score higher than 0.75 for all MIM-models. Meanwhile, models trained without MIM score below this threshold for all components, as demonstrated by the red-green gradient. To highlight the discrepancy between models trained with and without MIM objectives, we look at the maximum SI-score for each model in Fig. 6. This reflects the level of non-semantic noise encoded by each model, and shows a prominent gap between non-MIM and MIM-based models. We also probe semantic invariance over model depth. Fig. 7 shows the maximum SI-score per layer for a selection of the models. We observe that semantic invariance starts out high in the early layers, which is expected for models with additive positional embeddings, although DeiT3 is a somewhat surprising exception to this. Specific to the MIM-based models is that the SI-score increases again for the last layers. This can be explained as the model saturates more      
+
+> 0246810
+> 0.75
+> 0.85
+> 0.95
+
+ViT layer 
+
+> max SI-score
+> DINOv2
+> DINOv3
+> iBOT
+> MAE
+> DINO
+> DeiT3
+
+Figure 7. Maximum semantic invariance score for MIM models (solid lines) and non-MIM models (dashed lines) vs. model depth. Critically, MIM models show high SI-scores in the last layers. This can be explained by the MIM objective encouraging posi-tional information in the patch embeddings of deeper layers. 
+
+positional information into the embeddings in preparation for solving the MIM task. For MAE however, the score re-mains high across all layers. To summarize, we confirm that the most semantically invariant components revealed by the SI score encode po-sitional information, we show that MIM-based models con-sistently exhibit higher SI-scores, and we observe that the non-semantic noise either increases in the last transformer layer or is high throughout the MIM-based models. 
+
+4.2. Cleaning with SOAP for Zero-Shot Perfor-mance 
+
+We use SOAP to correct for semantically invariant compo-nents in local embeddings, and find that this improves per-formance in zero-shot downstream tasks for all MIM mod-els. Note that since non-semantic noise can be identified through linear methods, evaluation using learnable heads is unsuitable as they can adapt to unintentionally mask the is-sue. See App. F for further details. Based on the observations from Sec. 4.1, we let μ be 6Table 2. Zero-shot salient segmentation with TokenCut. We evaluate on ECSSD [46], DUTS [38], and DUT-OMRON [47]. Correcting the embeddings with SOAP improves results for all MIM-based models.                                                                                                                                                  
+
+> ECSSD DUTS DUT-OMRON Pretrain Model max FβIoU Acc. max FβIoU Acc. max FβIoU Acc.
+> Original embeddings
+> DINO ViT-B16 82.580 74.325 90.929 83.932 75.769 89.705 59.289 52.851 83.019 DINOv2 ViT-B16 71.319 63.937 83.147 69.701 63.064 78.891 45.923 39.643 75.067 DINOv3 ViT-B16 36.975 29.122 52.953 39.874 31.302 52.264 19.656 15.623 46.258 iBOT ViT-B16 62.873 56.248 78.785 66.353 59.657 77.987 33.731 29.602 67.883 CAPI ViT-L14 72.456 66.083 84.334 68.148 61.913 78.634 49.150 42.423 77.762 MAE ViT-B16 79.952 71.067 89.410 79.229 70.227 86.078 54.758 45.630 78.552 I-JEPA ViT-H14 37.670 27.989 68.898 33.008 24.890 63.592 33.345 24.340 71.343
+> Corrected embeddings
+> DINOv2 ViT-B16 80.633 72.559 88.687 84.387 76.785 89.440 50.610 43.472 71.762 DINOv3 ViT-B16 42.633 33.742 61.975 47.624 39.057 63.033 23.329 17.485 51.390 iBOT ViT-B16 66.557 60.167 78.340 72.192 65.618 80.595 36.330 31.991 63.552 CAPI ViT-L14 85.219 78.084 92.600 85.710 78.439 91.906 59.872 51.315 80.291 MAE ViT-B16 82.094 72.118 91.444 82.877 72.293 90.107 59.931 48.297 82.974
+> I-JEPA ViT-H14 40.239 31.162 71.406 33.371 25.922 65.001 35.472 27.038 76.841
+
+the number of components with an SI-score above a thresh-old of 0.75 , and use a sharper cut-off τ = 0 .05 to reduce suppression of the remaining components. This makes the suppression more sparse and retains all but the most seman-tically invariant components. In the case that no compo-nents have an SI-score higher than 0.75 , we set all weights 
+
+wd = 0 ; this is equivalent to no suppression. 
+
+Salient segmentation. We select TokenCut [41] for zero-shot evaluation of relative saliency information present in local embeddings, and follow their evaluation on three datasets—ECSSD [46], DUTS [38], and DUTOM-RON [47]—reporting intersection over union (IoU), accu-racy, and the F-measure 2.Tab. 2 shows that correcting the patch embeddings, in addition to using salient principal components as guides to foreground selection, can significantly boost performance. We observe that DINO performs better out-of-the-box com-pared to the models with MIM objectives. We believe this is because DINO is trained with a global objective only. Posi-tional information, and to a degree local semantic informa-tion, is not as useful for the salient segmentation task which relies on global (class specific) correlations. However, after suppressing semantically invariant components, most MIM models perform on par or better than DINO. Some notable exceptions are I-JEPA and DINOv3, which perform poorly in general for this task.               
+
+> 2F-measure is a standard metric used in saliency detection, defined by
+> Fβ= (1 + β2)Precision ×Recall
+> β2Precision +Recall .
+> Prediction and recall are defined by the binary prediction mask and the ground truth. We report the max value of 255 uniformly distributed bina-rization thresholds, denoted max Fβ. IoU, Accuracy, and max Fβare all computed following Wang et al. [41]. Input Raw pred. SOAP pred. Ground Truth
+
+Figure 8. Examples of salient segmentation using TokenCut [41] with frozen CAPI [16] on the raw embeddings (Raw pred.) and after correcting with SOAP (SOAP pred.). Suppressing positional noise with SOAP improves the zero-shot saliency maps. In the last row, TokenCut is unable to generate a salient prediction from the raw embeddings, yet it succeeds when provided with SOAP embeddings. 
+
+kNN segmentation. We evaluate zero-shot segmentation on ADE20k [51, 52] by performing per-patch k-nearest neighbors (kNN) and upsampling the predictions to full im-age resolution using nearest neighbor interpolation. Tab. 3 shows that correcting the patch embeddings boosts perfor-mance for all models. Additional details and results for Pas-calVOC [18] are given in App. E.2. 
+
+kNN classification. To probe the degree to which in-stance information is encoded in the patch embeddings, we perform classification by weighted aggregation of patch-level kNN predictions. We use cls -attention weighted aggregation, except for the models trained without an in-7Table 3. kNN segmentation on ADE20k [52] reporting mean IoU and pixel accuracy (Acc). Correcting with SOAP improves results. 
+
+Original embeddings Corrected embeddings Pretrain Model IoU Acc IoU Acc DINOv2 ViT-B16 40.253 74.603 40.808 ↑ 0.556 74.723 ↑ 0.120 
+
+DINOv3 ViT-B16 43.849 77.943 44.575 ↑ 0.725 78.101 ↑ 0.158 
+
+iBOT ViT-B16 27.726 70.859 28.426 ↑ 0.700 71.262 ↑ 0.403 
+
+CAPI ViT-L14 31.382 71.626 31.637 ↑ 0.255 71.770 ↑ 0.144 
+
+MAE ViT-B16 11.882 58.002 12.651 ↑ 0.769 58.592 ↑ 0.591 
+
+I-JEPA ViT-H14 20.952 60.273 21.258 ↑ 0.306 60.287 ↑ 0.014 
+
+DINO ViT-B16 21.208 66.478 21.208 0.000 66.478 0.000 
+
+> Caltech256
+> COCO
+> CUB
+> PascalVOC2012
+> IN1k
+
+Caltech256 
+
+COCO 
+
+CUB 
+
+PascalVOC2012 
+
+IN1k 
+
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+1.0
+
+·10 −2
+
+dcos 
+
+Figure 9. Cosine distance between SI-scores for DINOv2 using various datasets for semantically informative images. The low val-ues in (.0025 , . 0032) indicate that the SI-score is consistent across datasets. 
+
+stance objective (CAPI, MAE, I-JEPA), where we aggregate weighted by patch-prediction entropy instead. More details are given in App. E. We compare top-1 and top-5 accuracies on ImageNet [17]. The results in Tab. 4 show improvements after correcting for invariant components, although the ben-efit is in general less than for dense tasks. This is expected, as classification is not as reliant on local semantics and is therefore less affected by positional noise. 
+
+4.3. Ablations 
+
+SI-score sensitivity to dataset choice. To probe the SI-score sensitivity to dataset choice, we ablate over Cal-tech256 [19], COCO-Stuff164k [23], CUB200 [43], PAS-CAL VOC [18], and ImageNet [17] using DINOv2 as the backbone. We calculate the cosine distance between the score vectors over the D = 768 components. We observe that the distances are low (between 0.0025 and 0.0032 ), which means that the scores for each component remain consistent despite using different datasets with different dis-tributions and of various sizes to instantiate semantically in-formative input. This indicates that the SI-score is not sen-sitive to dataset choice. We show the SI-score distance for each pair of datasets in Fig. 9. 
+
+Table 4. Weighted kNN classification on ImageNet [17] by ag-gregating patch predictions. We compare original vs. SOAP-corrected embeddings across backbones. 
+
+Original embeddings Corrected embeddings Pretrain Model Acc@1 Acc@5 Acc@1 Acc@5 DINOv2 ViT-B16 82.32 96.29 82.59 ↑ 0.27 96.30 ↑ 0.01 
+
+DINOv3 ViT-B16 81.47 95.57 81.48 ↑ 0.01 95.59 ↑ 0.01 
+
+iBOT ViT-B16 71.45 90.03 71.60 ↑ 0.15 90.10 ↑ 0.07 
+
+CAPI † ViT-L14 70.81 91.09 71.25 ↑ 0.43 91.33 ↑ 0.24 
+
+MAE † ViT-B16 59.30 81.49 60.62 ↑ 1.32 82.38 ↑ 0.89 
+
+I-JEPA † ViT-H14 75.68 91.70 75.89 ↑ 0.21 91.76 ↑ 0.06 
+
+DINO ViT-B16 66.08 86.13 66.08 0.00 86.13 0.00 †Aggregation weighted by entropy for models with no class token objective; otherwise weighted by class attention. 
+
+Table 5. Ablation on the scaling function in Eq. (8), evaluated on kNN classification of average pooled patch embeddings on Ima-geNet [17].                                
+
+> SOAP without scaling SOAP with scaling Pretrain Model kNN Acc@1 kNN Acc@5 kNN Acc@1 kNN Acc@5 DINOv2 ViT-B16 77.068 91.588 77.102 91.635 DINOv3 ViT-B16 76.354 91.306 76.588 91.612 iBOT ViT-B16 59.194 79.610 59.498 79.918 CAPI ViT-L14 55.720 76.950 56.444 77.742 MAE ViT-B16 47.596 69.108 47.758 69.442 I-JEPA ViT-H14 71.422 86.112 71.390 86.168
+
+Use of scaling function. We ablate the necessity of fil-tering the SI-scores with the scaling function from Eq. (8), by evaluating on kNN classification of the average pooled patch embeddings on ImageNet [17]. The details of the evaluation method are given in Sec. E.3.2. The results in Tab. 5 show that applying SOAP without scaling the SI-scores can reduce performance. Evaluating on salient seg-mentation shows the same result; see Tab. D.1. We posit that this is because too many components are suppressed when the scores are not scaled in the projection, resulting in detrimental information loss. While the SI-score allows us to identify the most semantically invariant components, the raw scores remain too high for the remaining components, unnecessarily dampening their contribution. 
+
+Comparison with RASA. We compare SOAP with RASA by correcting the patch embeddings from Franca using pretrained RASA weights from Venkataramanan et al.’s [36] work. The results in Tab. 6 show that SOAP yields higher performance. We argue that the significant improvement stems from SOAP correcting non-semantic noise directly, while RASA has to learn the positional cues to remove. We also note that RASA requires training 9
+
+linear layers of dimension D × 2 (D = 768 for ViT-B), while SOAP is simpler , requires no training , and can be 
+
+attached to any model as a single D × D linear head. 8Table 6. Comparing SOAP with RASA on Franca ViT-B/14 for zero-shot salient segmentation on ECSSD [46] and kNN classifi-cation on ImageNet [17].                   
+
+> ECSSD (Sal. Seg) IN1k (kNN cls.) Method max FβIoU Acc. Acc@1 Acc@5 Franca 71.615 64.899 83.982 64.920 85.872 Franca + RASA 68.220 68.220 85.935 64.890 85.886
+> Franca + SOAP 84.176 76.985 91.514 65.084 86.006
+
+## 5. Discussion 
+
+Our analysis indicates a tendency for MIM to “cheat” to per-form the matching of masked tokens by dedicating capacity to patch location cues. Furthermore, Fig. 4 shows that this happens in both latent and reconstructive MIM. The results are not totally unexpected; the reconstruction objective re-quires positional information to perform the task to some extent. However, we note that latent MIM models exhibit this property with or without additive positional encoding, such as for DINOv3. The models learn to dedicate capac-ity to non-semantic information. This makes sense if we consider how much this actually helps the MIM objective; by being able to correctly select the patch position in the image, the search is reduced by a ratio of Hz × Wz . For a ViT-B/14 model, this results in a reduction of ×256 , sig-nificantly improving the loss of the model. While MIM im-proves performance on dense objectives, it does so at a cost .The importance and severity of this positional noise is cor-roborated by several works [16, 37, 48]. Our method shows that the problem is pervasive for MIM models, and does not meaningfully occur in non-MIM models .
+
+Limitations and Further Work. We restrict evaluation to raw patch embeddings; both kNN and TokenCut operate directly on the representations without additional projec-tions or heads. This is a conscious choice, as further trans-formations would confound the effect of SOAP with that of the evaluation model itself, which is beyond the scope of the current work. An avenue for future work is to study how SOAP interacts with more elaborate evaluation proto-cols. Lastly, the linear assumption as a mixture of sources (Sec. 3.2) is a simplification, but given our empirical results, this assumption seems to at least partially hold. 
+
+## 6. Conclusion 
+
+We demonstrate that masked image modeling (MIM) objec-tives bias vision transformers toward encoding positional noise, corroborating our hypothesis that such noise per-sists even in inputs devoid of semantic content. This sug-gests that MIM learning signals are solved by short-cutting the intended objective of learning better local representa-tions, and while this helps solve the pretext task, it reduces zero-shot generalization and semantic fidelity. To diag-nose and address this issue, we introduce a Semantic Invari-ance Score and the lightweight, post-hoc denoising method SOAP, which consistently suppresses positional noise and improves downstream performance. Our findings highlight a fundamental trade-off in MIM and offer practical tools for building more semantically robust self-supervised models. 
+
+## Acknowledgments 
+
+This work was funded by RCN (the Research Council of Norway) through Visual Intelligence, Centre for Research-based Innovation (309439), and in part by the RCN–NRF (National Research Foundation of Korea) joint project AU-RoRA (359216, RS-2025-03522980). We acknowledge Sigma2 (Project NN8104K) for access to the LUMI su-percomputer, owned by the EuroHPC Joint Undertaking, hosted by CSC (Finland) and the LUMI consortium through Sigma2, Norway. 
+
+## References 
+
+[1] Benedikt Alkin, Lukas Miklautz, Sepp Hochreiter, and Jo-hannes Brandstetter. MIM-Refiner: A Contrastive Learning Boost from Intermediate Pre-Trained Representations. In In-ter. Conf. Learn. Represent. (ICLR) , 2025. 1 [2] Mahmoud Assran, Quentin Duval, Ishan Misra, Piotr Bo-janowski, Pascal Vincent, Michael Rabbat, Yann LeCun, and Nicolas Ballas. Self-Supervised Learning from Images with a Joint-Embedding Predictive Architecture. In IEEE/CVF Inter. Conf. Comput. Vis. Pattern Recog. (CVPR) , 2023. 2, 5, 1[3] Alexei Baevski, Wei-Ning Hsu, Qiantong Xu, Arun Babu, Jiatao Gu, and Michael Auli. data2vec: A General Frame-work for Self-Supervised Learning in Speech, Vision and Language. In Inter. Conf. Mach. Learn. (ICML) , 2022. 1 [4] Hangbo Bao, Li Dong, and Furu Wei. BEiT: BERT Pre-Training of Image Transformers. In Inter. Conf. Learn. Rep-resent. (ICLR) , 2022. 2 [5] Amir Bar, Florian Bordes, Assaf Shocher, Mido Assran, Pas-cal Vincent, Nicolas Ballas, Trevor Darrell, Amir Glober-son, and Yann Lecun. Stochastic Positional Embeddings im-prove Masked Image Modeling. In Inter. Conf. Mach. Learn. (ICML) , 2024. 1, 2, 4 [6] Adrien Bardes, Quentin Garrido, Jean Ponce, Xinlei Chen, Michael Rabbat, Yann LeCun, Mahmoud Assran, and Nico-las Ballas. Revisiting Feature Prediction for Learning Vi-sual Representations from Video. Trans. Mach. Learn. Res. ,2024. 6 [7] Matt A. Bernstein, Sean B. Fain, and Stephen J. Riederer. Effect of Windowing and Zero-Filled Reconstruction of MRI Data on Spatial Resolution and Acquisition Strategy. Journal of Magnetic Resonance Imaging , 14(3):270–280, 2001. 5 [8] Elisabeth C. Caparelli and Dardo Tomasi. K-space Spatial Low-pass Filters Can Increase Signal Loss Artifacts in Echo-Planar Imaging. Biomedical Signal Processing and Control ,3(1):107–114, 2008. 5 
+
+9[9] Aaron Carass, Snehashis Roy, Adrian Gherman, Jacob C Reinhold, Andrew Jesson, Tal Arbel, Oskar Maier, Heinz Handels, Mohsen Ghafoorian, Bram Platel, et al. Evaluating White Matter Lesion Segmentations with Refined Sørensen-Dice Analysis. Scientific reports , 10(1):8242, 2020. 4 [10] Mathilde Caron, Ishan Misra, Julien Mairal, Priya Goyal, Pi-otr Bojanowski, and Armand Joulin. Unsupervised Learning of Visual Features by Contrasting Cluster Assignments. In 
+
+Adv. Neural Inf. Process. Sys. (NeurIPS) , 2020. 2 [11] Mathilde Caron, Hugo Touvron, Ishan Misra, Hervé Jégou, Julien Mairal, Piotr Bojanowski, and Armand Joulin. Emerg-ing Properties in Self-Supervised Vision Transformers. In 
+
+IEEE Inter. Conf. Comput. Vis. (ICCV) , 2021. 1, 2, 5, 6 [12] Ting Chen, Simon Kornblith, Mohammad Norouzi, and Ge-offrey Hinton. A Simple Framework for Contrastive Learn-ing of Visual Representations. In Inter. Conf. Mach. Learn. (ICML) , 2020. 1 [13] Xinlei Chen and Kaiming He. Exploring Simple Siamese Representation Learning. In IEEE/CVF Inter. Conf. Comput. Vis. Pattern Recog. (CVPR) , 2021. 2 [14] Xinlei Chen, Haoqi Fan, Ross Girshick, and Kaiming He. Improved Baselines with Momentum Contrastive Learning. 
+
+arXiv preprint , 2020. 1 [15] Timothée Darcet, Maxime Oquab, Julien Mairal, and Piotr Bojanowski. Vision Transformers Need Registers. In Inter. Conf. Learn. Represent. (ICLR) , 2024. 1, 2 [16] Timothée Darcet, Federico Baldassarre, Maxime Oquab, Julien Mairal, and Piotr Bojanowski. Cluster and Predict La-tents Patches for Improved Masked Image Modeling. Trans. Mach. Learn. Res. , 2025. 1, 2, 5, 7, 9, 8 [17] Jia Deng, Wei Dong, Richard Socher, Li-Jia Li, Kai Li, and Li Fei-Fei. ImageNet: A Large-Scale Hierarchical Image Database. In IEEE/CVF Inter. Conf. Comput. Vis. Pattern Recog. (CVPR) , 2009. 3, 4, 5, 8, 9, 6 [18] Mark Everingham, Luc Van Gool, Christopher K. I. Williams, John Winn, and Andrew Zisserman. The PASCAL Visual Object Classes Challenge 2012 (VOC2012) Results, 2012. 7, 8, 4, 5 [19] Gregory Griffin, Alex Holub, and Pietro Perona. Caltech 256, 2022. 8 [20] Jean-Bastien Grill, Florian Strub, Florent Altché, Corentin Tallec, Pierre H Richemond, Elena Buchatskaya, Carl Do-ersch, Bernardo Avila Pires, Zhaohan Daniel Guo, Moham-mad Gheshlaghi Azar, Bilal Piot, Koray Kavukcuoglu, Rémi Munos, and Michal Valko. Bootstrap (y)our Own Latent: A New Approach to Self-Supervised Learning. In Adv. Neural Inf. Process. Sys. (NeurIPS) , 2020. 2 [21] Per Christian Hansen. Discrete Inverse Problems: Insight and Algorithms . SIAM, 2010. 5 [22] Kaiming He, Xinlei Chen, Saining Xie, Yanghao Li, Piotr Dollár, and Ross Girshick. Masked Autoencoders are Scal-able Vision Learners. In IEEE/CVF Inter. Conf. Comput. Vis. Pattern Recog. (CVPR) , 2022. 1, 2, 5 [23] Tsung-Yi Lin, Michael Maire, Serge Belongie, James Hays, Pietro Perona, Deva Ramanan, Piotr Dollár, and C. Lawrence Zitnick. Microsoft COCO: Common Objects in Context. In 
+
+European Conf. Comput. Vis. (ECCV) , 2014. 8 [24] Yanbin Liu and Stephen Gould. Unsupervised Dense Pre-diction using Differentiable Normalized Cuts. In European Conf. Comput. Vis. (ECCV) , 2024. 2 [25] Huy Nguyen, Nhat Ho, and Alessandro Rinaldo. Sig-moid Gating is More Sample Efficient Than Softmax Gat-ing in Mixture of Experts. In Adv. Neural Inf. Process. Sys. (NeurIPS) , 2024. 5 [26] Maxime Oquab, Timothée Darcet, Théo Moutakanni, Huy V. Vo, Marc Szafraniec, Vasil Khalidov, Pierre Fernandez, Daniel HAZIZA, Francisco Massa, Alaaeldin El-Nouby, Mido Assran, Nicolas Ballas, Wojciech Galuba, Russell Howes, Po-Yao Huang, Shang-Wen Li, Ishan Misra, Michael Rabbat, Vasu Sharma, Gabriel Synnaeve, Hu Xu, Herve Je-gou, Julien Mairal, Patrick Labatut, Armand Joulin, and Pi-otr Bojanowski. DINOv2: Learning Robust Visual Features without Supervision. Trans. Mach. Learn. Res. , 2024. 1, 2, 5[27] Marcin Przewi˛ ezlikowski, Randall Balestriero, Wojciech Jasi´ nski, Marek ´ Smieja, and Bartosz Zieli´ nski. Beyond [cls]: Exploring the True Potential of Masked Image Modeling Representations. In IEEE Inter. Conf. Comput. Vis. (ICCV) ,2025. 1, 2 [28] Gilles Puy, Yuwei Li, Hang Xu, Andrea Scamarcio, Xin Xu, Ishan Misra, Yujun Shen, Cordelia Schmid, and Camille Couprie. Three Pillars Improving Vision Foundation Model Distillation for Lidar. In IEEE/CVF Inter. Conf. Comput. Vis. Pattern Recog. (CVPR) , 2024. 2 [29] Oriane Siméoni, Huy V. Vo, Maximilian Seitzer, Federico Baldassarre, Maxime Oquab, Cijo Jose, Vasil Khalidov, Marc Szafraniec, Seungeun Yi, Michaël Ramamonjisoa, Francisco Massa, Daniel Haziza, Luca Wehrstedt, Jianyuan Wang, Timothée Darcet, Théo Moutakanni, Leonel Sentana, Claire Roberts, Andrea Vedaldi, Jamie Tolan, John Brandt, Camille Couprie, Julien Mairal, Hervé Jégou, Patrick La-batut, and Piotr Bojanowski. DINOv3, 2025. 1, 2, 5 [30] E P Simoncelli and B A Olshausen. Natural Image Statistics and Neural Representation. Annu. Rev. Neurosci. , 24:1193– 1216, 2001. 2 [31] Yonglong Tian, Dilip Krishnan Chen, and Phillip Isola. What Makes for Good Views for Contrastive Learning? In Adv. Neural Inf. Process. Sys. (NeurIPS) , 2020. 1 [32] Hugo Touvron, Matthieu Cord, and Hervé Jégou. DeiT III: Revenge of the ViT. In European Conf. Comput. Vis. (ECCV) , 2022. 5 [33] Michael Tschannen, Alexey Gritsenko, Xiao Wang, Muham-mad Ferjad Naeem, Ibrahim Alabdulmohsin, Nikhil Parthasarathy, Talfan Evans, Lucas Beyer, Ye Xia, Basil Mustafa, Olivier Hénaff, Jeremiah Harmsen, Andreas Steiner, and Xiaohua Zhai. SigLIP 2: Multilingual vision-language encoders with improved semantic understanding, localization, and dense features. arXiv preprint , 2025. 1 [34] Grant Van Horn, Oisin Mac Aodha, Yang Song, Ying Cui, Chen Sun, Alex Shepard, Hartwig Adam, Pietro Perona, and Serge Belongie. The iNaturalist Species Classification and Detection Dataset. In IEEE/CVF Inter. Conf. Comput. Vis. Pattern Recog. (CVPR) , 2018. 5 [35] Ani Vanyan, Alvard Barseghyan, Hakob Tamazyan, Vahan Huroyan, Hrant Khachatrian, and Martin Danelljan. Analyz-
+
+10 ing Local Representations of Self-Supervised Vision Trans-formers. arXiv preprint , 2024. 2 [36] Shashanka Venkataramanan, Valentinos Pariza, Moham-madreza Salehi, Lukas Knobel, Spyros Gidaris, Elias Ramzi, Andrei Bursuc, and Yuki M. Asano. Franca: Nested Matryoshka Clustering for Scalable Visual Representation Learning. arXiv preprint , 2025. 1, 2, 8 [37] Haoqi Wang, Tong Zhang, and Mathieu Salzmann. SINDER: Repairing the Singular Defects of DINOv2. In European Conf. Comput. Vis. (ECCV) , 2024. 2, 9 [38] Lijun Wang, Huchuan Lu, Yifan Wang, Mengyang Feng, Dong Wang, Baocai Yin, and Xiang Ruan. Learning to Detect Salient Objects with Image-level Supervision. In 
+
+IEEE/CVF Inter. Conf. Comput. Vis. Pattern Recog. (CVPR) ,2017. 7, 6, 8 [39] Tongzhou Wang and Phillip Isola. Understanding Con-trastive Representation Learning through Alignment and Uniformity on the Hypersphere. In Inter. Conf. Mach. Learn. (ICML) , 2020. 1 [40] Yangtao Wang, Enze Xie, Xingyi Song, Peize Sun, Ping Luo, Wenhai Wang, Zhe Li, Tong Xu, and Changsheng Deng. Self-Supervised Transformers for Unsupervised Object Dis-covery using Normalized Cut. In IEEE/CVF Inter. Conf. Comput. Vis. Pattern Recog. (CVPR) , 2022. 2 [41] Yangtao Wang, Jie Xu, Enze Xie, Ding Liang, Ping Wang, Tong Lu, and Ping Luo. TokenCut: Segmenting Objects in Images and Videos with Self-Supervised Transformer and Normalized Cut. IEEE Trans. Pattern Anal. Mach. Intell. , 45 (12):15790–15801, 2023. 5, 7, 3, 6, 8, 9 [42] Barry Payne Welford. Note on a Method for Calculating Corrected Sums of Squares and Products. Technometrics ,4(3):419–420, 1962. 3 [43] Peter Welinder, Steve Branson, Takeshi Mita, Catherine Wah, Florian Schroff, Serge Belongie, and Pietro Perona. Caltech-UCSD Birds 200. Technical Report CNS-TR-201, California Institute of Technology, 2010. 8 [44] Zhirong Wu, Yuanjun Xiong, Stella Yu, and Dahua Lin. Un-supervised Feature Learning via Non-Parametric Instance-Level Discrimination. In IEEE/CVF Inter. Conf. Comput. Vis. Pattern Recog. (CVPR) , 2018. 6 [45] Zhenda Xie, Zheng Zhang, Yue Cao, Yutong Lin, Jianwei Bao, Zhuliang Yao, Qiang Dai, Han Hu, and Guoqiang Gao. Simmim: A Simple Framework for Masked Image Model-ing. In IEEE/CVF Inter. Conf. Comput. Vis. Pattern Recog. (CVPR) , 2022. 2 [46] Qiong Yan, Li Xu, Jianping Shi, and Jiaya Jia. Hierarchical Saliency Detection. In IEEE/CVF Inter. Conf. Comput. Vis. Pattern Recog. (CVPR) , 2013. 7, 9, 3, 4 [47] Chuan Yang, Lihe Zhang, Huchuan Lu, Xiang Ruan, and Ming-Hsuan Yang. Saliency Detection via Graph-based Manifold Ranking. In IEEE/CVF Inter. Conf. Comput. Vis. Pattern Recog. (CVPR) , 2013. 7, 6, 9 [48] Jiawei Yang, Katie Z. Luo, Jiefeng Li, Congyue Deng, Leonidas Guibas, Dilip Krishnan, Kilian Q. Weinberger, Yonglong Tian, and Yue Wang. Denoising Vision Transform-ers. In European Conf. Comput. Vis. (ECCV) , 2024. 2, 9 [49] Yike Yuan, Kaicheng Cao, Yiheng He, Xiaojie Zhang, Jiaying Xu, Yichen Zhang, Ziwei Liu, and Yizhou Yu. DenseDINO: Boosting Dense Self-Supervised Learning with Token-Based Point-Level Consistency. In Inter. Joint Conf. Artif. Intell. (IJCAI) , 2023. 2 [50] Junbo Zhang and Kaisheng Ma. Rethinking the Augmen-tation Module in Contrastive Learning: Learning Hierar-chical Augmentation Invariance with Expanded Views. In 
+
+IEEE/CVF Inter. Conf. Comput. Vis. Pattern Recog. (CVPR) ,2022. 1 [51] Bolei Zhou, Hang Zhao, Xavier Puig, Sanja Fidler, Adela Barriuso, and Antonio Torralba. Scene Parsing through Ade20k Dataset. In IEEE/CVF Inter. Conf. Comput. Vis. Pat-tern Recog. (CVPR) , 2017. 7, 4, 5, 6 [52] Bolei Zhou, Hang Zhao, Xavier Puig, Tete Xiao, Sanja Fi-dler, Adela Barriuso, and Antonio Torralba. Semantic Un-derstanding of Scenes through the Ade20k Dataset. Inter. J. Comput. Vis. , 2019. 7, 8, 4, 5, 6 [53] Jinghao Zhou, Chen Wei, Huiyu Wang, Wei Shen, Cihang Xie, Alan Yuille, and Tao Kong. iBOT:Image BERT Pre-Training with Online Tokenizer. In Inter. Conf. Learn. Rep-resent. (ICLR) , 2022. 1, 2, 5 
+
+11 Appendix 
+
+## A. Self-Supervised Objectives 
+
+Contrastive Learning. In this work, we focus on the contrastive self-distillation objective as presented in Caron et al. [11]. Given an image x, two random augmentations are applied yielding the views u, v . The views are sent through a teacher-student framework giving p = fθ (v) ∈
+
+Rd and q = fˆθ (u) ∈ Rd, where θ and ˆθ denote the teacher and student weights, respectively. The loss minimizes the cross-entropy 
+
+LCLS = −q⊤ log p. (A.1) Importantly, this loss is applied on the global representa-tions, given by the CLS token in ViTs. The teacher and student share the same architecture, comprising a backbone and a projection head for the global representation. The teacher is updated as an exponential moving average of the student. 
+
+Masked Image Modeling. The core idea of the MIM ob-jective is to reconstruct masked parts of an image when given visible parts as context. While the masking strategy varies between the MIM-based methods, the general setup can be summarized as follows. The input x is obscured by a random mask m and passed through an encoder to give a context z = f (m(x)) with which to make a prediction 
+
+ˆs = g(z) about the unmasked image x. The prediction can be made in the pixel space or in the latent space where the target s is given by passing x through the encoder. The loss is 
+
+LMIM = ℓ(ˆ s, s ) (A.2) where ℓ is the mean squared error [22], euclidean dis-tance [2] or negative cross entropy [16, 26, 29, 53]. Notably, several frameworks [26, 29, 53] employ a combination of contrastive loss over the global CLS -tokens in a multi-view setup with a local MIM-based loss over masked patch to-kens. 
+
+## B. Details on Activation and Distributions 
+
+In this section, we elaborate on the details of responses, activations, and distributions. As explained in the main text, we compute responses for all images in the dataset for each principal component. We binarize the activations, and compute the token-wise empirical distributions as indi-vidual Bernoulli distributions for each token in the image, 
+
+Pd,n from Section 3.3. As an ensemble, this can be taken as       
+
+> Figure B.1. The relation of soft responses of DINOv2 to PC 1in Figure 2 (left), compared with the multinomial distribution of ac-tivations P1from Figure 4 and Section 3.3 (right). The responses are binarized, and the probability distribution P1is computed as a multinomial distribution over all tokens in the image.
+
+Pd ∼ Multinomial(2 , N ), forming a full distribution over the image. Divergence measures would be a natural choice to com-pare Pd, Q d, however, we find that pure divergence mea-sures such as Jensen-Shannon yield suboptimal scores in our testing. If Pd,n = Qd,n = 0 .5, a proper divergence such as the Jensen-Shannon requires that the distributions are equal, e.g., DJS (Pd,n , Q d,n ) = 1 . However, in this case we are unsure if individual activations actually agree or not. In other words, a proper divergence yields high scores when activation maps are highly uncertain. In contrast, our proposed SI-score given in Eq. (6) yields SI (Pd,n , Q d,n ) = √0.5 for the same example, reflecting the inherent uncertainty in agreement in the two responses, and correctly identifies similar responses between real data and the non-semantic synthetic data. Figure B.1 illustrates the relation between responses and empirical estimates of the distribution. To expand on Fig. 4 in the main article, Fig. B.2 shows the top 10 principal com-ponents for each model in our study, sorted by descending SI-scores. 
+
+B.1. Form of the SI -score 
+
+When we calculate the SI-scores in Section 3.3, we do so over the multinomial distributions Pd, Q d. To clarify, we consider the inner products and norms as being taken over the support set , not the multivariate dimensions. Let Pd, Q d ∈ RN and let 1 ∈ RN . Define the augmented vectors 
+
+˜Pd = Pd, 1 − Pd
+
+ , ˜Qd = Qd, 1 − Qd
+
+ ∈ R2N .
+
+Then we calculate the scores by averaging over the multi-1(Higher SI) (Lower SI) Principal components                                       
+
+> Rank 1Rank 2Rank 3Rank 4Rank 5Rank 6Rank 7Rank 8Rank 9Rank 10
+> Real Synth Real Synth Real Synth Real Synth Real Synth Real Synth Real Synth Real Synth Real Synth Real Synth DINOv2
+> DINOv3
+> iBOT
+> MAE
+> CAPI
+> IJEPA
+> DINO
+> DeiT3
+
+Figure B.2. Distributions for the top 10 principal components, ranked by semantic invariance (SI). Real columns correspond to Pd and 
+
+Synth correspond with Qd from Section 3.3, and each column compares the activations for real images from ImageNet, and generated synthetic images. MIM models are shown in the top rows; non-MIM models in the bottom rows. MIM models exhibit higher semantic invariance than the non-MIM models, as seen by the clear positional bias in the activations. 
+
+variate dimensions, yielding 
+
+sd = SI (Pd, Q d) (B.1a) 
+
+= 1
+
+N 1⊤ 2 ⟨ ˜Pd, ˜Qd⟩∥ ˜Pd∥2 + ∥ ˜Qd∥2
+
+!
+
+, (B.1b) 
+
+= 2
+
+N
+
+X
+
+> n
+
+Pd,n Qd,n + (1 − Pd,n )(1 − Qd,n )
+
+q
+
+P 2 
+
+> d,n
+
++ (1 − Pd,n )2 +
+
+q
+
+Q2 
+
+> d,n
+
++ (1 − Qd,n )2
+
+,
+
+(B.1c) where ⟨· , ·⟩ and ∥ · ∥ 2 denotes the Euclidean inner product and norm (over the support set), respectively. 
+
+## C. Generating synthetic images 
+
+Let Ω = {1, . . . , H } × { 1, . . . , W } and X ∈ RC×H×W .For each image, draw mixture weights 
+
+w = ( w1, w 2, w 3) ∼ Dir( α1, α 2, α 3). (C.1) We generate three components independently: 1. Pink Noise : Xpink is zero-mean with isotropic power spectrum 
+
+E |F{ Xpink }(ξ)|2  ∝ ∥ ξ∥−β , ξ ∈ Z2 \ { 0},
+
+with β ≈ 2, following the power-law slope typical of natural images [30]. 2. Modulated White Noise : Xwhite = M ⊙ W , where 
+
+W i.i.d. 
+
+∼ N (0 , 1) and the nonnegative modulation M =
+
+g(P ) is a smooth field obtained from a pink process P
+
+(as above) and a bounded mapping g that sets the local standard deviation. This yields a heteroscedastic Gaus-sian field with variance σ2(x) = M (x)2 and long-range variance correlations. 3. Gradient Field : Xgrad is a random low-degree polynomial—or equivalently, a very low-pass random field—concentrating energy near ξ = 0 .Synthesized images are then given by the convex mixture 
+
+X = w1 Xwhite + w2 Xpink + w3 Xgrad . (C.2) Assuming zero mean and independence between compo-nents, the expected power spectrum of X is 
+
+SX (ξ) = E |F{ X}(ξ)|2  =
+
+> 3
+
+X
+
+> i=1
+
+E[w2 
+
+> i
+
+] SXi (ξ), (C.3) i.e., a convex combination of the components’ spectra. Simoncelli and Olshausen [30] show that natural images exhibit approximate scale invariance with a 1/∥ξ∥β law in the power spectrum (amplitude ∼ 1/∥ξ∥β/ 2), together with large-scale illumination/contrast fluctuations. In the construction above, Xpink directly imposes the 1/∥ξ∥β de-cay, giving second-order statistics aligned with natural im-age ensembles. Meanwhile, Xgrad injects additional low-frequency near-DC energy, modeling global trends and illu-mination. Finally, Xwhite introduces spatially varying con-2Figure C.1. Examples of generated synthetic non-semantic images. 
+
+trast via a pink variance field, capturing long-range correla-tions of local variance found in natural scenes. Thus SX (ξ) inherits a natural-image-like spectrum: apower-law falloff dominated by Xpink , boosted near ξ = 0 
+
+by Xgrad , and with heteroscedasticity from Xmw . We illus-trate examples of synthetic images in Fig. C.1. During testing, we also experimented with standard probability distributions such as Gaussian or Uniform noise, in addition to simple mono-colored and gradient images, which provides similar responses to our proposed synthetic data. However, we considered these less appropriate given the mismatch in frequency response, which differs signifi-cantly from natural images. Hence, we designed our synthe-sis to better match key properties of natural images without additional semantic content. 
+
+## D. Effect of the Scaling Function 
+
+The filtering of SI scores acts as a smooth low-pass filter over the PCA spectrum. We selected the Fermi window as a smooth approximation of hard truncation, due to its prece-dence as a regularizer in image reconstruction. Figure D.1 illustrates the effect of the scaling function on the SI scores. We ablate the effect of removing the scaling function in SOAP in Section 4.3, showing the downstream performance of kNN classification on the aggregated patch embeddings in Table 5. We provide additional results in Table D.1 by showing the effect for salient segmentation. We see a boost in performance by 1–9% points for all models, ex-cept DINOv2 and CAPI, which have reduced performance by < 1% . Since the majority of the SI-scores are > 0.6 for all models, projecting the representations with SOAP with-out scaling the SI-scores results in suppressing a majority of the principal components, reducing performance when useful information is encoded in any but the most semantic components. We chose to include the ablation with kNN in the main paper, as the salient segmentation task requires less fine-grained information about the patch contents, making kNN more informative as an ablation task. 
+
+## E. Evaluation Details 
+
+Throughout the paper, we provide several evaluations and experiments. In this section, we exposition some of the de-tails for each evaluation method.      
+
+> 1384 768
+> 0
+> 0.5
+> 1
+> Principal component
+> Scaling function  t
+> SI scores
+> μ=192 , τ =0 .05
+> μ=384 , τ =0 .1
+> μ=576 , τ =0 .2
+
+Figure D.1. Plot showing the effect of the scaling function, filter-ing with the Fermi window in Eq. (8), on semantic invariance (SI) scores with various choices of μ, τ . The μ parameter controls how many components are filtered, while τ controls the smoothness. Table D.1. Ablation on the scaling function in Eq. (8), evaluated on salient segmentation for ECSSD [46]. Removing the scaling function from SOAP generally leads to reduced performance.                                  
+
+> SOAP without scaling SOAP with scaling Pretrain max FβIoU Acc. max FβIoU Acc. DINOv2 81.615 73.533 89.472 80.633 72.559 88.687 DINOv3 39.867 32.426 59.745 42.633 33.742 61.975 iBOT 64.702 58.401 76.419 66.557 60.167 78.340 CAPI 85.555 78.446 93.460 85.219 78.084 92.600 MAE 73.264 62.877 85.655 82.094 72.118 91.444 I-JEPA 32.646 24.327 68.927 40.239 31.162 71.406
+
+E.1. TokenCut 
+
+We use the official TokenCut [41] implementation with their graph cut segmentation algorithm for the patch embeddings and the bilateral solver for edge-aware post-processing to refine the segmentations up to original image size. Token-Cut is a natural extension of spectral clustering and graph cuts to token representations, where patches are either clas-sified as belonging to foreground or background by taking the inner product of the Fiedler vector of a filtered Gramian matrix over the tokens. Contrary to Wang et al. [41], we find that using the final output features yields better results for all models except MAE. Our reported results are thus for the out features for all models in our study, except MAE, for which we use the key features. We set τTC = 0 .3 for all models; Table E.1 shows this setting yield better results for DINOv2 and CAPI. Otherwise, we follow original imple-mentation. 3Table E.1. Ablation over the TokenCut parameter τTC on EC-SSD [46] for DINOv2 and CAPI.                                                                       
+
+> DINOv2 ViT-B/16 CAPI ViT-L/14
+> τTC max FβIoU Acc. max FβIoU Acc. 0.2 79.037 70.033 87.720 64.927 53.906 78.027 0.3 79.803 71.751 87.953 72.456 66.083 84.334 0.4 79.177 71.708 87.655 70.604 64.627 84.139
+> Table E.2. Using salient principal components to select foreground partition in TokenCut. Results are shows for corrected embeddings after cleaning with SOAP.
+> Max. abs. val. Max. Sal. PC reponse Model Arch. max FβIoU Acc. max FβIoU Acc. DINOv2 ViT-B/14 71.461 64.129 83.292 80.633 72.559 88.687 DINOv3 ViT-B/16 33.360 25.111 46.521 42.633 33.742 61.975 iBOT ViT-B/16 64.432 57.978 80.093 66.557 60.167 78.340 CAPI ViT-L/14 74.506 68.045 86.3234 85.219 78.084 92.600 MAE ViT-B/16 80.525 70.705 90.506 82.094 72.118 91.444 Franca ViT-B/14 77.660 70.830 87.577 84.176 76.985 91.514
+
+Selecting foreground partition using salient principal components. We also observe that some principal com-ponents have a strong center bias in the activations. This can be partially explained by object center bias in the train-ing data. Comparing with the activation maps of synthetic input data in Fig. B.2 shows that in several cases the cen-ter bias is not present. This indicates that these components are responding to relative saliency or instance level correla-tions for each of the local patches, rather than an encoded positional center bias in the model. Given a principal component vd with salient activations, we can effectively determine which patches are likely to be part of the foreground or class level object. We find that we can improve zero-shot salient segmentation with Token-Cut by selecting the foreground partition based on the patch with the highest response ⟨vd, z ⟩. In contrast, TokenCut selects the patch with maximum absolute value in its fea-ture vector. The results in Table E.2 show out-of-the-box improvement across the board, where we use the strongest salient principal component to guide foreground selection for each model. We show results for all MIM models in our study, except I-JEPA which did not have a good salient prin-cipal component. We observed low performance on salient segmentation for all our experiments with I-JEPA, which suggests that the patch embeddings are not informative for this task. 
+
+E.2. kNN segmentation 
+
+We evaluate segmentation quality without any learnable pa-rameters using a patch-level k-nearest neighbor approach. We first extract patch features from all training images us-ing the frozen backbone and build a feature bank of ℓ2-normalized patch embeddings paired with their ground truth labels, obtained by downsampling the segmentation masks to the patch grid via nearest-neighbor interpolation. At evaluation time, each query patch is classified by retriev-ing its k = 30 nearest neighbors from the feature bank us-ing cosine similarity, with temperature-scaled ( τ = 0 .07 )weighted voting over the neighbor labels. This approach di-rectly probes the spatial quality of frozen patch representa-tions without introducing any learnable parameters, making it a good diagnostic for raw feature quality. In Tab. E.3 we provide additional results for PascalVOC [18], expanding the results for ADE20k [51, 52] that were reported in Tab. 3 in the main paper. 
+
+E.3. kNN classification 
+
+In this section we provide details on our kNN classifica-tion evaluation protocol. In the main article we report kNN classification by attention- and entropy-weighted aggrega-tion of patch predictions; the exact details are in Sec. E.3.1. Furthermore, we report kNN classification on the averaged patch embeddings in Sec. E.3.2 for completeness. 
+
+E.3.1. kNN classification by weighted aggregation of patch predictions 
+
+In Tab. 4 in Sec. 4.2, we evaluate frozen patch features on ImageNet [17] using a patch-level k-nearest neighbor classification protocol with k = 20 and temperature τ =0.07 . We extract patch tokens from the last layer of each frozen backbone and reduce their dimensionality to 256 
+
+using PCA. Features are ℓ2-normalized and stored in a feature bank sharded across 2 GPUs in float16 precision. Each patch in a query image retrieves its k nearest neigh-bors from the training feature bank via cosine similarity, producing per-patch class probability distributions through temperature-scaled softmax weighting. The per-patch prob-abilities are then aggregated into a single image-level pre-diction using one of two weighting schemes: 1. CLS attention weighting , which uses the attention weights from the [CLS] token in the last self-attention layer of the backbone to weight each patch’s contribu-tion, thus leveraging the model’s own learned notion of patch importance. 2. Entropy weighting , which assigns higher weight to patches whose k-NN probability distributions have lower entropy, favoring patches that yield more confi-dent predictions. We aggregate by CLS attention weighting for models trained with an instance discrimination objective (DINO, DINOv2, DINOv3, iBOT), as these methods explicitly train the [CLS] token to capture global image semantics through their contrastive or self-distillation losses, yielding mean-ingful attention distributions over patches. For models trained exclusively with a masked image modeling objec-tive (I-JEPA, MAE, CAPI), the [CLS] token is either ab-sent or not trained to aggregate global information, so its at-4Table E.3. kNN segmentation comparison of original vs. SOAP-corrected embeddings across backbones, reporting mean IoU and pixel accuracy (Acc) for the ADE20 [51, 52] and PascalVOC [18] benchmarks. 
+
+ADE20k PascalVOC Original emb. Corrected emb. Original emb. Corrected emb. Pretrain Model IoU Acc IoU Acc IoU Acc IoU Acc DINOv2 ViT-B16 40.25 74.60 40.81 ↑ 0.56 74.72 ↑ 0.12 73.34 93.74 74.07 ↑ 0.73 93.90 ↑ 0.16 
+
+DINOv3 ViT-B16 43.85 77.94 44.58 ↑ 0.73 78.10 ↑ 0.16 78.46 95.41 79.43 ↑ 0.97 95.58 ↑ 0.17 
+
+iBOT ViT-B16 27.73 70.86 28.43 ↑ 0.70 71.27 ↑ 0.40 61.10 91.25 62.16 ↑ 1.06 91.50 ↑ 0.25 
+
+CAPI ViT-L14 31.38 71.63 31.64 ↑ 0.26 71.77 ↑ 0.14 60.40 91.40 60.80 ↑ 0.40 91.50 ↑ 0.09 
+
+MAE ViT-B16 11.88 58.00 12.65 ↑ 0.77 58.60 ↑ 0.59 27.99 82.624 30.39 ↑ 2.37 83.27 ↑ 0.65 
+
+I-JEPA ViT-H14 20.95 60.27 21.26 ↑ 0.31 60.29 ↑ 0.01 57.77 89.22 58.50 ↑ 0.73 89.34 ↑ 0.13 
+
+DINO ViT-B16 21.21 66.49 21.21 0.00 66.49 0.00 47.32 88.01 47.32 0.00 88.01 0.00 
+
+Table E.4. Weighted kNN classification by aggregating patch prediction on iNat2018 [34] and ImageNet [17], expanding results from Tab. 4. We compare original vs. SOAP-corrected embeddings across backbones. 
+
+ImageNet iNat Original emb. Corrected emb. Original emb. Corrected emb. Pretrain Model Acc@1 Acc@5 Acc@1 Acc@5 Acc@1 Acc@5 Acc@1 Acc@5 DINOv2 ViT-B16 82.32 96.29 82.59 ↑ 0.27 96.30 ↑ 0.01 58.80 82.99 60.36 ↑ 1.56 83.75 ↑ 0.76 
+
+DINOv3 ViT-B16 81.47 95.57 81.48 ↑ 0.01 95.59 ↑ 0.01 58.25 79.52 58.76 ↑ 0.51 80.12 ↑ 0.60 
+
+iBOT ViT-B16 71.45 90.03 71.60 ↑ 0.15 90.10 ↑ 0.07 27.64 49.06 27.70 ↑ 0.06 49.73 ↑ 0.66 
+
+CAPI † ViT-L14 70.81 91.09 71.25 ↑ 0.43 91.33 ↑ 0.24 26.88 51.18 27.64 ↑ 0.76 52.25 ↑ 1.07 
+
+MAE † ViT-B16 59.30 81.49 60.62 ↑ 1.32 82.38 ↑ 0.89 16.43 31.36 19.12 ↑ 2.70 36.61 ↑ 5.25 
+
+I-JEPA † ViT-H14 75.68 91.70 75.89 ↑ 0.21 91.76 ↑ 0.06 17.29 35.34 18.01 ↑ 0.73 36.06 ↑ 0.72 
+
+DINO ViT-B16 66.08 86.13 66.08 0.00 86.13 0.00 24.64 44.60 24.64 0.00 44.60 0.00 †Aggregation weighted by entropy for models with no class token objective; otherwise weighted by class attention. 
+
+tention weights are not informative for patch weighting. We therefore use entropy-based aggregation for these models, which is agnostic to the pretraining objective and instead relies on the confidence of the per-patch k-NN predictions themselves. In Tab. E.4 we provide additional results for iNat2018 [34], expanding the results for ImageNet [17] that were re-ported in Tab. 4 in the main paper. 
+
+E.3.2. kNN classification on averaged patch embeddings. 
+
+We additionally perform kNN classification on Ima-geNet [17] by average pooling the patch embeddings, and matching the validation embeddings to the k nearest embed-dings from the training set. We follow the kNN evaluation script by Caron et al. [11], and set k = 20 number of neigh-bors and 0.07 temperature for the voting coefficient. We compare the top-1 and top-5 accuracies of the aver-age of the patch embeddings, and the corrected patch em-beddings. The results in Table E.5 show only modest im-provements after correcting for invariant components. This is the expected result, as instance tasks are not as reliant on local semantics, and the benefit of SOAP may be dampened by the uniform aggregation, as spatial information about the locality of patches reduces due to averaging them out. 
+
+## F. Linear evaluation protocols 
+
+Our intention with restricting evaluation to zero-shot proto-cols (TokenCut, kNN) is to measure the intrinsic fidelity of 
+
+Table E.5. kNN classification of average pooled patch embeddings on ImageNet [17]. We compare the original embeddings with the SOAP-corrected embeddings for each backbone, and report top-1 and top-5 accuracies. 
+
+Original embeddings Corrected embeddings Pretrain Model Acc@1 Acc@5 Acc@1 Acc@5 DINOv2 ViT-B16 77.064 91.624 77.100 ↑ 0.036 91.636 ↑ 0.012 
+
+DINOv3 ViT-B16 76.542 91.530 76.588 ↑ 0.046 91.612 ↑ 0.082 
+
+iBOT ViT-B16 59.170 79.612 59.498 ↑ 0.328 79.918 ↑ 0.306 
+
+CAPI ViT-L14 56.250 77.490 56.444 ↑ 0.194 77.742 ↑ 0.252 
+
+MAE ViT-B16 47.488 69.168 47.758 ↑ 0.27 69.442 ↑ 0.274 
+
+I-JEPA ViT-H14 71.382 86.144 71.390 ↑ 0.008 86.168 ↑ 0.024 
+
+DINO ViT-B16 55.216 75.740 55.216 0.000 75.740 0.000 
+
+the representations, while limiting confounding factors . As SOAP uses linear PCA, a learnable head can adapt to sup-press positional noise when this information is unhelpful for the task. Linear evaluation protocols are thus unsuitable for diagnosing positional noise, as they can adapt, uninten-tionally masking the issue. Indeed, linear probing, attentive probing, and linear segmentation yield similar results with SOAP; see Tab. F.1, Tab. F.2, and Tab. F.3. The difference in performance with and without SOAP is very low—this level of variation in performance is expected when probing with learnable heads, and the difference is thus too small to attribute any change in performance to SOAP. We describe each of these evaluation protocols in detail below. In contrast, kNN directly probes representation geometry without learned transformations, making it a faithful diag-5nostic for raw feature quality [11, 44]. This matters in prac-tice: using SSL representations out-of-the-box is common, and practitioners unaware of positional noise may encounter false positives from patch embeddings at similar relative lo-cations. 
+
+F.1. Linear evaluation. 
+
+We perform linear evaluation on the averaged patch em-beddings of the last output layer of each model on Ima-geNet [17]. We follow the standard protocol of training a single linear layer for classification on top of the frozen fea-tures for 100 epochs. We use a standard stochastic gradient descent optimizer ( SGD ) with a base learning rate of 0.001 ,momentum 0.9, cosine learning rate decay, and a batch size of 256 with 4 GPUs (effective batch size 1024 ). Following protocol, the learning rate is scaled by lr = base lr × batch size × num GPUs 
+
+256 .
+
+The results in Tab. F.1 show minor changes in performance when the embeddings are corrected with SOAP, reflecting that suppressing positional noise has little effect when the classification head is learnable. 
+
+F.2. Attentive probing. 
+
+The attentive probing protocol replaces the global average pooling of patch tokens with a learnable attention mecha-nism that computes a weighted aggregation over the patch tokens before classification [6]. Specifically, a lightweight two-layer MLP computes per-patch attention logits, which are normalized via softmax to produce attention weights over the spatial positions. The attended feature is then passed to a linear classifier. This allows the probe to selec-tively focus on the most informative patches, which is par-ticularly beneficial for methods where discriminative infor-mation is distributed across patch tokens rather than concen-trated in a single global representation. We otherwise fol-low the linear evaluation protocol, training for 100 epochs with SGD , a base learning rate of 0.0025 , momentum 0.9,cosine learning rate decay, and a batch size of 256 with 4
+
+GPUs (effective batch size 1024 ). The results in Tab. F.2 show minor changes in performance when the embeddings are corrected with SOAP, reflecting that suppressing posi-tional noise has little effect when the classification head is learnable. 
+
+F.3. Linear Segmentation. 
+
+We evaluate segmentation quality by training a linear segmentation head on top of frozen patch features on ADE20k [51, 52]. The segmentation head consists of a sin-gle 1 × 1 convolution applied to the spatial patch feature map, followed by bilinear upsampling to the original image resolution. We train with cross-entropy loss and SGD with 
+
+Table F.1. Linear evaluation protocol.                                                                  
+
+> Original embeddings Corrected embeddings Pretrain Model Acc@1 Acc@5 Acc@1 Acc@5 DINOv2 ViT-B16 81.13 96.01 81.15 ↑0.02 96.01 0.00
+> DINOv3 ViT-B16 76.77 93.89 76.76 ↓-0.01 93.90 ↑0.01
+> iBOT ViT-B16 72.89 91.37 72.93 ↑0.04 91.35 ↓-0.02
+> CAPI ViT-L14 63.09 85.41 63.17 ↑0.08 85.46 ↑0.05
+> MAE ViT-B16 50.60 74.83 50.63 ↑0.03 74.87 ↑0.04
+> I-JEPA ViT-H14 74.99 90.65 74.99 0.00 90.69 ↑0.04
+> DINO ViT-B16 66.36 86.43 66.39 ↑0.03 86.41 ↓-0.02
+
+Table F.2. Attentive probing.                                                                   
+
+> Original embeddings Corrected embeddings Pretrain Model Acc@1 Acc@5 Acc@1 Acc@5 DINOv2 ViT-B16 84.97 97.20 85.00 ↑0.03 97.22 ↑0.02
+> DINOv3 ViT-B16 83.40 96.56 83.46 ↑0.06 96.61 ↑0.05
+> iBOT ViT-B16 79.05 94.34 79.04 ↓-0.01 94.31 ↓-0.03
+> CAPI ViT-L14 81.75 95.84 81.72 ↓-0.03 95.93 ↑0.09
+> MAE ViT-B16 67.80 87.44 67.90 ↑0.10 87.47 ↑0.03
+> I-JEPA ViT-H14 77.66 92.84 77.60 ↓-0.06 92.77 ↓-0.07
+> DINO ViT-B16 72.56 90.58 72.50 ↓-0.06 90.58 0.00
+
+Table F.3. Linear segmentation.                                                              
+
+> Original embeddings Corrected embeddings Pretrain Model IoU Acc IoU Acc DINOv2 ViT-B16 47.54 80.21 47.53 ↓-0.01 80.20 ↓-0.01
+> DINOv3 ViT-B16 49.35 82.31 49.28 ↓-0.07 82.25 ↓-0.06
+> iBOT ViT-B16 35.61 75.97 35.61 ↑0.00 76.12 ↑0.15
+> CAPI ViT-L14 41.96 78.73 41.98 ↑0.02 78.55 ↓-0.18
+> MAE ViT-B16 20.43 65.10 20.52 ↑0.09 65.48 ↑0.38
+> I-JEPA ViT-H14 27.43 68.71 27.53 ↑0.10 68.77 ↑0.06
+> DINO ViT-B16 28.95 71.28 28.88 ↓-0.07 71.19 ↓-0.09
+
+momentum 0.9, polynomial learning rate decay with power 
+
+0.9, and a batch size of 32 per GPU across 4 GPUs (effective batch size 128 ) for 80 epochs. The learning rate is selected from {0.08 , 0.04 , 0.008 } based on validation mIoU for the baseline results of the original embeddings for each model. The crop size is set to be divisible by the patch size of the backbone: 512 for patch size 16 and 518 for patch size 14 .Training images are augmented with random scaling (ratio 
+
+0.5–2.0×), random cropping, and random horizontal flip-ping; validation images are resized to the crop size. We report mean intersection over union (IoU) and per pixel ac-curacy in Tab. F.3, once again showing that learnable eval-uation heads confound the effect of suppressing positional noise with SOAP. 
+
+## G. Additional salient segmentation examples 
+
+We show additional examples of salient segmentation using TokenCut [41] in Figs. G.1 and G.2, for the DUTS [38] and DUTOMRON [47] datasets, respectively. The images dis-played are from the first samples in the datasets, and were not cherry picked except to show different outcomes of us-ing SOAP in the case of DUTOMRON. We show both the 6coarse per-patch prediction maps, and the refined maps af-ter using the bilateral solver for edge aware post-processing; see App. E.1 for more TokenCut details. 7Input Raw pred. SOAP pred. Raw pred. + BS SOAP pred. + BS Ground Truth 
+
+Figure G.1. Examples of salient segmentation from DUTS [38] using TokenCut [41] with frozen CAPI [16] on the raw embeddings (Raw pred.) and after correcting with SOAP (SOAP pred.). We show the predictions per patch and after refining the segmentation maps with the bilateral solver (BS). Suppressing positional noise with SOAP either matches or improves the zero-shot saliency maps. These examples are from the first samples in the dataset. 
+
+8Input Raw pred. SOAP pred. Raw pred. + BS SOAP pred. + BS Ground Truth 
+
+Figure G.2. Examples of salient segmentation from DUTOMRON [47] using TokenCut [41] with frozen CAPI [16] on the raw embeddings (Raw pred.) and after correcting with SOAP (SOAP pred.). Suppressing positional noise with SOAP either matches or improves the zero-shot saliency maps. We show the predictions per patch and after refining the segmentation maps with the bilateral solver (BS). These examples are from the first samples in the dataset, and were not cherry picked except to show different outcomes of using SOAP. 
+
+9

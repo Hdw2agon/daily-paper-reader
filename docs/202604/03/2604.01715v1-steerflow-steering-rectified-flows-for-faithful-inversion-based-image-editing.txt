@@ -1,0 +1,1113 @@
+Title: SteerFlow: Steering Rectified Flows for Faithful Inversion-Based Image Editing
+
+URL Source: https://arxiv.org/pdf/2604.01715v1
+
+Published Time: Fri, 03 Apr 2026 00:40:47 GMT
+
+Number of Pages: 36
+
+Markdown Content:
+# SteerFlow: Steering Rectified Flows for Faithful Inversion-Based Image Editing 
+
+Thinh Dao 1,2⋆, Zhen Wang 1, Kien T.Pham 1, and Long Chen 1⋆⋆  
+
+> 1
+
+The Hong Kong University of Science and Technology, Clear Water Bay, Hong Kong  
+
+> 2
+
+VinUniversity, Ha Noi, Viet Nam 
+
+{zhenwang,longchen}@ust.hk, {dtdao,tkpham}@connect.ust.hk 
+
+Abstract. Recent advances in flow-based generative models have en-abled training-free, text-guided image editing by inverting an image into its latent noise and regenerating it under a new target conditional guidance. However, existing methods struggle to preserve source fidelity: higher-order solvers incur additional model inferences, truncated inversion constrains editability, and feature injection methods lack architectural transferability. To address these limitations, we propose SteerFlow , a model-agnostic editing framework with strong theoretical guarantees on source fidelity. In the forward process, we introduce an Amortized Fixed-Point Solver that implicitly straightens the forward trajectory by enforcing velocity consistency across consecutive timesteps, yielding a high-fidelity inverted latent. In the backward process, we introduce Tra-jectory Interpolation , which adaptively blends target-editing and source-reconstruction velocities to keep the editing trajectory anchored to the source. To further improve background preservation, we introduce an 
+
+Adaptive Masking mechanism that spatially constrains the editing signal with concept-guided segmentation and source-target velocity differences. Extensive experiments on FLUX.1-dev and Stable Diffusion 3.5 Medium demonstrate that SteerFlow consistently achieves better editing quality than existing methods. Finally, we show that SteerFlow extends naturally to a complex multi-turn editing paradigm without accumulating drift. 3
+
+## 1 Introduction 
+
+Recent Rectified Flow (RF) models have achieved state-of-the-art image genera-tion by learning a linear transport trajectory between a noise distribution ( e.g ., Gaussian distribution) and a data distribution [19, 20]. Beyond generation, pre-trained text-to-image (T2I) RF models [1, 18] have been adapted for training-free ,
+
+text-guided image editing — editing a source image to faithfully follow a target 
+
+prompt while preserving its original structure. Successful editing thus requires a delicate balance between target alignment and source consistency.  
+
+> ⋆
+
+Work done during Thinh Dao’s visiting period at HKUST.  
+
+> ⋆⋆
+
+Corresponding author.  
+
+> 3
+
+https://github.com/thinh-dao/SteerFlow.git   
+
+> arXiv:2604.01715v1 [cs.CV] 2 Apr 2026 2Dao et al.
+> Fig. 1: Comparison of SteerFlow and existing inversion-based methods. (a) Uncon-strained generation causes over-editing with loss of source structure. (b) Prior approaches, represented by UniEdit [14], either rely on computationally expensive second-order solvers, or heuristic feature injection/truncated inversion that often suffers from under-editing (as shown by the unchanged source subject) and limited architectural transfer-ability. (c) In contrast, SteerFlow presents a principled, architecture-agnostic editing framework that achieves high source-fidelity and faithful target alignment.
+
+Leveraging the learned transport between data and noise distributions, this task is commonly addressed via a two-stage process (Fig. 1 (a)): Forward Inversion maps the source image to an inverted latent in the noise distribution, and Backward Generation synthesizes the edited image from this latent under the target prompt [8, 14, 25, 30]. The quality of such editing critically depends on inversion accuracy: if the inverted latent decodes back perfectly to the source image, we can reasonably expect the target-conditioned generation to produce controlled edits with strong structural preservation. However, this editing paradigm faces two main challenges that degrade source fidelity in practice. (i) 
+
+Inversion Error: Euler discretization of the ODE introduces truncation errors at each step that result in compounded velocity mismatch between forward and backward trajectories. (ii) Trajectory Divergence: Even with a perfect inverted latent, the inherent disparity between source and target velocities can still cause the editing outcome to drift significantly from the original image. As shown in Fig. 1 (a), unconstrained generation causes the generated dog image to lose source structural information (the cat’s pose, the chair, and the table). To address (i), recent works introduce higher-order solvers [8, 21, 30] designed to reduce the order of local truncation error. While they improve inversion accuracy, they come at the cost of additional number of function evaluations (NFEs). To address (ii), a straightforward solution is truncated inversion , which halts the forward process at an intermediate timestep where source structure is still partially preserved [14, 25]. Another related approach is feature injection ,which extracts internal model representations from the source forward pass ( e.g ., attention maps [4, 9] and value features [8, 30] of select transformer blocks) and SteerFlow 3
+
+injects them into the early steps of the backward generation process. However, since these strategies are heuristic by design, they struggle to achieve consistent performance. Truncated inversion is sensitive to the choice of truncation timestep, where stopping too early causes over-editing and stopping too late causes under-editing. Feature injection requires manual tuning of which blocks to inject and for how many steps, limiting their transferability across different architectures. To address the limitations of these heuristic designs, we rigorously analyze the 
+
+inversion error and editing error of flow-based image editing. Our findings moti-vate the design of SteerFlow , a model-agnostic editing framework with strong theoretical guarantees that achieves a faithful and controllable trade-off between source fidelity and target alignment. Specifically, as shown in Fig. 1 (c), in the forward process, we bound the inversion error of Euler’s method and introduce an efficient Amortized Fixed-Point Solver that implicitly straightens the forward trajectory by enforcing velocity consistency across consecutive timesteps, thereby reducing the forward-backward velocity mismatch and minimizing inversion error. In the backward process, we justify the need for source anchoring and construct an editing velocity via Trajectory Interpolation , which adaptively blends target-editing and source-reconstruction velocities. This design addresses trajec-tory divergence, ensuring that the editing outcome preserves source structure while still satisfying the target prompt. Trajectory Interpolation naturally induces an Adaptive Masking mechanism that acts as a spatial gate on editing veloc-ity, thereby improving editing localization and background preservation. This mechanism first obtains a base mask from SAM3 [6] through the source editing tokens, and then adaptively refines it with source-target velocity differentials during the backward process to produce precise, content-aware edit boundaries. Extensive experiments on PIE-Bench [15] using FLUX.1-dev [18] and Stable Diffusion 3.5 Medium [1] demonstrate that SteerFlow consistently achieves a better trade-off between source preservation and target alignment than existing methods. Building on this foundation, we further extend SteerFlow to complex multi-turn editing, enabling iterative and compositional image modifications without accumulating significant drift from the source image. In summary, our main contributions are as follows: 1. We provide a formal analysis of Inversion Error and Trajectory Divergence, establishing error bounds that motivate our framework design and yield theoretical guarantees on source fidelity. 2. We propose SteerFlow, a principled editing framework that consists of an 
+
+Amortized Fixed-Point Solver in the forward process and Trajectory Interpolation in the backward process that altogether minimizes trajectory divergence. SteerFlow further introduces an Adaptive Masking mechanism that constrains editing leakage and improves background preservation. 3. Extensive experiments on PIE-Bench [15] show that SteerFlow outperforms existing methods in source preservation and target alignment. Furthermore, we show that SteerFlow naturally extends to multi-turn editing without accumulating drift across editing turns. 4 Dao et al. 
+
+## 2 Related Works 
+
+2.1 Inversion-Based Image Editing 
+
+Inversion-based image editing has been explored extensively for diffusion models via DDIM inversion [5,7,22,23,28]. Recent works adapt this to Rectified Flow (RF) models, exploiting their straighter transport paths to improve inversion accuracy. For example, [25] proposed controller guidance that simultaneously minimizes the deviation of the inverted latent from the noise prior and the editing output from the source image. Another line of work focuses on improving reconstruction fidelity through higher-order ODE solvers [8, 21, 30], or by refining the inverted latent with additional correction steps [14]. While these approaches can improve image reconstruction, they are not guaranteed to ensure high source consistency for image editing since they do not resolve the trajectory divergence issue between source and target velocity fields. To enforce source preservation, previous methods often employ truncated inversion, which halts the inversion process at an earlier timestep and starts the backward process from there [14, 25]. Another line of work investigates feature injection, which transfers attention features ( e.g ., Values or Attention Maps) from the forward velocities to the backward velocities, typically in the first few steps [2 –4,8,9,30,37]. However, since both approaches rely on architecture-specific heuristics ( e.g ., manual selection of injection layers or truncated steps), they lack generalization across different architectures. 
+
+2.2 Inversion-Free Image Editing 
+
+To avoid reliance on accurate inversion, recent works have explored inversion-free 
+
+editing for RF models [13, 16, 17, 31, 34]. FlowEdit [17] pioneered this direction by replacing the inverted latent with a random pairing of the source image and Gaussian noise sampled at every timestep. Although FlowEdit could maintain strong structural consistency in certain cases, the method is inherently stochastic, so the final output can vary significantly across different random seeds. Building on FlowEdit, FlowAlign [16] addresses the unstable editing trajectories inherent to inversion-free methods by introducing a terminal point regularization term that explicitly balances semantic alignment with the edit prompt and structural consistency with the source image. 
+
+SteerFlow is an inversion-based editing method that departs from previous architecture-specific heuristics by framing backward generation as a trajectory-control problem. By dynamically anchoring the editing path to the source recon-struction, we guarantee strong structural consistency and target alignment. 
+
+## 3 Preliminaries 
+
+3.1 Rectified Flow 
+
+Rectified Flow (RF) [20] is a generative framework that constructs a linear transport map from the data distribution π0 = pdata to the noise distribution SteerFlow 5
+
+π1 = N (0 , I d). Given a clean image Z0 ∼ π0 and Gaussian noise Z1 ∼ π1,RF defines a linear interpolation path Zt = tZ 1 + (1 − t)Z0 between coupled samples (Z0, Z 1) ∼ π0 × π1. The probability flow is governed by the ODE 
+
+dZ t = vθ (Zt, t ) dt , where vθ : Rd × [0 , 1] → Rd is a learnable velocity field trained with the Conditional Flow Matching (CFM) objective: 
+
+LCFM (θ) = Et∼U [0 ,1] 
+
+∥vθ (Zt, t ) − (Z1 − Z0)∥2 . (1) 
+
+Inference. For text-to-image generation, the velocity field is additionally con-ditioned on a text prompt c, yielding vθ (Zt, t, c ). Image generation is achieved by solving the ODE backward from t = 1 to t = 0 . In practice, this continuous process is approximated using a numerical solver, such as the Euler method: 
+
+Zt−∆t = Zt − vθ (Zt, t, c ) ∆t.  (2) 
+
+Classifier-Free Guidance (CFG). To enhance prompt alignment, CFG [10] scales the conditional velocity at inference: 
+
+˜vθ (Zt, t, c ) = vθ (Zt, t, ∅) + w (vθ (Zt, t, c ) − vθ (Zt, t, ∅)) , (3) where w > 1 is the guidance scale that amplifies the conditional signal. 
+
+3.2 Inversion-based Image Editing 
+
+In text-guided image editing, we start with a source image Zsrc  
+
+> 0
+
+and an optional 
+
+source prompt csrc that describes Zsrc  
+
+> 0
+
+. The goal is to transform the source image into the target image that follows the provided target prompt ctar . The editing process consists of two stages: 
+
+1. Inversion (Forward Process). The source image Zsrc  
+
+> 0
+
+is mapped to inverted latent Zsrc  
+
+> 1
+
+by integrating the ODE from t = 0 to t = 1 conditioned on the source prompt csrc . The forward process does not use CFG ( w = 1 ) to keep the latent on the data manifold: 
+
+Zsrc  
+
+> 1
+
+= Zsrc  
+
+> 0
+
++
+
+Z 10
+
+vθ (Zsrc t , t, c src ) dt (Inversion)  (4) 
+
+2. Generation (Backward Process). Starting from the inverted noise Ztar  
+
+> 1
+
+=
+
+Zsrc  
+
+> 1
+
+, we solve the reverse-time ODE from t = 1 to t = 0 conditioned on the target prompt ctar . The backward process typically uses CFG ( w > 1) to enhance prompt adherence of the edited image: 
+
+Ztar  
+
+> 0
+
+= Zsrc  
+
+> 1
+
+−
+
+Z 10
+
+˜vθ (Zt, t, c tar , w ) dt (Editing)  (5) 
+
+## 4 Methodology 
+
+4.1 Overview 
+
+In this section, we present the SteerFlow editing framework (see Fig. 2 for an overview). For both image reconstruction and editing, we derive theoretical error bounds between the output and the source image, and show that SteerFlow provably achieves tighter bounds than standard inversion-based approaches. 6 Dao et al. 
+
+Fig. 2: SteerFlow Editing Framework. Note that adaptive masking is optional. 
+
+4.2 Forward Process: Amortized Fixed-Point Solver 
+
+The primary objective of the forward process is to find an inverted latent that retains source structure so that simulating a backward ODE on this latent under the target prompt does not significantly degrade source consistency. The quality of the inverted latent is often assessed via an image reconstruction task. From Eq. (4), we solve for Zsrc  
+
+> 0
+
+with the inverted latent Zsrc  
+
+> 1
+
+:
+
+ˆZsrc  
+
+> 0
+
+= Zsrc  
+
+> 1
+
+−
+
+Z 10
+
+vθ (Zt, t, c src ) dt (Reconstruction)  (6) While this continuous integral yields exact reconstruction, it is intractable in practice. The ODE is therefore solved using Euler’s method with discretized steps: 
+
+Zti+1 = Zti + ∆t · vθ (Zti , t i), where {ti}Ni=0 represents a time schedule with t0 = 0 ,
+
+tN = 1 , and ∆t = 1 /N . This discretization introduces an asymmetry between the forward inversion and backward reconstruction processes. Specifically, at any step i, the forward latent Zti and backward latent ˆZti are computed as: 
+
+Forward Latent: Zti = Zti+1 − ∆t · vθ (Zti , t i) (7) Backward Latent: ˆZti = ˆZti+1 − ∆t · vθ ( ˆZti+1 , t i+1 ) (8) Perfect reconstruction ( ˆZti ≡ Zti ) would require the velocity field to be con-stant over the interval [ti, t i+1 ], implying a linear trajectory where vθ (Zti , t i) = SteerFlow 7
+
+vθ (Zti+1 , t i+1 ). However, due to the high-dimensional curvature of pretrained flow-based models [20], the velocity changes dynamically along the path, creating a discretization gap δi = ∥vθ (Zti , t i) − vθ (Zti+1 , t i+1 )∥. This velocity mismatch in-duces inversion error that is compounded as t → 0. We bound the final inversion error with the following proposition: 
+
+Proposition 1 (Euler Inversion Error Bound). Let vθ (z, t ) be L-Lipschitz continuous in z and have a bounded total time derivative ∥ dv θ 
+
+> dt
+
+∥ ≤ M , which represents the maximum curvature (acceleration) of the trajectory. Consider a discretization ∆t = 1 /N and ignore the higher-order error O(∆t 2). The Euler inversion error is bounded by: 
+
+Einv  
+
+> 0
+
+= ∥ ˆZt0 − Zt0 ∥ ≤ M ∆t L
+
+ (1 + L∆t )N − 1 ≤ M ∆t L (eL − 1)  (9) Prop. 1 shows that the inversion error expands at a rate of (1 + L∆t ) per step, and it depends on the maximum curvature M . If M = 0 (the path is straight), 
+
+EN = 0 . While prior higher-order methods reduce this bound to O(∆t 2) [21, 30], they do so at the cost of ×2 NFEs. In this work, we propose a new approach that reduces inversion error by 
+
+implicitly straightening the forward trajectory , which consequently re-duces the forward-backward velocity mismatch. This is achieved by enforcing a consistent velocity across consecutive timesteps. Formally, at any timestep ti, we solve for a v∗ 
+
+> i
+
+that satisfies the implicit fixed-point condition: 
+
+v∗ 
+
+> i
+
+= vθ (Zti + ∆t · v∗ 
+
+> i
+
+, t i+1 ) (10) To solve for v∗ 
+
+> i
+
+, we define an update map Φi : Rd → Rd on the velocity vi as: 
+
+vk+1  
+
+> i
+
+= Φi(vki ) = vθ (Zti + ∆t · vki , t i+1 ), (11) with v0 
+
+> i
+
+= vθ (Zti , t i) (initial condition)  (12) We note that Eq. (11) represents a fixed-point iteration, initialized with the standard Euler velocity vθ (Zti , t i). As established in Prop. 1 (App. C), when the step size ∆t < 1 
+
+> L
+
+, this update map acts as a strict contraction mapping, meaning that the local velocity mismatch strictly decreases after each iteration. However, we observe that increasing the number of fixed-point iterations K yields diminishing returns, as the reconstruction performance fluctuates rather than improves monotonically with K. We attribute this to a moving target problem :the fixed-point solver in Eq. (11) optimizes vi toward a target vi+1 estimated via a zero-step Euler iteration. If vi+1 is subsequently refined using the same procedure, the shift in the target velocity would invalidate the previous step’s optimization, leading to trajectory drift and redundant function evaluations. 
+
+Amortized Fixed-Point (AFP) Solver. Since the moving target problem stems from applying uniform iterative refinement across all timesteps, we address this by amortizing the refinement cost: we apply K iterations only at the first timestep to strictly minimize the initial velocity mismatch, and a single iteration 8 Dao et al.  
+
+> Fig. 3: An illustration of the AFP Solver with increasing iterations.
+
+at all subsequent timesteps, reusing the previous step’s velocity as the “warm-start” initial guess. Single-step iteration constrains the target movement, while the warm-start ensures temporal consistency across steps. Consequently, the total overhead is only K − 1 additional NFEs at the first timestep, compared to N (K − 1) for the standard fixed-point solver or ×2 NFEs for second-order solvers, making AFP significantly more efficient and empirically more stable. We experimentally validate this in our ablation study in App. D, where the AFP solver achieves consistently improved reconstruction across all metrics as K grows, whereas the standard fixed-point solver exhibits high variance and overall worse performance across K. Fig. 3 shows an example where increasing K progressively improves reconstruction quality, which is evidenced in the refinement of the girl’s dress. The pseudo-code for SteerFlow Forward Inversion is in Alg. 1, which returns the full forward trajectory for Trajectory Interpolation. 
+
+4.3 Backward Process: Trajectory Interpolation 
+
+With the AFP solver, we have constructed an inverted latent that addresses inversion error by minimizing the forward-backward velocity mismatch. However, this alone does not guarantee source fidelity in the edited output. In line with [11], we find that even when starting from a perfect latent which generates the source image, the edited image may still deviate significantly from the source. We attribute this to trajectory divergence , which arises from two factors: the change in textual conditioning and the application of CFG during backward generation. We formalize this as follows: 
+
+Proposition 2 (Backward Editing Error Bound). With Ztar tN = Zsrc tN , the guidance scale w for the backward process, and the same discretization of step size ∆t , the deviation between the source image and the target image can be decomposed into editing deviation and CFG deviation :
+
+Etar  
+
+> 0
+
+= ∥Ztar t0 − Zsrc t0 ∥ ≤ ∆t (|| V∆|| + ( w − 1) || VCF G || ), where (13) 
+
+V∆ =
+
+> N
+
+X
+
+> i=1
+
+vtar θ (Ztar ti ) − vsrc θ (Zsrc ti−1 ); VCF G =
+
+> N
+
+X
+
+> i=1
+
+vtar θ (Ztar ti ) − v∅ 
+
+> θ
+
+(Ztar ti ) (14) The editing deviation V∆ captures the cumulative editing direction from the source to the target image, arising from the difference between source and target SteerFlow 9
+
+text embeddings. The CFG deviation VCFG captures the cumulative effect of classifier-free guidance, which enhances prompt adherence but also amplifies divergence from the source trajectory when w > 1.Prior works [14,17] attempted to bound Eq. (13) using truncated inversion that effectively sets the backward velocity to the source-reconstruction velocity ( ˜vtar θ =
+
+vsrc θ ) for some initial timesteps. While this suppresses early error accumulation, it tends to over-constrain editability because too many truncated steps prevent the target latent from detaching from the source trajectory in later timesteps. To overcome this rigidity, we propose Trajectory Interpolation to replace the hard truncation with an adaptive blend between the target-conditioned and source-reconstruction velocities. Denote Zedit t as SteerFlow editing latent, 
+
+V tar ti = ˜vθ (Zedit ti , t i, c tar , w ) and V src ti = vθ (Zti−1 , t i−1, c src ). At time t, SteerFlow updates the editing latent Zedit t with the following editing velocity: 
+
+V edit t = V src t + αt · (V tar t − V src t ), αt ∈ [0 , 1]  (15) where αt continuously interpolates between full target-conditioned editing ( αt = 1 )and pure source reconstruction ( αt = 0 ). Importantly, we directly reuse the source-conditioned velocity vθ (Zsrc  
+
+> t
+
+, t, c src ) cached during the forward process, avoiding additional NFEs while ensuring the backward trajectory remains anchored to the ground-truth source-reconstruction path. Theoretically, our formulation of trajectory interpolation provides a tunable bound on the editing error: 
+
+Proposition 3 (SteerFlow Editing Error Bound). Let Btar  
+
+> 0
+
+be the upper bound of the error Etar  
+
+> 0
+
+from standard Euler integration ( α = 1 ). For a fixed 
+
+α ∈ (0 , 1) , the upper bound of the SteerFlow editing error Bedit  
+
+> 0
+
+satisfies: 
+
+Eedit  
+
+> 0
+
+≤ B edit  
+
+> 0
+
+< α · B tar  
+
+> 0
+
+(16) However, a constant α is not ideal since it uniformly dampens the editing signal. We therefore design an adaptive , time-decaying schedule αt that anchors the editing latent to the source trajectory in early generation steps while progressively releasing it to the target trajectory later: 
+
+αt = CosSim (V src t , V tar t ) · (1 − tγ ) t ∈ [0 , 1]  (17) where γ controls the temporal decay rate. The coefficient CosSim (V src t , V tar t )
+
+introduces directional awareness. When V tar t strongly aligns with V src t , the editing step is structurally safe, allowing a higher weight on the target velocity. When the two vectors diverge, stronger source regularization is applied to prevent structural collapse. Since the editing velocities operate in latent space with semantic information densely encoded along the channel dimension, we compute a spatial cosine similarity by evaluating the cosine similarity between channel vectors at each spatial location and averaging across the spatial grid. The pseudo-code for the SteerFlow Backward Editing process is shown in App.Alg. 2. Crucially, the AFP Solver and Trajectory Interpolation are naturally com-plementary. The divergence between forward and backward velocities is offset by one timestep (see V∆ in Eq. (14)). By enforcing velocity consistency between 10 Dao et al.  
+
+> Fig. 4: Comparison of masking strategies. No masking causes editing leakage, while using only the SAM3 mask restricts editability. SteerFlow Adaptive Mask dynamically expands the SAM3 mask to accommodate appropriate structural changes.
+
+consecutive timesteps, the AFP Solver reduces this divergence and ensures that the cached source velocities V src t and target velocities V tar t operate at the same diffusion level during interpolation. 
+
+4.4 Adaptive Masking Mechanism 
+
+While the AFP Solver and Trajectory Interpolation altogether improve global source structural fidelity, we observe that SteerFlow still suffers from editing leak-age , where unintended regions are modified alongside the target. We attribute this primarily to the limited concept-region localization inherent in pretrained generative models. Because these models struggle to precisely decouple semantic concepts from their surrounding context, editing signals driven by prompt differ-ences often bleed into the background. To address this localized failure, SteerFlow introduces an automated masking mechanism that enforces the spatial constraints the base model lacks. We leverage SAM3 [6], a concept-guided segmentation model that accepts source editing tokens ( e.g ., [cat] ) as input and outputs a spatially precise base mask for the edited region. However, relying solely on the base mask is restrictive since many editing tasks require structural change beyond mask boundaries. To address this, we propose an adaptive mask refinement procedure that expands the base mask with velocity difference ∆V = V tar − V src . This difference captures the expected editing deviation in image space induced by the generative model [17], making it suitable for mask refinement. In each backward step, the refinement synthesizes a velocity-driven mask from ∆V , merges it with the SAM3 base mask, and applies morphological closing to enforce spatial contiguity. Full details are provided in Alg. 3. Importantly, the adaptive mask 
+
+Mt integrates seamlessly into Trajectory Interpolation (Eq. (15)), yielding an editing velocity that is both temporally and spatially adaptive: 
+
+V edit t = V src t + αt · Mt ⊙ (V tar t − V src t ), αt ∈ [0 , 1] , M t ∈ [0 , 1] d (18) where αt governs the global temporal strength of the edit and Mt spatially gates the editing velocity so that background regions outside the mask are preserved. SteerFlow 11  
+
+> Fig. 5: Qualitative comparison of editing baselines and SteerFlow for various editing tasks on FLUX.1-dev model.
+
+## 5 Experiments 
+
+5.1 Implementation Details 
+
+Models and Dataset. We evaluate our method on FLUX.1-dev [18] and Stable Diffusion 3.5 Medium [1], two state-of-the-art T2I flow-based models. Following prior works [8, 14], we conduct experiments on two tasks: Image Editing (main task) and Image Reconstruction (secondary task to validate the AFP Solver). Both tasks are evaluated on PIE-Bench [15], a standard benchmark comprising 700 image-text pairs across 10 editing categories. PIE-Bench also provides object masks that we use to evaluate background preservation. 
+
+Evaluation Metrics. For Image Editing, we follow [37] and assess performance across three dimensions. Image Quality is measured by HPSv2 [35] and 
+
+Aesthetic Score (AS) [27], which quantify perceptual fidelity and visual quality. 
+
+Source Preservation is evaluated via DinoDist [29] for global structural 12 Dao et al. 
+
+Table 1: Quantitative comparison on PIE-Bench using FLUX.1-dev and SD3.5-Medium. 
+
+Bold indicates best, underline second best. DinoDist, LPIPS, SSIM, and HPSv2 are scaled ×10 2 for readability. For SD3.5, UniEdit uses N = 30 steps (default is 15) to be comparable to other methods. SteerFlow uses K = 1 optimization steps.                                                                                                                                                                   
+
+> Method NFE ↓Rank ↓Source Preservation Target Alignment Image Quality
+> DinoDist ↓LPIPS ↓SSIM ↑PSNR ↑CLIP ↑ImgRew ↑HPSv2 ↑AS ↑
+> FLUX.1-dev
+> Inversion-Free Methods
+> FlowEdit [17] 48 3.62 2.61 10.50 84.04 22.37 25.27 0.654 28.78 6.74
+> Inversion-Based Methods
+> ODE Inv 30 4.50 10.38 30.64 64.98 14.52 26.67 1.275 31.25 6.98
+> RF-Inversion [25] 58 6.62 4.10 17.43 70.84 20.54 24.62 0.399 27.85 6.74 FireFlow [8] 32 5.00 2.77 12.63 82.73 23.29 25.13 0.647 28.09 6.67 RF-Solver [30] 60 5.00 3.07 13.66 81.62 22.82 25.20 0.665 28.14 6.65 UniEdit [14] 28 4.62 0.98 5.65 90.92 29.62 25.08 0.374 26.05 6.28
+> SteerFlow (w/o mask) 31 3.38 2.41 10.80 84.05 23.00 25.44 0.682 28.57 6.60
+> SteerFlow 31 3.25 1.61 4.66 91.38 27.66 25.31 0.651 28.13 6.59
+> SD3.5-Medium
+> Inversion-Free Methods
+> FlowEdit [17] 66 3.75 3.97 10.11 82.59 22.10 26.65 1.088 28.11 6.71 FlowAlign [16] 66 4.38 3.06 6.44 86.83 24.69 25.61 0.722 24.97 6.27
+> Inversion-Based Methods
+> ODE Inv 60 3.50 12.42 33.21 63.11 13.13 27.60 1.322 29.29 6.73
+> UniEdit [14] 55 3.75 2.12 9.54 86.47 25.41 25.97 0.869 27.19 6.40
+> SteerFlow (w/o mask) 61 3.12 2.74 11.76 83.84 22.86 26.86 1.095 28.78 6.54
+> SteerFlow 61 2.50 1.82 5.09 90.38 26.92 26.35 0.976 28.03 6.52
+
+consistency, and LPIPS, SSIM, and PSNR computed on unedited background regions for background preservation. Target Alignment is measured by CLIP Score [24] for semantic adherence to the target prompt, and ImageReward [33] for human preference alignment. For Image Reconstruction, we follow [8, 14] and measure MSE , PSNR [12], SSIM [32], and LPIPS [36] to quantify fidelity between the source and reconstructed images. To summarize overall performance across methods, we report the average rank ( Rank ) computed over all metrics. 
+
+Baselines. We evaluate SteerFlow against two categories of baselines: (1) Inversion-Based : ODE Inv (naive ODE inversion), RF-Inversion [25], FireFlow [8], RF-Solver [30], and UniEdit [14]; (2) Inversion-Free : FlowEdit [17] and FlowAlign [16]. For Image Editing, we retain each method’s originally reported configurations, as different methods exhibit varying sensitivities to hyperparameters such as guidance scale and truncation timestep. For Image Reconstruction, we standardize the number of integration steps across all methods, fixing N = 15 for FLUX and 
+
+N = 30 for SD3.5. All baselines are evaluated using their official implementations where available; as not all methods provide open-source support for both models, some comparisons are limited to a single architecture. 
+
+5.2 Experiment Results 
+
+Image Editing. In Tab. 1, we report results for both SteerFlow and SteerFlow (w/o mask) to isolate the contribution of adaptive masking and to promote fair comparison with prior methods that do not incorporate masking. Even SteerFlow 13 
+
+Table 2: Quantitative comparison on image reconstruction. Bold indicates the best performance, and underline indicates the second best. LPIPS, SSIM, and MSE are scaled ×10 2 for readability. SteerFlow uses K = 8 optimization steps.                                                                                                                 
+
+> Model Method Rank ↓Conditional Reconstruction Unconditional Reconstruction
+> PSNR ↑LPIPS ↓SSIM ↑MSE ↓PSNR ↑LPIPS ↓SSIM ↑MSE ↓
+> FLUX.1-dev (N= 15 )ODE Inv 5.00 15.32 41.11 55.97 3.52 15.65 48.04 48.11 3.08 RF-Solver [30] 3.38 19.32 20.80 73.34 2.13 19.39 21.47 72.01 1.80 FireFlow [8] 1.62 20.45 17.93 75.83 1.67 20.26 19.65 74.12 1.58
+> UniEdit [14] 3.25 19.51 18.66 76.12 3.27 18.98 21.21 73.12 2.06
+> SteerFlow 1.75 20.26 15.99 78.83 2.60 19.63 17.70 76.84 1.91 SD3.5-Medium (N= 30 )ODE Inv 5.00 15.80 51.38 47.66 3.25 13.60 59.48 41.08 4.97 RF-Solver [30] 4.00 18.06 41.99 53.88 2.04 15.51 48.68 46.96 3.27 FireFlow [8] 3.00 23.48 16.84 77.03 0.86 17.53 30.16 64.22 2.27 UniEdit [14] 1.25 24.28 10.09 82.35 0.56 20.29 16.69 73.81 1.27 SteerFlow 1.75 24.25 10.18 82.27 0.58 20.24 16.67 73.81 1.28
+
+without adaptive masking, SteerFlow still achieves the best overall rankings across both models, balancing source preservation and target alignment better than all evaluated methods. Naive ODE inversion achieves the highest target alignment and image quality scores but the worst source preservation, which is expected since it applies no source preservation constraints. UniEdit achieves competitive source preservation but at the cost of constrained editability, owing to its reliance on truncated inversion with a high truncation ratio. On FLUX.1-dev, second-order methods such as RF-Solver and FireFlow offer better editability but exhibit weaker source consistency. The ablation between SteerFlow and SteerFlow (w/o mask) demonstrates that adaptive masking substantially improves source preservation with only a minor reduction in target alignment. These quantitative results are strongly reflected through qualitative visualizations in Fig. 5. 
+
+Image Reconstruction. As shown in Tab. 2, method rankings vary considerably across architectures. For instance, FireFlow ranks first on FLUX but drops to third on SD3.5, while UniEdit ranks first on SD3.5 but fourth on FLUX. In contrast, SteerFlow consistently ranks second across both models, demonstrating strong cross-architecture transferability. Notably, on FLUX, SteerFlow achieves the best perceptual quality, ranking first in LPIPS and SSIM for both conditional and unconditional reconstruction. On SD3.5, SteerFlow closely matches the top-performing UniEdit across all metrics, while outperforming all other baselines by a significant margin. Qualitative results are shown in the appendix. 
+
+## 6 Extension to Multi-Turn Image Editing 
+
+Multi-turn image editing involves applying a sequence of edits such that each subsequent outcome remains consistent with prior turns. Existing inversion-based methods struggle in this setting, as accumulated differences in textual embeddings across turns cause significant drift from the source image. In contrast, SteerFlow naturally extends to this paradigm by updating the source-anchoring trajectory with the editing trajectory from the previous turn. This requires only 14 Dao et al.  
+
+> Fig. 6: Multi-turn image editing with SteerFlow. Each turn applies one of three edit operations: object replacement, attribute modification, object addition.
+
+N additional NFEs per subsequent instruction while guaranteeing that each new output does not deviate significantly from the previous one. We find that progressively decreasing γ in the edit coefficient (Eq. (17)) after each editing turn effectively constrains accumulated drift. In turns where new objects are edited (last row of Fig. 6), the SAM3 base mask should be updated with the corresponding object concept. Some qualitative results are shown in Fig. 6. 
+
+## 7 Conclusion 
+
+This paper presented SteerFlow, a principled inversion-based image editing framework with theoretical guarantees on source fidelity. Grounded in our analysis of reconstruction and editing error bounds, SteerFlow introduces an Amortized Fixed-Point Solver that implicitly straightens the forward trajectory to minimize inversion error, and Trajectory Interpolation that adaptively anchors editing trajectories to the source to minimize trajectory divergence. SteerFlow further improves editing localization with Adaptive Masking, which iteratively refines a base SAM3 mask using source-target velocity differences. Extensive experiments on FLUX.1-dev and SD3.5-Medium demonstrate that SteerFlow consistently achieves the best trade-off between source preservation and target alignment, outperforming state-of-the-art inversion-based and inversion-free methods. SteerFlow 15 
+
+## References 
+
+1. AI, S.: Stable diffusion 3.5 medium. https://huggingface.co/stabilityai/ stable-diffusion-3.5-medium (2024) 1, 3, 11 2. Avrahami, O., Patashnik, O., Fried, O., Nemchinov, E., Aberman, K., Lischinski, D., Cohen-Or, D.: Stable flow: Vital layers for training-free image editing. arXiv preprint arXiv:2411.14430 (2024) 4 3. Brack, M., Friedrich, F., Kornmeier, K., Tsaban, L., Schramowski, P., Kersting, K., Passos, A.: Ledits++: Limitless image editing using text-to-image models. In: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition. pp. 8861–8870 (2024) 4 4. Cao, M., Wang, X., Qi, Z., Shan, Y., Qie, X., Zheng, Y.: Masactrl: Tuning-free mu-tual self-attention control for consistent image synthesis and editing. In: Proceedings of the IEEE/CVF International Conference on Computer Vision. pp. 22560–22570 (2023) 2, 4 5. Cao, M., Wang, X., Qi, Z., Shan, Y., Qie, X., Zheng, Y.: Masactrl: Tuning-free mutual self-attention control for consistent image synthesis and editing. In: Pro-ceedings of the IEEE/CVF International Conference on Computer Vision (ICCV). pp. 22560–22570 (October 2023) 4 6. Carion, N., Gustafson, L., Hu, Y.T., Debnath, S., Hu, R., Suris, D., Ryali, C., Alwala, K.V., Khedr, H., Huang, A., Lei, J., Ma, T., Guo, B., Kalla, A., Marks, M., Greer, J., Wang, M., Sun, P., Rädle, R., Afouras, T., Mavroudi, E., Xu, K., Wu, T.H., Zhou, Y., Momeni, L., Hazra, R., Ding, S., Vaze, S., Porcher, F., Li, F., Li, S., Kamath, A., Cheng, H.K., Dollár, P., Ravi, N., Saenko, K., Zhang, P., Feichtenhofer, C.: Sam 3: Segment anything with concepts (2025), https://arxiv.org/abs/2511.16719 
+
+3, 10 7. Couairon, G., Verbeek, J., Schwenk, H., Cord, M.: Diffedit: Diffusion-based semantic image editing with mask guidance. In: The Eleventh International Conference on Learning Representations (2023), https://openreview.net/forum?id=3lge0p5o-M- 48. Deng, Y., He, X., Mei, C., Wang, P., Tang, F.: Fireflow: Fast inversion of rectified flow for image semantic editing (2024), https://arxiv.org/abs/2412.07517 2, 4, 11, 12, 13 9. Hertz, A., Mokady, R., Tenenbaum, J., Aberman, K., Pritch, Y., Cohen-Or, D.: Prompt-to-prompt image editing with cross attention control. arXiv preprint arXiv:2208.01626 (2022) 2, 4 10. Ho, J., Salimans, T.: Classifier-free diffusion guidance. In: NeurIPS 2021 Work-shop on Deep Generative Models and Downstream Applications (2021), https: //openreview.net/forum?id=qw8AKxfYbI 511. Huberman-Spiegelglas, I., Kulikov, V., Michaeli, T.: An edit friendly ddpm noise space: Inversion and manipulations. In: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition. pp. 12469–12478 (2024) 8 12. Huynh-Thu, Q., Ghanbari, M.: Scope of validity of psnr in image/video quality assessment. Electronics letters 44 (13), 800–801 (2008) 12 13. Jiang, Y., Wang, Z., Wang, Y., Yu, J., Zhuang, Y., Xiao, J., Chen, L.: Flowdc: Flow-based decoupling-decay for complex image editing (2025), https://arxiv. org/abs/2512.11395 414. Jiao, G., Huang, B., Wang, K.C.J., Liao, R.: Uniedit-flow: Unleashing inversion and editing in the era of flow models. In: The Fourteenth International Conference on Learning Representations (2026), https://openreview.net/forum?id=ArU2CeB7Tm 
+
+2, 4, 9, 11, 12, 13, 35 16 Dao et al. 15. Ju, X., Zeng, A., Bian, Y., Liu, S., Xu, Q.: Pnp inversion: Boosting diffusion-based editing with 3 lines of code. International Conference on Learning Representations (ICLR) (2024) 3, 11 16. Kim, J., Hong, Y., Park, J., Ye, J.C.: Flowalign: Trajectory-regularized, inversion-free flow-based image editing (2025), https://arxiv.org/abs/2505.23145 4, 12, 35 17. Kulikov, V., Kleiner, M., Huberman-Spiegelglas, I., Michaeli, T.: Flowedit: Inversion-free text-based editing using pre-trained flow models. In: Proceedings of the IEEE/CVF International Conference on Computer Vision. pp. 19721–19730 (2025) 4, 9, 10, 12 18. Labs, B.F.: FLUX.1-dev. https://huggingface.co/black-forest-labs/FLUX.1-dev (2024) 1, 3, 11 19. Lipman, Y., Chen, R.T., Ben-Hamu, H., Nickel, M., Le, M.: Flow matching for generative modeling. arXiv preprint arXiv:2210.02747 (2022) 1 20. Liu, X., Gong, C., Liu, Q.: Flow straight and fast: Learning to generate and transfer data with rectified flow. arXiv preprint arXiv:2209.03003 (2022) 1, 4, 7 21. Ma, Y., Di, D., Liu, X., Chen, X., Fan, L., Chen, W., Su, T.: Adams bashforth moulton solver for inversion and editing in rectified flow (2025), https://arxiv. org/abs/2503.16522 2, 4, 7 22. Miyake, D., Iohara, A., Saito, Y., Tanaka, T.: Negative-prompt inversion: Fast image inversion for editing with text-guided diffusion models. arXiv preprint arXiv:2305.16807 (2023) 4 23. Mokady, R., Hertz, A., Aberman, K., Pritch, Y., Cohen-Or, D.: Null-text in-version for editing real images using guided diffusion models. arXiv preprint arXiv:2211.09794 (2022) 4 24. Radford, A., Kim, J.W., Hallacy, C., Ramesh, A., Goh, G., Agarwal, S., Sastry, G., Askell, A., Mishkin, P., Clark, J., Krueger, G., Sutskever, I.: Learning transferable visual models from natural language supervision. In: Meila, M., Zhang, T. (eds.) Proceedings of the 38th International Conference on Machine Learning. Proceedings of Machine Learning Research, vol. 139, pp. 8748–8763. PMLR (18–24 Jul 2021), 
+
+https://proceedings.mlr.press/v139/radford21a.html 12 25. Rout, L., Chen, Y., Ruiz, N., Caramanis, C., Shakkottai, S., Chu, W.S.: Semantic image inversion and editing using rectified stochastic differential equations. In: The Thirteenth International Conference on Learning Representations (2025), 
+
+https://openreview.net/forum?id=Hu0FSOSEyS , proceedings track 2, 4, 12 26. Saini, S., Gupta, S., Bovik, A.: Rectified CFG++ for flow based models. In: The Thirty-ninth Annual Conference on Neural Information Processing Systems (2025), 
+
+https://openreview.net/forum?id=NosdT1FHPv 33 27. Schuhmann, C., Beaumont, R., Vencu, R., Gordon, C., Wightman, R., Cherti, M., Coombes, T., Katta, A., Mullis, C., Wortsman, M., Schramowski, P., Kundurthy, S., Crowson, K., Schmidt, L., Kaczmarczyk, R., Jitsev, J.: Laion-5b: An open large-scale dataset for training next generation image-text models. In: Koyejo, S., Mohamed, S., Agarwal, A., Belgrave, D., Cho, K., Oh, A. (eds.) Advances in Neural Information Processing Systems. vol. 35, pp. 25278–25294. Curran Associates, Inc. (2022), https://proceedings.neurips.cc/paper_files/paper/2022/file/ a1859debfb3b59d094f3504d5ebb6c25-Paper-Datasets_and_Benchmarks.pdf 11 28. Song, J., Meng, C., Ermon, S.: Denoising diffusion implicit models. arXiv preprint arXiv:2010.02502 (2020) 4 29. Tumanyan, N., Bar-Tal, O., Bagon, S., Dekel, T.: Splicing vit features for semantic appearance transfer. In: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition. pp. 10748–10757 (2022) 11 SteerFlow 17 30. Wang, J., Pu, J., Qi, Z., Guo, J., Ma, Y., Huang, N., Chen, Y., Li, X., Shan, Y.: Taming rectified flow for inversion and editing. arXiv preprint arXiv:2411.04746 (2024) 2, 4, 7, 12, 13 31. Wang, Y., Wang, Z., Chen, L.: Flowcycle: Pursuing cycle-consistent flows for text-based editing (2025), https://openreview.net/forum?id=0rHEudxV8K 432. Wang, Z., Bovik, A.C., Sheikh, H.R., Simoncelli, E.P.: Image quality assessment: from error visibility to structural similarity. IEEE transactions on image processing 
+
+13 (4), 600–612 (2004) 12 33. Xu, J., Liu, X., Wu, Y., Tong, Y., Li, Q., Ding, M., Tang, J., Dong, Y.: Imagereward: Learning and evaluating human preferences for text-to-image generation. Advances in Neural Information Processing Systems 36 , 15903–15935 (2023) 12 34. Yoon, S.H., Li, M., Beaudouin, G., Wen, C., Azhar, M.R., Wang, M.: Splitflow: Flow decomposition for inversion-free text-to-image editing. In: Advances in Neural Information Processing Systems (NeurIPS) (2025) 4 35. Zhang, R., Isola, P., Efros, A.A., Shechtman, E., Wang, O.: The unreasonable effectiveness of deep features as a perceptual metric. In: Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition (CVPR) (June 2018) 11 36. Zhang, R., Isola, P., Efros, A.A., Shechtman, E., Wang, O.: The unreasonable effectiveness of deep features as a perceptual metric. In: Proceedings of the IEEE conference on computer vision and pattern recognition. pp. 586–595 (2018) 12 37. Zhu, T., Zhang, S., Shao, J., Tang, Y.: Kv-edit: Training-free image editing for precise background preservation. arXiv preprint arXiv:2502.17363 (2025) 4, 11 Appendices for “SteerFlow: Steering Rectified Flows for Faithful Inversion-Based Image Editing” 
+
+No Author Given 
+
+> No Institute Given
+
+The appendix is organized as follows: 
+
+– Sec. A presents additional qualitative results for image editing, multi-turn image editing, and image reconstruction. 
+
+– Sec. B presents the detailed SteerFlow editing algorithm, its hyperparameter settings, and its extension to multi-turn image editing. 
+
+– Sec. C presents the theoretical proofs. 
+
+– Sec. D presents the ablation study. 
+
+– Sec. E presents the implementation details and hyperparameter settings for the baselines and SteerFlow. 
+
+– Sec. F discusses the limitations of SteerFlow. 
+
+– Sec. G presents a study on image editing with a perfect latent. Title Suppressed Due to Excessive Length 19 
+
+## A Additional Qualitative Results 
+
+Fig. 1: Additional SteerFlow results on FLUX.1-dev model. 20 No Author Given 
+
+Fig. 2: Additional SteerFlow results on Stable Diffusion 3.5-Medium model. Title Suppressed Due to Excessive Length 21 
+
+Fig. 3: Additional SteerFlow results on Multi-Turn editing. First row is Flux.1-dev, second row is Stable Diffusion 3.5-Medium. For both models, SteerFlow enables consis-tent multi-turn editing and complex multi-object editing (in the last row). 22 No Author Given 
+
+Fig. 4: Qualitative comparison of baseline editing methods and SteerFlow on Stable Diffusion 3.5-Medium. SteerFlow demonstrates strong source preservation and faithful target prompt alignment. Previous editing baselines struggle with pose and structural change (in the third and fourth rows). ODE Inversion suffers from over-editing. Title Suppressed Due to Excessive Length 23 
+
+Fig. 5: Qualitative comparison on inversion & reconstruction performance of baselines and SteerFlow. 24 No Author Given 
+
+## B SteerFlow Editing Algorithm 
+
+B.1 Overall Pipeline 
+
+The overall pipeline of SteerFlow works as follows. First, we obtain the base mask by feeding the source image and the editing tokens into SAM3. This process is relatively fast with almost no overhead, as we benchmark that an inference through SAM3 takes less than 1 second. Second, we perform Forward Inversion with Alg. 1 to obtain the full forward trajectory . With the forward trajectory and the base mask, we perform Backward Editing with Alg. 2 to obtain the 
+
+edited outcome . At each iteration of the backward process, Alg. 3 refines the base mask with a velocity-driven adaptive mask. 
+
+Algorithm 1: ForwardInv (SteerFlow Forward Inversion) 
+
+Input: Initial latent Zt0 , source prompt csrc , step size ∆t , Picard iterations K
+
+Output: Trajectory {Zti }Ni=0  
+
+> 1
+
+V src ← vθ (Zt0 , t 0, c src ) // Initial velocity guess // Amortized Initialization at t0 
+
+> 2
+
+for k = 1 to K do  
+
+> 3
+
+˜Zt1 ← Zt0 + ∆t · V src  
+
+> 4
+
+V src ← vθ ( ˜Zt1 , t 1, c src ) 
+
+> 5
+
+end  
+
+> 6
+
+Zt1 ← Zt0 + ∆t · V src 
+
+// Forward ODE with Single-Step Fixed-Point Solver  
+
+> 7
+
+for i = 1 to N − 1 do  
+
+> 8
+
+˜Zti+1 ← Zti + ∆t · V src // Predictor using cached V 
+
+> 9
+
+V src ← vθ ( ˜Zti+1 , t i+1 , c src ) // Fixed-point correction  
+
+> 10
+
+Zti+1 ← Zti + ∆t · V src  
+
+> 11
+
+end  
+
+> 12
+
+return {Zti }Ni=0 
+
+Note that in the backward process, the decay factor (1 − tγi−1) is evaluated at the next timestep ti−1, since the decay factor evaluated at the current timestep will truncate the first timestep ( V edit  
+
+> 1
+
+= V src  
+
+> 1
+
+) and limit editability. 
+
+B.2 Hyperparameter Settings 
+
+In the SteerFlow editing algorithm, the two key parameters that control the balance between source preservation and target alignment are (1) the CFG coefficient w and (2) the decay rate of the editing coefficient γ. Higher values of 
+
+w and γ lead to better editability but worse source consistency. Title Suppressed Due to Excessive Length 25 
+
+Algorithm 2: BackwardEdit (SteerFlow Backward Editing) 
+
+Input: Source trajectory {Zsrc ti }Ni=0 , target prompt ctar , base mask Mbase ,guidance scale w, interpolation exponent γ
+
+Output: Edited image Ztar t0 
+
+> 1
+
+Ztar tN ← Zsrc tN // Initialize from source  
+
+> 2
+
+for i = N to 1 do  
+
+> 3
+
+V src ← (Zsrc ti − Zsrc ti−1 ) / ∆t // Cached source velocity  
+
+> 4
+
+V tar ← ˜vθ (Ztar ti , t i, c tar , w ) // Target velocity with CFG  
+
+> 5
+
+α ← CosSim (V src , V tar ) · (1 − ti−1γ ) // Edit coefficient  
+
+> 6
+
+M ← MaskRefine (V tar − V src , M base ) // Alg. 3  
+
+> 7
+
+V edit ← V src + α · M ⊙ (V tar − V src ) // Eq. 18  
+
+> 8
+
+Ztar ti−1 ← Ztar ti − ∆t · V edit // Euler step  
+
+> 9
+
+end  
+
+> 10
+
+return Ztar t0
+
+Algorithm 3: MaskRefine (Adaptive Mask Refinement) 
+
+Input: Velocity difference ∆V , base mask Mbase , quantile q, sigmoid temperature τ , dilation kernel size k
+
+Output: Refined adaptive mask Madapt  
+
+> 1
+
+M ← ∥ ∆V ∥2 // Per-token ℓ2 magnitude  
+
+> 2
+
+vmin , v max ← Quantile( M, 1−q), Quantile( M, q ) 
+
+> 3
+
+M ← (M − vmin ) / (vmax − vmin ) // (1) Quantile normalization  
+
+> 4
+
+M ← σ(τ · (M − 0.5)) // (2) Temperature-scaled sigmoid  
+
+> 5
+
+Madapt ← max( M, M base ) // (3) Union with SAM3 base mask  
+
+> 6
+
+Madapt ← Erode(Dilate( Madapt , k ), k ) // (4) Morphological closing  
+
+> 7
+
+return Madapt 
+
+B.3 Adaptive Masking Mechanism 
+
+As explained in Sec. 4.4, relying solely on the SAM3 base mask is overly restrictive for editing tasks that involve structural changes. The SteerFlow Adaptive Masking mechanism refines the base mask with velocity-driven region changes inferred through the editing deviation V∆ = V tar − V src at each timestep. As shown in Alg. 3, the refinement pipeline proceeds in four steps: 1. Quantile normalization of ∆V : controls the spatial extent of the velocity-driven mask. By setting q lower than 1, we allow for more expansion of the velocity-driven mask. 2. Element-wise sigmoid : increases the contrast of the adaptive mask to suppress low-response regions for precise background preservation. 3. Mask union : merges the resulting mask with the SAM3 base mask via pixel-wise max( ·).4. Morphological closing : enforces spatial contiguity by filling internal holes in the combined mask. 26 No Author Given 
+
+B.4 SteerFlow Extension to Multi-Turn Editing 
+
+SteerFlow extends naturally to Multi-Turn Editing through two steps: 1. Reuse the previous turn’s editing trajectory as the source trajectory for the current turn. This constrains the accumulated drift after each editing turn. 2. Update the base mask at each turn using the corresponding edit tokens. Since each editing turn may require a different level of editability, we allow different decay rates γ per turn, resulting in a per-turn editing scheduler {γk}Kk=1 
+
+for K editing turns. SteerFlow Multi-Turn procedure is shown in Alg. 4. 
+
+Algorithm 4: SteerFlow Multi-Turn Editing 
+
+Input: Source image Zsrc t0 , source prompt csrc , target prompts {c(k) 
+
+> tar
+
+}Kk=1 ,editing tokens {e(k)}Kk=1 , editing schedulers {γk }Kk=1 
+
+Output: Edited images {Z(k) 
+
+> t0
+
+}Kk=1 
+
+// Initial forward inversion 
+
+{Zsrc ti }Ni=0 ← ForwardInv (Zsrc t0 , c src )
+
+for k = 1 to K do 
+
+// Update base mask for current turn 
+
+Mbase ← GetBaseMask (Zsrc t0 , e (k)) ; // Feed to SAM3 // Backward editing, storing full trajectory for next turn 
+
+Z(k) 
+
+> t0
+
+, {Zsrc ti }Ni=0 ← BackwardEdit ({Zsrc ti }, c (k) 
+
+> tar
+
+, M base , γ k )
+
+return {Z(k) 
+
+> t0
+
+}Kk=1 
+
+Fig. 6: Comparision of SteerFlow multi-turn editing and single-turn editing. First row: single-turn editing. Second row: multi-turn editing. Title Suppressed Due to Excessive Length 27 
+
+Comparison to Single-Turn Editing. To validate that SteerFlow multi-turn editing algorithm (Alg. 4) enable consistent edits without accumulating drift, we compare it against single-turn editing. While multi-turn editing uses the previous turn’s editing trajectory as the current turn’s source trajectory, single-turn editing fix the source trajectory and iteratively update the target prompt. As explained in Sec. 4.3, the editing error bound is determined by the editing deviation (i.e., the difference between source-conditioned and target-conditioned velocities), so the divergence between the edited and source images grows as the target prompt becomes increasingly dissimilar from the source prompt. This is illustrated in the first row of Fig. 6, which corresponds to single-turn editing. The first two turns do not exhibit significant deviation from the source image since the two prompts remain close to the source prompt. However, changing the tiger to “stuffed tiger” (turn 3) and adding a “scarf” (turn 4) result in greater loss of source structure as the gap between the target and source prompts widens. By contrast, multi-turn editing in the second row effectively constrains the drift the turn 3 and turn 4 by updating the source trajectory at each turn, which keeps the source and target velocities better aligned. 
+
+## C Proofs of Theoretical Results 
+
+We first state the assumptions and theorem required for the proofs. 
+
+Assumption 1 (Lipschitz Continuity) There exists a constant L > 0 such that for all states z, z ′ ∈ Rd and time t ∈ [0 , 1] , the vector field vθ (z, t ) satisfies: 
+
+|| vθ (z, t ) − vθ (z′, t )|| ≤ L|| z − z′|| 
+
+Assumption 2 (Bounded Trajectory Curvature) There exists a constant 
+
+M such that the total time derivative of the velocity field is bounded: 
+
+ddt vθ (Zt, t ) ≤ M
+
+for all t ∈ [0 , 1] . This bounds the maximum curvature (acceleration) of the flow. 
+
+Theorem 1 (Banach Fixed-Point Theorem). Let (X, d ) be a complete metric space and let T : X → X be a strict contraction, i.e., there exists q ∈ [0 , 1) 
+
+such that for all x, y ∈ X,
+
+d(T (x), T (y)) ≤ q · d(x, y ).
+
+Then T has a unique fixed point x∗ ∈ X, and the sequence xk+1 = T (xk) converges to x∗ for any initial x0 ∈ X.28 No Author Given 
+
+C.1 Proof of Prop. 1 
+
+Proof. We track the accumulation of the inversion error Eti = ∥ ˆZti − Zti ∥ as we integrate backward from tN = 1 down to t0 = 0 . At the initial point of the backward process ( i = N ), EtN = 0 since ˆZ1 = Z1. The error arises from the asymmetry between forward and backward latents: 
+
+Forward Latent: Zti = Zti+1 − ∆t · vθ (Zti , t i) (1) Backward Latent: ˆZti = ˆZti+1 − ∆t · vθ ( ˆZti+1 , t i+1 ) (2) The inversion error at time ti is: 
+
+Eti = ∥ ˆZti − Zti ∥ = ∥( ˆZti+1 − Zti+1 ) − ∆t 
+
+
+
+vθ ( ˆZti+1 , t i+1 ) − vθ (Zti , t i)
+
+
+
+∥ (3) 
+
+≤ E ti+1 + ∆t ∥vθ ( ˆZti+1 , t i+1 ) − vθ (Zti , t i)∥ (Triangle Inequality)  (4) We bound ∥vθ ( ˆZti+1 , t i+1 ) − vθ (Zti , t i)∥ via the cross-term vθ (Zti+1 , t i+1 ):
+
+∥vθ ( ˆZti+1 , t i+1 ) − vθ (Zti , t i)∥ ≤ ∥ vθ ( ˆZti+1 , t i+1 ) − vθ (Zti+1 , t i+1 )∥
+
++ ∥vθ (Zti+1 , t i+1 ) − vθ (Zti , t i)∥ (5) By the second-order Taylor expansion of vθ (Zti+1 , t i+1 ) around (Zti , t i):
+
+vθ (Zti+1 , t i+1 ) ≈ vθ (Zti , t i) + ∆t ∂v θ
+
+∂t + ∇z vθ · (Zti+1 − Zti ) + O(∆t 2) (6) Since Zti+1 − Zti = ∆t · vθ (Zti , t i),
+
+vθ (Zti+1 , t i+1 ) ≈ vθ (Zti , t i) + ∆t ∂v θ
+
+∂t + ∇z vθ · (∆t · vθ (Zti , t i)) + O(∆t 2) (7) 
+
+≈ vθ (Zti , t i) + ∆t · dv θ
+
+dt (Disregard O(∆t 2)) (8) 
+
+⇒ ∥ vθ (Zti+1 , t i+1 ) − vθ (Zti , t i)∥ ≤ M ∆t  (9) Applying Eq. (9) and Assump. 1 to Eq. (5), we have: 
+
+∥vθ ( ˆZti+1 , t i+1 ) − vθ (Zti , t i)∥ ≤ L · ∥ ˆZti+1 − Zti+1 ∥ + M ∆t (10) 
+
+= L · E ti+1 + M ∆t (Assump. 2)  (11) Applying Eq. (11) back to Eq. (4), we obtain the final error bound: 
+
+Eti ≤ (1 + L∆t )Eti+1 + M ∆t 2 (12) To solve for E0, we unroll this recurrence backward in time from i = N − 1 to 
+
+i = 0 . The recurrence strictly follows a geometric series summation: 
+
+Et0 ≤ M ∆t 2 
+
+> N−1
+
+X
+
+> j=0
+
+(1 + L∆t )j (13) Title Suppressed Due to Excessive Length 29 
+
+Using the standard geometric series formula PN −1 
+
+> j=0
+
+rj = rN −1 
+
+> r−1
+
+with the ratio 
+
+r = 1 + L∆t , we arrive at the precise global error bound: 
+
+Einv  
+
+> 0
+
+≤ M ∆t 2 (1 + L∆t )N − 1(1 + L∆t ) − 1 = M ∆t L
+
+ (1 + L∆t )N − 1 (14) Finally, since ∆t = 1 /N , by applying the limit definition of the exponential function (1 + LN )N ≤ eL for all N ≥ 1, we obtain the exponential upper bound that is indepedent of N :
+
+Einv  
+
+> 0
+
+≤ M ∆t L (eL − 1) (As N → ∞ ) (15) 
+
+Proposition 1 (Convergence of The Update Map). Under the condition that the step size ∆t < 1 
+
+> L
+
+(L is the Lipschitz constant), the update map Φi is a strict contraction mapping. By the Banach Fixed-Point Theorem (Theorem 1, the sequence {vki } is guaranteed to converge to a unique solution v∗ 
+
+> i
+
+.
+
+C.2 Proof of Prop. 1 
+
+Proof. The proof applies the Banach Fixed-Point Theorem (Theorem 1) directly to the velocity update map by leveraging the Lipschitz assumption (Assump. 1). The update map Φi : Rd → Rd is defined at a specific timestep i as: 
+
+Φi(v) = vθ (Zti + ∆t · v, t i+1 )
+
+The space Rd equipped with the standard L2 norm metric d(u, v ) = ∥u −v∥ forms a complete metric space (a Banach space). To apply the Banach Fixed-Point Theorem, we must show that Φi is a strict contraction mapping on this space. For any u, v ∈ Rd, by Assump. 1, 
+
+∥Φi(v) − Φi(u)∥ = ∥vθ (Zti + ∆t · v, t i+1 ) − vθ (Zti + ∆t · u, t i+1 )∥≤ L∥(Zti + ∆t · v) − (Zti + ∆t · u)∥
+
+= ( L∆t ) ∥v − u∥. (16) Let q = L∆t . The assumption ∆t < 1 
+
+> L
+
+implies q ∈ [0 , 1) , so Φi is a strict contraction. Applying Banach Fixed-Point Theorem guarantees that: 1. There exists a uniquely defined fixed-point velocity v∗ 
+
+> i
+
+∈ Rd satisfying 
+
+Φi(v∗ 
+
+> i
+
+) = v∗ 
+
+> i
+
+.2. The sequence generated by vk+1  
+
+> i
+
+= Φi(vki ) monotonically converges to v∗ 
+
+> i
+
+for any initialization v0 
+
+> i
+
+.By initializing the sequence with the explicit Euler velocity, v0 
+
+> i
+
+= vθ (Zti , t i), the AFP solver strictly minimizes the local discretization gap δi = ∥vθ (Zti , t i) −
+
+vθ (Zti+1 , t i+1 )∥. This procedure effectively “pulls” the velocity at ti toward the future state at ti+1 , aligning the velocity with the local curvature of the flow. 30 No Author Given 
+
+C.3 Proof of Prop. 2 
+
+Proof. Starting at Zsrc tN from the forward inversion process (Eq. (4)), we can perfectly reconstruct the source image Zsrc t0 by reversing the ODE: 
+
+Zsrc t0 = Zsrc tN − ∆t · 
+
+> N−1
+
+X
+
+> i=0
+
+vθ (Zsrc ti , t i, c src )
+
+!| {z }
+
+> Cached source velocities
+
+(17) Starting at Ztar tN = Zsrc tN , the editing outcome is as follows: 
+
+Ztar t0 = Ztar tN − ∆t ·
+
+> N
+
+X
+
+> i=1
+
+vθ (Ztar ti , t i, ∅) + w  vθ (Ztar ti , t i, c tar ) − vθ (Ztar ti , t i, ∅) !
+
+(18) From Eq. (18) and Eq. (17), by rearranging the terms we have: 
+
+∥Ztar t0 − Zsrc t0 ∥ = ∆t · ∥ 
+
+> N
+
+X
+
+> i=1
+
+vθ (Ztar ti , t i, c tar ) − vθ (Zsrc ti−1 , t i−1, c src )+ ( w − 1)  vθ (Ztar ti , t i, c tar ) − vθ (Ztar ti , t i, ∅) ∥ (19) 
+
+≤ ∆t (∥V∆∥ + ( w − 1) ∥VCF G ∥) (Triangle Inequality) (20) where V∆ =
+
+> N
+
+X
+
+> i=1
+
+vtar θ (Ztar ti ) − vsrc θ (Zsrc ti−1 ); VCF G =
+
+> N
+
+X
+
+> i=1
+
+vtar θ (Ztar ti ) − v∅ 
+
+> θ
+
+(Ztar ti )
+
+C.4 Proof of Prop. 3 
+
+Proof. Define the maximum instantaneous velocity deviation along the source trajectory as 
+
+δmax = max  
+
+> t
+
+∥˜vθ (Zsrc  
+
+> t
+
+, c tar ) − vθ (Zsrc  
+
+> t
+
+, c src )∥ (21) Let V src  
+
+> ti
+
+= vθ (Zsrc  
+
+> ti−1
+
+, t i−1, c src ) denote the cached source velocity from the forward process, and let V tar  
+
+> ti
+
+= ˜vθ (Zedit  
+
+> ti
+
+, t i, c tar , w ) denote the target-conditioned velocity evaluated at the SteerFlow editing latent Zedit  
+
+> ti
+
+. The SteerFlow editing velocity is then defined as the interpolation 
+
+V edit  
+
+> t
+
+= V src  
+
+> t
+
++ α ·  V tar  
+
+> t
+
+− V src 
+
+> t
+
+ , (22) from which the source and editing latents at time ti are given by: 
+
+Zsrc ti = Zsrc ti+1 − ∆t · V src ti (23) 
+
+Zedit ti = Zedit ti+1 − ∆t ·  V src ti + α · (V tar ti − V src ti ) (24) Then the editing error at time ti is 
+
+Eti = ∥Zedit ti − Zsrc ti ∥ ≤ E ti+1 + α∆t · ∥ V tar ti − V src ti ∥ (Triangle Inequality) 
+
+(25) Title Suppressed Due to Excessive Length 31 
+
+To bound ∥V tar ti − V src ti ∥, we leverage the cross-term ˜vθ (Zsrc ti+1 , c tar ):
+
+∥V tar ti − V src ti ∥ = ∥˜vθ (Zedit ti+1 , c tar ) − ˜vθ (Zsrc ti+1 , c tar )+ ˜ vθ (Zsrc ti+1 , c tar ) − vθ (Zsrc ti+1 , c src )∥ (26) 
+
+≤ LEti+1 + δmax (Assump. 1 and Eq. (21))  (27) Applying Eq. (27) to Eq. (25), we have: 
+
+Eti ≤ (1 + αL∆t )Eti+1 + α∆tδ max  (28) By solving this recurrence from tN to t0 similar to Sec. C.1, we have the generalized global error bound: 
+
+B(α) = δmax 
+
+L
+
+ eαL − 1 (29) For standard editing without interpolation ( α = 1 ), the error bound is: 
+
+Btar  
+
+> 0
+
+= B(1) = δmax 
+
+L
+
+ eL − 1 (30) For SteerFlow with interpolation factor α ∈ (0 , 1) , the error bound is: 
+
+Bedit  
+
+> 0
+
+= B(α) = δmax 
+
+L
+
+ eαL − 1 (31) To compare Bedit  
+
+> 0
+
+and Btar  
+
+> 0
+
+, we analyze the function f (x) = ex − 1. Because the exponential function is strictly convex ( f ′′ (x) = ex > 0) and f (0) = 0 , it follows from the definition of convexity that for any α ∈ (0 , 1) :
+
+f (αx + (1 − α) · 0) < αf (x) + (1 − α)f (0) = ⇒ eαL − 1 < α (eL − 1)  (32) Substituting this inequality into our error bounds yields the final result: 
+
+Bedit  
+
+> 0
+
+= δmax 
+
+L
+
+ eαL − 1 < α δmax 
+
+L
+
+ eL − 1 = α · B tar  
+
+> 0
+
+(33) 
+
+## D Ablation Studies 
+
+We ablate the key components of SteerFlow to validate each design choice. Specifically, we examine: 1. The performance of AFP Solver with increasing K, and how it affects the performance of image editing. 2. Different decay factor γ and guidance scale w.3. Different α-schedulers for Trajectory Interpolation. All experiments are conducted on FLUX.1-dev using task 0 of PIE-Bench with 140 images of various editing styles. 32 No Author Given     
+
+> Fig. 7: Quantitative comparison of Standard Fixed-Point solver (first row) and AFP solver (second row) with increasing K.
+> Fig. 8: Qualitative comparison of Standard Fixed-Point solver (first row) and AFP solver (second row) with increasing K.
+
+D.1 AFP Solver 
+
+We experimentally validate that the AFP solver mitigates the moving target problem in Fig. 7, which compares the reconstruction performance of the AFP solver to the standard fixed-point solver. Across all metrics, the AFP solver achieves increasingly better reconstruction as K grows, consistently outperforming the standard fixed-point solver, which exhibits high variance across K. An illustrative comparison between the two solvers is shown in Fig. 8. We can observe that Standard Fixed-Point solver achieve the best reconstruction at 
+
+K = 1 , and the performance degrades as K increases. While high K benefits reconstruction performance for AFP Solver, we observe a high variance of editing performance with increasing K, as shown in Fig. 9. The performance gain is most noticeable with K = 1 , which ends up as our final hyperparameter choice for the main experiments. 
+
+D.2 Control on Editability ( w and γ)
+
+As shown in Fig. 10 and Fig. 11, increasing the decay rate γ and guidance scale w
+
+improves editability (measured by CLIP and ImageReward) but sacrifice source Title Suppressed Due to Excessive Length 33         
+
+> Fig. 9: Evaluation of AFP solver on editing performance with increasing K.
+> Fig. 10: Impact of varying decay rate γon editing performance.
+> Fig. 11: Impact of varying CFG weight won editing performance.
+
+preservation (measured by LPIPS and Structure Distance). Notably, γ offers more fine-grained control over the trade-off between source preservation and target alignment, whereas setting w too high may introduce unwanted structural changes and artifacts — a commly known issue of CFG [26]. The qualitative results of increasing γ is shown in Fig. 12, where we can observe that setting a high γ allows for more structural change. 
+
+D.3 Different α-schedulers 
+
+We evaluate several variants of α-schedulers for the backward process in Tab. 1. Fixing α at low values (0.1 or 0.5) significantly limits the method’s editability, whereas a high value (0.9) results in over-editing. While using only CosSim as the editing coefficient provides strong target alignment, it lacks sufficient source preservation. Our final combination of a time-decaying scheduler with 34 No Author Given    
+
+> Fig. 12: Illustrations of varying decay rate γon editability.
+
+cosine similarity achieves the highest source preservation (indicated by the lowest DinoDist and LPIPS scores) while maintaining moderate target alignment that performs similarly to the purely time-decaying approach.                                         
+
+> Table 1: SteerFlow editing performance with different α-schedulers Variant DinoDist ↓LPIPS ↓CLIP ↑ImgRew ↑
+> Fixed α= 0 .10.05 2.98 21.49 -0.64 Fixed α= 0 .50.85 10.90 23.91 0.12 Fixed α= 0 .97.76 40.31 26.57 1.08 Only time-decaying 3.10 24.55 25.32 0.70 Only Cossim 4.99 30.97 26.50 1.08 time-decaying + Cossim 2.20 19.87 25.12 0.60
+
+## E Implementation and Reproducibility Details 
+
+E.1 Experiment Settings 
+
+For all baseline methods, the hyperparameters strictly adhere to the configurations reported in their original publications and the default settings provided in their respective official repositories. The specific configurations for inversion-based and inversion-free baselines are summarized in Tab. 2 and Tab. 3, respectively. Title Suppressed Due to Excessive Length 35 
+
+Table 2: Experiment settings of inversion-based baselines Method Model Hyperparameters timesteps N target CFG w start step injection steps stop step forward guidance γ backward guidance η                                                     
+
+> ODE-Inversion SD3.5 50 5.5 0/50 ----FLUX 28 3.5 0/28 ----RF-Inversion FLUX 28 3.5 0/28 -7/28 0.5 0.9 RF-Solver FLUX 15 2.0 0/15 2---FireFlow FLUX 15 2.0 0/15 2---UniEdit SD3.5 15 5.0* 6/15 ----FLUX 30 5.0* 12/30 ----
+
+Table 3: Experiment settings of inversion-free baselines Method Model Hyperparameters timesteps N source CFG ws target CFG wt start step correction weight ζ
+
+FlowEdit SD3.5 50 1.5 5.5 17/50 -FLUX 28 5.5 13.5 4/28 -FlowAlign SD3.5 33 - 13.5* 0/50 0.01 
+
+Notably, as indicated by (*), FlowAlign [16] and UniEdit [14] utilize a modified Classifier-Free Guidance (CFG) formulation for the target velocity. Unlike the standard approach that extrapolates from an unconditional (null-prompt) velocity, these methods compute the guided target velocity by extrapolating between the source-conditioned and target-conditioned velocities: 
+
+V tar t = vθ (Zt, t, c src ) + w (vθ (Zt, t, c tar ) − vθ (Zt, t, c src ))  (34) Specific experimental configurations for SteerFlow are shown in Tab. 4, and the hyperparameters of the adaptive masking mechanism are shown in Tab. 5. 
+
+E.2 Hardware 
+
+We conduct our experiments on two servers. All experiments on FLUX.1-dev model are conducted on a single A6000 GPU, while experiments on Stable Diffusion 3.5 Medium are conducted on a single RTX3090 GPU. 
+
+E.3 Reproducibility 
+
+Despite following the original experimental settings and using official implemen-tations, our reproduced results exhibit minor discrepancies from those reported in prior works. We attribute these differences to potential updates in the Dif-fusers, Transformers, or PyTorch libraries, as well as hardware variation across environments. All results reported in this paper reflect our own reproduced runs. 
+
+## F Limitations 
+
+While SteerFlow presents an architecture-agnostic framework that excels in high-fidelity editing, it has two core limitations. First, the Adaptive Masking 36 No Author Given                           
+
+> Table 4: Experiment settings of SteerFlow Method Model Hyperparameters timesteps Ndecay rate γCFG wAFP iterations K
+> SteerFlow SD3.5 30 5.5 3.5 1FLUX 15 4.5 6.5 1
+> Table 5: SteerFlow Adaptive Mask setting quantile ratio qsigmoid temperature τkernel size k
+> 0.95 15 5
+
+mechanism may sometimes restrict large structural changes required by pose and background edits. This can be mitigated by allowing greater mask expansion via the quantile ratio q and morphological closing kernel size k, or by disabling masking entirely for such edits. Second, the optimal hyperparameters of SteerFlow may vary across model architectures, requiring some tuning of the CFG weight 
+
+w and decay rate γ for each target model. 
+
+## G A Study on Perfect Latent for Inversion-Based Editing 
+
+To examine whether inversion error is the primary cause of structural drift in inversion-based editing, we design a controlled experiment that eliminates it entirely: we generate the source image from a fixed noise sample ϵ ∼ N (0 , I ),then reuse that exact noise as the starting latent, changing only the editing token from [cat] to [dog] . As shown in Fig. 13, even with this perfect latent, the edited image still fails to preserve the source structure and background ( i.e ., the house). This demonstrates that structural drift stems from the divergence between source and target velocity fields, not inversion error alone. SteerFlow addresses this root cause directly via Trajectory Interpolation, faithfully preserving both the cat’s structure and the background of the house.

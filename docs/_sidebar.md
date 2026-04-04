@@ -1,6 +1,9 @@
 * <a class="dpr-sidebar-root-link" href="#/">首页</a>
 * <a class="dpr-sidebar-root-link dpr-sidebar-noactive-link" href="javascript:void(0)" data-dpr-hash="#/tutorial/README">使用教程</a>
 * Daily Papers
+  * 2026-04-04 <!--dpr-date:20260404-->
+    * 速读区
+      * <a class="dpr-sidebar-item-link dpr-sidebar-item-structured" href="#/202604/04/2604.00205v1-unsupervised-4d-flow-mri-velocity-enhancement-and-unwrapping-using-divergence-free-neural-networks" data-sidebar-item="{&quot;title&quot;: &quot;Unsupervised 4D Flow MRI Velocity Enhancement and Unwrapping Using Divergence-Free Neural Networks&quot;, &quot;link&quot;: &quot;https://arxiv.org/abs/2604.00205v1-unsupervised-4d-flow-mri-velocity-enhancement-and-unwrapping-using-divergence-free-neural-networks&quot;, &quot;score&quot;: &quot;6.0&quot;, &quot;tags&quot;: [{&quot;kind&quot;: &quot;query&quot;, &quot;label&quot;: &quot;q3&quot;}], &quot;evidence&quot;: &quot;无监督速度增强及从缠绕图像中去噪&quot;}">Unsupervised 4D Flow MRI Velocity Enhancement and Unwrapping Using Divergence-Free Neural Networks</a>
   * 2026-04-03 <!--dpr-date:20260403-->
     * 精读区
       * <a class="dpr-sidebar-item-link dpr-sidebar-item-structured" href="#/202604/03/2604.01693v1-from-understanding-to-erasing-towards-complete-and-stable-video-object-removal" data-sidebar-item="{&quot;title&quot;: &quot;From Understanding to Erasing: Towards Complete and Stable Video Object Removal&quot;, &quot;link&quot;: &quot;https://arxiv.org/abs/2604.01693v1-from-understanding-to-erasing-towards-complete-and-stable-video-object-removal&quot;, &quot;score&quot;: &quot;9.0&quot;, &quot;tags&quot;: [{&quot;kind&quot;: &quot;query&quot;, &quot;label&quot;: &quot;q1&quot;}], &quot;evidence&quot;: &quot;视频对象移除中的缺失区域补全&quot;}">From Understanding to Erasing: Towards Complete and Stable Video Object Removal</a>

@@ -6,40 +6,26 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-04-03
-- 运行时间：2026-04-03 19:48:55 UTC
+- 最新运行日期：2026-04-04
+- 运行时间：2026-04-04 19:09:42 UTC
 - 运行状态：成功
-- 本次总论文数：6
-- 精读区：2
-- 速读区：4
+- 本次总论文数：1
+- 精读区：0
+- 速读区：1
 
 ### 今日简报（AI）
-今日聚焦视频内容“无痕”擦除，深度解析了实现稳定视频对象与交互删除的前沿方案。
-重点推荐两篇 9.0 分佳作，它们分别攻克了视频修复的稳定性难题与复杂的物体交互删除。
-建议关注 FlowSlider 等免训练工具，尝试将 3D 感知技术应用于更具连续
-- 详情：[/202604/03/README](/202604/03/README)
+今日聚焦 4D Flow MRI 影像优化，探索无监督学习在流速增强与解包裹中的应用。
+研究通过引入无散约束神经网络（DFNN），在无标注数据下同步实现了血流速度的精度提升与相位去折叠。
+建议关注物理约束深度学习在解决医学影像伪影及低分辨率问题上的应用潜力。
+- 详情：[/202604/04/README](/202604/04/README)
 
 ### 精读区论文标签
-1. [From Understanding to Erasing: Towards Complete and Stable Video Object Removal](/202604/03/2604.01693v1-from-understanding-to-erasing-towards-complete-and-stable-video-object-removal)  
-   标签：评分：9.0/10、query:q1
-   evidence：视频对象移除中的缺失区域补全
-2. [VOID: Video Object and Interaction Deletion](/202604/03/2604.02296v1-void-video-object-and-interaction-deletion)  
-   标签：评分：9.0/10、query:q1
-   evidence：视频对象移除与物理合理的图像补全
+- 本次无精读推荐。
 
 ### 速读区论文标签
-1. [SteerFlow: Steering Rectified Flows for Faithful Inversion-Based Image Editing](/202604/03/2604.01715v1-steerflow-steering-rectified-flows-for-faithful-inversion-based-image-editing)  
-   标签：评分：7.0/10、query:q4
-   evidence：用于图像编辑和再生成的生成模型
-2. [FlowSlider: Training-Free Continuous Image Editing via Fidelity-Steering Decomposition](/202604/03/2604.02088v1-flowslider-training-free-continuous-image-editing-via-fidelity-steering-decomposition)  
-   标签：评分：7.0/10、query:q3
-   evidence：无需训练的连续图像编辑与修复
-3. [ObjectMorpher: 3D-Aware Image Editing via Deformable 3DGS Models](/202604/03/2603.28152v1-objectmorpher-3d-aware-image-editing-via-deformable-3dgs-models)  
-   标签：评分：6.0/10、query:q4
-   evidence：生成式图像编辑与合成
-4. [Region-Adaptive Generative Compression with Spatially Varying Diffusion Models](/202604/03/2604.01122v1-region-adaptive-generative-compression-with-spatially-varying-diffusion-models)  
-   标签：评分：6.0/10、query:q4
-   evidence：基于生成式扩散模型的图像重建
+1. [Unsupervised 4D Flow MRI Velocity Enhancement and Unwrapping Using Divergence-Free Neural Networks](/202604/04/2604.00205v1-unsupervised-4d-flow-mri-velocity-enhancement-and-unwrapping-using-divergence-free-neural-networks)  
+   标签：评分：6.0/10、query:q3
+   evidence：无监督速度增强及从缠绕图像中去噪
 
 
 <div class="dpr-home-promo-card">

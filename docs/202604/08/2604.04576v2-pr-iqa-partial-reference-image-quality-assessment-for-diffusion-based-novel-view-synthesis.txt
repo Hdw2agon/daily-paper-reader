@@ -1,0 +1,982 @@
+Title: PR-IQA: Partial-Reference Image Quality Assessment for Diffusion-Based Novel View Synthesis
+
+URL Source: https://arxiv.org/pdf/2604.04576v2
+
+Published Time: Wed, 08 Apr 2026 00:32:21 GMT
+
+Number of Pages: 24
+
+Markdown Content:
+# PR-IQA: Partial-Reference Image Quality Assessment for Diffusion-Based Novel View Synthesis 
+
+## Inseong Choi 1∗ Siwoo Lee 1∗ Seung-Hun Nam 2† Soohwan Song 1†
+
+> 1
+
+## Dongguk University 2NAVER WEBTOON AI 
+
+## Abstract 
+
+Diffusion models are promising for sparse-view novel view synthesis (NVS), as they can generate pseudo-ground-truth views to aid 3D reconstruction pipelines like 3D Gaus-sian Splatting (3DGS). However, these synthesized images often contain photometric and geometric inconsistencies, and their direct use for supervision can impair reconstruc-tion. To address this, we propose Partial-Reference Image Quality Assessment (PR-IQA), a framework that evaluates diffusion-generated views using reference images from dif-ferent poses, eliminating the need for ground truth. PR-IQA first computes a geometrically consistent partial qual-ity map in overlapping regions. It then performs qual-ity completion to inpaint this partial map into a dense, full-image map. This completion is achieved via a cross-attention mechanism that incorporates reference-view con-text, ensuring cross-view consistency and enabling thor-ough quality assessment. When integrated into a diffusion-augmented 3DGS pipeline, PR-IQA restricts supervision to high-confidence regions identified by its quality maps. Experiments demonstrate that PR-IQA outperforms exist-ing IQA methods, achieving full-reference-level accuracy without ground-truth supervision. Thus, our quality-aware 3DGS approach more effectively filters inconsistencies, pro-ducing superior 3D reconstructions and NVS results. 
+
+## 1. Introduction 
+
+Diffusion models [14, 29, 31] have become central to image-based 3D reconstruction because of their strong image-synthesis capabilities. In sparse-view settings [25, 46] with limited input views, they complement conventional pipelines such as Neural Radiance Fields (NeRF) [23] and 3D Gaussian Splatting (3DGS) [16] by generating novel views that act as pseudo-ground-truth views. These syn-thesized views densify supervision, fill coverage gaps in undersampled regions, thereby improving optimization and novel view synthesis (NVS) quality [3, 5, 46]. However,   
+
+> * Equal contribution. †Corresponding authors.
+
+diffusion-generated images can exhibit photometric arti-facts or geometric inconsistencies; training on them with-out proper quality assessment risks amplifying errors and distorting the reconstructed 3D geometry. This has led to a growing interest in Image Quality Assessment (IQA) meth-ods tailored to generated views. IQA methods are commonly grouped into full-reference 
+
+(FR) and no-reference (NR) categories, depending on whether a reference image is available. FR metrics, such as PSNR, SSIM [38], and LPIPS [48], can achieve high accuracy by comparing the query image against a pixel-aligned ground-truth (GT) view. However, this reliance on a GT limits their applicability to tasks like NVS and 3D reconstruction, where such GTs are often unavailable. Con-versely, NR methods [24, 35, 44, 47] operate without any reference image, offering greater flexibility, but they often struggle to detect the subtle artifacts and geometric incon-sistencies specific to diffusion-generated images. To bridge this gap, cross-reference (CR) evaluation [2, 13, 39] has re-cently emerged. This method leverages multiple unaligned reference views from the same scene, combining camera ge-ometry with photometric similarity to generate perceptually aligned quality maps without requiring GT supervision. CR-IQA primarily relies on two strategies: patch-based similarity and multi-view consistency . Patch-based methods, including CrossScore [39] and Puzzle Similar-ity [13], evaluate photometric consistency by comparing image patches across views, making them effective at de-tecting local visual artifacts. However, because they depend on simple measures such as SSIM or generic CNN features, they cannot capture high-level semantic information and provide only a limited assessment of geometric alignment. In contrast, multi-view consistency methods [2] explicitly evaluate both geometric and photometric coherence. For example, MEt3R [2] warps 3D structure between views to establish correspondences and then measures feature sim-ilarity within aligned regions. This yields reliable quality estimates in observed areas but cannot assess unobserved regions, leaving a blind spot in evaluation. To overcome these limitations, we propose Partial-Reference IQA (PR-IQA), a novel CR-IQA method that in-                       
+
+> arXiv:2604.04576v2 [cs.CV] 7 Apr 2026 (a) Diffusion -Based Image Generation (b) Image Quality Assessment (c) Quality -Aware 3DGS Optimization
+> Reference View
+> Ground Truth Vanilla 3DGS
+> Ours PuzzleSim
+> CrossScore PuzzleSim Ours
+> Query +Reference Images + Patch -level
+> DINOv2 PIQE
+> Only Query Image
+> Query Image Reference Image Ground Truth
+> MEt3R
+> Only Overlapped Region
+> Query +Ref. + Pixel -level
+> Refined Novel View
+> Point -rendered
+> Novel View
+> Quality Map Loss Mask
+> Masked
+> Training Loss
+> Quality -
+> Conditioned
+> Sampling …
+> Point -rendered
+> Novel View
+> Video
+> Diffusion
+> Model
+> NR -IQA FR -IQA CR -IQA
+> CR -IQA CR -IQA CR -IQA
+> Unobserved Inpainted
+> Dense Stereo
+> Aligned Misaligned
+
+Figure 1. Overview of the proposed PR-IQA and quality-aware 3DGS. (a) Diffusion models generate novel views (pseudo-GTs) from sparse inputs, which often contain photometric or geometric artifacts. (b) We propose PR-IQA, a cross-reference method predicting a dense, pixel-level quality map from unaligned references. It produces a complete map correlating closely with FR-IQA metrics (e.g., DINOv2 feature-similarity map) without requiring a GT. (c) This quality map enables a dual-filtering strategy (image selection and pixel masking) for 3DGS training, reducing reconstruction errors and improving fidelity. 
+
+tegrates the strengths of both patch-similarity and multi-view consistency approaches. PR-IQA operates in two stages: (i) partial quality estimation in mutually observable regions, and (ii) quality completion for non-overlapping re-gions using partial references. First, we warp 3D data to align query and reference views, identifying mutually visi-ble pixels and computing a partial quality map through fea-ture similarity in these aligned regions. Second, we for-mulate quality evaluation of unobserved regions as a qual-ity completion problem. Unlike traditional image comple-tion [8, 27] that predicts pixel values from local context, our approach infers quality scores for unseen areas using the partial map as guidance. This effectively extrapolates qual-ity estimates across the entire image, mitigating blind spots and enabling more comprehensive quality assessment. Our quality completion network uses a novel three-stream encoder-decoder architecture that processes the query image, reference image, and partial quality map. Its core is a reference-conditioned cross-attention mechanism, injecting features from the reference encoder into the query and partial map encoders. This architecture enforces ex-plicit view alignment and integrates cross-view evidence at all scales. Furthermore, each encoder uses a dual-gated at-tention block, decoupling channel and spatial attention to promote effective quality propagation into non-overlapping regions. Consequently, our method predicts quality maps with accuracy comparable to FR-IQA metrics, despite op-erating without GT supervision. We also demonstrate the practical utility of PR-IQA by integrating it into a sparse-view 3DGS pipeline. This inte-gration employs a dual-filtering strategy: (i) at the image level, we use PR-IQA to score generated pseudo-GT can-didates and select the best one; (ii) at the pixel level, its dense quality map creates a binary confidence mask. This mask restricts the 3DGS optimization loss to only high-confidence regions, filtering out artifacts and inconsisten-cies. This quality-aware approach ensures the 3DGS model trains on the most trustworthy regions of generated views, significantly improving reconstruction fidelity. As shown in Fig. 1, our pipeline effectively filters inconsistent con-tent while preserving geometric fidelity, yielding accurate 3D reconstructions and high-fidelity NVS. The main contributions are summarized as follows: • We propose a novel CR-IQA method, PR-IQA, that refor-mulates quality estimation as a quality completion using a geometrically consistent partial map. • We introduce a reference-conditioned quality comple-tion network that leverages cross-attention to align views, achieving FR-level accuracy without GT supervision. • We develop a quality-aware 3DGS training pipeline that leverages high-confidence regions identified by PR-IQA. • We construct a new CR-IQA dataset using diffusion-generated variants of standard benchmark images, and we release both the dataset and source code. 1
+
+## 2. Related Work 
+
+2.1. Diffusion-based Sparse Novel View Synthesis 
+
+Diffusion models [14, 29, 31] have achieved state-of-the-art performance in image, video, and 3D synthesis. They are increasingly applied to sparse-view NVS, generating 
+
+> 1
+
+https://github.com/Kakaomacao/PR-IQA new viewpoints from limited inputs [46]. Multi-view dif-fusion frameworks can infer 3D structure to produce cross-view-consistent renderings [19, 41], which are then fused by downstream pipelines like NeRFs [20, 43] or textured meshes [21, 32, 33]. Diffusion models are also used to generate pseudo-GT views for 3DGS to improve coverage in sparse-view set-tings. ViewCrafter [46] and its variants [3, 5, 45] handle extremely sparse inputs using auxiliary priors (e.g., lay-ered scene representations [3], inpainting [5]) to bridge gaps and enforce consistency. However, these synthesized views often contain geometric artifacts or inconsistent textures. Naively using such views without quality filtering can de-grade the reconstruction. Only a few studies have attempted to mitigate this prob-lem. Wang et al. [40] proposed image-level quality scores for selection, but this still allows artifact-prone regions to be used in optimization. Another approach [3] proposed measuring pixel-wise uncertainty for the generated images and selectively applying this to the 3DGS training. This method, however, defines uncertainty simply as the pixel-wise variance across multiple generated images for a single view. This definition is highly dependent on the output dis-tribution of the specific generative model and often leads to inaccurate uncertainty predictions. In contrast, our work proposes a network that directly predicts image quality. We leverage these predictions for both robust image selection and pixel-wise adaptive 3DGS training. This dual-filtering approach ensures that only the most accurate regions of the generated images contribute to the reconstruction, thereby significantly improving 3DGS modeling performance. 
+
+2.2. Image Quality Assessment 
+
+Full-reference (FR-IQA) metrics assess image quality by comparing a query image against a pose-aligned GT. Estab-lished metrics like PSNR and SSIM [38], along with learned measures such as LPIPS [48], operate in deep feature spaces to better reflect human perception. However, their strict re-quirement for a pixel-aligned GT restricts their use in prac-tical applications like NVS, where GTs are inherently un-available. No-reference (NR-IQA) methods bypass the need for a reference, estimating quality directly from the query im-age. Classical approaches (BRISQUE [24], PIQE [35]) use handcrafted features, while modern learning-based methods (PAL4VST [47], PaQ-2-PiQ [44]) leverage deep networks. Lacking a reference makes defining an objective quality standard difficult. Consequently, NR-IQA metrics are pri-marily designed to detect low-level artifacts, and thus are ill-suited for assessing the high-level geometric and multi-view consistency required for NVS. To bridge this gap, cross-reference (CR-IQA) meth-ods [2, 13, 39] have emerged, which utilize unregistered reference images from the same scene. Pioneering works include CrossScore [39], which estimates SSIM maps via cross-attention, and Puzzle Similarity [13], which employs patch-level cosine similarity. While innovative, these meth-ods are often limited to simple patch-level comparisons and lack high-level semantic understanding. More critically, they ignore multi-view geometry, a cornerstone of reliable 3D reconstruction. MEt3R [2] addresses this by explicitly quantifying geometric alignment using DINO features [7], but its analysis is confined to overlapping regions. In contrast, our method unifies patch-similarity and multi-view consistency within a novel quality completion framework. Our approach first computes a geometrically aligned, reliable quality map only in overlapping regions. It then propagates trusted quality signals to non-overlapping areas via a novel cross-attention network, yielding a com-plete and geometrically-aware quality assessment. 
+
+## 3. Partial-Reference IQA 
+
+3.1. Preliminaries 
+
+Given a query image Iq ∈ RH×W ×3 and a reference im-age Ir ∈ RH×W ×3 captured from different viewpoints of the same scene, our task, CR-IQA, aims to predict a dense quality map Q ∈ [0 , 1] H×W for Iq . In the context of sparse NVS, Iq is a pose-conditioned diffusion rendering, whereas Ir is a real image from another pose. Unlike FR-IQA [38, 48], we do not assume access to a pixel-aligned GT image I∗ 
+
+> q
+
+.Let f denote an FR quality function f (Iq , I ∗ 
+
+> q
+
+) → QFR ,where QFR ∈ [0 , 1] H×W is the per-pixel quality map de-rived by comparing Iq to its GT I∗ 
+
+> q
+
+. Our goal is to learn a cross-reference function gΦ(Iq , I r ) → Q. This function is trained to approximate the FR-like quality map ( Q ≈ QFR )using only an unregistered reference image Ir in place of I∗ 
+
+> q
+
+.Any established FR-IQA metric can serve as the target for the FR quality function f . We adopt DINOv2 [26] feature similarity and SSIM, as they are strong-performing metrics for sparse NVS (see Appendix). The DINOv2 similarity is computed as the pixel-wise cosine similarity between DI-NOv2 feature maps extracted from both images. 
+
+3.2. Overview 
+
+Fig. 2(a) illustrates our proposed CR-IQA pipeline, namely PR-IQA, which operates in two main stages: (i) partial qual-ity map generation and (ii) dense quality map completion. In the first stage, inspired by MEt3R [2], we leverage the principle that geometric overlap provides locally reliable cross-view consistency. We identify overlapping regions between Iq and Ir and compute a partial quality map ˆQ
+
+exclusively for these regions. In the second stage, we for-mulate quality estimation for non-overlapping regions as Reference Image ( 𝐼 r)          
+
+> Partial Quality Map ( ෠𝑄 )
+> Query Image ( 𝐼 q)
+> Partial Quality Map Generation
+> Self -Attn
+> Encoder
+> Cross -Attn
+> Encoder
+> Cross -Attn
+> Encoder Decoder
+> Dense Quality Map ( 𝑄 )
+> Upsampled Feature Map
+> Input and Derived Data Quality Map Completion
+> DINOv2
+> LoftUp
+> Cross Attention
+> ConvFusion
+> Spatial
+> Attention
+> Module
+> Norm
+> FFN
+> Dual -Gated
+> Attention Block
+> Norm
+> Channel
+> Attention
+> Module
+> Norm
+> K, V
+> K, V
+> Spatial Attention Module
+> Channel Attention Module
+> XShallow MLP
+> Channel
+> Attention
+> AvgPool
+> MaxPool
+> X
+> Q
+> K
+> V
+> Softmax
+> Attention Score
+> X’
+> Pointwise Conv
+> Depthwise Conv
+
+(a) Overview  (b) Dual -Gated Attention Block Architecture   
+
+> Dense Stereo Overlapped Region
+> Feature Warping
+
+Figure 2. (a) Overview of the PR-IQA pipeline. The framework operates in two stages. First, we warp DINOv2 features from the reference 
+
+Ir to the query Iq view via dense stereo, generating a partial quality map ( ˆQ) for overlapping regions. Next, a three-stream (query, reference, partial map) encoder-decoder predicts the full quality map Q. (b) Architecture of the Dual-Gated Attention Block. The block sequentially applies two attention mechanisms: a Channel Attention Module (using max/avg pooling and MLP) recalibrates channels, and a Spatial Attention Module (using Q, K, V projections and softmax) provides spatial refinement. The block integrates both with normalization, residual connections ( ⊕), and an FFN. Each encoder and decoder is composed of this block. 
+
+a quality map completion problem. Our PR-IQA network takes the partial quality map ˆQ as input, along with the query and reference images Iq and Ir . The network then predicts a complete quality map Q over the entire image domain. This allows the network to propagate reliable qual-ity signals from validated regions to the rest of the image, using the reference image for context guidance. 
+
+3.3. Partial Quality Map Generation 
+
+We construct a partial quality map ˆQ that measures feature-space consistency between a query image Iq and a reference image Ir only at geometry-consistent pixels. Concretely, we first obtain dense, pixel-aligned 3D point maps using visual geometry grounded transformer (VGGT) [36] to es-tablish geometric correspondences. For feature compari-son, we extract DINOv2 [26] features ( F DINO  
+
+> q
+
+, F DINO  
+
+> r
+
+) and upsample them to high-resolution using LoftUp [15]. Us-ing the VGGT point maps, we warp the reference features 
+
+F DINO  
+
+> r
+
+into the query view via unprojection and reprojec-tion, yielding the warped features F DINO  
+
+> r→q
+
+.The partial quality at pixel i is then computed as the co-sine similarity between the query features F DINO  
+
+> q
+
+(i) and the warped reference features F DINO  
+
+> r→q
+
+(i):
+
+ˆQ(i) = CosSim  F DINO  
+
+> q
+
+(i), F DINO  
+
+> r→q
+
+(i) , (1) where CosSim (u, v) = 12
+
+ u·v 
+
+> ∥u∥∥ v∥
+
++ 1 
+
+
+
+denotes the cosine similarity normalized to the range [0 , 1] .
+
+3.4. Quality Map Completion 
+
+Our goal is to predict a dense quality map Q for Iq , given Ir
+
+and a partial quality map ˆQ. We frame this as a cross-view quality completion task, which propagates reliable scores from overlapping regions to unobserved areas, guided by cross-view geometric and semantic consistency. Our network architecture is composed of three encoders, 
+
+Enc r 
+
+> self
+
+, Enc q
+
+> cross
+
+, and Enc p
+
+> cross
+
+, and a single decoder, Dec .The self-attention encoder, Enc r 
+
+> self
+
+, processes Ir to extract its features. These features are then utilized as context by the two cross-attention encoders: Enc q
+
+> cross
+
+, which processes the query image Iq , and Enc p
+
+> cross
+
+, which processes the par-tial quality map ˆQ. The decoder, Dec , then synthesizes the information from the encoders to produce the final full qual-ity map Q.All encoders are multi-scale pyramids featuring three downsampling stages. As illustrated in Fig. 2(b), each stage employs a dual-gated attention block derived from the CBAM model [42], which utilizes a sequential atten-tion mechanism consisting of channel attention, spatial at-tention, and a feed-forward network (FFN). This sequen-tial design is highly advantageous for quality map comple-tion, as it allows the network to decouple what features are relevant (via channel attention) from where they should be propagated to fill non-overlapping regions (via spatial atten-tion). To stabilize matching across pose changes, we inject 2D positional encodings at every scale. The decoder mir-rors this multi-scale attention pattern, progressively upsam-pling the fused features back to full resolution to produce the quality map Q.For each stage s, the self-attention block Enc r,s  
+
+> self
+
+pro-cesses the reference features, where s ∈ { 0, 1, 2, 3}. The cross-attention blocks Enc q,s  
+
+> cross
+
+and Enc p,s  
+
+> cross
+
+are reference-conditioned: they replace the self-attention layer with a cross-attention module that takes the branch’s own features as queries while using the same-stage reference features as keys and values. This design explicitly enforces alignment to Ir and injects cross-view evidence at every scale, unlike prior designs that rely solely on self-attention [34]. Let F sr , F sq , and F sp denote the reference, query, and partial-map features at stage s. We initialize F 0 
+
+> r
+
+= Ir ,
+
+F 0 
+
+> q
+
+= Iq , and F 0 
+
+> p
+
+= ˆQ. The computation at each stage proceeds as: 
+
+F sr = Enc r,s  
+
+> self
+
+(F s−1 
+
+> r
+
+),
+
+ˆF sq = Enc q,s 
+
+> cross
+
+(F s−1 
+
+> q
+
+; F sr ),F sp = Enc p,s 
+
+> cross
+
+(F s−1 
+
+> p
+
+; F sr ).
+
+(2) After each stage, we fuse the query and partial streams to update the partial representation: 
+
+F sq = ConvFuse ( ˆF sq , F sp ), (3) where ConvFuse denotes channel-wise concatenation fol-lowed by a channel-mixing convolution. This fusion an-chors quality propagation to geometry-validated regions from ˆQ and steers subsequent updates toward a cross-view-consistent solution. The final fused representation F 3 
+
+> q
+
+is decoded to a full-resolution map: 
+
+Q = Dec (F 3 
+
+> q
+
+). (4) The combination of reference-conditioned cross-attention and overlap-guided fusion enforces strict geometric alignment across views, allowing the network to propagate reliable scores from overlapping to unseen re-gions while reducing ghosting and view-mismatch artifacts to yield a complete, perceptually coherent quality map. 
+
+3.5. Training Strategy 
+
+We train our model to predict a quality map Q that approx-imates a GT map Q∗. This target map is derived using a custom FR-IQA metric that requires a pixel-aligned GT im-age I∗ 
+
+> q
+
+, which is unavailable at inference. We define the tar-get quality map Q∗ as either the DINOv2 feature-similarity map (DINOv2-SIM) or the SSIM map computed between 
+
+I∗ 
+
+> q
+
+and Iq . Consequently, we train two separate model vari-ants, each targeting one of these two FR-IQA metrics. The training objective combines three distinct loss com-ponents. First, a pixel-wise L1 loss LIQA  
+
+> 1
+
+between Q and 
+
+Q∗ ensures local accuracy. Second, to align the global score distributions, we apply a Jensen-Shannon Divergence (JSD) [9] loss, LJSD , between Q and Q∗. Third, a Pearson Linear Correlation Coefficient (PLCC) [6] loss, LPLCC , is used to enforce linear agreement between Q and Q∗.Finally, the total training loss L is a weighted combina-tion of these three components: 
+
+L = λIQA LIQA  
+
+> 1
+
++ λJSD LJSD + λPLCC LPLCC , (5) with weights λIQA = 0 .5, λJSD = 1 .0, and λPLCC = 0 .25 .
+
+## 4. PR-IQA-Guided 3D Gaussian Splatting 
+
+We integrate our PR-IQA framework into a sparse-view 3DGS pipeline to filter inconsistencies from diffusion-generated views. We adopt ViewCrafter [46] as our baseline for generating pseudo-GT images. Fig. 1(c) illustrates our quality-aware approach, which involves a two-stage pro-cess: (i) robust pseudo-GT selection using PR-IQA scores, and (ii) pixel-wise adaptive 3DGS training using the high-confidence regions identified by our quality maps. 
+
+Pseudo-GT Generation and Selection. Given a sparse set of Nin input images Iin = {Ik
+
+> in
+
+}Nin  
+
+> k=1
+
+with camera parame-ters recovered via DUSt3R [37], we first sample new view-points. Following ViewCrafter [46], we identify two nearby inputs, Ir1 and Ir2 from Iin , and sample viewpoints v along the trajectory between them. For each viewpoint v, the video diffusion model (VDM) [46] generates Nv candidate images, denoted as Iv
+
+= {Iv,n }Nv
+
+> n=1
+
+. Each candidate Iv,n (acting as the query im-age Iq ) is then evaluated by our PR-IQA model gΦ, using 
+
+Ir1 and Ir2 as reference images. Let Qr1 
+
+> v,n
+
+and Qr2 
+
+> v,n
+
+be the predicted quality maps for Iv,n using Ir1 and Ir2 as ref-erences, respectively. We take the pixel-wise maximum of the two quality maps to form a consolidated map Qv,n . This optimistic aggregation strategy ensures that a region is con-sidered high-quality if it is consistent with at least one of the reference views, which is crucial for effectively expanding the training set with pseudo-GTs. Finally, a representative image-level quality score Sv,n is then defined as the mean of all values in Qv,n .For each viewpoint v, we select the single candidate with the highest score as the pseudo-GT image ˜Iv and retain its corresponding quality map ˜Qv :
+
+( ˜Iv , ˜Qv ) = argmax 
+
+> (Iv,n ,Q v,n )∈I v
+
+(Sv,n ). (6) This selection process yields a set of high-quality pseudo-GT images, Ipseudo = { ˜Iv }, which are used to densify the sparse input views. 
+
+Quality-Aware 3DGS Training. We perform pixel-wise adaptive 3DGS training using the full set of images Itrain =
+
+Iin ∪ I pseudo . We define a binary confidence mask Mk for each training image Ik ∈ Itrain . For real input images (Ik ∈ I in ), the mask Mk is set to all ones, as we trust all pixels. For pseudo-GT images ( Ik ∈ I pseudo ), the mask is derived from its corresponding quality map Qk to restrict training to only high-confidence regions. This is achieved by thresholding the map at its top τ -percentile. Formally, the mask for a pixel i is Mk(i) = 1[Qk(i) ≥ Tτ ], where 
+
+1[·] is the indicator function and Tτ = percentile (Qk, τ ).We heuristically set τ = 50 .Let ˆIk be the image rendered from the 3D Gaussians at the k-th pose. We employ the pixel-wise adaptive L1 loss 
+
+L3DGS  
+
+> 1,k
+
+, which computes the difference between Ik and ˆIk,Table 1. Quantitative comparisons of predicted quality maps from IQA methods against GT quality maps (PLCC ↑, SRCC ↑). Red, orange, and yellow cells denote the 1st, 2nd, and 3rd best methods per column (with rankings computed excluding FR settings †), and gray cells indicate identity cases where the IQA prediction matches the GT quality map.                                                                                                                                                                                  
+
+> Mip-NeRF 360 Tanks and Temples RealEstate10K IQA Type IQA Method DINOv2 SSIM DINOv2 SSIM DINOv2 SSIM PLCC SRCC PLCC SRCC PLCC SRCC PLCC SRCC PLCC SRCC PLCC SRCC PSNR †0.407 0.338 0.517 0.487 0.405 0.367 0.486 0.487 0.248 0.241 0.392 0.386 SSIM †0.409 0.386 1.000 1.000 0.429 0.423 1.000 1.000 0.400 0.444 1.000 1.000 LPIPS †0.557 0.472 0.565 0.554 0.591 0.590 0.598 0.595 0.489 0.516 0.452 0.460 FR-IQA DINOv2 †1.000 1.000 0.409 0.386 1.000 1.000 0.423 0.417 1.000 1.000 0.400 0.533 PAL4VST 0.030 0.031 0.014 0.014 0.002 0.001 0.003 0.004 0.094 0.088 0.043 0.048 PaQ-2-PiQ -0.088 -0.107 -0.163 -0.174 0.039 0.118 -0.086 -0.089 -0.111 -0.119 -0.251 -0.268 NR-IQA PIQE 0.144 0.161 -0.002 0.017 0.194 0.201 0.365 0.399 0.191 0.245 0.444 0.533 MEt3R* 0.105 0.129 0.037 0.032 0.142 0.153 0.110 0.130 0.312 0.368 0.195 0.217 CrossScore 0.094 0.090 0.290 0.325 0.237 0.272 0.444 0.462 0.285 0.324 0.442 0.523 PuzzleSim 0.304 0.327 0.128 0.124 0.351 0.369 0.348 0.347 0.410 0.478 0.384 0.415 Ours partial *0.437 0.596 0.150 0.169 0.407 0.557 0.098 0.116 0.325 0.509 0.206 0.266 Ours DINOv2 0.555 0.622 0.261 0.241 0.573 0.650 0.387 0.367 0.453 0.564 0.352 0.395 CR-IQA Ours SSIM 0.320 0.367 0.535 0.556 0.309 0.345 0.625 0.643 0.278 0.324 0.632 0.677
+> †Metrics require a same-pose GT image. * Metrics are computed only over the valid overlapping region.
+
+but only for pixels within high-confidence regions specified by the mask Mk. The final loss is then a combination of this masked reconstruction loss L3DGS  
+
+> 1,k
+
+and the SSIM term [16]: 
+
+Ltotal =
+
+> |I train |
+
+X
+
+> k=1
+
+
+
+(1 − λdssim )L3DGS  
+
+> 1,k
+
++ λdssim Ldssim ( ˆIk, I k)
+
+
+
+,
+
+(7) where λdssim = 0 .2. This quality-aware formulation su-pervises the 3DGS optimization using reliable real images, while leveraging high-confidence regions from synthesized views to filter photometric and geometric inconsistencies. 
+
+## 5. Experiments 
+
+5.1. Experimental Settings 
+
+Dataset. We constructed our training dataset using the MFR dataset [1] by uniformly sampling GT frames and using a VDM [46] to generate three variant query images per frame, resulting in 120k training pairs. For evaluation, we used three benchmarks: Tanks and Temples [18], Mip-NeRF 360 [4], and RealEstate10K [50]. For each bench-mark, we pre-generated a fixed set of query images (using the same VDM) and their corresponding GT images, which are used only for computing the ground-truth quality maps during evaluation. Our benchmark is publicly available 1;details appear in the Appendix. 
+
+Baselines. We compare our method against three cate-gories of baselines: FR-IQA, NR-IQA, and CR-IQA. All IQA methods are configured to produce pixel-wise quality maps for our alignment-based comparison. For FR-IQA, we include well-established metrics, PSNR, SSIM [38], LPIPS [48], and DINOv2-SIM, each computed against the pose-aligned GT image. For NR-IQA, we employ PAL4VST [47], PaQ-2-PiQ [44], and PIQE [35]. For CR-IQA, we evaluate CrossScore [39], PuzzleSim [13], and MEt3R [2]. Our PR-IQA method, as introduced in Sect. 3.2, is evaluated in two variants: Ours DINOv2 and Ours SSIM ,which target the DINOv2 and SSIM metrics, respectively. To assess the partial map’s utility, we also include Ours partial ,a non-learned variant using the partial map directly. 
+
+5.2. IQA Performance 
+
+Setup. We evaluate competing IQA methods by measuring their alignment with GT quality maps. GT maps are gener-ated by comparing diffusion outputs (query images) to their pose-aligned GT counterparts; we consider two variants: DINOv2-SIM and SSIM map. We quantify map alignment using the Pearson Linear Correlation Coefficient (PLCC) and the Spearman Rank Correlation Coefficient (SRCC). PLCC measures linear correlation (invariant to affine scal-ing), and SRCC captures rank-order correlation (invariant to monotonic transformations). Following standard protocols, FR-IQA uses the query and its pose-aligned GT image; NR-IQA uses only the query. For CR-IQA, which measures cross-view consis-tency, we use the closer of the first or last frame as a ref-erence view for each query, with the intermediate frames serving as the query views. Predicted maps are generated for these reference-query pairs, and alignment is evaluated on all intermediate frames. Since Ours partial and MEt3R [2] operate on sub-regions, their evaluation is restricted to the valid support, computing PLCC and SRCC only within these corresponding spatial regions. 
+
+Results. Table 1 summarizes the average PLCC and SRCC for each IQA metric. As expected, FR-IQA methods achieve the highest performance given their access to pose-GT Image  Generated Image  Reference Image  DINOv2  PaQ -2-PiQ  PIQE  CrossScore  PuzzleSim  Ours 
+
+> Family Horse Garden Kitchen Scene1 Scene2 Figure 3. Qualitative comparison of estimated quality maps from IQA methods. Colors encode estimated quality, where low-quality pixels are shown in blue and high-quality pixels are shown in red. Compared to baselines, our results (“Ours”) more faithfully recover object silhouettes and fine structures, closely matching the GT (DINOv2-SIM).
+
+aligned GT images, with LPIPS yielding the best results on both DINOv2 and SSIM targets. Conversely, NR-IQA methods demonstrate the lowest average performance. The performance of CR-IQA baselines aligns with their respec-tive designs: CrossScore (trained on SSIM) exhibits high correlation with SSIM, while PuzzleSim (feature-based) correlates more strongly with DINOv2. Notably, our PR-IQA variants, Ours DINOv2 and Ours SSIM ,achieve state-of-the-art performance in their categories. As confirmed by Table 1, Ours DINOv2 effectively tar-gets the feature-similarity map from a large-scale back-bone. Ours SSIM substantially outperforms CrossScore on the SSIM target despite a shared objective, indicating a more accurate and robust representation for structural sim-ilarity. Ours SSIM also performs on par with, and sometimes surpasses, the FR metric LPIPS. This demonstrates our ap-proach can attain FR-level quality in a challenging cross-view setting without an aligned GT. Fig. 3 provides qualitative comparisons against the GT quality map (DINOv2-SIM), visually exposing the limita-tions of the baselines. PIQE, for instance, tends to empha-size simple edges over meaningful degradation, while PaQ-2-PiQ, PuzzleSim, and CrossScore often produce coarse, blocky maps. The patch-level design of CrossScore appears to struggle with capturing fine details and precise bound-aries, resulting in coarser quality maps. By contrast, PR-IQA consistently produces maps that closely resemble the GT, recovering object silhouettes and local structural differ-ences, thus visually validating the quantitative gains. 
+
+5.3. Architectural Ablations 
+
+Setup. We conduct a systematic ablation study to validate the core components of our model (Sect. 3.4). Our analysis focuses on two key areas: (1) the design of our CBAM-like attention block, and (2) the impact of our auxiliary inputs. For the attention block, we evaluate two modified variants: (v-i) one with the spatial and channel attention modules swapped, and (v-ii) a simplified variant that removes the channel attention module, leaving a basic transformer-like structure. To assess the inputs, we test two additional vari-ants: (v-iii) a model without the reference-image encoding branch, and (v-iv) a model without the partial quality map encoding branch. All variants are trained and evaluated un-der identical settings to ensure a fair comparison. 
+
+Results. Table 2 reports the PLCC and SRCC for each variant on Mip-NeRF 360 and Tanks and Temples, using DINOv2-SIM as the target. The results clearly indicate that the partial quality map is the most crucial input; remov-ing it (v-iv) causes a much larger performance drop than removing the reference image (v-iii). Furthermore, the ef-fectiveness of our dual-gated attention block (Fig. 2(b)) is supported by the improved performance of the full model compared to the alternative variants (v-i and v-ii), with par-ticularly notable gains in SRCC, confirming its suitability for regression of dense quality maps. 
+
+5.4. Application: IQA-Guided 3DGS Results 
+
+Setup. We demonstrate a practical application of PR-IQA by using its predicted quality maps to guide 3DGS [16] GT Image  Vani lla  3DGS  ViewCrafter  PIQE  CrossScore  PuzzleSim  Ours 
+
+> Bonsai Caterpillar Scene3
+
+Figure 4. Qualitative comparison of rendered novel views from IQA-guided 3DGS. While baseline methods produce results with artifacts, blurring, or misaligned Gaussians, our PR-IQA-guided method (“Ours”) avoids these failure modes, yielding significantly cleaner and more coherent reconstructions. Table 2. Ablation on architectural components: attention block design and auxiliary inputs. PLCC ↑ and SRCC ↑ are measured against DINOv2-SIM. 
+
+Model Variants Mip-NeRF 360 Tanks and Temples PLCC SRCC PLCC SRCC (v-i) Reversed Attention Order 0.540 0.609 0.517 0.584 (v-ii) w/o Channel Attention 0.554 0.611 0.571 0.633 (v-iii) w/o Reference Branch 0.544 0.613 0.553 0.637 (v-iv) w/o Partial Map Branch 0.421 0.464 0.452 0.438 Full Model 0.555 0.622 0.573 0.650 
+
+Table 3. Quantitative comparison of IQA-guided 3DGS across IQA methods. PSNR ↑, SSIM ↑, and LPIPS ↓ are averaged over scenes. Red, orange, yellow mark 1st–3rd per column, excluding FR-based baselines †.                                                                                                         
+
+> Mip-NeRF 360 Tanks and Temples RealEstate10K IQA-Guided Method PSNR SSIM LPIPS PSNR SSIM LPIPS PSNR SSIM LPIPS Vanilla 3DGS 16.08 0.461 0.415 15.30 0.509 0.406 16.39 0.625 0.345 w/o IQA ViewCrafter 16.18 0.474 0.453 15.77 0.523 0.455 16.94 0.620 0.327 w/ FR-IQA SSIM †16.68 0.487 0.421 16.23 0.556 0.399 17.54 0.639 0.325 DINOv2 †17.18 0.498 0.399 16.78 0.562 0.384 17.83 0.640 0.322 PaQ-2-PiQ 16.30 0.472 0.425 15.77 0.534 0.421 16.58 0.608 0.339 w/ NR-IQA PIQE 16.31 0.479 0.440 15.67 0.534 0.433 16.54 0.612 0.333 CrossScore 16.31 0.476 0.431 15.86 0.537 0.427 16.99 0.621 0.338 PuzzleSim 16.35 0.482 0.423 15.94 0.541 0.406 17.38 0.632 0.332 Ours SSIM 16.37 0.485 0.427 16.14 0.548 0.407 16.94 0.631 0.329 w/ CR-IQA Ours DINOv2 16.76 0.493 0.414 16.24 0.551 0.403 17.72 0.632 0.327
+
+training for sparse-view NVS. For each scene, we extract a GT set IGT (100 frames for Tanks and Temples/Mip-NeRF, 25 for RealEstate10K) and select Nin = 5 sparse inputs ( Iin ). For the remaining views ( IGT \ I in ), we use a VDM [46] to generate a candidate pool of Nv = 5 images per view. We compare our PR-IQA against alternative IQA meth-ods. For each IQA method, we construct a pseudo-GT set Ipseudo by selecting the highest-scoring candidate per view. The 3DGS model is trained on Iin 
+
+S Ipseudo , using the method’s quality maps for masking during optimiza-tion (see Sect. 4). We also evaluate two standard base-lines: (i) Vanilla 3DGS [16], trained only on Iin , and (ii) ViewCrafter [46], a diffusion baseline without IQA guid-ance. ViewCrafter uses the same candidate pool, randomly selects one image per view, and uses all pixels for training. 
+
+Results. Table 3 presents the quantitative results. Our IQA-guided 3DGS training strategy achieves consistently strong performance, significantly outperforming both Vanilla 3DGS and ViewCrafter across all datasets. Our PR-IQA (Ours DINOv2 ) achieves the highest PSNR and SSIM and the lowest LPIPS on all three datasets, indicating that its pre-dicted quality maps effectively identify and mask inaccurate regions, thereby improving 3DGS reconstruction quality. Fig. 4 provides a qualitative comparison for 3DGS, clearly exposing the limitations of the baseline meth-ods. Using quality maps from other IQA methods yields views with noticeable artifacts or occlusions. The non-IQA-guided baselines also struggle: omitting diffusion-generated images entirely (Vanilla 3DGS) leads to mis-aligned Gaussians, while training on diffusion images with-out IQA guidance (ViewCrafter) produces blurry render-ings. In contrast, the PR-IQA-guided 3DGS results avoid these failure modes and produce significantly cleaner, more coherent reconstructions (see red solid and dashed boxes in Fig. 4). 
+
+## 6. Conclusion 
+
+This study introduced PR-IQA, a novel CR-IQA framework to address diffusion-generated view inconsistencies. The method computes a partial quality map in overlapping re-gions, then completes it into a dense map using a reference-conditioned cross-attention network. Experiments show PR-IQA outperforms existing methods, correlating highly with FR-IQA metrics without GT. Integrated into a 3DGS pipeline, its quality-aware strategy filters inconsistencies by restricting supervision to high-confidence regions, improv-ing reconstruction fidelity. This suggests PR-IQA is a pow-erful tool for high-quality, sparse-view 3D reconstruction. Acknowledgements 
+
+This research was supported by the MSIT(Ministry of Sci-ence and ICT), Korea, under the ITRC(Information Tech-nology Research Center) support program(IITP-2026-RS-2020-II201789), and the Artificial Intelligence Conver-gence Innovation Human Resources Development(IITP-2026-RS-2023-00254592) supervised by the IITP(Institute for Information & Communications Technology Planning & Evaluation). 
+
+## References 
+
+[1] Eduardo Arnold, Jamie Wynn, Sara Vicente, Guillermo Garcia-Hernando, Aron Monszpart, Victor Prisacariu, Dani-yar Turmukhambetov, and Eric Brachmann. Map-free visual relocalization: Metric pose relative to a single image. In 
+
+ECCV , pages 690–708, 2022. 6, 2 [2] Mohammad Asim, Christopher Wewer, Thomas Wimmer, Bernt Schiele, and Jan Eric Lenssen. MET3R: Measuring multi-view consistency in generated images. In CVPR , pages 6034–6044, 2025. 1, 3, 6 [3] Chong Bao, Xiyu Zhang, Zehao Yu, Jiale Shi, Guofeng Zhang, Songyou Peng, and Zhaopeng Cui. Free360: Layered gaussian splatting for unbounded 360-degree view synthesis from extremely sparse and unposed views. In CVPR , pages 16377–16387, 2025. 1, 3 [4] Jonathan T. Barron, Ben Mildenhall, Dor Verbin, Pratul P. Srinivasan, and Peter Hedman. Mip-NeRF 360: Unbounded anti-aliased neural radiance fields. In CVPR , pages 5470– 5479, 2022. 6 [5] Xudong Cai, Yongcai Wang, Zhaoxin Fan, Deng Haoran, Shuo Wang, Wanting Li, Deying Li, Lun Luo, Minhang Wang, and Jintao Xu. Dust to tower: Coarse-to-fine photo-realistic scene reconstruction from sparse uncalibrated im-ages. arXiv preprint arXiv:2412.19518 , 2024. 1, 3 [6] Weihan Cao, Yifan Zhang, Jianfei Gao, Anda Cheng, Ke Cheng, and Jian Cheng. PKD: general distillation frame-work for object detectors via pearson correlation coefficient. In NeurIPS , 2022. 5, 1 [7] Mathilde Caron, Hugo Touvron, Ishan Misra, Herv´ e J´ egou, Julien Mairal, Piotr Bojanowski, and Armand Joulin. Emerg-ing properties in self-supervised vision transformers. In 
+
+ICCV , pages 9650–9660, 2021. 3 [8] Antonio Criminisi, Patrick P´ erez, and Kentaro Toyama. Re-gion filling and object removal by exemplar-based image in-painting. IEEE TIP , 13(9):1200–1212, 2004. 2 [9] Erik Englesson and Hossein Azizpour. Generalized jensen-shannon divergence loss for learning with noisy labels. In 
+
+NeurIPS , pages 30284–30297, 2021. 5, 1 [10] Stephanie Fu, Mark Hamilton, Laura Brandt, Axel Feld-man, Zhoutong Zhang, and William T. Freeman. Featup: A model-agnostic framework for features at any resolution. In ICLR , 2024. 3 [11] Kaiming He, Xiangyu Zhang, Shaoqing Ren, and Jian Sun. Deep residual learning for image recognition. In CVPR ,2016. 3 [12] Dan Hendrycks and Kevin Gimpel. Gaussian error linear units (gelus), 2016. 1 [13] Nicolai Hermann, Jorge Condor, and Piotr Didyk. Puzzle similarity: A perceptually-guided cross-reference metric for artifact detection in 3d scene reconstructions. In ICCV , pages 28881–28891, 2025. 1, 3, 6, 4 [14] Jonathan Ho, Ajay Jain, and Pieter Abbeel. Denoising dif-fusion probabilistic models. In NeurIPS , pages 6840–6851, 2020. 1, 2 [15] Haiwen Huang, Anpei Chen, Volodymyr Havrylov, Andreas Geiger, and Dan Zhang. LoftUp: Learning a coordinate-based feature upsampler for vision foundation models. In 
+
+ICCV , 2025. 4 [16] Bernhard Kerbl, Georgios Kopanas, Thomas Leimk¨ uhler, and George Drettakis. 3D gaussian splatting for real-time radiance field rendering. ACM TOG , 42(4):139–1, 2023. 1, 6, 7, 8 [17] Yuval Kirstain, Adam Polyak, Uriel Singer, Shahbuland Ma-tiana, Joe Penna, and Omer Levy. Pick-a-pic: An open dataset of user preferences for text-to-image generation. In 
+
+NeurIPS , 2023. 11 [18] Arno Knapitsch, Jaesik Park, Qian-Yi Zhou, and Vladlen Koltun. Tanks and temples: Benchmarking large-scale scene reconstruction. ACM TOG , 36(4), 2017. 6 [19] Ruoshi Liu, Rundi Wu, Basile Van Hoorick, Pavel Tok-makov, Sergey Zakharov, and Carl Vondrick. Zero-1-to-3: Zero-shot one image to 3D object. In ICCV , pages 9298– 9309, 2023. 3 [20] Xinhang Liu, Jiaben Chen, Shiu-Hong Kao, Yu-Wing Tai, and Chi-Keung Tang. Deceptive-NeRF/3DGS: Diffusion-generated pseudo-observations for high-quality sparse-view reconstruction. In ECCV , pages 337–355. Springer, 2024. 3 [21] Yuxin Liu, Minshan Xie, Hanyuan Liu, and Tien-Tsin Wong. Text-guided texturing by synchronized multi-view diffusion. In SIGGRAPH Asia 2024 Conference Papers , pages 1–11. ACM, 2024. 3 [22] Ilya Loshchilov and Frank Hutter. SGDR: stochastic gradient descent with warm restarts. In ICLR , 2017. 3 [23] Ben Mildenhall, Pratul P. Srinivasan, Matthew Tancik, Jonathan T. Barron, Ravi Ramamoorthi, and Ren Ng. NeRF: Representing scenes as neural radiance fields for view syn-thesis. In ECCV , pages 405–421. Springer, 2020. 1 [24] Anish Mittal, Anush Krishna Moorthy, and Alan Conrad Bovik. No-reference image quality assessment in the spa-tial domain. IEEE TIP , 21(12):4695–4708, 2012. 1, 3 [25] Michael Niemeyer, Jonathan T. Barron, Ben Mildenhall, Mehdi S. M. Sajjadi, Andreas Geiger, and Noha Radwan. RegNeRF: Regularizing neural radiance fields for view syn-thesis from sparse inputs. In CVPR , pages 5480–5490, 2022. 1[26] Maxime Oquab, Timoth´ ee Darcet, Th´ eo Moutakanni, Huy Vo, Marc Szafraniec, Vasil Khalidov, Pierre Fernandez, Daniel Haziza, Francisco Massa, Alaaeldin El-Nouby, Mah-moud Assran, Nicolas Ballas, Wojciech Galuba, Russell Howes, Po-Yao Huang, Shang-Wen Li, Ishan Misra, Michael Rabbat, Vasu Sharma, Gabriel Synnaeve, Hu Xu, Herv´ eJ´ egou, Julien Mairal, Patrick Labatut, Armand Joulin, and Piotr Bojanowski. DINOv2: Learning robust visual features without supervision. Transactions on Machine Learning Re-search , 2024. 3, 4, 1 [27] Deepak Pathak, Philipp Krahenbuhl, Jeff Donahue, Trevor Darrell, and Alexei A. Efros. Context encoders: Feature learning by inpainting. In CVPR , pages 2536–2544, 2016. 2[28] Xuanchi Ren, Tianchang Shen, Jiahui Huang, Huan Ling, Yifan Lu, Merlin Nimier-David, Thomas M¨ uller, Alexan-der Keller, Sanja Fidler, and Jun Gao. Gen3C: 3d-informed world-consistent video generation with precise camera con-trol. In CVPR , pages 6121–6132, 2025. 5 [29] Robin Rombach, Andreas Blattmann, Dominik Lorenz, Patrick Esser, and Bj¨ orn Ommer. High-resolution image syn-thesis with latent diffusion models. In CVPR , pages 10684– 10695, 2022. 1, 2 [30] Olaf Ronneberger, Philipp Fischer, and Thomas Brox. U-net: Convolutional networks for biomedical image segmentation. In MICCAI , 2015. 1 [31] Jiaming Song, Chenlin Meng, and Stefano Ermon. Denois-ing diffusion implicit models. In ICLR , 2021. 1, 2 [32] Shitao Tang, Fuyang Zhang, Jiacheng Chen, Peng Wang, and Yasutaka Furukawa. MVDiffusion: Enabling holistic multi-view image generation with correspondence-aware diffusion. In NeurIPS , 2023. 3 [33] Shitao Tang, Jiacheng Chen, Dilin Wang, Chengzhou Tang, Fuyang Zhang, Yuchen Fan, Vikas Chandra, Yasutaka Fu-rukawa, and Rakesh Ranjan. MVDiffusion++: a dense high-resolution multi-view diffusion model for single or sparse-view 3D object reconstruction. In ECCV , pages 175–191. Springer, 2024. 3 [34] Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszko-reit, Llion Jones, Aidan N. Gomez, Łukasz Kaiser, and Illia Polosukhin. Attention is all you need. In NeurIPS , pages 5998–6008, 2017. 5 [35] Narasimhan Venkatanath, D. Praneeth, S. Channappayya Sumohana, S. Medasani Swarup, et al. Blind image quality evaluation using perception based features. In 2015 Twenty First National Conference on Communications (NCC) , pages 1–6. IEEE, 2015. 1, 3, 6 [36] Jianyuan Wang, Minghao Chen, Nikita Karaev, Andrea Vedaldi, Christian Rupprecht, and David Novotny. VGGT: Visual geometry grounded transformer. In CVPR , pages 5294–5306, 2025. 4, 7 [37] Shuzhe Wang, Vincent Leroy, Yohann Cabon, Boris Chidlovskii, and Jerome Revaud. DUSt3R: Geometric 3D vision made easy. In CVPR , pages 20697–20709, 2024. 5, 3 [38] Zhou Wang, Alan C. Bovik, Hamid R. Sheikh, and Eero P. Simoncelli. Image quality assessment: From error visibility to structural similarity. IEEE TIP , 13(4):600–612, 2004. 1, 3, 6 [39] Zirui Wang, Wenjing Bian, and Victor Adrian Prisacariu. CrossScore: Towards multi-view image evaluation and scor-ing. In ECCV , pages 492–510, 2024. 1, 3, 6 [40] Zirui Wang, Yash Bhalgat, Ruining Li, and Victor Adrian Prisacariu. Active view selector: Fast and accurate active view selection with cross reference image quality assess-ment. arXiv preprint arXiv:2506.19844 , 2025. 3 [41] Daniel Watson, William Chan, Ricardo Martin-Brualla, Jonathan Ho, Andrea Tagliasacchi, and Mohammad Norouzi. Novel view synthesis with diffusion models. In 
+
+ICLR , 2023. 3 [42] Sanghyun Woo, Jongchan Park, Joon-Young Lee, and In So Kweon. CBAM: convolutional block attention module. In 
+
+ECCV , pages 3–19, 2018. 4 [43] Jamie Wynn and Daniyar Turmukhambetov. DiffusioNeRF: Regularizing neural radiance fields with denoising diffusion models. In CVPR , pages 4180–4189, 2023. 3 [44] Zhenqiang Ying, Haoran Niu, Praful Gupta, Dhruv Mahajan, Deepti Ghadiyaram, and Alan Bovik. From patches to pic-tures (PaQ-2-PiQ): Mapping the perceptual space of picture quality. In CVPR , pages 3575–3585, 2020. 1, 3, 6 [45] Hong-Xing Yu, Haoyi Duan, Charles Herrmann, William T. Freeman, and Jiajun Wu. WonderWorld: Interactive 3d scene generation from a single image. In CVPR , pages 5916–5926, 2025. 3 [46] Wangbo Yu, Jinbo Xing, Li Yuan, Wenbo Hu, Xiaoyu Li, Zhipeng Huang, Xiangjun Gao, Tien-Tsin Wong, Ying Shan, and Yonghong Tian. ViewCrafter: Taming video diffusion models for high-fidelity novel view synthesis. IEEE TPAMI ,pages 1–18, 2025. 1, 3, 5, 6, 8, 2 [47] Lingzhi Zhang, Zhengjie Xu, Connelly Barnes, Yuqian Zhou, Qing Liu, He Zhang, Sohrab Amirghodsi, Zhe Lin, Eli Shechtman, and Jianbo Shi. Perceptual artifacts localiza-tion for image synthesis tasks. In ICCV , pages 7579–7590, 2023. 1, 3, 6 [48] Richard Zhang, Phillip Isola, Alexei A. Efros, Eli Shecht-man, and Oliver Wang. The unreasonable effectiveness of deep features as a perceptual metric. In CVPR , 2018. 1, 3, 6 [49] Jensen Zhou, Hang Gao, Vikram Voleti, Aaryaman Vasishta, Chun-Han Yao, Mark Boss, Philip Torr, Christian Rupprecht, and Varun Jampani. Stable virtual camera: Generative view synthesis with diffusion models, 2025. 5 [50] Tinghui Zhou, Richard Tucker, John Flynn, Graham Fyffe, and Noah Snavely. Stereo magnification: Learning view syn-thesis using multiplane images. ACM TOG , 37(4), 2018. 6 PR-IQA: Partial-Reference Image Quality Assessment for Diffusion-Based Novel View Synthesis 
+
+# Supplementary Material 
+
+This supplementary material complements the main pa-per by providing comprehensive implementation details, extended experimental results, and in-depth ablation stud-ies. Sections 1 and 2 establish the foundation for repro-ducibility by detailing the network architecture, loss func-tions, dataset generation protocols, and training configura-tions. We expand our experimental analysis in Section 3 to cover alternative FR-IQA targets (PSNR, LPIPS) and vali-date the reliability of image-level view selection. Further-more, Sections 4 and 5 present systematic ablation studies concerning IQA design choices (e.g., reference count, fu-sion strategy, geometric robustness) and 3DGS parameters (e.g., guidance metric, masking threshold, soft vs. binary masking), respectively. Section 6 provides extensive quali-tative visualizations for both quality map estimation and 3D reconstruction results. Finally, Section 7 discusses the limi-tations of the proposed method and outlines potential future directions. 
+
+## 7. Method Details 
+
+7.1. Architecture Details 
+
+As illustrated in Fig. 5, our architecture adopts a U-Net-like [30] encoder-decoder design, leveraging DINOv2 [26] as the feature backbone. The network utilizes GELU [12] as the activation function throughout all layers. Detailed speci-fications, including resolution, channel dimensions, and the number of blocks for each level, are summarized in Table 4. The encoder is structured into four stages with [2 , 3, 3, 4] 
+
+encoding blocks and [1 , 2, 4, 8] attention heads, respec-tively. The encoders for the query and reference branches share weights, whereas the encoder for the partial branch remains independent. The channel dimensions scale pro-gressively as [48 , 96 , 192 , 384] from Level 1 to Level 4. To effectively integrate information across branches, we employ a ConvFuse operation at each encoding stage. Specifically, the feature maps from the query and partial branches are concatenated along the channel dimension and then projected back to the original channel size via a con-volutional layer. The resulting fused features serve as the input for the subsequent stage of the query branch, while the partial branch retains its original, unfused features for its own propagation. The decoder consists of three stages containing [3 , 3, 2] 
+
+decoding blocks and [4 , 2, 1] attention heads. Correspond-ing to the encoder levels, the decoder maintains channel widths of 192 , 96 , and 96 , respectively, following skip con-nection fusion and 1 × 1 channel reduction. The resulting model comprises approximately 60M trainable parameters. In terms of resource consumption, it is highly efficient, requiring approximately 2 GB of GPU memory for single-image inference and 6 GB for training with a batch size of 1. 
+
+7.2. Loss Functions 
+
+To ensure robust performance, our training objective com-bines three complementary loss terms: the pixel-wise L1
+
+loss for local accuracy, the Jensen-Shannon Divergence (JSD) [9] loss for global distributional alignment, and the Pearson Linear Correlation Coefficient (PLCC) [6] loss for ranking consistency. 
+
+Distribution Alignment (JSD Loss). We employ the JSD loss to align the global distribution of predicted quality scores with the GT, thereby preventing mode collapse where the network predicts overly uniform values. We first flatten the quality maps ˆQ and Q into vectors ˆp, g ∈ [0 , 1] N , where 
+
+N = H × W . Since ˆp and g are bounded, we first apply a logit transformation to map them into an unbounded space suitable for softmax normalization: 
+
+˜pi = log 
+
+ ˆpi
+
+1 − ˆpi
+
+
+
+, ˜gi = log 
+
+ gi
+
+1 − gi
+
+
+
+. (8) Next, we convert these logits into probability distributions 
+
+P and G using a temperature-scaled softmax function: 
+
+Pi = exp(˜ pi/τ )
+
+P 
+
+> j
+
+exp(˜ pj /τ ) , Gi = exp(˜ gi/τ )
+
+P 
+
+> j
+
+exp(˜ gj /τ ) . (9) where τ is the temperature parameter, empirically set to 
+
+0.2. The symmetric JSD loss is then defined as the average Kullback-Leibler (KL) divergence from the mixture distri-bution M = ( P + G)/2:
+
+LJSD = 12 DKL (P ∥ M ) + 12 DKL (G ∥ M ). (10) This prevents mode collapse by penalizing uniform predic-tions: when the network predicts similar quality values ev-erywhere, P becomes nearly uniform, resulting in a large JSD loss against the typically non-uniform ground truth (GT) G.
+
+Ranking Consistency (Pearson Loss). To strictly en-force the relative ranking of quality, we utilize the PLCC DGA  
+
+> Block
+> x 2
+> DGA
+> Block
+> x 3
+> DGA
+> Block
+> x 3
+> DGA
+> Block
+> x 4
+> DGA
+> Block
+> x 3
+> DGA
+> Block
+> x 2
+> DGA
+> Block
+> x 3
+> DGA
+> Block
+> x 2
+> DGA
+> Block
+> x 3
+> DGA
+> Block
+> x 3
+> DGA
+> Block
+> x 4
+> DGA
+> Block
+> x 2
+> DGA
+> Block
+> x 3
+> DGA
+> Block
+> x 3
+> DGA
+> Block
+> x 4
+> Up -
+> Sampling
+> Down -
+> Sampling
+> Down -
+> Sampling
+> Down -
+> Sampling
+> Down -
+> Sampling
+> Down -
+> Sampling
+> Down -
+> Sampling
+> Down -
+> Sampling
+> Up -
+> Sampling
+> Up -
+> Sampling
+> Down -
+> Sampling
+> Down -
+> Sampling
+> Cross Attention
+> ConvFusion
+> Dense Quality Map
+> Data Flow
+> Skip
+> Connection
+> ConvFusion
+> Query Image
+> Reference Image
+> Partial Quality Map
+> Norm
+> FFN
+> Spatial
+> Attention
+> Module
+> Norm
+> Channel
+> Attention
+> Module
+> Norm
+> Dual -Gated Attention Block
+> ෠𝐹 𝑞
+> 𝑠
+> 𝐹 𝑝
+> 𝑠 Concat .
+> 𝐹 𝑞
+> 𝑠
+> Conv.
+
+Figure 5. Detailed architecture of the proposed model. The network employs an encoder–decoder design featuring cross- and self-attention modules, query fusion, and mask-aware pixel-shuffle downsampling. Key specifications, including stage-wise block counts, attention heads, and the status of component sharing (frozen vs. trainable), are explicitly annotated. Table 4. Detailed architecture specifications of the proposed PR-IQA network. We report the spatial resolution, channel dimen-sions, number of attention heads, and block counts for each stage of the encoder (Enc0- Enc3) and decoder (Dec3- Dec1). 
+
+Level Resolution Channels Heads Blocks Output Channels Input 224 x 224 4 - - -Enc0 224 x 224 48 1 2 48 Enc1 112 x 112 96 2 3 96 Enc2 56 x 56 192 4 3 192 Enc3 28 x 28 384 8 4 384 Dec3 56 x 56 192 4 3 192 Dec2 112 x 112 96 2 3 96 Dec1 224 x 224 96 1 2 96 Output 224 x 224 1 - - 1
+
+loss. Let ˆy and y denote the flattened predicted and GT quality maps, respectively. We first center these vectors by subtracting their means ( μˆy , μ y ). The correlation coefficient 
+
+r is computed as: 
+
+r =
+
+P(ˆ yi − μˆy )( yi − μy )
+
+pP (ˆ yi − μˆy )2pP (yi − μy )2 . (11) The Pearson loss is defined as LPLCC = 1 − r. This term complements the pixel-wise L1 loss by focusing on linear trends and the relative ordering of salient regions, crucial for accurate quality assessment and downstream tasks, rather than solely minimizing absolute pixel errors. 
+
+## 8. Experimental Details 
+
+8.1. Training Data Generation 
+
+Frame Sampling. We utilize the Map-free Visual Relo-calization (MFR) dataset [1] as our primary source. For each scene, we uniformly sample 200 frames along the cam-era trajectory, explicitly including the start and end frames. 
+
+Table 5. List of evaluation scenes. We enumerate the specific scenes and sequence IDs selected from the Mip-NeRF 360, Tanks and Temples, and RealEstate10K datasets used for our experimen-tal benchmarks. Dataset Scene Mip-NeRF 360 Bonsai Counter Garden Kitchen Room Treehill Tanks and Temples Barn Caterpillar Family Horse Ignatius Truck RealEstate10K 87f03b8928fc286e d932fa3862974507 9ea61697c238be3d 7bab7b21dbaf38ab 2e7ffcba51990c93 f48829b917629fe0 
+
+This uniform sampling strategy serves two purposes: it re-duces the computational overhead for the Video Diffusion Model (VDM) [46] and prevents redundancy by mitigating negligible pose changes between adjacent frames. 
+
+View Synthesis and Distortion. Following the ViewCrafter protocol [46], we organize the sampled frames into sliding windows of size 25. Within each window, two anchor images are used to synthesize novel views. It is a known characteristic of VDMs that generation fidelity degrades as the target viewpoint deviates further from the conditioning camera poses. We explicitly leverage this property to induce a diverse spectrum of realistic artifacts and geometric distortions in the generated images. This strategy enriches our training distribution with chal-lenging samples, thereby enhancing the model’s robustness to reconstruction errors. 
+
+Reference Selection and Annotation. To ensure suf-ficient baseline separation and avoid trivial correlations from high-overlap pairs, we systematically select reference frames relative to the query. For a given query frame Iq , we identify four reference candidates {Ir } at relative indices of 
+
+±10 and ±20 within the sampled sequence. For each re-sulting query-reference pair (Iq , I r ), we generate pseudo-Table 6. Quantitative comparisons of predicted quality maps against GT quality maps (PLCC ↑, SRCC ↑), targeting PSNR and LPIPS. Red, orange, and yellow cells denote the 1st, 2nd, and 3rd best methods per column (excluding FR settings †), while gray cells indicate identity cases where the IQA prediction matches the GT quality map.                                                                                                                                                                                  
+
+> Mip-NeRF 360 Tanks and Temples RealEstate10K IQA Type IQA Method PSNR LPIPS PSNR LPIPS PSNR LPIPS PLCC SRCC PLCC SRCC PLCC SRCC PLCC SRCC PLCC SRCC PLCC SRCC PSNR †1.000 1.000 0.434 0.384 1.000 1.000 0.478 0.459 1.000 1.000 0.370 0.347 SSIM †0.517 0.487 0.565 0.554 0.486 0.487 0.598 0.595 0.392 0.386 0.452 0.460 LPIPS †0.434 0.384 1.000 1.000 0.478 0.459 1.000 1.000 0.370 0.347 1.000 1.000 FR-IQA DINOv2 †0.407 0.338 0.557 0.472 0.396 0.361 0.582 0.581 0.248 0.241 0.489 0.516 PAL4VST 0.016 0.016 0.024 0.021 0.004 0.004 0.004 0.004 0.013 0.012 0.078 0.074 PaQ-2-PiQ -0.179 -0.181 -0.047 -0.047 -0.136 -0.095 0.007 0.053 -0.126 -0.134 0.029 0.030 NR-IQA PIQE -0.110 -0.114 0.031 0.035 0.223 0.242 0.194 0.208 0.227 0.235 0.047 0.062 MEt3R* 0.056 0.055 0.057 0.042 0.106 0.120 0.181 0.196 0.125 0.117 0.363 0.352 CrossScore 0.082 0.081 0.224 0.238 0.206 0.182 0.312 0.304 0.195 0.149 0.169 0.161 PuzzleSim 0.179 0.172 0.286 0.264 0.250 0.259 0.456 0.433 0.208 0.200 0.458 0.447 Ours partial *0.161 0.184 0.189 0.173 0.131 0.134 0.225 0.256 0.070 0.150 0.208 0.298 Ours DINOv2 0.259 0.227 0.280 0.229 0.273 0.258 0.401 0.384 0.206 0.215 0.304 0.333 CR-IQA Ours SSIM 0.338 0.345 0.235 0.229 0.340 0.334 0.340 0.334 0.284 0.244 0.171 0.175
+> †Metrics require a same-pose GT image. * Metrics are computed only over the valid overlapping region.
+
+ground-truth supervision by applying the procedure de-scribed in the Partial Map Generation section (Sect. 3.3 of the main manuscript). This involves estimating global point clouds via dense stereo matching, performing z-buffered re-projection to align views, and finally computing the partial quality map ˆQ.
+
+Data Structure. Consequently, training samples are formed as tuples (Iq , I r , ˆQ, Q ∗), where Q∗ represents the GT quality map. This structure enables a systematic evalu-ation of robustness in the CR-IQA setting. 
+
+8.2. Evaluation Data Generation 
+
+Dataset Selection. We conduct our evaluation across three standard benchmarks: Mip-NeRF 360, Tanks and Temples, and RealEstate10K. The specific scenes se-lected for these experiments are listed in Table 5 (with RealEstate10K sequences indexed as Scenes 1–6). To en-sure consistency, we employ the identical set of scenes for both the standalone IQA performance assessment and the downstream IQA-guided 3DGS experiments. 
+
+Query Image Synthesis. To generate the synthesized query images used for evaluation, we adopt a standardized pipeline. We utilize the sequence endpoints (i.e., the first and last frames) as the reference views. For the interme-diate target frames, we employ DUSt3R [37] to estimate dense point clouds by matching the endpoints with the cur-rent frame. These point clouds are subsequently rendered into the target viewpoint and processed by the VDM to re-fine the details, producing the final query images. 
+
+8.3. Model Training 
+
+All input images are resized to a resolution of 294 × 518 .The model is trained using the AdamW optimizer [22] with 
+
+β1 = 0 .9 and β2 = 0 .999 , starting with an initial learning rate of 1×10 −4. We employ a Cosine Annealing with Warm Restarts schedule [22], where the learning rate decays to 1×
+
+10 −6 with a restart period of 135,000 iterations. The entire training process spans 270,000 iterations (approximately 20 hours) on four NVIDIA RTX 3090 GPUs, utilizing a total batch size of 12 (3 frames per GPU). 
+
+8.4. Baseline Details 
+
+We compare our method against a comprehensive set of baselines across three categories: Full-Reference (FR), No-Reference (NR), and Cross-Reference (CR) IQA. • FR-IQA: We utilize PSNR and SSIM [38] as represen-tative metrics for measuring pixel-wise reconstruction er-ror and structural similarity, respectively. Additionally, LPIPS [48] is employed to assess perceptual similar-ity based on deep feature distances extracted from pre-trained networks. • NR-IQA: PAL4VST [47] is a segmentation-based model trained on pixel-level artifact masks. PaQ-2-PiQ [44] uses a ResNet-based [11] architecture to jointly learn local (patch-level) and global (image-level) quality. PIQE [35] is a training-free method that quantifies distortions, such as blur and noise, by analyzing the statistical properties of spatially active blocks. • CR-IQA: MEt3R [2] evaluates multi-view consistency by using dense stereo to project DINO [7] and Fea-tUp [10] features into a shared 3D space, followed by cosine similarity computation. CrossScore [39] utilizes Table 7. Image selection evaluation. We report the correlation (PLCC, SRCC) between per-image quality scores and ground-truth quality scalars derived from DINOv2 feature similarity and SSIM across three datasets. Ours DINOv2 demonstrates strong alignment with feature-based quality, achieving the highest performance on Tanks and Temples and RealEstate10K, and competitive results on Mip-NeRF 360.                                                                              
+
+> Mip-NeRF 360 Tanks and Temples RealEstate10K IQA Type IQA Method PLCC (DINOv2) SRCC (DINOv2) PLCC (SSIM) SRCC (SSIM) PLCC (DINOv2) SRCC (DINOv2) PLCC (SSIM) SRCC (SSIM) PLCC (DINOv2) SRCC (DINOv2) PLCC (SSIM) SRCC (SSIM) PaQ-2-PiQ 0.002 0.012 -0.014 -0.009 0.113 0.112 -0.166 -0.179 0.022 0.012 0.032 0.042 NR-IQA PIQE 0.047 0.044 0.348 0.347 0.075 0.075 0.329 0.385 -0.126 -0.128 -0.133 -0.118 CrossScore -0.090 -0.104 0.366 0.366 0.188 0.188 -0.097 -0.126 -0.095 -0.074 -0.035 -0.026 PuzzleSim 0.607 0.518 0.516 0.494 0.616 0.612 0.539 0.399 0.772 0.727 0.827 0.747 Ours SSIM 0.186 0.164 0.629 0.620 0.278 0.287 0.457 0.511 0.595 0.600 0.666 0.684 CR-IQA Ours DINOv2 0.597 0.547 0.571 0.541 0.627 0.619 0.590 0.557 0.790 0.802 0.746 0.783
+
+a DINOv2 [26] encoder with a cross-attention module to compare the query against multiple references, predicting a patch-level map approximating SSIM. PuzzleSim [13] operates in the feature space of a pre-trained network, producing a similarity map based on patch statistics learned from scene training views. For all learning-based baselines, we use the publicly available pre-trained models without additional fine-tuning. 
+
+## 9. More Experimental Results 
+
+9.1. Evaluation on Alternative FR-IQA Targets 
+
+Although our Partial-Reference (PR-IQA) framework is trained to optimize DINOv2-SIM and SSIM maps, we ex-tend our evaluation to alternative FR-IQA targets, specif-ically PSNR and LPIPS, to assess the generalization capa-bility of our predicted quality maps. Table 6 summarizes the Pearson Linear Correlation Coefficient (PLCC) and Spear-man Rank Correlation Coefficient (SRCC) between our pre-dicted maps Q and the GT quality maps Q∗ derived from these unseen metrics. 
+
+Evaluation on PSNR. As shown in Table 6, our method demonstrates robust generalization to the PSNR target, which measures pixel-level fidelity. Specifically for the PSNR target, Ours SSIM achieves state-of-the-art perfor-mance, ranking first across all datasets. Ours DINOv2 also shows competitive correlations, generally outperforming other baselines. In stark contrast, NR-IQA baselines (PAL4VST, PaQ-2-PiQ, PIQE) exhibit extremely low or even negative correlations. This suggests that traditional natural-image quality predictors fail to capture the specific rendering artifacts inherent in novel view synthesis. While some CR-IQA methods like PuzzleSim show moderate suc-cess, our method proves significantly more effective at ap-proximating the pixel-wise accuracy required for PSNR prediction. 
+
+Evaluation on LPIPS. For the LPIPS target, the CR-IQA baseline PuzzleSim generally ranks first. This per-formance is likely attributable to architectural bias: Puz-zleSim relies on VGG features, which structurally align with the VGG backbone used in LPIPS. Despite this advan-tage, Ours DINOv2 achieves highly competitive results, con-sistently ranking second on Mip-NeRF 360 and Tanks and Temples. This indicates that our method effectively cap-tures perceptual quality variations even without relying on the same feature backbone as the target metric. Other CR-IQA methods (MEt3R, CrossScore) show lower correla-tions, and NR-IQA methods again fail to provide meaning-ful estimates. Our approach demonstrates superior generalization com-pared to existing methods. Ours SSIM and Ours DINOv2 effec-tively generalize PSNR and LPIPS targets respectively, sig-nificantly outperforming NR-IQA. Furthermore, compared to CR-IQA baselines, our strategy of learning quality com-pletion from partial references proves to be a more robust solution for estimating diverse quality metrics. 
+
+9.2. Evaluation on Image Selection for 3DGS 
+
+We employ an image-level quality score to select the op-timal pseudo-ground-truth candidate from the diffusion-generated pool (in Sect. 4 of the main manuscript). In this section, we quantitatively evaluate the reliability of various IQA metrics for this selection task. To validate whether image-level scores effectively rep-resent semantic quality, we analyze the correlation between the predicted scores and the GT DINOv2 feature similarity maps. Specifically, for each generated image, we compute the pixel-wise cosine similarity between its DINOv2 fea-tures and those of the corresponding real image at the same pose. This dense similarity map is then spatially averaged to derive a single scalar GT score. We verify the alignment by measuring the PLCC and SRCC correlations between this scalar and the scores predicted by different IQA methods (CR-IQA and NR-IQA) across all test frames. Table 7 presents the correlation results on three bench-mark datasets. Ours DINOv2 demonstrates robust and con-sistent performance across all datasets. It generally achieves the highest correlations on Tanks and Temples and RealEstate10K, significantly outperforming baselines. On Mip-NeRF 360, it remains highly competitive, showing 1.0 DINOv2 (1.000)                         
+
+> 246810 0.0
+> 0.1
+> 0.2
+> 0.3
+> 0.4
+> 0.5
+> 0.6
+> PSNR (0.407)
+> SSIM (0.409)
+> LPIPS (0.557)
+> Number of Ref. Images
+> PLCC
+> 1.0 DINOv2 (1.000)
+> 246810 0.0
+> 0.1
+> 0.2
+> 0.3
+> 0.4
+> 0.5
+> 0.6
+> 0.7
+> PSNR (0.338)
+> LPIPS (0.472)
+> SSIM (0.386)
+> Number of Ref. Images
+> SRCC
+> 1.0 SSIM (1.000)
+> 246810 0.0
+> 0.1
+> 0.2
+> 0.3
+> 0.4
+> 0.5
+> 0.6
+> PSNR (0.517)
+> LPIPS (0.565)
+> DINOv2 (0.409)
+> Number of Ref. Images
+> PLCC
+> 1.0 SSIM (1.000)
+> 246810 0.0
+> 0.1
+> 0.2
+> 0.3
+> 0.4
+> 0.5
+> 0.6
+> PSNR (0.487)
+> LPIPS (0.554)
+> DINOv2 (0.386)
+> Number of Ref. Images
+> SRCC
+> Ours CrossScore PuzzleSim Ours Partial MEt3R
+> (a) DINOv2 target evaluation (b) SSIM target evaluation
+
+Figure 6. Impact of the number of reference views on IQA performance. We plot the PLCC and SRCC against the number of reference images used for evaluation. FR-IQA baselines are indicated by constant horizontal lines. The results are shown for (a) DINOv2 and (b) SSIM targets. In both scenarios, our model achieves the highest correlation among learned metrics (CrossScore, PuzzleSim) and demonstrates robustness even with a single reference image. 
+
+Figure 7. Impact of quality map fusion strategies on DINOv2 target evaluation. We evaluate the performance of four aggrega-tion strategies (Max, Min, Median, and Mean) as a function of the number of reference images ( Nref ∈ [2 , 10] ). 
+
+results comparable to PuzzleSim. While PuzzleSim also exhibits strong correlations thanks to its VGG-based fea-ture representation, our method proves to be more effective in scenarios requiring precise semantic alignment, such as RealEstate10K. In stark contrast, NR-IQA methods (PaQ-2-PiQ, PIQE) exhibit weak or near-zero correlations across all datasets. This indicates that no-reference metrics, which focus on low-level perceptual artifacts, fail to capture the reference-relative semantic quality required for 3DGS. Similarly, CrossScore displays inconsistent behavior, yielding neg-ative correlations on Mip-NeRF 360, suggesting that its matching-based mechanism does not reliably align with dense feature similarity. 
+
+9.3. Generalization to Unseen Generators 
+
+To evaluate cross-generator generalization, we applied PR-IQA directly to images synthesized by unseen generators (GEN3C [28] and SEVA [49] ) without any retraining. As shown in Table 8, the evaluation demonstrates that our model maintains a stable correlation across various datasets and target metrics, indicating that the learned quality cues are not tied to the rendering characteristics of a specific gen-erator. Unlike prior methods that exhibit significant per-formance fluctuations depending on the generator or eval-uation metric, PR-IQA consistently yields competitive and superior results. This suggests that our partial-reference for-mulation effectively captures transferable perceptual corre-spondences rather than overfitting to generator-specific arti-facts, thereby demonstrating robust generalization capabili-ties on previously unseen generative models. 
+
+## 10. More Ablation Studies on IQA 
+
+10.1. Impact of the Number of Reference Images 
+
+We conducted an ablation study to analyze the sensitivity of our PR-IQA framework to the number of available reference images Nref . In this experiment, we varied Nref from 1 to 10 by selecting reference views at regular intervals from the corresponding image sequence. Fig. 6 illustrates the evolution of PLCC and SRCC scores for both DINOv2 and SSIM targets as the number of refer-ence views increases. In contrast to CrossScore, where per-formance saturates, all other methods exhibit a steady gain in performance with additional reference views. Notably, our models (Ours DINOv2 and Ours SSIM ) demonstrate high ro-bustness even with a single reference view and continue to improve monotonically. A significant finding is that our method achieves parity with, or even surpasses, established FR metrics without re-quiring GT supervision. Specifically, as shown in the DI-NOv2 target evaluation, our method begins to outperform the LPIPS baseline (orange dotted line) once Nref ≥ 4. This confirms that with sufficient cross-view context, our frame-work can predict quality maps with FR-level accuracy. The ˆQ variant (yellow solid line), which relies solely on geometrically overlapping regions, shows a steep per-formance increase as Nref grows. This trend validates our design rationale: increasing the number of reference views expands the geometric coverage of the partial quality map 
+
+ˆQ, thereby providing a richer guidance signal for the subse-Table 8. Cross-generator generalization results on two unseen generators, GEN3C and SEVA, evaluated without any retraining. We report PLCC and SRCC on Mip-NeRF 360 and Tanks and Temples using DINOv2- and SSIM-based target quality scores.                                                                                                             
+
+> Mip-NeRF 360 (GEN3C) Tanks and Temples (GEN3C) Mip-NeRF (SEVA) Tanks and Temples (SEVA) DINOv2 SSIM DINOv2 SSIM DINOv2 SSIM DINOv2 SSIM IQA Method PLCC SRCC PLCC SRCC PLCC SRCC PLCC SRCC PLCC SRCC PLCC SRCC PLCC SRCC PLCC SRCC MEt3R* 0.251 0.279 0.070 0.061 0.254 0.231 0.121 0.121 0.168 0.227 0.086 0.098 0.142 0.144 0.120 0.141 CrossScore 0.076 0.092 0.229 0.220 0.345 0.365 0.530 0.520 -0.005 0.026 0.187 0.185 0.204 0.276 0.395 0.381 PuzzleSim 0.258 0.271 0.153 0.153 0.422 0.435 0.420 0.413 0.312 0.338 0.160 0.164 0.331 0.367 0.327 0.320 Ours partial *0.308 0.409 0.174 0.178 0.344 0.433 0.067 0.084 0.258 0.409 0.119 0.164 0.318 0.504 0.087 0.113 Ours DINOv2 0.368 0.401 0.303 0.287 0.548 0.596 0.392 0.403 0.358 0.472 0.306 0.313 0.418 0.543 0.299 0.276 Ours SSIM 0.113 0.136 0.340 0.341 0.328 0.340 0.558 0.553 0.085 0.143 0.431 0.420 0.211 0.294 0.547 0.521
+
+Table 9. Ablation study on the contribution of loss components. We compare the full model with variants trained without the JSD loss (w/o LJSD ) or without the PLCC loss (w/o LPLCC ). All met-rics are evaluated on the Mip-NeRF 360 and Tanks and Temples datasets using PLCC and SRCC for the target of DINOv2. Bold indicates the best performance. Loss variants Mip-NeRF 360 Tanks and Temples PLCC SRCC PLCC SRCC w/o LJSD -0.181 -0.202 -0.242 -0.274 w/o LPLCC -0.119 -0.134 -0.147 -0.150 Full Model 0.555 0.622 0.573 0.649 
+
+quent quality completion network. 
+
+10.2. Quality Fusion Strategy 
+
+We investigate the optimal strategy for aggregating quality predictions when multiple reference images are available. As illustrated in Fig. 7, we evaluate four pixel-wise fusion operators, Max, Min, Median, and Mean, across varying reference counts ( Nref = 1 to 10 ) to determine the most effective aggregation method. Given K reference images yielding predicted quality maps {Qi}Ki=1 for a query image Iq , the fused map values at pixel p are computed as follows: 
+
+Qmax (p) = max  
+
+> i
+
+{Qi(p)},Qmin (p) = min  
+
+> i
+
+{Qi(p)},Qmean (p) = 1
+
+K
+
+> K
+
+X
+
+> i=1
+
+Qi(p),Qmedian (p) = median i{Qi(p)}.
+
+(12) The quantitative results demonstrate that the Max fu-sion strategy consistently outperforms all other aggregation methods. As shown in Fig. 7, the performance of Max fu-sion improves monotonically as the number of reference images increases, reaching peak correlations at Nref = 10 .This represents a substantial gain over the single-reference baseline. In contrast, Min fusion exhibits the poorest performance, showing a degrading trend where accuracy drops signifi-cantly as more references are added. The Mean and Median strategies remain relatively stagnant and fail to consistently surpass the single-reference baseline. The widening gap between Max fusion and other meth-ods suggests that an optimistic aggregation strategy is cru-cial for robust cross-reference evaluation. By selecting the maximum quality score per pixel, the framework effec-tively isolates the best matching evidence from the avail-able views. This approach allows the model to filter out low scores caused by occlusions, view-dependent artifacts, or poor geometric correspondences in specific reference frames, ensuring that the final quality map reflects the most reliable visual information. 
+
+10.3. Ablation Study on Loss Components 
+
+In this section, we evaluate the contribution of the individual loss terms defined in the training objective (Eq. (5) in the main manuscript). Our full objective function combines a pixel-wise reconstruction loss ( L1) with two distribution-aware losses: the Jensen-Shannon Divergence loss ( LJSD )and the Pearson Linear Correlation Coefficient loss ( LPLCC ). To isolate the impact of these auxiliary terms, we trained variants of our model by removing them one at a time. Table 9 presents the performance comparison on the Mip-NeRF 360 and Tanks and Temples datasets. The re-sults demonstrate that LJSD and LPLCC are not merely sup-plementary but are fundamental to the learning process. As shown in the table, removing either the JSD loss (“w/o LJSD ”) or the PLCC loss (“w/o LPLCC ”) leads to a catastrophic performance drop, resulting in negative corre-lation values across all metrics and datasets. A negative cor-relation implies that the model’s predictions are inversely related to the GT, indicating a complete failure to learn the correct quality ranking. In contrast, the “Full Model” achieves strong positive correlations (e.g., PLCC > 0.55 ). This sharp contrast sug-gests that the pixel-wise loss alone is insufficient for this task. The combination of LJSD (which aligns score dis-Table 10. Geometric robustness analysis under point cloud filtering and camera pose perturbations. We evaluate the sensitivity of our PR-IQA framework to geometric input quality on the Mip-NeRF 360 and Tanks and Temples datasets. We analyze the impact of varying VGGT depth confidence filtering thresholds (No filtering, 20%, 50%) and introduce synthetic Gaussian noise to camera parameters (5% and 10% levels). Red, orange, and yellow cells denote the 1st, 2nd, and 3rd best results, respectively. The results demonstrate that our default configuration (20% filtering) yields optimal performance, and the method remains robust, consistently outperforming baselines (CrossScore, PuzzleSim) even under significant geometric noise. Method Type Mip-NeRF 360 Tanks and Temples DINOv2 SSIM DINOv2 SSIM PLCC SRCC PLCC SRCC PLCC SRCC PLCC SRCC CrossScore - 0.094 0.090 0.290 0.325 0.237 0.272 0.444 0.462 PuzzleSim - 0.304 0.327 0.128 0.124 0.351 0.369 0.348 0.347 Ours DINOv2 
+
+(20% Conf Filtering) 0.555 0.622 0.261 0.241 0.573 0.649 0.387 0.367 + 50% Conf Filtering 0.476 0.522 0.252 0.241 0.495 0.559 0.362 0.325 + No Filtering 0.495 0.555 0.261 0.251 0.517 0.584 0.352 0.310 + 5% Random Noise on Cam 0.460 0.498 0.248 0.240 0.480 0.511 0.358 0.319 + 10% Random Noise on Cam 0.447 0.477 0.244 0.236 0.464 0.479 0.353 0.315 Ours SSIM 
+
+(20% Conf Filtering) 0.320 0.367 0.535 0.556 0.309 0.344 0.625 0.642 + 50% Conf Filtering 0.301 0.348 0.514 0.534 0.294 0.326 0.607 0.624 + No Filtering 0.304 0.349 0.520 0.542 0.301 0.334 0.609 0.626 + 5% Random Noise on Cam 0.312 0.360 0.505 0.524 0.293 0.320 0.610 0.624 + 10% Random Noise on Cam 0.312 0.360 0.504 0.523 0.292 0.318 0.609 0.624 Table 11. Comparison of FR-IQA metrics as guidance signals for Quality-Aware 3DGS training. We evaluate the 3DGS modeling quality (PSNR, SSIM, LPIPS) when guiding the optimization us-ing different IQA targets (PSNR, SSIM, LPIPS, and DINOv2). The results demonstrate that DINOv2 feature similarity consis-tently outperforms traditional metrics, even surpassing methods that directly optimize for the target metric itself, thereby justifying its selection as our primary prediction target.                                
+
+> Tanks and Temples Mip-NeRF 360 IQA method PSNR SSIM LPIPS PSNR SSIM LPIPS PSNR 7.09 0.435 0.575 7.33 0.371 0.574 SSIM 14.11 0.525 0.482 15.71 0.515 0.466 LPIPS 13.21 0.524 0.480 14.72 0.502 0.472 DINOv2-SIM 16.05 0.548 0.465 18.29 0.526 0.453
+
+tributions) and LPLCC (which enforces linear relationship) provides the necessary constraints to stabilize training and guide the model toward perceptually meaningful quality predictions. 
+
+10.4. Geometric Robustness Analysis 
+
+In this section, we investigate the sensitivity of the PR-IQA framework to geometric imperfections, specifically fo-cusing on point cloud quality and camera pose accuracy. As detailed in our methodology (Sect. 3.3 of the main manuscript), our approach generates a partial quality map by warping features from the reference image to the query view using VGGT [36]. This process relies on estimating 3D points via stereo correspondences and reprojecting them for feature alignment. To mitigate artifacts arising from un-reliable correspondences, our default configuration filters out 3D points falling within the bottom 20% of confidence scores, utilizing only the remaining high-confidence points for warping. To evaluate the robustness of this design, we conducted experiments varying this filtering threshold and introducing synthetic noise to the estimated camera poses. Table 10 summarizes the performance of our method under these varying geometric conditions. A broad anal-ysis reveals that our proposed methods (Ours DINOv2 and Ours SSIM ) consistently achieve significantly higher PLCC and SRCC correlations compared to baselines like CrossS-core and PuzzleSim across both Mip-NeRF 360 and Tanks and Temples datasets. This empirically validates the ef-fectiveness of our geometry-guided feature matching ap-proach. 
+
+Impact of Point Cloud Filtering. We analyzed how the density and reliability of the geometric input affect perfor-mance by adjusting the VGGT depth confidence filter. As shown in Table 10, the default setting, removing the bottom 20% of low-confidence points, yields optimal performance. This threshold strikes a critical balance: it effectively elim-inates high-variance noise (e.g., sky regions or inaccurate depths) while preserving sufficient scene context essential for matching. Conversely, performance degrades under the “No Filtering” setting due to the inclusion of geometric out-liers, as well as under the stricter “+50% Conf Filtering” setting, where the excessive removal of points leads to a loss of valuable visual information. 
+
+Robustness to Camera Pose Noise. To evaluate re-silience against inaccurate camera poses, a common chal-Table 12. Ablation on the masking threshold τ for 3DGS training. We evaluate the impact of the pixel retention rate τ on reconstruction quality. We compare aggressive ( τ = 30 ), default ( τ = 50 ), and lenient ( τ = 70 ) filtering strategies on the Mip-NeRF 360 and Tanks and Temples datasets. The results show that τ = 50 achieves the best performance across datasets, validating it as a robust heuristic that balances noise removal with data retention. Red, orange, and yellow cells denote the 1st, 2nd, and 3rd best methods per column. (excluding FR settings †)                                                                                                                                                                                                                     
+
+> τ= 30 τ= 50 τ= 70
+> Mip-NeRF 360 Tanks and Temples Mip-NeRF 360 Tanks and Temples Mip-NeRF 360 Tanks and Temples IQA-Guided Method PSNR SSIM LPIPS PSNR SSIM LPIPS PSNR SSIM LPIPS PSNR SSIM LPIPS PSNR SSIM LPIPS PSNR SSIM LPIPS Vanilla 3DGS 16.078 0.461 0.415 15.298 0.509 0.406 16.078 0.461 0.415 15.298 0.509 0.406 16.078 0.461 0.415 15.298 0.509 0.406 w/o IQA ViewCrafter 16.179 0.474 0.452 15.773 0.523 0.455 16.179 0.474 0.452 15.773 0.523 0.455 16.179 0.474 0.452 15.773 0.523 0.455 SSIM †16.837 0.494 0.413 16.331 0.551 0.397 16.676 0.487 0.421 16.228 0.556 0.399 16.779 0.491 0.425 16.405 0.557 0.407 w/ FR-IQA DINOv2 †16.892 0.494 0.400 16.401 0.551 0.392 17.178 0.498 0.399 16.777 0.562 0.384 17.209 0.497 0.412 16.784 0.560 0.391 PaQ-2-PiQ 16.148 0.456 0.432 15.345 0.511 0.435 16.298 0.472 0.425 15.769 0.534 0.421 16.370 0.477 0.430 16.137 0.546 0.414 w/ NR-IQA PIQE 15.858 0.462 0.450 15.275 0.521 0.443 16.313 0.479 0.440 15.671 0.534 0.433 16.426 0.478 0.441 15.936 0.543 0.427 CrossScore 16.036 0.469 0.441 15.196 0.515 0.440 16.312 0.476 0.431 15.856 0.537 0.427 16.463 0.480 0.442 16.195 0.547 0.424 PuzzleSim 16.239 0.473 0.411 15.645 0.527 0.414 16.349 0.482 0.423 15.937 0.541 0.406 16.469 0.479 0.421 16.104 0.546 0.406 Ours SSIM 16.319 0.474 0.437 15.914 0.540 0.410 16.371 0.485 0.427 16.143 0.548 0.407 16.512 0.482 0.437 16.240 0.551 0.416 w/ CR-IQA Ours DINOv2 16.529 0.482 0.417 15.981 0.540 0.406 16.756 0.493 0.414 16.238 0.551 0.403 16.736 0.489 0.424 16.370 0.554 0.405
+
+† Metrics require a same-pose GT image. 
+
+Table 13. Ablation study comparing binary masking and soft masking strategies. We evaluate the robustness of our framework by comparing the default binary masking approach against a con-tinuous soft weighting strategy.                                   
+
+> Mip-NeRF 360 Tanks and Temples Mask Type Method PSNR SSIM LPIPS PSNR SSIM LPIPS Binary Mask Ours SSIM 16.37 0.485 0.427 16.14 0.548 0.407 Ours DINOv2 16.76 0.493 0.414 16.24 0.551 0.403
+> Soft Mask Ours SSIM 16.61 0.485 0.437 16.34 0.553 0.418 Ours DINOv2 16.78 0.488 0.426 16.44 0.553 0.405
+
+lenge in real-world sparse-view reconstruction, we intro-duced Gaussian noise to both intrinsic and extrinsic param-eters. We defined two noise levels: • 5% Noise Level: Perturbations included rotation by ap-proximately 5◦, translation by 5% of the original magni-tude, focal length by 5%, and principal point shifts by 5% of image dimensions. • 10% Noise Level: These perturbations were doubled (e.g., approximately 10 ◦ rotation). As expected, the performance exhibits a gradual decline as noise levels increase (see Table 10). However, a crucial finding is that even under significant perturbations (10% noise), our method maintains competitive scores that con-tinue to surpass the baseline methods (CrossScore and Puz-zleSim). This confirms that the PR-IQA framework is not only effective under ideal conditions but also practically robust to the geometric errors frequently encountered in sparse-view scenarios. 
+
+10.5. Low-Overlap Robustness Analysis 
+
+To examine robustness under limited visual correspon-dence, we re-evaluated the test set by regrouping image pairs according to their overlap ratio. As shown in Table 14, the proposed PR-IQA remains stable even as the overlap becomes progressively smaller, while competing methods tend to degrade more noticeably under the same condition. This result indicates that our method does not rely solely on directly shared regions between the generated and ref-erence images, but instead learns transferable quality cues that remain meaningful when only partial correspondence is available. Fig. 8 further illustrates this behavior in challenging low-overlap examples. Even when the common visible region is very limited, our method produces quality maps that bet-ter preserve the perceptually important structure and object-level consistency than direct full-reference targets. In par-ticular, the propagated responses remain coherent beyond the overlapping area, supporting reliable quality estimation in non-overlapping regions. These observations confirm that PR-IQA effectively extends local reference evidence into the unseen area and remains robust even in near-zero-overlap cases. 
+
+10.6. False Positive Analysis in Non-Overlapping Regions 
+
+To further analyze reliability in unseen areas, we mea-sured the False Positive Rate (FPR@Top-X%) specifically within non-overlapping regions, where hallucinated con-tent is most likely to appear. As summarized in Table 15, Ours DINOv2 consistently achieves the lowest false positive rate across all evaluation thresholds. This indicates that the proposed PR-IQA is less prone to incorrectly assigning high-quality scores to regions that are not supported by ref-erence evidence, demonstrating stronger conservativeness and robustness in ambiguous areas. Fig. 9 provides qualitative examples of this behavior on hallucinated objects and structures. Compared with exist-ing methods, our predictions suppress spuriously high re-sponses in boxed non-overlapping regions while preserving meaningful quality patterns in the valid area. In contrast, competing approaches more often produce overly confident activations on unsupported content. These results confirm that PR-IQA avoids false positives on hallucinated content. Table 14. Low-overlap evaluation. We evaluate robustness by grouping image pairs from the original dataset by overlap ratio.                                                                                    
+
+> IQA Method 25% (81) 20% (52) 10% (17) 5% (9) DINOv2 SSIM DINOv2 SSIM DINOv2 SSIM DINOv2 SSIM PLCC SRCC PLCC SRCC PLCC SRCC PLCC SRCC PLCC SRCC PLCC SRCC PLCC SRCC PLCC SRCC CrossScore 0.137 0.118 0.153 0.139 0.189 0.162 0.106 0.074 0.223 0.194 0.141 0.079 0.250 0.217 0.131 0.080 PuzzleSim 0.178 0.211 0.013 0.004 0.120 0.173 0.041 0.030 0.041 0.081 0.024 0.006 -0.007 0.027 0.058 0.041 Ours DINOv2 0.469 0.502 0.374 0.366 0.485 0.503 0.396 0.382 0.501 0.511 0.383 0.370 0.486 0.484 0.386 0.369 Ours SSIM 0.278 0.295 0.463 0.482 0.331 0.311 0.462 0.477 0.384 0.345 0.434 0.414 0.365 0.300 0.409 0.418
+> Note. %: overlap ratio; (): # of images. GT Image Generated Image Reference Image DINOv2 Ours (DINOv2) SSIM Ours (SSIM)
+> Family Ignatius
+
+## Low  Overlap 
+
+Figure 8. Low-overlap qualitative results. Red region in the generated image shows overlaps of 16% (Family) and 22% (Ignatius) .Table 15. FPR@Top-X% measures how often pixels in the top 
+
+X% of scores within non-overlapping regions are falsely rated as high quality on Tanks and Temples.                  
+
+> Method FPR@50% FPR@40% FPR@30% FPR@20% FPR@10% CrossScore 0.380 0.300 0.240 0.183 0.105 PuzzleSim 0.328 0.273 0.222 0.162 0.093 Ours DINOv2 0.306 0.236 0.183 0.137 0.082
+
+## 11. More Ablation Studies on 3DGS 
+
+11.1. Effectiveness of DINOv2 Feature Similarity 
+
+We validate the rationale behind selecting DINOv2 feature similarity (i.e., DINOv2-SIM) as our primary optimization target by comparing its effectiveness against standard FR-IQA metrics: PSNR, SSIM, and LPIPS. To ensure a fair comparison, we integrated these metrics into the “Quality-Aware 3DGS Training” pipeline (described in Section 4 of the main manuscript) as alternative guidance signals. For consistency, all quality maps were normalized to the range 
+
+[0 , 1] via min-max scaling, where higher values denote bet-ter quality. As detailed in Table 11, the 3DGS reconstruction guided by DINOv2-based quality maps consistently yields supe-rior performance across all evaluation metrics on both the Tanks and Temples and Mip-NeRF 360 datasets. A remark-able finding is that utilizing DINOv2 similarity as a training guide results in higher final PSNR and SSIM scores than using those specific metrics themselves as guidance targets. This superiority stems from the inherent limitations of conventional metrics in the context of diffusion-based syn-thesis. Pixel-wise metrics like PSNR tend to unduly pe-nalize regions that possess valid geometric structures but exhibit minor color shifts or lighting variations, thereby discarding potentially useful supervision signals. Simi-larly, SSIM and LPIPS often struggle to reliably distinguish between fine geometric details and artifacts in generated views. In contrast, our DINOv2-based approach prioritizes high-level semantic and geometric alignment. It effectively identifies and utilizes structurally consistent regions while remaining robust to benign photometric discrepancies, mak-ing it significantly more suitable for supervising 3D recon-struction from diffusion-generated imagery. 
+
+11.2. Impact of Masking Threshold τ
+
+In this section, we provide a detailed ablation study to vali-date our choice of the masking threshold τ , which was set to a heuristic value of 50 in the main manuscript. In our frame-work, τ represents the retention rate, the percentage of pix-els with the highest predicted quality scores that are used for 3DGS optimization. We determine a global quality thresh-old Qthresh corresponding to the (100 − τ )-th percentile of the score distribution; pixels exceeding this value are in-cluded in the training mask. Thus, a lower τ (e.g., τ = 30 )implies an aggressive filtering strategy that retains only the top 30% of pixels, whereas a higher τ (e.g., τ = 70 ) is more lenient. Table 12 presents the reconstruction performance across varying thresholds ( τ ∈ { 30 , 50 , 70 }). The aggressive strat-egy ( τ = 30 ) consistently yields the lowest performance across both datasets. This indicates that while removing low-quality regions is essential, discarding 70% of the gen-GT Image  Generated  Image  DINOv2  Ours (DINOv2)  PuzzleSim  SSIM  Ours (SSIM)  CrossScore 
+
+> Barn Garden
+
+## False Positive Figure 9. Quality estimation results on hallucinated non-overlapping regions (boxed) from the Barn and Garden scenes. The dashed boxes highlight unsupported areas that are visible in the generated image but not reliably matched to the reference view. Table 16. Computational cost analysis. We report the averaged runtime (seconds) and memory usage (MB) for individual compo-nents of the PR-IQA pipeline and the 3DGS optimization process. Method Stage Runtime (s) Memory (MB) PR-IQA Feature Ext. 0.303 5509.250 VGGT 0.207 2448.317 Inference 0.510 530.950 3DGS - 25.210 749.780 
+
+erated data eliminates too much valid supervision signal, thereby hindering the geometry convergence and degrading the final reconstruction quality. Performance peaks between τ = 50 and τ = 70 . For Ours DINOv2 , the heuristic τ = 50 achieves the best PSNR (16 .756 ) on the Mip-NeRF 360 dataset, outperforming both the stricter ( τ = 30 ) and looser ( τ = 70 ) settings. On the Tanks and Temples dataset, while τ = 70 yields a marginal improvement, the performance at τ = 50 remains highly competitive and robust. This study confirms that τ = 50 serves as an effective and robust heuristic across diverse scenes. It strikes a crit-ical balance: it is strict enough to filter out significant ar-tifacts and inconsistencies, yet lenient enough to preserve a sufficient density of high-confidence pseudo-ground-truth pixels for accurate 3D reconstruction. 
+
+11.3. Soft vs. Binary Masking Strategies 
+
+In our primary manuscript, we employ a binary masking strategy that strictly includes or excludes pixels based on a confidence threshold. In this section, we conduct an abla-tion study to evaluate an alternative “soft weighting” strat-egy. Instead of a hard binary selection ( 0 or 1), this ap-proach utilizes the predicted continuous quality score di-rectly as a pixel-wise loss weight (ranging from 0 to 1) dur-ing 3DGS optimization. This allows the influence of each pixel to be modulated gradually by its estimated quality. 
+
+Mathematical Formulation. Let Lbase (p) denote the standard photometric loss (e.g., L1 or D-SSIM) for a pixel 
+
+p during 3DGS training. • Binary Masking: We define a binary mask M (p) based on the quality threshold Qτ derived from the percentile τ :
+
+M (p) = 1(Q(p) ≥ Qτ ) = 
+
+(
+
+1 if Q(p) ≥ Qτ
+
+0 otherwise . (13) The final loss function is given by: 
+
+Lbinary = X
+
+> p∈P
+
+M (p) · L base (p). (14) • Soft Weighting: We directly use the normalized pre-dicted quality score Q(p) ∈ [0 , 1] as a weighting factor 
+
+W (p):
+
+W (p) = Q(p). (15) The weighted loss function becomes: 
+
+Lsoft = X
+
+> p∈P
+
+W (p) · L base (p). (16) Table 13 compares the reconstruction performance of our method under both masking regimes. The quantita-tive results indicate that both strategies yield highly similar performance metrics across the Mip-NeRF 360 and Tanks and Temples datasets. For instance, while binary masking achieves a slightly better LPIPS score on Mip-NeRF 360, soft masking yields a marginally higher PSNR. Overall, the performance differences are negligible, suggesting that both approaches effectively guide the optimization process. These findings demonstrate the inherent robustness of the PR-IQA framework. The fact that the optimiza-tion remains stable and high-performing under both hard-thresholding and continuous-weighting schemes confirms that our predicted quality maps provide reliable supervision signals regardless of the specific masking implementation. This flexibility suggests that practitioners can select either approach, prioritizing the interpretability of binary masks or the differentiability of soft weights, without compromising reconstruction quality. 
+
+11.4. Computational Analysis 
+
+In this section, we evaluate the computational efficiency of the proposed PR-IQA framework. Table 16 details the runtime and memory usage for each stage of the pipeline: feature extraction, VGGT-based warping, and quality infer-ence, measured on a single-image basis. A key advantage of our design is that the pipeline internally resizes all inputs to a fixed resolution, ensuring that these computational met-rics remain invariant regardless of the original input image resolution. To provide context for these costs, we compare them against the resource consumption of the standard 3DGS op-timization process. This comparison was conducted on the ‘Barn’ scene from the Tanks and Temples dataset, initial-ized with 28,290 points. As shown in Table 16, the total runtime for the PR-IQA pipeline is approximately 1.02 seconds per image (sum-ming feature extraction, VGGT, and inference). In contrast, the 3DGS optimization for the corresponding scene requires 
+
+25 .21 seconds. This indicates that the additional computa-tional overhead introduced by our quality assessment mod-ule is negligible, making it a highly practical addition to the reconstruction pipeline without causing significant bottle-necks. 
+
+## 12. More Qualitative Results 
+
+12.1. More Qualitative Results for Quality Map 
+
+We provide extensive qualitative comparisons on scenes not featured in the main manuscript. Figs. 10, 11, and 12 il-lustrate results across the Mip-NeRF 360, Tanks and Tem-ples, and RealEstate10K datasets, respectively. As shown in these figures, our PR-IQA generates quality maps that exhibit high fidelity to the GT DINOv2-SIM, accurately capturing fine-grained variations and sharp boundaries. In contrast, NR-IQA methods often struggle to provide mean-ingful estimates, while CR-IQA baselines tend to suffer from blocky artifacts, particularly in non-overlapping re-gions. Our method overcomes these limitations by effec-tively propagating quality information globally, resulting in smooth and accurate dense quality maps. 
+
+12.2. More Qualitative Results for SSIM Map 
+
+We provide extended qualitative comparisons for SSIM-based quality assessment. Figs. 13, 14, and 15 dis-play results for the Mip-NeRF 360, Tanks and Temples, and RealEstate10K datasets, respectively. Notably, our Ours SSIM variant substantially outperforms CrossScore, de-spite both methods sharing the same SSIM target. This per-formance gap highlights the effectiveness of our reference-conditioned cross-attention and quality completion frame-work. Visually, Ours SSIM maintains consistent quality es-timation across both textured and smooth regions, whereas baselines frequently exhibit noisy predictions. This vali-dates that our framework adapts robustly to diverse quality metrics. 
+
+12.3. More Qualitative Results for 3DGS 
+
+We present additional visualization results highlighting the impact of our IQA-Guided 3DGS framework. Fig. 16 shows reconstructions from the Mip-NeRF 360, Tanks and Temples, and RealEstate10K datasets, respectively. These results illustrate how our quality-guided training effectively concentrates computational resources on high-quality re-gions, significantly improving the overall reconstruction quality. 
+
+## 13. Limitations and Discussion 
+
+While PR-IQA achieves state-of-the-art performance in CR-IQA and significantly enhances sparse-view 3DGS re-construction, we acknowledge several limitations and out-line avenues for future research. First, PR-IQA is currently trained using pseudo-GT quality maps derived from FR metrics, specifically DINOv2 feature similarity or SSIM. While this proxy-supervision strategy is practical for our targeted downstream task and has proven effective for geometric reconstruction, it does not fully replace human perceptual quality assessment. The model’s upper bound is inherently limited by the capability of the chosen FR metric to capture perceptual subtleties or domain-specific artifacts. Incorporating human annotations or learning from large-scale perceptual preference data [17] remains an exciting direction to align the quality predictions more closely with human visual perception. Second, our experimental validation covers multiple standard benchmarks (Mip-NeRF 360, Tanks and Temples, RealEstate10K) and utilizes widely adopted backbones like ViewCrafter for view synthesis and standard 3DGS for re-construction. However, the fields of generative AI and 3D vision are rapidly evolving, with new multi-view diffusion models and reconstruction primitives emerging frequently. A truly comprehensive evaluation across all recent archi-tectures is beyond the scope of this work. Exploring the broader applicability of PR-IQA as a plug-and-play module for diverse generative pipelines and reconstruction methods is an interesting avenue for future research. Finally, our framework relies on the generation of a par-tial quality map ˆQ, which is constructed using geometric correspondences (via VGGT and dense stereo). While our ablation studies demonstrate robustness to significant geo-metric noise, extreme scenarios, such as large textureless regions or severe lighting changes where stereo matching fails completely, could inevitably degrade the quality of the partial map. Future work could investigate end-to-end joint training strategies that simultaneously optimize for geomet-ric alignment and quality estimation to mitigate this depen-dency. GT Image  Generated Image  Reference Image  DINOv2  PaQ -2-PiQ  PIQE  CrossScore  PuzzleSim  Ours 
+
+> Bonsai Counter Room Treehill
+
+Figure 10. Additional quality map comparisons on Mip-NeRF 360 dataset (DINOv2-SIM target). Our method produces quality maps closely aligned with ground-truth DINOv2-SIM. GT Image  Generated Image  Reference Image  DINOv2  PaQ -2-PiQ  PIQE  CrossScore  PuzzleSim  Ours 
+
+> Barn Caterpillar Ignatius Truck
+
+Figure 11. Additional quality map comparisons on Tanks and Temples dataset (DINOv2-SIM target). Our PR-IQA consistently estimates quality across complex outdoor scenes. GT Image  Generated Image  Reference Image  DINOv2  PaQ -2-PiQ  PIQE  CrossScore  PuzzleSim  Ours 
+
+> Scene3 Scene4 Scene5 Scene6
+
+Figure 12. Additional quality map comparisons on RealEstate10K dataset (DINOv2-SIM target). Our method demonstrates robust performance on real estate scenes. GT Image  Generated Image  Reference Image  SSIM  PaQ -2-PiQ  PIQE  CrossScore  PuzzleSim  Ours 
+
+> Bonsai Counter Garden Room
+
+Figure 13. Additional quality map comparisons on Mip-NeRF 360 dataset (SSIM target). Ours SSIM variant effectively predicts SSIM maps, outperforming CrossScore across indoor scenes with various textures and structures. GT Image  Generated Image  Reference Image  SSIM  PaQ -2-PiQ  PIQE  CrossScore  PuzzleSim  Ours 
+
+> Barn Caterpillar Horse Truck
+
+Figure 14. Additional quality map comparisons on Tanks and Temples dataset (SSIM target). Ours SSIM maintains consistent quality estimation in both textured and smooth regions, demonstrating superior performance over baseline methods in complex outdoor envi-ronments. GT Image  Generated Image  Reference Image  SSIM  PaQ -2-PiQ  PIQE  CrossScore  PuzzleSim  Ours 
+
+> Scene2 Scene3 Scene4 Scene5
+
+Figure 15. Additional quality map comparisons on RealEstate10K dataset (SSIM target). Our method accurately predicts SSIM maps, producing smooth and consistent results while baselines exhibit noisy or inconsistent predictions. GT Image  Vanilla 3DGS  ViewCrafter  PIQE  CrossScore  PuzzleSim  Ours 
+
+> Barn Caterpillar Family Garden Treehill Scene5
+
+Figure 16. Qualitative comparison of 3DGS reconstruction quality. Our IQA-Guided 3DGS produces sharper geometry and more accurate textures compared to baselines by focusing computational resources on high-quality regions. Red boxes highlight representative areas where our method demonstrates superior reconstruction quality.

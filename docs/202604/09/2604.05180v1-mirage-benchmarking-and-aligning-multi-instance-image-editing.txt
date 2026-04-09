@@ -1,0 +1,2378 @@
+Title: MIRAGE: Benchmarking and Aligning Multi-Instance Image Editing
+
+URL Source: https://arxiv.org/pdf/2604.05180v1
+
+Published Time: Wed, 08 Apr 2026 00:18:31 GMT
+
+Number of Pages: 32
+
+Markdown Content:
+## MIRAGE: Benchmarking and Aligning Multi-Instance Image Editing 
+
+Ziqian Liu and Stephan Alaniz 
+
+LTCI, Télécom Paris, Institut Polytechnique de Paris, France 
+
+Abstract. Instruction-guided image editing has seen remarkable progress with models like FLUX.2 and Qwen-Image-Edit, yet they still struggle with complex scenarios with multiple similar instances each requiring in-dividual edits. We observe that state-of-the-art models suffer from severe over-editing and spatial misalignment when faced with multiple identi-cal instances and composite instructions. To this end, we introduce a comprehensive benchmark specifically designed to evaluate fine-grained consistency in multi-instance and multi-instruction settings. To address the failures of existing methods observed in our benchmark, we propose Multi-Instance Regional Alignment via Guided Editing (MIRAGE), a training-free framework that enables precise, localized editing. By lever-aging a vision-language model to parse complex instructions into re-gional subsets, MIRAGE employs a multi-branch parallel denoising strat-egy. This approach injects latent representations of target regions into the global representation space while maintaining background integrity through a reference trajectory. Extensive evaluations on MIRA-Bench and RefEdit-Bench demonstrate that our framework significantly out-performs existing methods in achieving precise instance-level modifica-tions while preserving background consistency. Our benchmark and code are available at https://github.com/ZiqianLiu666/MIRAGE .
+
+1 Introduction 
+
+The field of visual content creation has been revolutionized by the emergence of diffusion models [12, 30, 34], which now achieve unprecedented fidelity in image synthesis. This success has paved the way for instruction-guided image edit-ing [6, 46], where users can modify complex visual scenes using only natural language. While these models excel at global transformations and single object adjustments, current models still struggle with handling multi-instance scenarios where multiple similar objects require distinct, independent modifications. In these complex settings, even state-of-the-art (SOTA) models like FLUX.2 [4] and Qwen-Image-Edit [42] exhibit spatial misalignment and over-editing. For ex-ample, as shown in Fig. 1, when given the instruction “Change the material of the leftmost sculpture to marble” in a scene containing three sculptures, FLUX.2 changes the material of all sculptures in the image. Existing benchmarks lack the density and complexity required to diagnose these fine-grained errors. To better measure progress in such challenging settings, 
+
+> arXiv:2604.05180v1 [cs.CV] 6 Apr 2026
+
+2 Z. Liu and S. Alaniz Flux.2 [dev]            
+
+> Change the material of the leftmost sculpture to marble
+> Limitation
+> Input Image
+> Change the texture of the middle vase from porcelain to metal
+> Qwen -Image -Edit -2511
+> Change the material of the leftmost sculpture to marble Change the material of the leftmost fountain to ceramic
+> 绿色是过度编辑，蓝色是空间错位
+> Qwen -Image -Edit -2511
+> +MIRAGE
+> Flux.2 [dev]
+> +MIRAGE Input Image
+
+Fig. 1: Limitations of current state-of-the-art image editing models. Although these models successfully follow the editing instructions, noticeable limitations remain. (i) blue circles indicate failures in preserving local consistency within the target regions; (ii) green circles highlight unintended modifications in the background. 
+
+we introduce MIRA-Bench, a comprehensive benchmark specifically designed to evaluate fine-grained consistency in multi-instance and multi-instruction scenar-ios. While previous benchmarks like MagicBrush [46] or RefEdit-Bench [28] focus on single-object edits or referring expressions, MIRA-Bench is the first to systematically test models against images containing three to five similar in-stances with five simultaneous, compositional edit instructions. This benchmark provides the community with a rigorous diagnostic tool for assessing model per-formance in complex editing tasks. To address the challenge of accurately editing images with fine-grained in-structions on the model side, we propose Multi-Instance Regional Alignment via Guided Editing (MIRAGE), a training-free framework designed for pre-cise, localized image editing. Unlike prior approaches that require fine-tuning or rely on attention maps, MIRAGE leverages the inherent reasoning of Vision-Language Models (VLMs) [2] to decompose complex, global instructions into regional sub-tasks. By introducing a multi-branch parallel denoising strategy, MIRAGE enables the independent editing of specific instances while enforcing background integrity through a reference trajectory. This allows the model to perform high-fidelity edits on specific targets without disturbing the rest of the scene. As shown in Fig. 1, MIRAGE resolves the over-editing issues of FLUX.2 and Qwen-Image-Edit resulting in more reliable editing results. In summary, our contributions are as follows: i) We introduce MIRA-Bench, a novel benchmark focused on multi-instance scenes and compositional instruc-tions, filling an important gap in image editing evaluation; ii) We propose MI-RAGE, a training-free, multi-branch inference framework that improves the pre-cision of mainstream diffusion models without additional training or computa-tional overhead; iii) Through extensive experiments, we demonstrate that inte-grating MIRAGE into SOTA models yields significant gains in prompt following and consistency on both MIRA-Bench and the existing RefEdit benchmark, ef-fectively resolving persistent issues of over-editing and spatial misalignment. MIRAGE: Benchmarking and Aligning Multi-Instance Image Editing 3
+
+2 Related Work 
+
+Text-Guided Image Editing . As diffusion models have made significant progress in image generation [30,31,34], they exhibit superior detail fidelity and local con-trollability compared to GAN-based [27] methods, and have increasingly become the dominant paradigm for image editing. E4C [14] and FlexiEdit [16] invert im-ages into the latent space and incorporate attention constraints to improve struc-tural consistency. However, such methods typically rely on correspondences be-tween source and target texts, which introduces inconvenience in practical usage. Subsequently, InstructPix2Pix [6] performed conditional fine-tuning to enable Stable Diffusion to learn a mapping from (X src , Instruction) to Xtrg . Although this approach improves both performance and usability over prior methods, it is prone to over-editing [10, 18, 21], motivating a large body of follow-up work that explores improvements from the perspectives of attention control [10, 18], spatial conditioning [35], and inference strategies [15, 21]. On the other hand, recent studies indicate that replacing the conventional U-Net architecture with Transformers leads to stronger generative performance [9,24,29]. Representative SOTA models, such as Qwen-Image-Edit [42] and FLUX [3, 4], achieve signifi-cant gains on multiple generation and editing benchmarks. However, in scenarios involving multiple similar instances and compositional instructions, we observe that SOTA models [4, 42], while broadly following the editing intent, frequently exhibit over-editing, fail to preserve fine-grained detail consistency in target re-gions, and introduce unintended changes to non-target background areas. With MIRAGE, we effectively mitigate these issues with a training-free method with-out computational overhead. 
+
+Localization of Regions of Interest. Accurate localization of target regions is critical for consistency of detailed textures and for avoiding over-editing. Even for SOTA generative models [4, 25, 42], reliably identifying the target object in complex scenes remains challenging. Among existing approaches, FOI [10], LOV [26], and LIME [36] extract spatial masks by analyzing attention maps or feature attributions, while DiffEdit [8] and WYS [21] infer editing regions based on differences between predicted noise signals. These methods rely on model-internal signals, whose generalization tends to degrade in complex settings such as multi-instance scenes or when handling semantically complex instructions. In contrast, GIP2P [35], InstructEdit [39], and OIR [44] leverage external mod-els [32, 33] to localize target regions, though their performance is sensitive to the fine-grained accuracy of the external masks. RIE [19] disentangles referring expressions from editing instructions via a self-attention mechanism and relies on an additional trained module to predict target masks for local edits. However, this design introduces additional training cost and computational overhead. Our work falls into the category of external priors, and we employ a vision–language model (VLM) [2] to parse instructions and ground target references, enabling more precise localization of regions of interest. 
+
+Instruction-Guided Image Editing Benchmarks. Table 1 compares repre-sentative benchmarks designed for image editing tasks. Early benchmarks such as MagicBrush [46], HIVE [47], and OmniEdit [41] primarily focus on relatively 4 Z. Liu and S. Alaniz 
+
+Table 1: Comparison of image editing benchmarks. MIRA-Bench is the first benchmark to focus on multi-instance editing with 3-5 similar instances and 5 compo-sitional edit instructions per image. 
+
+Dataset Num. Image Multi-Instance Avg. Instances Compositional Instructions Avg. Instructions / Image Referable MagicBrush [46] 535 × 1 × 2 ×
+
+HIVE [47] 200 × 1 × 5 ×
+
+OmniEdit [41] 62 × 1 × 7 ×
+
+ImgEdit [45] 811 Partial 2 Partial 4 ✓
+
+RefEdit-Bench [28] 200 Partial 3 Partial 1 ✓
+
+MIRA-Bench 100 ✓ 4 ✓ 5 ✓Caption  
+
+> template
+> Qwen3 -14B -
+> Instruct FLUX.2
+> Reference Image
+
+(a) Generate Image 
+
+(b) Generate Instruction and Refer expression                                                                
+
+> Qwen3 -VL -
+> 8B -Instruct
+> Instruction :
+> "Change …the shell of the leftmost turtle …,replace the middle turtle …,
+> add ….onto the shell of the rightmost turtle, remove the newspaper on
+> the ground, change …of the bag in the lower -right corner to …"
+> Refer object :
+> ["the shell of the leftmost turtle", "the middle turtle", "the shell of the
+> rightmost turtle", "the newspaper on the ground", "the bag in the lower -
+> right corner"]
+
+(c) Generate  Bbox  and Mask                                        
+
+> Qwen3 -VL -8B -
+> Instruct
+> SAM2
+> Bounding Box Mask
+> Source Prompt :
+> …,three turtles as the main subjects very close to the camera, …
+> …,arainy telephoto shot frames four parrots close to the camera, …
+> …,five camp hikers as the main subjects very close to the camera, …
+> Qwen3 -VL -
+> 8B -Instruct
+
+Fig. 2: MIRA-Bench construction. (a) Images are generated from source prompts via FLUX.2 [4]. (b) A VLM extracts editing instructions and referring expressions. (c) VLM-predicted boxes are refined by SAM2 [32] into masks. Final benchmark triplets (image, instruction, mask) are human-validated. 
+
+simple scenarios, where editing typically targets a single salient object or a lo-cal region in the image. Such settings rarely capture complex real-world scenes containing multiple entities, which limits their ability to evaluate model per-formance on multi-instance editing tasks. More recent benchmarks, including ImgEdit [45] and RefEdit-Bench [28], expand the diversity of editing types and evaluation scope. However, only a limited portion of their samples involve multi-instance scenarios, and most evaluations still focus on single-instruction editing. As a result, these benchmarks cannot fully reflect model performance under com-plex compositional editing settings. In contrast, our proposed MIRA-Bench is specifically designed for multi-instance editing scenarios. 
+
+3 MIRA-Bench 
+
+With the rapid advancement of image editing models, existing benchmarks are increasingly insufficient to characterize editing performance in complex scenarios involving multiple similar instances. To address this limitation, we introduce a benchmark for measuring Multi-Instance Regional Alignment, MIRA-Bench, designed for compositional instruction-based editing in multi-instance settings. Since our goal is to create a challenging benchmark with images containing MIRAGE: Benchmarking and Aligning Multi-Instance Image Editing 5Flux.2 [dev] + MIRAGE Flux.2 [Klein] -base -9B Input image          
+
+> Change the color of the second cat from the left to white ,change the color of the eyes of the second cat from the right to blue ,remove the first cat from the
+> right ,add some snow onto the top of the head of the first cat from the left ,change the material of the metal case in the lower -left corner to plastic .
+> Qwen -Image -Edit -2511
+> Change the color of the tires of the second scooter from the left to red ,change the texture of the second scooter from the right to smooth and reflective ,change
+> the color of the first scooter from the right to green ,add some snow onto the tire of the first scooter from the left ,replace the map on the ground with a bird .
+> + MIRAGE + MIRAGE
+
+Fig. 3: Example images and instructions from MIRA-Bench. The multiple similar in-stances and compositional instructions pose a challenge to SOTA models which in-troduce unintended modification in these complex scenarios. Through MIRAGE, we achieve precise instance-level editing while preserving background consistency. 
+
+multiple similar instances, there are limited real images that fulfill this criteria. Hence, we adopt an automatic dataset creation pipeline with human oversight and validation as illustrated in Fig. 2. We generate both the reference images and the editing instructions, while ensuring high diversity and quality for the selected benchmark samples. 
+
+Reference images. We construct a comprehensive prompt for generating a list of image descriptions depicting multiple instances of the same object. We find that using a multi-stage prompt composition to generate the descriptions leads to greater diversity. The prompt pipeline incorporates the following constraints: 1) the images contain three, four, or five instances of the same object; 2) the instances are clearly referable by a textual expression; 3) each image contains a unique combination of scenes, objects (including humans, vehicles, animals, common objects), and an otherwise rich environment, preventing bias towards frequently occurring categories. To adopt a progressively increasing difficulty, 50% of the dataset contains three similar instances in each image, while those with four and five similar instances each account for 25%. The full prompt is shown in the Supplementary (Fig. S10). To further improve cross-sample diversity, we automatically deduplicate and filter similar descriptions. Specifically, each generated description is compared against previously accepted ones using an LLM, and discarded if deemed seman-tically similar. For every filtered description, a new one is regenerated. Details of this filtering process are provided in Sec. A.1 of the Supplementary. We use Qwen3-14B-Instruct [43] to generate 200 image descriptions and we then use FLUX.2 [Dev] [4] to synthesize reference images from these descriptions, with examples shown in Fig. S1. 
+
+Edit instructions. We construct a prompt to generate editing instructions with Qwen3-VL-8B [2] based on both the reference image and the source description. For each image, we require exactly five editing instructions and enforce instance-6 Z. Liu and S. Alaniz 
+
+level one-to-one correspondence. Concretely, Qwen3-VL first orders the n sim-ilar instances according to their horizontal spatial positions in the image, and assigns the first n instructions to the corresponding instances from left to right. Any remaining instructions are restricted to other clearly visible and previously unedited objects in the scene. The edit instructions can always be unambiguously grounded and span five core types: addition, removal, replacement, color modifi-cation, and material modification. The full prompt for creating the instructions is provided in the Supplementary (Fig. S11). 
+
+Object masks. Together with the edit instructions, we let Qwen3-VL-8B ex-tract the referring expression of the relevant object of each instruction. Using these referring expressions, we subsequently employ Qwen3-VL-8B to predict the corresponding bounding boxes of each object. These bounding boxes are then provided to SAM2 [32] to obtain precise target segmentation masks, which will be used during evaluation. Following this pipeline, we generate 200 image–instruction samples and fur-ther conduct a human validation step to sub-select and retain a “gold set” of 100 high-quality samples that satisfy both structural consistency and semantic cor-rectness. Fig. 3 illustrates example images and instructions from our benchmark (additional examples are shown in Fig. S2). During evaluation, editing models must perform all five editing actions simultaneously through a single prompt. The resulting MIRA-Bench systematically evaluates existing image editing mod-els under multi-instance independent editing scenarios. 
+
+4 Multi-Instance Regional Alignment via Guided Editing 
+
+While prior methods improve the image editing ability of base diffusion mod-els through fine-tuning [5, 7, 48], we design a training-free framework to address the over-editing [10, 21] and spatial misalignment [19, 28] of current instruction-guided editing models, especially in complex scenarios. Our proposed framework, Multi-Instance Regional Alignment via Guided Editing (MIRAGE), is illustrated in Fig. 4, and consists of two core components: 1) parsing the editing instruc-tion to localize the corresponding target regions (Sec. 4.1), and 2) designing an inference strategy tailored to the target and background regions (Sec. 4.2). 
+
+4.1 Instruction Parsing and Target Region Localization 
+
+We leverage the capabilities of a visual-language model (VLM), such as Qwen3-VL, to perform instruction decomposition and target grounding without any additional model training. As illustrated in Fig. 4 (top), given an input image 
+
+x and its compositional editing instruction  I, we first employ the VLM as an information-extraction parser  D to decompose  I into a set of aligned subtasks: 
+
+D(I) = {(rk, I k)}Kk=1 , (1) where  rk denotes the referring expression of the  k-th editing target, and  Ik
+
+represents the corresponding atomic editing instruction. MIRAGE: Benchmarking and Aligning Multi-Instance Image Editing 7෡𝑌 0 ෢𝑍 0
+
+··· 
+
+> ෣𝑋 𝑇 −𝑡 ෢𝑋 𝑇
+> Edit Instruction:
+> Remove the bluebird perched
+> on the rightmost birdbath.
+> Replace the water in the left
+> birdbath with lava.
+> Edit Instruction:
+> “Remove the
+> bluebird ”
+> Edit Instruction:
+> “Replace the
+> water with lava ”
+
+··· ···  
+
+> 𝑋 1𝑋 𝑇 −𝑡 𝑋 𝑇
+
+··· 
+
+> ෢𝑋 0
+> ෢
+> 𝑋 𝑇
+> (2)
+> 𝑋 0
+> (2)
+> 𝑋 0
+> (1)
+> 𝑋 0
+> ෢𝑋 1
+> ෢
+> 𝑋 𝑇
+> (1)෣
+> 𝑋 𝑇 −𝑡
+> (1)෣
+> 𝑋 𝑇 −𝑡
+> (2)
+
+[𝛒 T, T] 
+
+Diffusion 
+
+Model 
+
+[𝟎 , 𝛒 T] 
+
+> 1. VLM Parsing & Grounding
+
+Diffusion 
+
+Model 
+
+VLM 
+
+> Edit Instruction
+> Replace the water
+> with lava
+> Remove the bluebird
+> Refer Object
+> Water in the left
+> birdbath
+> Bluebird perched on
+> the rightmost birdbath
+> Instr. 1
+> Instr. 2
+> Parse Instruction
+
+VLM    
+
+> Predict Bounding Box
+> Global Instruction Regional Instructions
+> Crop
+> Region -level editing
+> Global editing
+> Forward -Diffusion
+> Reference Trajectory
+> 𝑋 0
+> 2. Diffusion Inference
+> Replace Replace
+> Replace Replace Replace
+
+Fig. 4: Overview of MIRAGE. (1) A VLM parses the global instruction into instance-level edits and localizes target regions via bounding boxes. (2) Regional branches perform parallel diffusion editing and inject their latents into the global branch; later time steps continue global editing under the global instruction while preserving background latents from the reference trajectory. 
+
+Subsequently, we employ the VLM as a referring expression localizer  L, which grounds the target specified by  rk in image  x and extracts the corresponding sub-region based on the predicted bounding box: 
+
+bk = L(x, r k) (2) 
+
+xk = Crop( x, bk) (3) where  xk denotes the region of interest extracted by cropping (Crop) the image x
+
+with the predicted bounding box  bk. This process produces a set of region-level editing instances {(xk, I k)}Kk=1 , which explicitly align editing regions with their intended operations, providing structured inputs for our multi-branch diffusion-based editing. The prompts used for both the instruction decomposition and the referring expression grounding are detailed in the Supplementary (Fig. S9). 
+
+4.2 Localized image editing 
+
+This module constitutes the editing component of our framework, implemented as a multi-branch parallel inference, built upon instruction-based editing models, such as FLUX.2 [4] and Qwen-Image-Edit [42]. As illustrated in Fig. 4 (bottom), given the  K region-level editing pairs  {(xk, I k)}Kk=1  obtained from the VLM, we utilize one global branch together with  K target-region branches for parallel 8 Z. Liu and S. Alaniz 
+
+denoising. Prior studies have shown that early diffusion time steps primarily determine editing semantics, whereas later time steps focus on refining local details [11, 15, 23]. Motivated by this observation, we adopt a two-stage region fusion strategy during inference. Let the total number of time steps be  T , with 
+
+t = T corresponding to noise and t = 0 the clean image, and denote the threshold time step for switching between region editing and global editing as  ρT  .Since we have isolated the edit regions of interest in the image, we can con-struct the noised latents of the background region from the forward diffusion process applied to the reference image, obtaining  zref t . During the early stage (t > ρT  ), the global branch is not used, while each region editing branch k in-dependently performs denoising conditioned on  (xk, I k), producing local latent representations  zkt . These local latents are then spatially aligned to their loca-tions on the full image latents via the spatial mapping  Π(·, bk) and overwrite the respective locations of the background representation  zref t to form the updated latents at time step  t:
+
+zft = zref t ⊙ 1 −
+
+> K
+
+X
+
+> k=1
+
+Mk
+
+!
+
++
+
+> K
+
+X
+
+> k=1
+
+ Π(zkt , bk) ⊙ Mk
+
+ t > ρT  (4) Here,  Mk represents the binary mask, corresponding to bounding box  bk, pro-jected onto the latent grid, and ⊙ is the element-wise product. The fused latent 
+
+zft is then propagated to the next denoising step. During the late stage ( t ≤ ρT  ), all region branches are terminated, and only the global branch performs conditional denoising in the global latent space conditioned on  (x, I ), producing  ¯zft . In this stage, we continue to apply updates only within the target regions, while background representations are directly computed from the forward process of the reference image: 
+
+zft = zref t ⊙ 1 −
+
+> K
+
+X
+
+> k=1
+
+Mk
+
+!
+
++ ¯ zft ⊙
+
+> K
+
+X
+
+> k=1
+
+Mk t ≤ ρT  (5) Here, ¯zft denotes the denoised latent predicted by the global branch before region-wise fusion. In summary, during the early stage, the denoised latent representations from each region editing branch are written back to the corresponding locations of the reference latents, explicitly binding sub-instructions to their associated regions and enabling early semantic fusion. Throughout the entire denoising process, regions outside the targets consistently follow the reference trajectory, prevent-ing unintended background drift. This inference strategy effectively mitigates over-editing, detail inconsistency, and spatial misalignment commonly observed in existing editing models [3, 4, 42] under multi-instance and compositional in-struction scenarios. Moreover, since regional edits are performed on a subset of the whole image, our MIRAGE pipeline is more efficient than editing with the base model as the diffusion model is applied on fewer patch tokens. MIRAGE: Benchmarking and Aligning Multi-Instance Image Editing 9
+
+5 Experiments 
+
+We evaluate the effectiveness of MIRAGE in addressing the challenges of multi-instance and compositional image editing. We provide a quantitative (Sec. 5.2) and qualitative (Sec. 5.3) comparison against SOTA models on MIRA-Bench and RefEdit-Bench. Finally, we conduct ablation studies (Sec. 5.4) to analyze the impact ρ, our replacement strategies, the instruction complexity, and runtime. 
+
+5.1 Experimental Setup Datasets. We conduct systematic comparative evaluations on the RefEdit-Bench [28] single-instruction benchmark (200 images) and our proposed multi-instance and compositional instruction benchmark, MIRA-Bench (100 images). Both datasets provide explicit referring expressions for each editing target, en-abling precise localization and fine-grained evaluation. 
+
+Baselines. We compare against representative classical and SOTA instruction-based image editing models, including FLUX.2 [Dev/Klein] [4], Qwen-Image-Edit-2511 [42], RefEdit(SD3) [28], MagicBrush [46], and also GPT-Image-1.5 [25] to systematically assess the effectiveness of our method. 
+
+Metrics. We partition each image into target and background regions using ground-truth masks provided by the benchmarks, and evaluate performance from two aspects: the degree to which the background region is preserved relative to the original image, and the extent to which the target region follows the editing instruction. We adopt EditScore [20] which follows the evaluation framework of VIEScore [17], and provides a fine-tuned scoring model specifically for evaluat-ing image editing, approximating human judgment. EditScore evaluates results along three dimensions (on a scale from 0 - 10): Prompt Following (PF) mea-sures whether the edit complies with the given instruction. Consistency (Cons) assesses whether unedited regions remain unchanged. Perceptual Quality (PQ) reflects overall image naturalness and the absence of artifacts. PF and Cons utilize the object masks from the benchmarks. The overall score is computed as Overall = pmin(PF , Cons) × PQ [20]. To enhance evaluation reliability, we introduce finer-grained scoring criteria based on the original EditScore [20] eval-uation template (see Fig. S12 and Fig. S13 for details). PF and Cons are assessed using the Qwen3-VL-8B-Instruct variant of EditScore. However, as noted by Luo et al. [20], the PQ score is less reliable which is why we resort to the stronger GPT-5.1 model to compute PQ. 
+
+5.2 Quantitative Results 
+
+In Table 2, we evaluate baselines and MIRAGE on MIRA-Bench. We perform three independent evaluations of PF and Cons for every image-instruction pair and calculate their average scores. The results indicate that, after integrating MI-RAGE, all image editing models achieve significant improvements in instruction following (up to +1.7) and consistency (up to +0.7). This shows that MIRAGE enables precise editing of the correct target object and does not over-edit the 10 Z. Liu and S. Alaniz 
+
+Table 2: Results on MIRA-Bench. EditScore [20] for Prompt Following (PF) and Consistency (Cons), and GPT-5.1 evaluation of Perceptual Quality (PQ) in the range from 0 (lowest) to 10 (highest).                                               
+
+> Model PF ↑
+> avg@3
+> Cons ↑
+> avg@3 PQ avg ↑Overall avg ↑
+> MagicBrush [46] 0.879 9.788 7.648 2.358 RefEdit-SD3 [28] 2.358 8.025 6.324 4.247 FLUX.2 [Klein]-9B [4] 6.046 8.646 8.988 7.372 FLUX.2 [Klein]-9B + MIRAGE 7.709 8.796 8.836 8.253
+> FLUX.2 [Dev] [4] 6.982 8.378 8.880 7.874 FLUX.2 [Dev] + MIRAGE 8.086 9.006 8.808 8.439
+> Qwen-Image-Edit-2511 [42] 7.541 8.492 8.632 8.068 Qwen-Image-Edit-2511 + MIRAGE 8.004 8.850 8.436 8.217
+> GPT-Image-1.5 [25] 7.659 8.894 9.000 8.302
+
+Table 3: Results on RefEdit-Bench. EditScore [20] for Prompt Following (PF) and Consistency (Cons), and GPT-5.1 evaluation of Perceptual Quality (PQ) in the range from 0 (lowest) to 10 (highest).                                           
+
+> Model PF ↑
+> avg@3
+> Cons ↑
+> avg@3 PQ avg ↑Overall avg ↑
+> MagicBrush [46] 2.400 9.674 7.400 6.412 RefEdit-SD3 [28] 5.556 8.460 7.506 4.244 FLUX.2 [Klein]-base-9B [4] 7.862 9.290 9.198 8.504 FLUX.2 [Klein]-base-9B + MIRAGE 8.236 9.296 9.066 8.641
+> FLUX.2 [Dev] [4] 7.454 8.934 9.054 8.215 FLUX.2 [Dev] + MIRAGE 8.212 9.469 8.936 8.566
+> Qwen-Image-Edit-2511 [42] 8.208 9.182 8.928 8.560 Qwen-Image-Edit-2511 + MIRAGE 8.753 9.353 8.700 8.726
+
+image at incorrect regions. We observe that perceptual quality remains largely the same. We could not find a notable degradation in image quality in FLUX.2 models when using MIRAGE compared to the base models during qualitative inspection of the results, attributing the difference in PQ to model variance. When applying MIRAGE to Qwen-Image-Edit-2511 [42], we observe that the reduced PQ is explained by some edit results exhibiting slight blurring and loss of fine details in the target region, which becomes more noticeable for “remove” instructions. This is because Qwen-Image-Edit-2511 [42] resamples input images as a preprocessing step to a fixed resolution. Since MIRAGE performs editing on locally cropped regions during the early denoising steps, this forced resampling can sometimes cause texture smoothing and loss of detail when small regions are upscaled significantly, thereby affecting perceptual quality. Hence, MIRAGE works best with editing models that allow variable size input images without rescaling, such as the FLUX.2 [4] model family. Furthermore, we evaluated GPT-Image-1.5 [25], a proprietary SOTA model which performs significantly better than any base open-source model. In complex multi-instance editing scenarios, we find that GPT-Image-1.5 [25] can still suffer from spatial misalignment and MIRAGE: Benchmarking and Aligning Multi-Instance Image Editing 11 Change the color of the left dog's eyes to blue , change the color of the middle dog to green , add a piece of meat into the dog bowl , change the right dog's fur  
+
+> texture to rough ,remove the blue cooler box in the lower -left corner .
+
+结果  Input Image  Flux.2 [dev] + MIRAGE RefEdit -SD3  Flux.2 [Klein] -base -9B          
+
+> Change the color of the feet of the first mountain goat from the left to yellow ,add some lava onto the second mountain goat from the left ,change the color of the halter
+> of the third mountain goat from the left to blue ,change the fur color of the fourth mountain goat from the left to green ,remove the fifth mountain goat from the left .
+> Qwen -Image -Edit -2511
+> 3 Similar Instances 4 Similar Instances 5 Similar Instances
+> Add a purple scarf to the first person from the left ,change the color of the pants of the second person from the left to green ,change the color of the hair of the
+> first person from the right to purple ,add sunglasses to the second person from the right ,add lava into the basket in the lower -left corner .
+> + MIRAGE + MIRAGE GPT -Image -1.5
+
+Fig. 5: Qualitative results on MIRA-Bench. Integrating MIRAGE into SOTA models effectively mitigates over-editing in multi-instance scenarios while preserving detail consistency as much as possible. 
+
+over-editing. Notably, MIRAGE applied to FLUX.2 [Dev] achieves a higher PF (8.09 vs. 7.66) and Cons (9.01 vs. 8.89) scores than GPT-Image-1.5 (Overall: 8.44 vs. 8.30), while FLUX.2 [Klein-9B] and Qwen-Image-Edit-2511 achieve per-formance very close to it. Similarly, the results on RefEdit-Bench in Table 3 show that MIRAGE gen-eralizes to other image editing benchmarks. While recent image editing models already perform well in these simpler scenarios with single instructions and fewer similar instances, MIRAGE further improves PF and Cons consistently across models. In addition, we show in the Supplementary (Tab. S1 and Tab. S2) that integrating MIRAGE consistently improves traditional metrics on background preservation and CLIP image similarity across all backbone models, indicating that our approach effectively retains unedited regions of the reference image. 
+
+5.3 Qualitative Results 
+
+Fig. 5 presents qualitative results of baselines and MIRAGE on MIRA-Bench. In complex scenarios involving multiple similar instances and compositional in-structions, RefEdit-SD3 fails to produce correct edits. Although recent SOTA models generally follow the instructions well, they frequently exhibit severe over-editing and spatial misalignment, such as unintentionally changing the color of the left dog (first row, FLUX.2 [Klein]) or assigning sunglasses to the wrong person (second row, all models except with MIRAGE). After integrating MIRAGE, the models can accurately identify the target instance specified by the instruction and perform precise, localized edits while preserving background consistency. For instance, no base model other than when combined with MIRAGE correctly removes the fifth goat in the last row. More-over, qualitative results on RefEdit-Bench (Fig. S5) further show that integrating 12 Z. Liu and S. Alaniz Input Image  [0.8T, T]  [0.4T, T] 
+
+Change the material of the backpack on the ground to metal , add some snow onto the second fox 
+
+from the right , make the fur of the first fox from the right glossy and shiny , add a red scarf to the 
+
+neck of the first fox from the left , change the color of the eyes of the second fox from the left to blue .
+
+Change the color of the eyes of the first sparrow from the left to green , remove the second sparrow 
+
+from the left , add some snow onto the third sparrow from the left , change the color of the beak of the 
+
+fourth sparrow from the left to red , add a purple scarf to the first sparrow from the right.                         
+
+> TimeStep PF avg ↑Cons avg ↑PQ avg ↑Overall avg ↑
+> [0.8T, T] 7.875 8.962 7.808 7.842
+> [0.6T, T] 7.931 9.092 7.856 7.894
+> [0.4T, T] 7.756 9.065 7.824 7.790
+> [0.2T, T] 7.840 9.030 7.692 7.766
+> [0, T] 7.817 8.958 7.364 7.587
+> Performance Metrics Comparison
+
+[0.6T, T]  [0.2T, T]  [0, T] 
+
+Time Step PF ↑
+
+avg@3 
+
+Cons ↑
+
+avg@3 PQ avg ↑ Overall avg ↑
+
+[0 .8T , T] 7.917 8.945 8.848 8.370 
+
+[0 .6T , T] 8.086 9.006 8.808 8.439 
+
+[0 .4T , T] 7.946 8.969 8.276 8.109 
+
+[0 .2T , T] 7.971 9.004 7.820 7.895 
+
+[0 , T] 7.899 8.936 6.368 7.092 
+
+Fig. 6: Effect of latent replacement time step ρ on MIRA-Bench . Results obtained with FLUX.2 [Dev]. Red circles highlight artifacts or over-editing regions. Input Image  Replace both  W/o replace  bg W/o replace target     
+
+> Change the color of the middle person's shirt to green ,add some snow onto the left man's shoulder ,change
+> the material of the water bottle on the ground to glass ,add some snow onto the bag on the ground in the
+> lower -right corner ,change the skin tone of the right man to black .
+
+Remove the blood on the left person's shirt , change the texture of the middle person's 
+
+pants to striped , add sunglasses to the right person , remove the yellow warning sign 
+
+in the middle , change the material of the backpack on the ground to wood .
+
+Strategy  PF avg ↑ Cons avg ↑ PQ avg ↑ Overall avg ↑
+
+W/o target  7.066  8.658  7.540  7.299 
+
+W/o  bg  7.682  8.963  7.764  7.723 
+
+Both replace  7.931  9.092  7.856  7.894 
+
+Performance Metrics Comparison 
+
+Strategy PF ↑
+
+avg@3 
+
+Cons ↑
+
+avg@3 PQ avg ↑ Overall avg ↑
+
+W/o replace target 7.172 8.567 8.752 7.923 W/o replace bg 7.858 8.950 8.824 8.327 Replace both 8.086 9.006 8.808 8.439 
+
+Fig. 7: Effect of target and background replacement strategies on MIRA-Bench. These results are obtained with FLUX.2 [Dev] using a replacement interval of [0.6T, T]. Red circles indicate over-editing and local detail inconsistencies. 
+
+MIRAGE effectively suppresses over-editing in the original models and consis-tently improves editing quality. 
+
+5.4 Ablation Study Impact of ρT Time Step Choice. We ablate the ρ hyperparameter which de-termines when we switch from region editing to global editing. The quantitative results in Fig. 6 on MIRA-Bench indicate that our method is robust to the exact choice of ρ in terms of PF and Cons metrics. However, we observe that replacing target-region latents only within a short interval (e.g., [0.8T, T]) can sometimes be insufficient to effectively suppress over-editing. Expanding the replacement time-step range further alleviates over-editing and spatial misalignment, but at the cost of increased visual distortions and artifacts. As a result, we find that choosing the region editing interval to [0.6T, T] achieves the best trade-off be-tween editing accuracy and visual quality. The analysis on RefEdit-Bench is provided in the Supplementary (Fig. S6). 
+
+Impact of Target and Background Replacement Strategies. As described in Sec. 4.2, our method consists of two core latent replacement strategies, namely the target-region replacement Rtarget (t) = PKk=1 
+
+ Πk(zkt , b k) ⊙ Mk
+
+ and the background replacement Rbg (t) = zref t ⊙
+
+
+
+1 − PKk=1 Mk
+
+
+
+. To isolate their ef-fects, we compare three configurations: (1) Replace both , where both target MIRAGE: Benchmarking and Aligning Multi-Instance Image Editing 13 First First three All          
+
+> Number of Instruction
+> 7.0
+> 7.5
+> 8.0
+> 8.5
+> 9.0
+> 9.5
+> Score
+> PF avg @3
+> First First three All
+> Number of Instruction
+> 7.0
+> 7.5
+> 8.0
+> 8.5
+> 9.0
+> 9.5
+> Cons avg @3
+> First First three All
+> Number of Instruction
+> 7.0
+> 7.5
+> 8.0
+> 8.5
+> 9.0
+> 9.5
+> PQ avg
+> First First three All
+> Number of Instruction
+> 7.0
+> 7.5
+> 8.0
+> 8.5
+> 9.0
+> 9.5
+> Overall avg
+> Flux.2 [Dev] Flux.2 [Dev] + MIRAGE Qwen-Image-Edit Qwen-Image-Edit + MIRAGE
+
+Fig. 8: Performance under increasing instruction complexity. Results on MIRA-Bench using a replacement interval of [0 .6T, T ].
+
+and background replacements are enabled as defined above. (2) No target re-placement , where the multi-branch target latents are not injected during the early stage  t > ρT  . In this case, the target regions use the pre-fusion global prediction  ¯zft , while the background replacement using  zref  
+
+> t
+
+remains unchanged. (3) No background replacement , where the background regions do not use the forward-diffusion reference latent  zref  
+
+> t
+
+and instead use the pre-fusion global prediction  ¯zft . The target-region replacement is preserved during the early stage 
+
+t > ρT  . We show experimental results of this ablation in Fig. 7. Removing background replacement leads to structural drift in non-edited regions, as il-lustrated by the disappearance of the wooden sign text behind the woman in (fourth column). In contrast, removing target replacement weakens instruction following and results in reduced local detail consistency within edited regions (third column). The quantitative results on the right confirm these observations as the “replace both” strategy achieves the highest overall results. Additional results on RefEdit-Bench (Fig. S7) corroborate that the two strategies exhibit complementary effects. 
+
+Instruction Complexity Analysis. We investigate the effect of increasingly more edit instructions on similar instances in MIRA-Bench, essentially increas-ing the task difficulty. Fig. 8 shows the results when we vary the number of compositional instructions between one, three, and five. While PF decreases for FLUX.2 [Dev] and Qwen-Image-Edit-2511 when going from one to three instruc-tions, indicating that this poses an additional challenge to these models, it does not drop further with all five instructions. However, both models exhibit a steady decline in consistency (Cons) as the number of instructions increase, suggesting that accumulated over-editing becomes increasingly severe. By comparison, after integrating MIRAGE, both FLUX.2 [Dev] and Qwen-Image-Edit-2511 demon-strate more stable performance trends across different complexity levels, partic-ularly in terms of PF and Cons. These results further validate the effectiveness of MIRAGE in handling multi-instruction image editing scenarios. 
+
+Runtime and Performance Analysis. We compare three inference strategies on MIRA-Bench in terms of both efficiency and editing performance, including (i) standard execution using the base model, (ii) sequential execution that ap-plies edit instructions one-by-one, and (iii) MIRAGE applied on top of the base 14 Z. Liu and S. Alaniz 
+
+Table 4: Runtime-performance comparison of different inference strategies on MIRA-Bench. Results obtained with FLUX.2 [Klein]-Base-9B under a replace-ment interval of [0.6T, T].                                    
+
+> Method PF ↑
+> avg@3
+> Cons ↑
+> avg@3 PQ avg ↑Overall avg ↑Parse (s) Detect (s) Inference (s) Total Time ↓
+> Flux.2 [Klein]-base-9B (Sequential) 6.124 7.895 7.173 6.628 ––448.99 448.99 Flux.2 [Klein]-base-9B 6.046 8.646 8.988 7.372 ––90.13 90.13 Flux.2 [Klein]-base-9B + MIRAGE 7.709 8.796 8.836 8.253 2.90 8.37 74.59 85.87
+
+model. All experiments are conducted on a single NVIDIA A100 40GB GPU. As shown in Tab. 4, sequential execution requires approximately 5x longer inference time than standard base model execution, as expected. Although the sequential execution yields a slight improvement in PF, it leads to noticeable degradation in both Cons and PQ, due to compounding errors and high-frequency visual artifacts. Qualitative examples are provided in Fig. S4 . In contrast, MIRAGE avoids the quality degradation while simultaneously improving all metrics at no additional computational cost. On the contrary, MIRAGE is overall slightly faster than base model execution because of the smaller latent size during the region editing phase. Instruction parsing and target localization introduce only about 11.3s overhead per image, while the main diffusion inference saves 15.5s. 
+
+6 Conclusion 
+
+We observe that current state-of-the-art models still struggle in complex scenar-ios involving multiple similar instances, where each instance requires indepen-dent editing. To address this limitation, we introduce MIRA-Bench for assessing the performance of editing models on this task, and MIRAGE, a training-free framework designed to mitigate the over-editing and spatial misalignment is-sues. Extensive experiments demonstrate that integrating MIRAGE into mul-tiple backbone models consistently yields significant improvements in prompt following and consistency, validating the effectiveness and scalability of the pro-posed framework in complex editing scenarios. Additionally, MIRAGE is also computationally more efficient than using standard base model inference. 
+
+Limitations. The MIRAGE framework shares limitations with the VLM used to extract the referring object location and editing instructions. At the same time, we observe that even relatively small models, such as Qwen3-VL-8B as used by MIRAGE, perform well on these tasks. Moreover, the computational speedup of MIRAGE depends on the image editing model supporting variable input sizes for the images. FLUX.2 supports this, but Qwen Image Edit does not. Finally, since Qwen Image Edit always resizes the input image to a fixed size, we sometimes observe a slight degradation in image quality when applying MIRAGE due to blurring (Sec. D in Supplementary). This explains the slightly lower PQ scores when using Qwen Image Edit. However, FLUX.2 does not suffer from these limitations. MIRAGE: Benchmarking and Aligning Multi-Instance Image Editing 15 
+
+Acknowledgments. This work is supported by Hi! PARIS and ANR/France 2030 program (ANR-23-IACL-0005). 
+
+References 
+
+1. Agrawal, P., et al.: Pixtral 12b. arXiv preprint arXiv:2410.07073 (2024) 2. Bai, S., Cai, Y., Chen, R., Chen, K., Chen, X., Cheng, Z., Deng, L., Ding, W., Gao, C., Ge, C., et al.: Qwen3-vl technical report. arXiv preprint arXiv:2511.21631 (2025) 3. Batifol, S., Blattmann, A., Boesel, F., Consul, S., Diagne, C., Dockhorn, T., En-glish, J., English, Z., Esser, P., et al.: Flux. 1 kontext: Flow matching for in-context image generation and editing in latent space. arXiv preprint arXiv:2506.15742 (2025) 4. Black Forest Labs: FLUX.2: Analyzing and enhancing the latent space of FLUX – representation comparison (2025), https://bfl.ai/research/representation-comparison 
+
+5. Bradbury, R., Zhong, D.: Your latent mask is wrong: Pixel-equivalent latent com-positing for diffusion models. arXiv preprint arXiv:2512.05198 (2025) 6. Brooks, T., Holynski, A., Efros, A.A.: Instructpix2pix: Learning to follow image editing instructions. In: CVPR (2023) 7. Chen, J., Zhang, Y., Qian, X., Li, Z., Fermuller, C., Chen, C., Aloimonos, Y.: From inpainting to layer decomposition: Repurposing generative inpainting models for image layer decomposition. arXiv preprint arXiv:2511.20996 (2025) 8. Couairon, G., Verbeek, J., Schwenk, H., Cord, M.: Diffedit: Diffusion-based seman-tic image editing with mask guidance. In: ICLR (2023) 9. Feng, K., Ma, Y., Wang, B., Qi, C., Chen, H., Chen, Q., Wang, Z.: Dit4edit: Diffusion transformer for image editing. In: AAAI (2025) 10. Guo, Q., Lin, T.: Focus on your instruction: Fine-grained and multi-instruction image editing by attention modulation. In: CVPR (2024) 11. Hertz, A., Mokady, R., Tenenbaum, J., Aberman, K., Pritch, Y., Cohen-Or, D.: Prompt-to-prompt image editing with cross-attention control. In: ICLR (2023) 12. Ho, J., Jain, A., Abbeel, P.: Denoising diffusion probabilistic models. In: NeurIPS (2020) 13. Hong, W., Wang, W., Ding, M., Yu, W., Lv, Q., Wang, Y., Cheng, Y., Huang, S., Ji, J., Xue, Z., et al.: Cogvlm2: Visual language models for image and video understanding. arXiv preprint arXiv:2408.16500 (2024) 14. Huang, T., Cao, P., Yang, L., Liu, C., Hu, M., Liu, Z., Song, Q.: E4c: Enhance editability for text-based image editing by harnessing efficient CLIP guidance. IEEE TCSVT (2025) 15. Kim, J., Lee, Z., Cho, D., Jo, S., Jung, Y., Kim, K., Yang, E.: Early timestep zero-shot candidate selection for instruction-guided image editing. In: ICCV (2025) 16. Koo, G., Yoon, S., Hong, J.W., Yoo, C.D.: FlexiEdit: Frequency-aware latent re-finement for enhanced non-rigid editing. In: ECCV (2024) 17. Ku, M., Jiang, D., Wei, C., Yue, X., Chen, W.: Viescore: Towards explainable metrics for conditional image synthesis evaluation. In: ACL (2024) 18. Li, S., Zeng, B., Feng, Y., Gao, S., Liu, X., Liu, J., Li, L., Tang, X., Hu, Y., Liu, J., et al.: Zone: Zero-shot instruction-guided local editing. In: CVPR (2024) 19. Liu, C., Li, X., Ding, H.: Referring image editing: Object-level image editing via referring expressions. In: CVPR (2024) 16 Z. Liu and S. Alaniz 20. Luo, X., Wang, J., Wu, C., Xiao, S., Jiang, X., Lian, D., Zhang, J., Liu, D., Liu, Z.: Editscore: Unlocking online RL for image editing via high-fidelity reward modeling. In: ICLR (2026) 21. Mirzaei, A., Aumentado-Armstrong, T., Brubaker, M.A., Kelly, J., Levinshtein, A., Derpanis, K.G., Gilitschenski, I.: Watch your steps: Local image and scene editing by text instructions. In: ECCV (2024) 22. Mistral AI: Mistral large 3 (2025), https://mistral.ai/news/mistral-3 
+
+23. Mokady, R., Hertz, A., Aberman, K., Pritch, Y., Cohen-Or, D.: Null-text inversion for editing real images using guided diffusion models. In: CVPR (2023) 24. Nitzan, Y., Wu, Z., Zhang, R., Shechtman, E., Cohen-Or, D., Park, T., Gharbi, M.: Lazy diffusion transformer for interactive image editing. In: ECCV (2024) 25. OpenAI: The new ChatGPT Images is here (2025), https://openai.com/index/ new-chatgpt-images-is-here/ 
+
+26. Patashnik, O., Garibi, D., Azuri, I., Averbuch-Elor, H., Cohen-Or, D.: Localizing object-level shape variations with text-to-image diffusion models. In: ICCV (2023) 27. Patashnik, O., Wu, Z., Shechtman, E., Cohen-Or, D., Lischinski, D.: StyleCLIP: Text-driven manipulation of StyleGAN imagery. In: ICCV (2021) 28. Pathiraja, B., Patel, M., Singh, S., Yang, Y., Baral, C.: Refedit: A benchmark and method for improving instruction-based image editing model on referring expres-sions. In: ICCV (2025) 29. Peebles, W., Xie, S.: Scalable diffusion models with transformers. In: ICCV (2023) 30. Podell, D., English, Z., Lacey, K., Blattmann, A., Dockhorn, T., Müller, J., Penna, J., Rombach, R.: SDXL: Improving latent diffusion models for high-resolution im-age synthesis. In: ICLR (2024) 31. Ramesh, A., Dhariwal, P., Nichol, A., Chu, C., Chen, M.: Hierarchical text-conditional image generation with clip latents. arXiv preprint arXiv:2204.06125 (2022) 32. Ravi, N., Gabeur, V., Hu, Y.T., Hu, R., Ryali, C., Ma, T., Khedr, H., Rädle, R., Rolland, C., Gustafson, L., et al.: SAM 2: Segment anything in images and videos. In: ICLR (2025) 33. Ren, T., Jiang, Q., Liu, S., Zeng, Z., Liu, W., Gao, H., Huang, H., Ma, Z., Jiang, X., Chen, Y., et al.: Grounding DINO 1.5: Advance the Edge of open-set object detection. arXiv preprint arXiv:2405.10300 (2024) 34. Rombach, R., Blattmann, A., Lorenz, D., Esser, P., Ommer, B.: High-resolution image synthesis with latent diffusion models. In: CVPR (2022) 35. Shagidanov, A., Poghosyan, H., Gong, X., Wang, Z., Navasardyan, S., Shi, H.: Grounded-instruct-pix2pix: Improving instruction based image editing with auto-matic target grounding. In: ICASSP (2024) 36. Simsar, E., Tonioni, A., Xian, Y., Hofmann, T., Tombari, F.: LIME: Localized image editing via attention regularization in diffusion models. In: WACV (2025) 37. Sun, W., Chen, H., Du, Y., Zheng, Y., Snoek, C.G.M.: Regionreasoner: Region-grounded multi-round visual reasoning. In: ICLR (2026) 38. Wang, J., Wu, Z., Huang, D., Zheng, Y., Wang, H.: Unlocking the potential of mllms in referring expression segmentation via a light-weight mask decoder. arXiv preprint arXiv:2508.04107 (2025) 39. Wang, Q., Zhang, B., Birsak, M., Wonka, P.: Instructedit: Improving automatic masks for diffusion-based image editing with user instructions. arXiv preprint arXiv:2305.18047 (2023) 40. Wang, W., Gao, Z., Gu, L., Pu, H., Cui, L., Wei, X., Liu, Z., Jing, L., Ye, S., Shao, J., et al.: Internvl3. 5: Advancing open-source multimodal models in versatility, reasoning, and efficiency. arXiv preprint arXiv:2508.18265 (2025) MIRAGE: Benchmarking and Aligning Multi-Instance Image Editing 17 41. Wei, C., Xiong, Z., Ren, W., Du, X., Zhang, G., Chen, W.: Omniedit: Building image editing generalist models through specialist supervision. In: ICLR (2025) 42. Wu, C., Li, J., Zhou, J., Lin, J., Gao, K., Yan, K., Yin, S.m., Bai, S., Xu, X., Chen, Y., et al.: Qwen-image technical report. arXiv preprint arXiv:2508.02324 (2025) 43. Yang, A., Li, A., Yang, B., Zhang, B., Hui, B., Zheng, B., Yu, B., Gao, C., Huang, C., Lv, C., et al.: Qwen3 technical report. arXiv preprint arXiv:2505.09388 (2025) 44. Yang, Z., Ding, G., Wang, W., Chen, H., Zhuang, B., Shen, C.: Object-aware inversion and reassembly for image editing. In: ICLR (2024) 45. Ye, Y., He, X., Li, Z., Lin, B., Yuan, S., Yan, Z., Hou, B., Yuan, L.: Imgedit: A unified image editing dataset and benchmark. In: NeurIPS (2025) 46. Zhang, K., Mo, L., Chen, W., Sun, H., Su, Y.: Magicbrush: A manually annotated dataset for instruction-guided image editing. In: NeurIPS (2023) 47. Zhang, S., Yang, X., Feng, Y., Qin, C., Chen, C.C., Yu, N., Chen, Z., Wang, H., Savarese, S., Ermon, S., et al.: Hive: Harnessing human feedback for instructional visual editing. In: CVPR (2024) 48. Zhang, Z., Xie, J., Lu, Y., Yang, Z., Yang, Y.: Enabling instructional image editing with in-context generation in large scale diffusion transformer. In: NeurIPS (2025) 18 Z. Liu and S. Alaniz 
+
+MIRAGE: Benchmarking and Aligning Multi-Instance Image Editing -Supplementary Material A Implementation Details of MIRA-Bench Construction 
+
+In this section we detail how we construct MIRA-Bench, including the image description generation A.1, image synthesis A.2, edit instruction and referring object generation A.3, and mask generation A.4. 
+
+A.1 Image Description Generation 
+
+We use Qwen3-14B-Instruct [43] for image description generation. However, prompting the model naively to generate image descriptions leads to template collapse, i.e., repetitive descriptions which often lack sufficient detail, fail to satisfy the referring requirements, or producing the same instance-scene combi-nations across samples. To improve the quality of the generated data, we adopt a two-stage generation strategy. In the first stage, we use the top prompt shown in Fig. S10 to ask the LLM to generate a large set of (repeated instance category, scene) pairs. If dupli-cate pairs are detected across samples, they are discarded and resampled until 200 valid pairs are obtained. During repeated sampling, the temperature and top_p parameters are gradually increased according to the number of failures in order to encourage diversity. The default sampling parameters are restored once a valid pair is produced. Candidate image descriptions are then generated based on these valid pairs. In the second stage, we first use the middle prompt in Fig. S10 together with the (repeated instance category, scene) pairs to generate image descriptions. Then, using the bottom prompt in Fig. S10, the LLM automatically verifies the generated descriptions. The checking process includes instance count, referential distinguishability, completeness of visual details, and duplication across samples. If a candidate does not satisfy these constraints, the model provides revision suggestions and performs up to four rounds of refinement. Samples that still fail after the refinement rounds are discarded and regenerated from the first stage. Examples of the final generated image descriptions can be found in the "Description" row of Fig. S1. 
+
+A.2 Image Synthesis 
+
+The generated descriptions are used as prompts for the text-to-image model FLUX.2 [Dev] [4] to synthesize images. The images generated from the image descriptions are shown in the "Generated Image" row of Fig. S1. Most impor-tantly, multi-instance scenes can sometimes lead to unstable generations, for MIRAGE: Benchmarking and Aligning Multi-Instance Image Editing 19 3 Similar Instances  4 Similar Instances  5 Similar Instances 
+
+> Generated Image
+
+A nighttime telephoto shot in a
+
+wide boulevard service lane, with 
+
+soft background blur and sharp 
+
+foreground edges highlights three 
+
+street sweepers as the main 
+
+subjects very close to the camera, 
+
+spaced across the foreground with 
+
+clear gaps so none touch or 
+
+overlap . the left vehicle shows a
+
+dented corner panel and is parked 
+
+beside a low bollard close to the 
+
+camera ; the center vehicle shows 
+
+a scratched door handle and is 
+
+parked near a bold lane marking 
+
+in the foreground ; and the right 
+
+vehicle shows a faded paint patch 
+
+and is parked by a puddle 
+
+reflection in front . Two other 
+
+distinct, editable items are a
+
+camera bag and a wooden crate, 
+
+both placed in the near foreground 
+
+w i t h o u t b l o c k i n g t h e m a i n 
+
+subjects . Close -range perspective 
+
+reveals micro -texture and natural 
+
+shadows on the editable items .
+
+> Description
+
+In  a mountain  trailhead  with  a
+
+wooden  signpost,  with  strong 
+
+foreground  lighting  that  reveals  fine 
+
+texture,  A nighttime  close -up  photo 
+
+frames  four  camp  hikers  close  to 
+
+the  camera  and  filling  much  of  the 
+
+foreground ; each  one  is  separated 
+
+by  visible  space . the  leftmost 
+
+person  wears  a faint  scuff  on  their 
+
+jacket  and  stands  beside  a stacked 
+
+crate ; the  left -center  person  wears  a
+
+dusty  shoulder  and  stands  by  a
+
+doorway  mat ; the  right -center 
+
+person  wears  a lanyard  and  stands 
+
+next  to  a wheeled  cart  handle ; and 
+
+the  rightmost  person  wears  a
+
+reflective  vest  and  stands  beside  a
+
+low  counter  edge . Alongside  them, 
+
+a water  bottle  and  a trail  map  sit 
+
+close  to  the  camera  as  separate 
+
+objects  that  could  be  edited  later .
+
+The  foreground  shows  crisp  texture 
+
+detail  and  realistic  lighting,  while 
+
+the  background  stays  secondary .
+
+A nighttime street -level photo in a
+
+cool indoor habitat near glass, with 
+
+gentle rim light outlining foreground 
+
+subjects highlights five penguins as 
+
+the main subjects very close to the 
+
+camera, spaced across the foreground 
+
+with clear gaps so none touch or 
+
+overlap . the leftmost animal has a
+
+slightly damp belly feather patch and 
+
+is near a smooth rock close to the 
+
+camera ; the second from left animal 
+
+has a small colored band on one 
+
+flipper and is near a wet ledge ; the 
+
+center animal has a darker patch near 
+
+the neck and is near a smooth rock 
+
+close to the camera ; the second from 
+
+right animal has a darker patch near 
+
+the neck and is near a smooth rock 
+
+close to the camera ; and the rightmost 
+
+animal has a small colored band on 
+
+one flipper and is near a wet ledge .
+
+Two other distinct, editable items are 
+
+a camera bag and a bicycle lock, both 
+
+placed in the near foreground without 
+
+blocking the main subjects . Fine 
+
+material texture and sharp edges are 
+
+emphasized in the foreground, with 
+
+the background kept unobtrusive .
+
+In an indoor market aisle with 
+
+produce crates, with shallow 
+
+depth of field emphasizing 
+
+foreground texture, A nighttime 
+
+documentary -style photo frames 
+
+three market vendors close to the 
+
+camera and filling much of the 
+
+foreground ; each one is separated 
+
+by visible space . the left person 
+
+wears a blue beanie and stands 
+
+beside a stacked crate ; the center 
+
+person wears a creased collar and 
+
+stands near a safety cone base ;
+
+and the right person wears a
+
+slightly wrinkled apron and 
+
+stands beside a low counter edge .
+
+The near foreground also includes 
+
+a cash box and a basket of fruit as 
+
+clearly identifiable objects for 
+
+later edits . Fine material texture 
+
+and sharp edges are emphasized 
+
+in the foreground, with the 
+
+background kept unobtrusive .
+
+A golden -hour documentary -style 
+
+photo in a rural stable aisle with 
+
+feed bins, with crisp fabric and 
+
+s u r f a c e d e t a i l i n t h e n e a r 
+
+foreground highlights four goats as 
+
+the main subjects very close to the 
+
+c a m e r a , s p a c e d a c r o s s t h e 
+
+foreground with clear gaps so none 
+
+touch or overlap . the leftmost 
+
+animal has a slightly muddy hoof 
+
+and is near a stall door ; the left -
+
+center animal has a darker coat 
+
+patch and is by a hay bale ; the 
+
+right -center animal has a dusty 
+
+flank mark and is near a fence rail ;
+
+and the rightmost animal has a
+
+simple halter strap and is beside a
+
+water trough . Two other distinct, 
+
+editable items are a coiled rope and 
+
+a feed bucket, both placed in the 
+
+near foreground without blocking 
+
+the main subjects . Close -range 
+
+perspective reveals micro -texture 
+
+and natural shadows on the editable 
+
+items .
+
+In an airport baggage service lane, 
+
+w i t h s h a l l o w d e p t h o f f i e l d 
+
+emphasizing foreground texture, An 
+
+early -morning wide -angle photograph 
+
+frames five baggage carts close to the 
+
+camera and filling much of the 
+
+foreground ; each one is separated by 
+
+visible space . the leftmost vehicle 
+
+shows a scratched door handle and is 
+
+parked near a bold lane marking in 
+
+the foreground ; the second from left 
+
+vehicle shows a dented corner panel 
+
+and is parked near a drain grate at the 
+
+edge of the frame ; the center vehicle 
+
+shows a loose strap on the rack and is 
+
+parked by a puddle reflection in front ;
+
+the second from right vehicle shows a
+
+small safety flag and is parked next to 
+
+a rolling cart ; and the rightmost 
+
+vehicle shows a scuffed side panel 
+
+and is parked beside a short curb stop .
+
+The near foreground also includes a
+
+handheld radio and a rolling suitcase 
+
+as clearly identifiable objects for later 
+
+edits . Fine material texture and sharp 
+
+e d g e s a r e e m p h a s i z e d i n t h e 
+
+foreground, with the background kept 
+
+unobtrusive .
+
+Fig. S1: The Image descriptions and the corresponding generated image of MIRA-Bench. 
+
+example incorrect instance counts, objects extending outside the image bound-ary, or insufficient visual detail. Therefore we manually inspect the generated results and select 100 samples with clearer semantics and higher visual quality from the 200 candidates to form the final MIRA-Bench dataset. 
+
+A.3 Editing Instruction and Referring Object Generation 
+
+Here we use Qwen3-VL-8B-Instruct [43] for instruction and refer object genera-tion. Compared to image description generation, editing instruction generation is less prone to template collapse, and therefore no additional judge stage is re-quired. The generation of editing instructions and referring objects also follows a two-stage process. In the first stage, we use the top prompt in Fig. S11 to con-struct a slot plan based solely on the filtered image descriptions. The slot plan records the number of repeated instances, the object category, and key attribute details. This information serves as a weak prior for later instruction generation. In the second stage, using the middle prompt in Fig. S11, the VLM generates editing instructions conditioned on both the slot plan and the synthesized image. The model is explicitly instructed to rely primarily on the image content and the final generated editing instructions are shown in the "Edit Instruction" row of Fig. S2. In addition, the final referring objects are obtained by parsing the generated editing instructions using the bottom prompt in Fig. S11. 
+
+A.4 Ground-Truth Mask Generation 
+
+After obtaining the referring objects in each image, we first use a Qwen3-VL-8B-Instruct [2] to localize the target regions and predict their corresponding 20 Z. Liu and S. Alaniz ➢ Remove the leftmost car                                     
+
+> ➢Change the color of the middle car's
+> headlights to red
+> ➢Change the color of the rightmost
+> car's logo to blue
+> ➢Change the material of the bag in
+> the lower -left corner to marble
+> ➢Add agreen sticker onto the
+> wooden crate .
+
+3 Similar Instances                                                                                                
+
+> ➢Change the color of the left man's
+> hat to green
+> ➢Change the color of the middle
+> man's eyes to blue
+> ➢Add ared scarf to the right man
+> ➢Replace the apple in the lower -right
+> corner with apear
+> ➢Remove the traffic cone in the
+> middle .
+> ➢Add apurple scarf to the first
+> person from the left
+> ➢Change the color of the pants of the
+> second person from the left to green
+> ➢Change the color of the hair of the
+> first person from the right to purple
+> ➢Add sunglasses to the second
+> person from the right
+> ➢Add lava into the basket in the
+> lower -left corner .
+
+4 Similar Instances                                                                                                                                      
+
+> ➢Change the color of the beard of
+> the first sheep from the left to black
+> ➢Add arose pattern onto the chest of
+> the second sheep from the left
+> ➢Change the color of the nose of the
+> first sheep from the right to red
+> ➢Change the color of the ear of the
+> second sheep from the right to
+> yellow
+> ➢Change the material of the rope on
+> the ground to metal .
+> ➢Change the color of the handle of the
+> first luggage cart from the left to red
+> ➢Change the material of the second
+> luggage cart from the left to ceramic
+> ➢Change the color of the strap tied on
+> the third luggage cart from the left to
+> green
+> ➢Change the color of the small flag on
+> the fourth luggage cart from the left
+> to blue
+> ➢Change the color of the fifth luggage
+> cart from the left to purple .
+
+5 Similar Instances                                                            
+
+> ➢Replace the belly of the first
+> penguin from the left with akitten
+> ➢Make the texture of the second
+> penguin from the left smooth and
+> reflective
+> ➢Change the color of the eyes of the
+> third penguin from the left to
+> yellow
+> ➢Change the color of the beak of the
+> fourth penguin from the left to
+> purple
+> ➢Add awhite scarf to the fifth
+> penguin from the left .
+> Reference Image Mask &  Bbox  overlay Edit Instruction
+
+Fig. S2: MIRA-Bench sample examples. The first row shows the synthesized orig-inal images, the second row presents the corresponding ground-truth (GT) masks of the target regions, and the third row displays the editing instructions constructed based on the generated image semantics and the source prompts. 
+
+bounding boxes. The predicted bounding boxes are then used as prompts for SAM2 [32] to generate the target segmentation masks. We note that models from the SAM family were tested in our pipeline, and based on visual inspection of the generated results, SAM2 [32] shows more reliable segmentation quality and stability. It is therefore used to produce the final masks. Each sample in MIRA-Bench finally consists of three components: the original image, the editing instruction, and the corresponding GT mask. The final results of MIRA-Bench are shown in Fig. S2. 
+
+B MIRA-Bench Examples 
+
+Fig. S1 shows example image descriptions generated for MIRA-Bench, along with the corresponding synthesized images. Each description explicitly specifies multiple similar instances and distinctive attributes to ensure referential dis-tinguishability in later editing tasks. The generated images confirm that these descriptions can be faithfully rendered while preserving the intended instance layout and visual details. Fig. S2 shows several example entries from MIRA-Bench, where each column corresponds to one editing example constructed in the benchmark. The first row presents the synthesized source images, the second row shows the corresponding ground-truth (GT) masks that indicate the target editing regions, and the third row lists the editing instructions generated based on the image semantics and the source prompts. These examples illustrate the multi-instance editing scenarios covered in MIRA-Bench, where target objects are specified through referring MIRAGE: Benchmarking and Aligning Multi-Instance Image Editing 21 
+
+Table S1: Additional evaluation metrics on MIRA-Bench. Model Structure Distance ↓                                                                 
+
+> Background preservation CLIP similarity PSNR ↑LPIPS ↓MSE ↓SSIM ↑Whole ↑Edited ↑
+> RefEdit-SD3 0.030 21.615 0.173 0.011 0.688 20.905 20.591 MagicBrush 0.006 25.969 0.103 0.003 0.777 19.027 20.516 FLUX.2 [Klein]-base-9B 0.020 24.626 0.043 0.006 0.928 20.586 21.491 FLUX.2 [Klein]-base-9B + MIRAGE 0.027 25.514 0.038 0.003 0.912 21.137 21.958
+> FLUX.2 [Dev] 0.027 23.023 0.066 0.008 0.855 21.813 21.830 FLUX.2 [Dev] + MIRAGE 0.027 25.108 0.041 0.004 0.906 21.989 22.297
+> Qwen-Image-Edit-2511 0.025 23.632 0.072 0.007 0.870 21.555 22.014 Qwen-Image-Edit-2511 + MIRAGE 0.019 28.729 0.040 0.002 0.918 21.569 22.160
+
+Table S2: Additional evaluation metrics on RefEdit-Bench Model Structure Distance ↓                                                                 
+
+> Background preservation CLIP similarity PSNR ↑LPIPS ↓MSE ↓SSIM ↑Whole ↑Edited ↑
+> RefEdit-SD3 0.024 24.463 0.072 0.010 0.867 23.108 21.229 MagicBrush 0.015 25.287 0.069 0.009 0.784 21.412 20.350 FLUX.2 [Klein]-base-9B 0.023 26.927 0.044 0.007 0.924 22.063 21.349 FLUX.2 [Klein]-base-9B + MIRAGE 0.021 29.097 0.026 0.002 0.938 22.247 21.479
+> FLUX.2 [Dev] 0.032 25.349 0.075 0.012 0.888 22.342 21.302 FLUX.2 [Dev] + MIRAGE 0.021 28.742 0.028 0.002 0.935 22.698 22.110
+> Qwen-Image-Edit-2511 0.022 25.331 0.066 0.006 0.811 22.424 21.686 Qwen-Image-Edit-2511 + MIRAGE 0.017 33.977 0.021 0.001 0.971 22.442 21.766
+
+expressions and localized accordingly. The ground-truth (GT) masks are further used for evaluating the editing performance in subsequent metrics. 
+
+C Additional Results 
+
+C.1 Additional Quantitative Metrics 
+
+In addition to the EditScore results reported in the main paper [20], we also eval-uate several widely used image similarity metrics to provide a complementary analysis of editing quality, particularly for assessing background preservation. These metrics quantify different aspects of similarity between the edited image and the original source image. Specifically, PSNR and MSE measure pixel-level reconstruction differences, SSIM evaluates structural similarity, and LPIPS mea-sures perceptual similarity in deep feature space. All metrics are computed on the background regions, defined as the areas outside the union of all ground-truth target masks, in order to evaluate how well non-target regions are preserved during editing. From the background preservation metrics in Table S1 and Table S2, it can be observed that MIRAGE consistently improves PSNR and SSIM while reduc-ing LPIPS and MSE across all backbone models. This indicates that MIRAGE effectively suppresses unnecessary modifications to non-target regions during 22 Z. Liu and S. Alaniz 
+
+Table S3: Ablation on different VLMs. We replace the VLM used for referring object localization in MIRAGE and results are reported on MIRA-Bench                     
+
+> Model Vision-Language Model PF ↑
+> avg@3
+> Cons ↑
+> avg@3 PQ avg ↑Overall avg ↑
+> FLUX.2 [Klein]-base-9B + MIRAGE Qwen3-VL-8B-Instruct [2] 7.709 8.796 8.836 8.253 Qwen3-VL-4B-Instruct [2] 7.699 8.848 8.724 8.195 RegionReasoner [37] 7.287 8.769 8.840 8.026
+
+diffusion-based editing, thereby enhancing background preservation and over-all visual stability. For example, on the relatively simpler RefEdit-Bench [28], although the base models already achieve reasonably strong performance, inte-grating MIRAGE still brings consistent improvements. Specifically, for FLUX.2 [Dev], the PSNR increases from 25.349 to 28.742, while the MSE decreases from 0.012 to 0.002. This further demonstrates that MIRAGE improves background consistency across different levels of task difficulty. For the CLIP Edited metric, we apply the ground-truth target mask to the edited image to retain only the edited object region, and compute the image–text similarity between this local region and the corresponding fine-grained editing instruction. This metric evaluates the accuracy of the edit on the target object. And CLIP Whole measures the image–text similarity between the full edited im-age and the global editing instruction, assessing the overall semantic alignment of the edited result. In addition, the CLIP similarity results show that after applying MIRAGE, the semantic similarity generally remains stable or slightly improves across models, indicating that the proposed method does not weaken the models’ ability to follow editing instructions while reducing unintended ed-its. It is worth noting that CLIP has known limitations in evaluating referring expressions [28]. Therefore, this metric should only be considered as a comple-mentary reference, while the primary evaluation results are reported in Tables 2 and 3 in the main paper. 
+
+C.2 Ablation on VLMs for Object Localization on MIRA-Bench 
+
+We conduct an ablation study by replacing the VLM used for referring object localization while keeping all other components of the pipeline unchanged. This experiment evaluates whether the effectiveness of MIRAGE depends on a specific VLM. All results are reported on MIRA-Bench using the EditScore [20] metrics. As shown in Table S3, Qwen3-VL 4B and 8B achieve similar PF scores, while RegionReasoner yields a lower PF. This is mainly due to its weaker refer-ring localization capability, which leads to more frequent target-binding errors in complex scenes. Nevertheless, its performance still surpasses that of the ba-sic model, indicating that MIRAGE consistently improves editing performance across different VLM choices. Moreover, the Cons scores are very similar across different VLMs, suggesting that the region control mechanism in MIRAGE effec-tively suppresses spatial misalignment and over-editing among similar instances. Meanwhile, PQ remains largely stable across different VLMs, as perceptual qual-MIRAGE: Benchmarking and Aligning Multi-Instance Image Editing 23 Change the color of the  first machine from the left  to black, change the  screen display of the second machine from the right  to a beach vacation scene, add some lava onto the 
+
+second machine from the left , change the texture of the  first machine from the right  to smooth reflective, and replace the  floating paper on the ground  with a white backpack. 
+
+Change the  left dog's fur  texture to rough, change the color of the  middle dog's ears  to blue, change the material of the  right dog's ears  to metal, change the color 
+
+of the  traffic cone on the right  to blue, remove the  metal equipment case in the lower -left corner .
+
+Change the material of the  first lifebuoy from the left  to leather, change the color of the  second lifebuoy from the left  to blue, remove the  first lifebuoy from the 
+
+right , add a dragon pattern onto the  second lifebuoy from the right , replace the  rope on the ground in the lower -left corner  with a lying dog. 
+
+Change the  feather  texture of the  first seagull from the left  to rough and dull, change the color of the  beak of the second seagull from the left  to blue, change the color of the  feet of 
+
+the third seagull from the left  to green, add a yellow dragon sticker in front of the  chest of the fourth seagull from the left , add some snow onto the  fifth seagull from the left .    
+
+> Input Image Flux.2 [dev] + MIRAGE MagicBrush RefEdit -SD3 Flux.2 [Klein] -base -9B Qwen -Image -Edit -2511
+
+Change the color of the  knitted hat worn by the first person from the left  to purple, remove the  dirt on the second person from the left's shirt , add a red dragon sticker onto the  shirt of 
+
+the third person from the left , change the color of the  pants worn by the fourth person from the left  to green, change the color of the  scarf worn by the fifth person from the left  to blue. 
+
+Remove the  first snowmobile from the left , change the color of the  second snowmobile from the left  to blue, remove the  dirt on the front of the third snowmobile 
+
+from the left , add some snow onto the  fourth snowmobile from the left , make the texture of the  fifth snowmobile from the left  glossy and reflective.  
+
+> + MIRAGE + MIRAGE GPT -Image -1.5
+
+Fig. S3: Additional qualitative results on MIRA-Bench. 
+
+ity is primarily determined by the underlying generative backbone. Overall, these results demonstrate that MIRAGE remains effective and robust under different VLM settings. We additionally tested several other VLMs (e.g., InternVL3.5-8B [40], CogVLM2 [13], MLLMSeg [38], Mistral Large 3 [22], and Pixtral Large [1]). In our experi-ments, these models in general underperform in producing stable referring local-ization outputs. As more VLMs with this capability become available, we expect that MIRAGE can be equally applied using them. 
+
+C.3 Additional Qualitative Results on MIRA-Bench 
+
+MIRA-Bench presents challenging scenarios with multiple similar instances and compositional instructions. As illustrated in Fig. S3, classical editing models such as MagicBrush [46] and RefEdit-SD3 [28] often fail to follow the complicated instructions and produce severe distortions and structural degradation in this case. More advanced models, such as GPT-5.1 [25], can execute most instructions and generate visually plausible results. However, they still exhibit common issues including spatial misalignment and over-editing. For example, in the fourth row 24 Z. Liu and S. Alaniz Input Image  Flux.2 [Klein] -base -9B           
+
+> Flux.2 [Klein] -base -9B
+> +MIRAGE
+> Flux.2 [Klein] -base -9B
+> (Sequential)
+> Change the color of the nose of the leftmost dog to red, change the color of the eyes of the middle dog to blue, remove the mud on the right dog,
+> change the material of the yellow hard hat in the lower -left corner to glass, add a yellow sticker onto the suitcase in the lowe r-right corner.
+> Change the color of the left bench to green, change the material of the middle bench to stone, add a small dog onto the right
+> bench , remove the paper on the ground in the lower -left corner , add a yellow sticker onto the box in the lower -right corner .
+
+Fig. S4: Sequential vs. joint editing inference. Applying instructions sequentially leads to accumulated artifacts and structural inconsistencies due to repeated image re-editing. In contrast, MIRAGE performs joint multi-region inference within a single denoising trajectory, preventing error accumulation and maintaining global coherence. 
+
+the model incorrectly removes the third swim ring from the left and applies the dragon pattern to the wrong instance. In the fifth row, the model fails to recolor the feet of the third seagull from the left and instead places the dragon sticker on an incorrect instance. Overall, these examples demonstrate that accurately binding editing instruc-tions to the correct target instance is highly challenging in multi-instance editing scenarios. By integrating MIRAGE into the backbone models, these issues can be effectively mitigated. 
+
+C.4 Sequential vs. Joint Editing on MIRA-Bench 
+
+To investigate whether sequential editing is preferable for backbone models in multi-instance editing scenarios, we compare three strategies: sequential editing, joint editing with the backbone model, and joint editing with our method. In sequential editing, instructions are applied one by one, with the edited im-age repeatedly fed back into the generative model as the input for the next step. However, this process tends to accumulate errors. As shown in Fig. S4, sequen-tial editing accumulates errors, leading to oversharpening artifacts and structural distortions. More importantly, sequential execution on the basic model still pro-duces similar over-editing as the joint editing baseline, indicating that sequential editing does not effectively mitigate this issue. In contrast, MIRAGE performs joint multi-region editing within a single denoising trajectory. By resolving all target regions simultaneously, the model avoids repeated image re-editing and mitigates over-editing. MIRAGE: Benchmarking and Aligning Multi-Instance Image Editing 25 Change the  single sofa next to the tree  to a single leather sofa. 
+
+RefEDIT 的定量结果                
+
+> Input Image Flux.2 [dev] + MIRAGE MagicBrush RefEdit -SD3 Flux.2 [Klein] -base -9B + MIRAGE Qwen -Image -Edit -2511 + MIRAGE
+> Remove the man in a green shirt holding a Starbucks cup with a straw
+> Remove the half full mug of beer to the left of the pizza .
+> Change the African American man wearing a suit to an african american woman wearing a suit
+> Make the smiling man that is wearing glasses wear a red hair bow.
+
+Fig. S5: Qualitative results on RefEdit-Bench . Across all compared methods, in-tegrating our MIRAGE consistently improves performance, substantially outperform-ing both the baseline models and their original versions. 
+
+C.5 Additional Qualitative Results on RefEdit-Bench 
+
+Fig. S5 presents qualitative comparisons on RefEdit-Bench [28]. Among the base-line methods, MagicBrush [46] often struggles to correctly execute the editing instructions, while RefEdit-SD3 [28] performs relatively better but introduces visible artifacts (e.g., color noise in the lower-right example). For stronger edit-ing models, such as FLUX.2 [4] and Qwen-Image-Edit [42], the instructions are generally followed, but noticeable over-editing is frequently observed in non-target regions. After integrating MIRAGE, these issues are largely mitigated. The edited regions better match the intended instructions while the surround-ing content remains more stable, resulting in improved visual consistency across different basic models. 
+
+C.6 Ablation on Latent Replacement on RefEdit-Bench Effect of Time-step Interval To further study the effect of the time step at which MIRAGE switches from region-level editing to global denoising, we conduct an ablation by varying the latent replacement interval on the RefEdit-Bench using FLUX.2 [Dev]. We test different time-step ranges [ρT, T ] while keeping all other settings unchanged. 26 Z. Liu and S. Alaniz Input Image                            
+
+> Refedit 的消融实验
+> Remove the white laptop in a black case.
+> Remove the baseball player sitting on the bench behind the fence.
+> Performance Metrics Comparison
+> Timestep PF avg ↑Cons avg ↑PQ avg ↑Overall avg ↑
+> [0.8T, T] 8.212 9.469 8.936 8.566
+> [0.6T, T] 8.286 9.432 8.616 8.449
+> [0.4T, T] 8.342 9.370 8.534 8.437
+> [0.2T, T] 8.140 9.280 8.124 8.132
+> [0, T] 8.024 9.106 7.438 7.725
+> [0.8T, T] [0.4T, T] [0.6T, T] [0.2T, T] [0, T]
+
+Time Step PF ↑
+
+avg@3 
+
+Cons ↑
+
+avg@3 PQ avg ↑ Overall avg ↑
+
+[0.8T, T] 8.212 9.469 8.936 8.566 
+
+[0.6T, T] 8.286 9.432 8.616 8.449 [0.4T, T] 8.342 9.370 8.534 8.437 [0.2T, T] 8.140 9.280 8.124 8.132 [0, T] 8.024 9.106 7.438 7.725 
+
+Fig. S6: Effect of latent replacement time-step selection on RefEdit-Bench. 
+
+Results are obtained using FLUX.2 [Dev] under different latent replacement intervals. Input Image  Both replace  W/o background W/o target 
+
+Add a rose to the hand of the blond woman wearing a pink shirt. 
+
+Let the slice of cheese cake at the top of the fork be a slice of red velvet cake. 
+
+Refedit 的消融实验 
+
+Performance Metrics Comparison 
+
+Strategy  PF avg ↑ Cons avg ↑ PQ avg ↑ Overall avg                                 
+
+> W/o target 7.765 9.058 9.012 8.365
+> W/o bg 7.926 9.336 8.850 8.375
+> Both replace 8.212 9.469 8.936 8.566
+> Time Step PF ↑
+> avg@3
+> Cons ↑
+> avg@3 PQ avg ↑Overall avg ↑
+> W/o target 7.765 9.058 9.012 8.365 W/o bg 7.926 9.336 8.850 8.375
+> Both replace 8.212 9.469 8.936 8.556
+
+Fig. S7: Effect of target and background replacement strategies on RefEdit-Bench. These results are obtained with FLUX.2 [Dev] using a replacement interval of 
+
+[0 .8T, T ].
+
+We also study the effect on different replacement strategies on the RefEdit-Bench. From Fig. S6, we observe that as the time step ρ for switching from region editing to global editing gradually increases, the PF metric changes only marginally, while the PQ metric drops significantly, introducing stronger visual distortions and artifacts compared to those observed on MIRA-Bench. This phe-nomenon indicates that for relatively simple editing scenarios such as RefEdit-Bench—where instructions typically involve spatial referring expressions and fewer similar instances—an overly long interval of target-region latent replace-ment tends to degrade the overall visual quality of the image. Therefore, per-forming target-region latent replacement within a shorter time-step interval (e.g., 
+
+[0 .8T, T ]) achieves a better balance between editing accuracy and visual quality. 
+
+Effect of Target and Background Replacement To analyze the contri-butions of the two latent replacement strategies in MIRAGE, we conduct an ablation study by selectively disabling target replacement or background re-placement during inference. This experiment aims to understand the individual roles of the two components in instruction following and background preserva-tion. All results are obtained on RefEdit-Bench using FLUX.2 [Dev] with the replacement interval fixed to [0 .8T, T ].MIRAGE: Benchmarking and Aligning Multi-Instance Image Editing 27 Input Image  Qwen -Image -Edit -2511  Qwen -Image -Edit -2511 
+
++ MIRAGE 
+
+Remove the  boy in a baseball uniform reaching out to the guy in front of him .        
+
+> Change the color of the shirt of the first person from the left to blue, add sunglasses to the second person from
+> the left , change the material of the pants of the second person from the right to rubber, change the skin tone of
+> the first person from the right to black, remove the colorful fruit in the basket in the lower -right corner .
+
+Fig. S8: Limitation of applying MIRAGE to Qwen-Image-Edit-2511 Although applying MIRAGE mitigates over-editing, the internal processing mechanism of Qwen still leads to degraded detail resolution in the edited target regions in certain cases (as highlighted by the red circles), resulting in blurred textures and indistinct structures. This effect is particularly pronounced in removal-based edits. 
+
+From the qualitative results in the left part of Fig. S7, we observe that dif-ferent replacement strategies have a clear impact on the editing behavior. When the target replacement is removed, the model’s ability to follow the editing in-struction noticeably degrades. For example, the expected rose does not appear in the girl’s hand. In contrast, when the background replacement is removed, the model can still perform the target edit, but it often unintentionally modifies non-target regions, thereby disrupting the global structure of the original image. The quantitative results further show that enabling both target and background replacement during inference achieves the best overall performance. This indi-cates that the two strategies have complementary effects: target replacement improves instruction-following ability, while background replacement helps pre-serve structural consistency in non-edited regions. 
+
+D Limitations 
+
+MIRAGE primarily addresses issues such as over-editing, spatial misalignment, inconsistent object details before and after editing, and unintended modifications to background regions. However, the final editing quality still partly depends on the representation capability of the underlying generative model. As shown 28 Z. Liu and S. Alaniz 
+
+in Fig. S8, when using Qwen-Image-Edit-2511, the model internally resizes the input image, causing the local crops extracted in the early denoising stage to lose fine details during the resizing process. As a result, although MIRAGE effectively avoids over-editing and preserves the correct editing region, the edited target areas may still exhibit slight blurring or loss of texture details. As image editing models move towards flexible input image sizes, like FLUX.2 [4], this issue will be mitigated. 
+
+E Prompt Details 指代表达 prompt 和目标定位 propt 
+
+You are an information extraction engine for fine -grained grounding in image editing. 
+
+Given an instruction containing one or multiple edits, extract TWO aligned lists: 
+
+{" Refer_object ":[...], " New_edit_instruction ":[...]} 
+
+Refer_object :
+
+- The EXACT visual region to edit. 
+
+- Use the MOST specific referring phrase. 
+
+- Prefer parts/attributes over whole objects. 
+
+- Preserve spatial or relational qualifiers. 
+
+- MUST be a contiguous text span copied from input. 
+
+Do NOT: 
+
+- Generalize or summarize. 
+
+- Collapse to only the object name. 
+
+New_edit_instruction :
+
+- The edit applied ONLY inside  Refer_object .
+
+- Keep the edit action. 
+
+- Remove spatial/localization phrases. 
+
+- Do NOT repeat the full refer phrase. 
+
+- Rewrite minimally for clarity. 
+
+Rules: 
+
+- Output ONE -LINE valid JSON only. 
+
+- No explanation or markdown. 
+
+- Always choose the most localized editable region. 
+
+Example: 
+
+Input: Change the leftmost bird's feathers to soft down feathers, change the color of 
+
+middle bird's eyes to blue, remove the blue car between the white and yellow cars. 
+
+Output: {" Refer_object ":["the leftmost bird's feathers", "the middle bird's eyes", "the 
+
+blue car between the white and yellow cars"], " New_edit_instruction ":["Change the 
+
+bird's feathers to soft down feathers", "Change the color of bird's eyes to blue", 
+
+"Remove the blue car"]} 
+
+Now process: 
+
+Input: <<<{instruction}>>> 
+
+Output: 
+
+You  are  a precise  referring -expression  object  local 
+
+Task : Given  ONE  image  and  ONE  referring  phras 
+
+Core  rule :
+
+- Identify  the  HOST  instance  described  in  the  phra 
+
+- If  a PART/ATTRIBUTE  of  that  host  is  s
+
+by/attached  to  Y),  localize  the  PART  only  if  it  is 
+
+host .
+
+- If  the  part  is  unclear,  unreadable,  or  not  confiden 
+
+boxing  the  HOST  instance  itself .
+
+Critical  constraints :
+
+- NEVER  switch  to  another  instance  even  if  the  at 
+
+- Use  spatial  cues  (leftmost/rightmost/middle/be 
+
+ONE  matching  host .
+
+- The  selected  instance  MUST  match  all  host  attri 
+
+Box  tightness  and  coordinates  :
+
+- Must  be  tightly  box  only  the  part  or  whole  host 
+
+- Normalized  [0,1000 ]
+
+- (0,0)=top -left,  (1000 ,1000 )=bottom -right 
+
+Output  ONLY :
+
+[{"bbox_ 2d" :[x_min,y_min,x_max,y_max ],"label 
+
+No  explanation . Valid  JSON  only .
+
+Target  phrase :
+
+{refer_object }指代表达 prompt 和目标定位 propt 
+
+You are an information extraction engine for fine -grained grounding in image editing. 
+
+Given an instruction containing one or multiple edits, extract TWO aligned lists: 
+
+{" Refer_object ":[...], " New_edit_instruction ":[...]} 
+
+Refer_object :
+
+- The EXACT visual region to edit. 
+
+- Use the MOST specific referring phrase. 
+
+- Prefer parts/attributes over whole objects. 
+
+- Preserve spatial or relational qualifiers. 
+
+- MUST be a contiguous text span copied from input. 
+
+Do NOT: 
+
+- Generalize or summarize. 
+
+- Collapse to only the object name. 
+
+New_edit_instruction :
+
+- The edit applied ONLY inside  Refer_object .
+
+- Keep the edit action. 
+
+- Remove spatial/localization phrases. 
+
+- Do NOT repeat the full refer phrase. 
+
+- Rewrite minimally for clarity. 
+
+Rules: 
+
+- Output ONE -LINE valid JSON only. 
+
+- No explanation or markdown. 
+
+- Always choose the most localized editable region. 
+
+Example: 
+
+Input: Change the leftmost bird's feathers to soft down feathers, change the color of 
+
+middle bird's eyes to blue, remove the blue car between the white and yellow cars. 
+
+Output: {" Refer_object ":["the leftmost bird's feathers", "the middle bird's eyes", "the 
+
+blue car between the white and yellow cars"], " New_edit_instruction ":["Change the 
+
+bird's feathers to soft down feathers", "Change the color of bird's eyes to blue", 
+
+"Remove the blue car"]} 
+
+Now process: 
+
+Input: <<<{instruction}>>> 
+
+Output: 
+
+You  are  a precise  object  detector  for  referring  expressions .
+
+Task :
+
+- You  are  given  ONE  image  and  ONE  short  phrase  that  describes  ONE  target .
+
+- Find  the  SINGLE  visible  target  region  that  the  phrase  refers  to  and  output  its  TIGHT  bounding  box .
+
+What  to  localize :
+
+- If  the  phrase  has  the  form  "X  of  Y"  or  "Y's  X",  the  target  to  box  is  X (the  part),  and  Y is  only  used 
+
+to  find  which  instance .
+
+Example : "glasses  of  the  person  on  the  leftmost"  → box  the  glasses  only,  NOT  the  whole  person .
+
+Example : "shoes  of  the  boy  on  the  left"  → box  the  shoes  only .
+
+- Otherwise,  box  the  main  noun  described  by  the  phrase .
+
+Disambiguation :
+
+- If  multiple  similar  objects  exist,  use  words  like  "leftmost",  "rightmost",  "middle",  "center ", 
+
+"between  A and  B",  "on  the  left/right",  etc . to  choose  exactly  one .
+
+Tightness  requirements :
+
+- The  box  must  tightly  enclose  only  the  visible  target .
+
+- Do  NOT  include  large  surrounding  areas  (e.g. full  body  when  target  is  glasses) .
+
+- Keep  minimal  padding  around  the  object .
+
+Coordinate  system :
+
+- Use  NORMALIZED  coordinates  in  the  range  [0, 1000 ].
+
+- 0 = left/top  image  edge,  1000  = right/bottom  image  edge .
+
+- Output  integers  only .
+
+- Do  NOT  output  pixel  coordinates  or  percentages .
+
+Output :
+
+- Return  ONLY  ONE  valid  JSON  object  and  NOTHING  ELSE .
+
+- JSON  format  (must  match  EXACTLY) :
+
+[{{" bbox_ 2d" : [x_min , y_min , x_max , y_max ],  "label" : "object "}}] 
+
+STRICT  JSON  RULES :
+
+- Use  double  quotes  "... " around  all  keys  and  string  values .
+
+- Use  colon  ":" between  keys  and  values .
+
+- No  trailing  commas .
+
+Target  phrase : {refer_ object }
+
+Fig. S9: Prompts used for instruction parsing and referring-expression lo-calization prior. Left: prompt for the information-extraction-based parser, which decomposes complex editing instructions  I into aligned referring objects  rk and edit sub-instruction  Ik . Right: prompt for the referring-expression localizer, which grounds each referring expression  rk to a spatial region  xk before image editing. 
+
+We use the prompt in Fig. S9 (left) to decompose a complex instruction 
+
+I into aligned referring objects  rk and sub-instructions  Ik. Each  rk is defined as the most localized target span, copied verbatim from  I. The corresponding 
+
+Ik is constructed by removing spatial localization phrases while preserving the edit action. A small set of in-context examples is included to improve parsing stability. We then use the prompt in Fig. S9 (right) to map each  rk to a precise image region. Given the image and  rk, we localize the most specific editable region MIRAGE: Benchmarking and Aligning Multi-Instance Image Editing 29 
+
+and leverage spatial cues in  Ik to match a unique instance, enabling accurate grounding. As shown in Fig. S10 (top), we first sample  N category–scene pairs under physically plausible and realistic photographic settings to ensure data gener-atability. In Fig. S10 (middle), we generate image descriptions where repeated instances are enforced as the primary foreground subjects, fully visible and non-overlapping. To enable unambiguous grounding, we adopt canonical left-to-right spatial expressions (e.g., leftmost ). Each instance is assigned distinct local at-tributes. We further introduce exactly two additional editable foreground ob-jects that do not occlude the repeated instances. Finally, based on Fig. S10 (bottom), we apply a consistency check to ensure correct spatial ordering, clear instance visibility, fine-grained details, and physical plausibility. Invalid samples are minimally revised to improve naturalness and diversity, yielding stable and high-quality descriptions. As shown in Fig. S11 (top), we extract a structured slot plan from the in-put description, including the repeated category, instance count  N , left-to-right ordered instances, and optional non-repeated targets. Spatial expressions are normalized (e.g., leftmost ) to ensure consistent referring patterns. In addition, as shown in Fig. S11 (middle), we generate five editing instructions aligned with the slot plan and the image. The first  N instructions correspond to all repeated instances in left-to-right order, while the remaining ones (if any) target clearly visible non-repeated objects. We enforce local edits grounded in image content, encourage diverse edit types across instances, and prohibit modifications to global information like background to ensure locality and controllability. In the Fig. S11 (bottom), we then extract precise referring expressions  rk from the generated instructions for localization (same objective as Fig. S9 (left)). Each  rk
+
+is constrained to be the most localized and uniquely identifiable span, strictly aligned with the original instruction, ensuring stable grounding. As shown in Fig. S12, we take the masked original image and the edited image as input to evaluate PF (editing success) and Cons (overediting). In particular, for Cons, if the edited image introduces unintended modifications outside the target region compared to the original image, it is considered overediting and assigned a lower score. As shown in Fig. S13, we use the full original and edited images as input to evaluate PQ. This metric focuses on the perceptual quality and generation artifacts of the edited image, including but not limited to structural distortions, unnatural shapes, or abnormal proportions. In particular, images exhibiting no-ticeable distortions or structures that violate visual plausibility are assigned lower scores. 30 Z. Liu and S. Alaniz You  are  generating  ONE  repeated -subject  image  description  draft  for  a text -to -image 
+
+benchmark .
+
+Output  only  tagged  lines . No  JSON . No  markdown . No  explanations . No  digits .
+
+Use  exactly  this  tag  style :
+
+CATEGORY : <plural  repeated  category> 
+
+SCENE : <realistic  scene  phrase> 
+
+PROMPT : <one  draft  photographic  paragraph> 
+
+Fixed  pair 
+
+- CATEGORY  = {{FIXED_CATEGORY}} 
+
+- SCENE  = {{FIXED_SCENE}} 
+
+Fixed  targets 
+
+- count_word  is  {{COUNT_WORD}} 
+
+- there  are  exactly  {{COUNT_NUM}}  repeated  instances 
+
+- the  repeated  instances  must  be  ordered  and  described  strictly  from  left  to  right  only 
+
+- preferred  left -to -right  position  labels  are : {{POSITION_LABELS}} 
+
+Opening  style 
+
+- Do  not  start  the  paragraph  directly  with  the  subject  count .
+
+- Do  not  begin  with  a bare  subject  listing .
+
+- The  opening  should  feel  like  a natural  photographic  setup,  not  a rigid  template .
+
+- Vary  the  opening  style  across  samples . Avoid  reusing  the  same  opening  stem  too  often .
+
+- Good  openings  may  begin  with  a scene -led  clause,  a shot -type  clause,  or  a lighting -led  clause .
+
+- Only  after  this  setup  should  the  paragraph  introduce  the  repeated  subjects  as  the  main 
+
+subjects .
+
+Main -subject  requirements 
+
+- The  repeated  instances  are  the  real  focus  of  the  prompt .
+
+- They  must  be  explicitly  described  as  the  main  subjects .
+
+- They  must  feel  very  close  to  the  camera .
+
+- They  must  occupy  most  of  the  near  foreground .
+
+- They  should  be  described  much  more  fully  than  any  other  elements .
+
+Repeated -instance  requirements 
+
+- All  repeated  instances  must  be  fully  visible .
+
+- They  must  be  clearly  separated  with  visible  gaps .
+
+- They  must  not  touch,  overlap,  intersect,  stack,  or  occlude  one  another,  including  front -back  occlusion .
+
+- The  prompt  must  explicitly  indicate  that  the  repeated  instances  are  spaced  apart  with  clear  gaps  and  do  not  touch  or  overlap .
+
+- The  repeated  instances  must  be  distinguished  strictly  from  left  to  right  based  on  horizontal  image  position .
+
+- Do  not  use  front/back,  depth  order,  nearest/farthest,  rear/frontmost,  or  other  depth -based  ordering  for  the  repeated  instances .
+
+- Each  repeated  instance  must  have  its  own  unique  local  visual  attribute .
+
+- Every  repeated  instance  should  be  individually  referable  mainly  by  left -to -right  spatial  order  and  concrete  local  attributes .
+
+- The  prompt  must  explicitly  reinforce  that  fine  local  textures  on  the  repeated  instances  are  clearly  visible .
+
+- The  prompt  should  explicitly  convey  crisp  foreground  edges  when  natural .
+
+- The  prompt  should,  when  natural,  imply  that  the  background  is  secondary  or  softly  blurred,  but  should  not  spend  many 
+
+words  describing  background  content .
+
+- Do  not  rely  only  on  general  material  texture  or  only  on  nearby  relations .
+
+- Do  not  force  every  repeated  instance  to  be  near  or  beside  something .
+
+Recent  opening  stems  to  avoid  repeating  too  often :
+
+{{RECENT_OPENINGS}} 
+
+Extra -object  requirements 
+
+- Include  exactly  two  extra  editable  foreground  objects .
+
+- The  two  extra  editable  foreground  objects  must  be  two  different  individual  objects,  not  the  same  object  and  not  two 
+
+instances  of  the  same  extra  object  category .
+
+- Identify  them  mainly  through  brief  concrete  appearance  details  such  as  material,  color,  texture,  or  surface  marks  rather  than 
+
+position  wording .
+
+- Do  not  spend  many  words  describing  them .
+
+- They  only  need  enough  detail  to  remain  concrete  and  editable  later .
+
+- Prefer  relatively  small  concrete  objects  rather  than  large  subjects  or  structures .
+
+- They  should  stay  separate  from  the  repeated  instances  and  should  not  introduce  overlap  or  occlusion  risk .
+
+- Avoid  using  groups,  piles,  crowds,  actions,  large  structures,  benches,  signs,  floats,  clusters,  or  visually  dominant  secondary 
+
+subjects  as  the  two  extra  editable  objects .
+
+The  last  attempt  failed  because :
+
+{{LAST_ERROR}} 
+
+Now  output  only  the  tagged  lines .
+
+图像描述 ---生成 （实例，场景）对 You  are  generating  a batch  of  fresh  repeated -subject  pairs  for  a text -to -image  benchmark .
+
+Output  exactly  {{REQUEST_N}}  lines .
+
+Each  line  must  have  exactly  this  format :
+
+CATEGORY  ||  SCENE 
+
+No  JSON . No  markdown . No  numbering . No  bullets . No  explanations .
+
+Requirements 
+
+- Each  line  must  be  one  realistic  repeated  category  and  one  realistic  scene  phrase .
+
+- The  pair  must  be  suitable  for  a natural  photograph  where  all  repeated  instances  can 
+
+appear  very  close  to  the  camera  at  the  same  time .
+
+- The  repeated  category  should  be  realistic,  photographable,  and  compatible  with  fine 
+
+local  visual  detail .
+
+- The  scene  phrase  should  be  fairly  specific  rather  than  generic .
+
+- Prefer  scene  phrases  with  concrete  environment  detail,  such  as  surface,  weather  trace, 
+
+architecture  cue,  material  cue,  or  setting  detail .
+
+- Avoid  broad  vague  scene  phrases  such  as :
+
+city  street 
+
+field 
+
+construction  site 
+
+studio 
+
+- Avoid  exact  reuse  or  very  close  reuse  of  recent  pairs .
+
+- Prefer  a fresh  scene -category  combination  over  a familiar  one .
+
+- Do  not  copy  the  examples  below .
+
+Good  pair  shapes 
+
+cargo  vans  ||  a damp  riverside  loading  dock  at  sunrise 
+
+tabby  cats  ||  a tiled  veterinary  waiting  room  beside  frosted  glass  panels 
+
+construction  workers  ||  a covered  service  corridor  with  puddled  concrete  after  rain 
+
+portable  generators  ||  a fluorescent -lit  equipment  checkout  bay  with  rubber  floor  mat 
+
+Bad  pair  shapes 
+
+delivery  vans  ||  city  street 
+
+pigeons  ||  field 
+
+ticket  kiosks  ||  construction  site 
+
+workbenches  ||  studio 
+
+Novelty  mode 
+
+{{NOVELTY_MODE}} 
+
+Forbidden  categories :
+
+{{FORBIDDEN_CATEGORIES}} 
+
+Forbidden  scenes :
+
+{{FORBIDDEN_SCENES}} 
+
+Most  common  categories  so  far :
+
+{{TOP_CATEGORIES}} 
+
+Most  common  scenes  so  far :
+
+{{TOP_SCENES}} 
+
+Recent  accepted  pairs :
+
+{{RECENT_PAIRS}} 
+
+The  last  attempt  failed  because :
+
+{{LAST_ERROR}} 
+
+Now  output  exactly  {{REQUEST_N}}  CATEGORY  ||  SCENE  lines .
+
+根据 pair 池生成图像描述的 prompt 检查端 
+
+You  are  judging,  optimizing,  and 
+
+rewriting  ONE  repeated -subject  image 
+
+description  draft  for  a text -to -image 
+
+benchmark .
+
+Output  only  tagged  lines . No  JSON . No 
+
+markdown . No  explanations . No  digits .
+
+Use  exactly  this  tag  style :
+
+DECISION : PASS  or  FIX  or  FAIL 
+
+CATEGORY : <plural  repeated  category> 
+
+SCENE : <realistic  scene  phrase> 
+
+PROMPT : <one  polished  photographic 
+
+paragraph> 
+
+FEEDBACK : <short  reason  or  short 
+
+note> 
+
+Fixed  pair  chosen  before  prose  generation :
+
+{{FIXED_PAIR}} 
+
+Fixed  targets 
+
+- count_word  is  {{COUNT_WORD}} 
+
+- there  are  exactly  {{COUNT_NUM}} 
+
+repeated  instances 
+
+- the  repeated  instances  must  be  ordered 
+
+and  described  strictly  from  left  to  right 
+
+only 
+
+- preferred  left -to -right  position  labels  are :
+
+{{POSITION_LABELS}} 
+
+Current  candidate :
+
+{{CURRENT_CANDIDATE}} 
+
+Opening  checklist 
+
+- The  paragraph  must  not  begin  abruptly  with  the 
+
+subject  count .
+
+- The  opening  should  feel  like  a photographic  setup 
+
+rather  than  a list .
+
+- The  opening  should  vary  naturally  across  samples 
+
+rather  than  repeatedly  using  the  same  template  stem .
+
+- If  the  current  opening  is  too  close  to  a repeated  stem 
+
+such  as  "A  low -angle  shot  captures",  rewrite  it  in  a
+
+different  natural  way .
+
+- Before  introducing  the  repeated  subjects,  include  a
+
+brief  but  natural  setup  clause  describing  the  photo, 
+
+shot,  lighting,  or  foreground  composition .
+
+Recent  opening  stems  to  avoid  repeating  too  often :
+
+{{RECENT_OPENINGS}} 
+
+Mandatory  explicit  cues 
+
+A correct  final  prompt  must  explicitly  state  all  of  the 
+
+following :
+
+- the  repeated  instances  are  the  main  subjects 
+
+- they  are  very  close  to  the  camera 
+
+- they  occupy  most  of  the  near  foreground 
+
+- they  are  fully  visible 
+
+- they  are  clearly  separated  with  visible  gaps 
+
+- they  do  not  touch,  overlap,  intersect,  stack,  or 
+
+occlude  one  another 
+
+- crisp  foreground  edges  are  visible 
+
+- fine  local  textures  on  the  repeated  instances  are 
+
+clearly  visible 
+
+If  any  of  these  points  is  missing,  weak,  or  only 
+
+implied,  output  DECISION : FIX  and  rewrite  the 
+
+prompt  so  these  properties  become  explicit  and  natural .
+
+Full  checklist 
+
+- Keep  the  fixed  CATEGORY  and  SCENE  unless  the  prose  is  impossible  to  repair 
+
+without  rephrasing  them  minimally .
+
+- The  repeated  instances  must  be  clearly  presented  as  the  main  subjects .
+
+- They  must  feel  very  close  to  the  camera  and  clearly  in  the  near  foreground .
+
+- They  should  appear  to  occupy  most  of  the  foreground  visual  attention .
+
+- The  prompt  must  explicitly  convey  clear  gaps  between  repeated  instances,  and  must 
+
+make  it  clear  they  do  not  touch,  overlap,  intersect,  stack,  or  occlude  one  another .
+
+- All  repeated  instances  should  remain  fully  visible .
+
+- Every  repeated  instance  must  receive  its  own  unique  local  visual  attribute .
+
+- Every  repeated  instance  must  be  individually  referable  mainly  by  strict  left -to -right 
+
+spatial  order  and  concrete  local  attributes .
+
+- Do  not  use  front/back,  near/far,  nearest/farthest,  rear/frontmost, 
+
+foreground/background  order,  or  other  depth -based  ordering  for  the  repeated 
+
+instances .
+
+- The  prompt  must  explicitly  reinforce  that  fine  local  textures  on  the  repeated 
+
+instances  are  clearly  visible .
+
+- The  prompt  should  explicitly  convey  crisp  foreground  edges  when  natural .
+
+- The  prompt  should,  when  natural,  imply  that  the  background  is  secondary  and 
+
+softly  blurred,  but  it  should  not  spend  many  words  describing  background  content .
+
+- Do  not  force  every  repeated  instance  to  be  near  or  beside  something .
+
+- The  prompt  must  include  exactly  two  extra  editable  foreground  objects .
+
+- The  two  extra  editable  foreground  objects  must  be  two  different  individual  objects, 
+
+not  the  same  object  and  not  two  instances  of  the  same  extra  object  category .
+
+- Identify  them  mainly  through  brief  concrete  appearance  details  such  as  material, 
+
+color,  texture,  or  surface  marks  rather  than  position  wording .
+
+- They  only  need  brief  concrete  detail,  not  long  descriptions .
+
+- The  two  extra  editable  foreground  objects  should  preferably  be  relatively  small 
+
+objects  so  that  the  repeated  main  subjects  remain  visually  dominant  and  fully  visible .
+
+- The  two  extra  editable  foreground  objects  must  not  be  groups,  piles,  actions,  large 
+
+structures,  benches,  signs,  floats,  clusters,  or  other  elements  likely  to  block  or 
+
+compete  with  the  repeated  subjects .
+
+- The  prose  should  sound  natural  and  polished,  not  like  a rigid  template .
+
+- Avoid  violating  basic  physical  common  sense .
+
+Fail  conditions 
+
+- some  repeated  instances  are  only 
+
+implied  but  not  individually  described 
+
+- fewer  than  all  repeated  instances 
+
+receive  unique  local  attributes 
+
+- repeated  instances  are  described  as 
+
+overlapping,  touching,  stacked,  partially 
+
+blocking  one  another,  or  ordered  by 
+
+depth  rather  than  left -to -right 
+
+- the  repeated  instances  are  placed  far 
+
+away,  in  the  background,  or  at  the  far 
+
+edge  of  the  scene 
+
+- the  two  extra  objects  dominate  the 
+
+description  or  receive  too  much  detail 
+
+- the  extra  objects  are  too  large  or  likely 
+
+to  occlude  the  main  repeated  subjects 
+
+- the  extra  objects  are  the  same  object 
+
+or  two  instances  of  the  same  extra 
+
+object  category 
+
+Instructions 
+
+- PASS  only  if  the  candidate  already 
+
+satisfies  the  checklist  strongly .
+
+- FIX  if  the  candidate  is  salvageable ;
+
+rewrite  the  prompt  naturally  while 
+
+keeping  the  fixed  pair .
+
+- FAIL  only  if  the  draft  is  unusable .
+
+The  last  error  from  the  iterative  loop 
+
+was :
+
+{{LAST_ERROR}} 
+
+Now  output  only  the  tagged  lines .
+
+Fig. S10: Prompts used for image description in MIRA-Bench construction. 
+
+Top: Prompt for generating (repeated instance category, scene) pairs. Middle: Prompt for generating image descriptions. Bottom: Prompt for verifying and refining the image descriptions. MIRAGE: Benchmarking and Aligning Multi-Instance Image Editing 31 Slot plan 
+
+You  are  given  a source  prompt  describing  an  image  scene  with  repeated  instances  of  one  object  category .
+
+Your  task  is  to  extract  a slot  plan  for  later  image -edit  generation .
+
+Output  exactly  ONE  SINGLE -LINE  valid  JSON  object .
+
+No  markdown . No  extra  text .
+
+GOAL 
+
+- Identify  the  repeated  object  category  and  repeated -instance  count  N.
+
+- N MUST  be  one  of : 3, 4, 5.
+
+- Build  repeated_slots  for  the  repeated  instances  in  strict  left -to -right  order .
+
+- Also  extract  preferred_non_repeated_targets  from  the  source  prompt,  if  available .
+
+- preferred_non_repeated_targets  are  only  PREFERRED  candidates  for  later  filler  edits,  not  mandatory  fixed  targets .
+
+IMPORTANT  NORMALIZATION 
+
+- Normalize  repeated_slots  into  stable  canonical  spatial  phrasing  so  they  can  be  reused  verbatim  later .
+
+- Use  these  preferred  canonical  patterns  whenever  they  fit :
+
+* N = 3: "the  leftmost  <category>",  "the  middle  <category>",  "the  rightmost  <category>" 
+
+* N = 4: "the  leftmost  <category>",  "the  second  <category>  from  the  left",  "the  second  <category>  from  the  right", 
+
+"the  rightmost  <category>" 
+
+* N = 5: "the  leftmost  <category>",  "the  second  <category>  from  the  left",  "the  middle  <category>",  "the  second 
+
+<category>  from  the  right",  "the  rightmost  <category>" 
+
+- Prefer  these  canonical  phrases  over  alternative  wording  such  as  "left -center",  "center -left",  "near  the  middle",  etc .
+
+OUTPUT  FORMAT 
+
+{"repeated_count" :3,"repeated_category" :"bicycle","repeated_slots" :["the  leftmost  bicycle","the  middle 
+
+bicycle","the  rightmost  bicycle"]," repeated_details ":["near  the  curb  with  a front  basket","with  a reflective 
+
+frame","beside  a bench"]," preferred_non_repeated_targets ":["the  red  toolbox  on  the  floor","the  folded  newspaper  on 
+
+the  bench"]} 
+
+RULES 
+
+- The  source  prompt  is  authoritative .
+
+- repeated_slots  MUST  be  mutually  distinct .
+
+- repeated_slots  MUST  be  listed  in  strict  left -to -right  order .
+
+- For  each  repeated  slot,  include  a short  repeated_details  string  summarizing  visible  cues  from  the 
+
+source  prompt .
+
+- preferred_non_repeated_targets  should  be  standalone  editable  objects  explicitly  mentioned  in  the 
+
+source  prompt  when  possible .
+
+- Prefer  non -repeated  targets  that  can  be  identified  independently  by  their  own  attributes  or  scene 
+
+position .
+
+- Avoid  using  repeated  instances  as  anchors  for  preferred_non_repeated_targets  if  an  independent 
+
+phrasing  is  available .
+
+- If  N = 5, preferred_non_repeated_targets  may  be  empty .
+
+- Do  NOT  invent  objects  or  attributes  not  supported  by  the  source  prompt .
+
+Rules :
+
+- repeated_count  must  be  3, 4, or  5
+
+- repeated_category  must  be  a singular  noun  phrase  naming  the  repeated  object  category 
+
+- len (repeated_slots ) must  equal  repeated_count 
+
+- len (repeated_details ) must  equal  repeated_count 
+
+- repeated_slots  must  all  be  unique 
+
+- preferred_non_repeated_targets  may  contain  0, 1, or  2 items 
+
+- preferred_non_repeated_targets  must  all  be  unique 
+
+- use  double  quotes  only 
+
+- no  trailing  commas 
+
+- output  NOTHING  else 
+
+SOURCE_PROMPT :
+
+<<<{ source_prompt }>>> 指令生成 
+
+You  are  given :
+
+1) An  input  image 
+
+2) A slot  plan  derived  from  the  source  prompt 
+
+Your  task  is  to  generate  exactly  5 edit  instructions .
+
+Output  exactly  ONE  SINGLE -LINE  valid  JSON  object .
+
+No  markdown . No  extra  text .
+
+CORE  REQUIREMENTS 
+
+AUTHORITATIVE  INPUTS 
+
+- The  slot  plan  is  authoritative  for :
+
+* repeated  instance  count 
+
+* repeated  object  identity 
+
+* repeated -instance  left -to -right  assignment 
+
+- The  image  is  authoritative  for :
+
+* what  is  actually  visible 
+
+* which  edit  type  is  natural  and  plausible  for  each 
+
+target 
+
+* the  current  appearance  of  each  target 
+
+* whether  a preferred  non -repeated  target  is  actually 
+
+visible  enough  to  use 
+
+SLOT  ASSIGNMENT 
+
+- Let  N = repeated_count  from  the  slot  plan .
+
+- You  MUST  produce  EXACTLY  5 slot_instructions .
+
+REPEATED  SLOTS  (CRITICAL) 
+
+- For  slots  1.. N:
+
+* slot_id  must  be  1.. N in  order 
+
+* target  MUST  exactly  equal  repeated_slots [i -1]
+
+* edit_instruction  MUST  contain  that  exact  target 
+
+verbatim 
+
+- Therefore  the  first  N instructions  must  cover  the 
+
+repeated  instances  in  strict  left -to -right  order .
+
+IMPORTANT  CASE  SPLIT 
+
+- If  N = 5:
+
+* ALL  5 slot_instructions  must  target  the  5 repeated  instances .
+
+* Do  NOT  introduce  any  non -repeated  target .
+
+* slot  5 MUST  target  repeated_slots [4],  i.e. the  rightmost  repeated 
+
+instance .
+
+- If  N = 4:
+
+* slots  1.. 4 MUST  target  the  4 repeated  instances .
+
+* Do  NOT  stop  at  only  3 repeated -instance  instructions .
+
+* slot  4 MUST  target  repeated_slots [3],  i.e. the  rightmost  repeated 
+
+instance .
+
+* ONLY  slot  5 may  be  the  non -repeated  filler  slot .
+
+- If  N = 3:
+
+* slots  1.. 3 must  target  the  3 repeated  instances 
+
+* slots  4.. 5 must  target  non -repeated  visible  objects 
+
+FILLER  SLOTS 
+
+- For  slots  N+ 1.. 5:
+
+* Choose  non -repeated  visible  objects  only .
+
+* Prefer  preferred_non_repeated_targets  if  they  are  clearly  visible  and 
+
+independently  identifiable  in  the  image .
+
+* If  a preferred  non -repeated  target  is  not  clearly  visible  or  not  reliable, 
+
+choose  another  standalone  visible  non -repeated  object  from  the  image .
+
+* The  chosen  filler  target  does  NOT  need  to  match  the  preferred 
+
+candidate  wording  if  the  image  suggests  a better  visible  target  phrase .
+
+* Avoid  using  repeated  instances  as  reference  objects  when  not  needed .
+
+* If  a repeated  instance  must  be  mentioned  for  context,  it  may  only  serve 
+
+as  context ; the  edited  target  must  still  be  the  non -repeated  target  itself .
+
+* Do  NOT  shift  filler  edits  back  onto  repeated  instances .
+
+EDIT  TYPE  CHOICE 
+
+Each  edit  instruction  MUST  be  exactly  one  of :
+
+- Change  color  / material  / texture  / surface  finish  / transparency  /
+
+reflectiveness  of  an  object  or  part 
+
+- Add  an  object/accessory  to  an  existing  object/location 
+
+- Remove  an  object/accessory/part 
+
+- Replace  an  object  or  defined  part  with  another 
+
+IMPORTANT  IMAGE -BASED  EDIT 
+
+SELECTION 
+
+- Use  the  ACTUAL  image  content  as  the 
+
+primary  evidence  for  choosing  edit  type  and 
+
+edit  content .
+
+- Use  repeated_details  and 
+
+preferred_non_repeated_targets  only  as 
+
+secondary  support .
+
+- Make  sure  the  edit  would  produce  a clearly 
+
+visible  change .
+
+- Do  NOT  propose  a no -op  edit .
+
+Example : if  a handle  is  already  red,  do  NOT 
+
+say  "change  the  handle  to  red" .
+
+- If  a part  or  accessory  is  clearly  visible,  you 
+
+may  edit  that  part  instead  of  the  whole  object .
+
+- Across  repeated  slots,  prefer  diverse  edit 
+
+types  when  plausible .
+
+- Avoid  making  all  repeated -slot  instructions 
+
+simple  color  changes  if  the  image  supports 
+
+richer  edits  such  as  material,  texture,  add, 
+
+remove,  or  replace .
+
+- If  multiple  repeated -slot  instructions  are 
+
+Change,  vary  the  changed  attribute  when 
+
+possible  (e .g., color  vs  material  vs  texture) .
+
+PREVIOUS  FAILURE  TO  AVOID 
+
+{failure_feedback }
+
+GLOBAL  RESTRICTIONS 
+
+- Do  NOT  modify  scene/background/global 
+
+properties .
+
+- Do  NOT  change 
+
+lighting/weather/time/viewpoint .
+
+- Do  NOT  change  the  number  of  repeated 
+
+instances .
+
+- Each  instruction  affects  only  ONE  edited 
+
+instance .
+
+FINAL  SELF -CHECK 
+
+Before  output,  verify :
+
+- each  slot_instruction  uses  the  correct  slot_id 
+
+- each  target  exactly  matches  the  required  target 
+
+- each  edit_instruction  contains  that  target  verbatim 
+
+- each  proposed  edit  would  visibly  change  the  current 
+
+appearance  in  the  image 
+
+- if  N = 5, slot  5 is  NOT  a filler  and  still  targets  the 
+
+rightmost  repeated  instance 
+
+- if  N = 4, slot  4 is  NOT  a filler  and  still  targets  the 
+
+rightmost  repeated  instance 
+
+- repeated  slots  are  not  all  trivial  color -only  edits  when  the 
+
+image  supports  richer  alternatives 
+
+OUTPUT  FORMAT 
+
+Return  exactly  one  JSON  object  in  ONE  line :
+
+{" slot_instructions ":[
+
+{"slot_id" :1,"target" :"... "," edit_instruction ":"... "}, 
+
+{"slot_id" :2,"target" :"... "," edit_instruction ":"... "}, 
+
+{"slot_id" :3,"target" :"... "," edit_instruction ":"... "}, 
+
+{"slot_id" :4,"target" :"... "," edit_instruction ":"... "}, 
+
+{"slot_id" :5,"target" :"... "," edit_instruction ":"... "} 
+
+]} 
+
+Rules :
+
+- len (slot_instructions ) must  be  EXACTLY  5
+
+- slot_id  must  be  1.. 5 in  order 
+
+- for  repeated  slots,  target  must  exactly  equal  the 
+
+corresponding  repeated_slots  entry 
+
+- for  all  slots,  edit_instruction  must  contain  target  verbatim 
+
+- use  double  quotes  only 
+
+- no  trailing  commas 
+
+- output  NOTHING  else 
+
+SLOT_PLAN :
+
+<<<{ slot_plan_json }>>> You  are  an  information  extraction  engine  for  fine -grained  grounding  in  image 
+
+editing .
+
+Given  EXACTLY  5 edit  instructions,  extract  one  aligned  list :
+
+{" refer_object ":[... ]} 
+
+refer_object :
+
+- The  EXACT  visual  region  or  entity  to  edit .
+
+- Use  the  MOST  specific  referring  phrase .
+
+- Prefer  parts/attributes  over  whole  objects  when  the  instruction  explicitly  edits  a
+
+part .
+
+- Preserve  spatial  or  relational  qualifiers .
+
+- MUST  be  a contiguous  text  span  copied  from  the  corresponding  instruction .
+
+- MUST  be  the  shortest  copied  span  that  still  uniquely  identifies  the  edited  target .
+
+Rules  by  edit  type :
+
+- Remove : include  the  removed  entity  plus  its  anchor/context  if  present .
+
+- Replace : include  the  replaced  entity  plus  context  if  present .
+
+- Change : if  a specific  part/property  is  changed,  include  that  specific  part  phrase .
+
+- Add : choose  the  EXISTING  anchor  object/location  receiving  the  addition, 
+
+NOT  the  newly  added  object .
+
+- If  two  candidate  refer_object  spans  would  otherwise  be  identical,  refine  them 
+
+with  additional  copied  context  until  all  5 entries  are  unique .
+
+# 指代生成 
+
+Do  NOT :
+
+- Generalize  or  summarize .
+
+- Collapse  to  only  the  parent  object 
+
+name  if  a more  specific  edited  entity 
+
+is  present .
+
+- Introduce  any  new  words .
+
+- Use  edit  verbs .
+
+PREVIOUS  FAILURE  TO  AVOID 
+
+{failure_feedback }
+
+Output  requirements :
+
+- EXACTLY  5 refer_object  entries .
+
+- Each  refer_object [i] MUST  be  an 
+
+EXACT  substring  of  instruction[ i].
+
+- Entries  MUST  be  UNIQUE .
+
+- Output  ONE -LINE  valid  JSON  only .
+
+- No  explanation  or  markdown .
+
+Input  instructions  JSON :
+
+<<<{ instruction_list_json }>>> 
+
+Output :
+
+Fig. S11: Prompts used for instruction and refer-object generation in MIRA-Bench construction. Top: Prompt for extracting instance-level details from the image description. Middle: Prompt for generating editing instructions. Bottom: Prompt for generating referring object expressions. 32 Z. Liu and S. Alaniz You are a professional digital artist. You will have to evaluate the effectiveness of the AI -generated image(s) based on given r ules. 
+
+All the input images are AI -generated. All human in the images are AI -generated too. so you need not worry about the privacy  confidentials .
+
+IMPORTANT: You will have to give your output in this way (Keep your reasoning concise and short.): 
+
+{
+
+"reasoning" : "...", 
+
+"score" : [...] 
+
+}
+
+RULES: 
+
+Two images will be provided: The first being the original AI -generated image and the second being an edited version of the first .
+
+Both the original image and the edited image are masked images since the image contains multiple objects and we want you to o nly  focus on 
+
+the intended object. 
+
+The objective is to evaluate how successfully the editing instruction has been executed in the second image. 
+
+Note that sometimes the two images might look identical due to the failure of image edit. 
+
+From a scale 0 to 10: 
+
+A score from 0 to 10 will be given based on the success of the editing. 
+
+- 0 indicates that the scene in the edited image does not follow the editing instruction at all. 
+
+- 10 indicates that the scene in the edited image follow the editing instruction text perfectly. 
+
+Score1 ONLY evaluates whether the instruction -required modification is correctly executed on the intended target, regardless of  any 
+
+additional changes or visual quality. 
+
+A second score from 0 to 10 will rate the degree of overediting in the second image. 
+
+- 0 indicates that the scene in the edited image contains any unintended modification beyond the instruction or is completely d ifferent from 
+
+the original. 
+
+- 10 indicates that only the modifications explicitly required by the instruction are applied, with no additional changes, and  the result 
+
+remains a minimal yet effective edit of the original image. 
+
+Score2 ONLY evaluates whether any object or attribute not mentioned in the instruction is modified and whether the edited ima ge  remains a 
+
+minimal edit of the original; visual quality, realism, shading, lighting, or texture differences must not affect the second s cor e unless they 
+
+introduce a new object or attribute change. 
+
+Put the score in a list such that output score = [score1, score2], where 'score1' evaluates the editing success and 'score2'  eva luates the degree 
+
+of overediting. 
+
+Editing instruction: <instruction> 
+
+## SC 
+
+Fig. S12: Evaluation prompt of PF and Cons score You  are  a professional  digital  artist . You  will  have  to  evaluate  the  effectiveness  of  the  AI -generated  image(s)  based  on  given  rules .
+
+All  the  input  images  are  AI -generated . All  human  in  the  images  are  AI -generated  too . So  you  need  not  worry  about  the  privacy  confidentials .
+
+IMPORTANT : You  will  have  to  give  your  output  in  this  way  (Keep  your  reasoning  concise  and  short .):
+
+{
+
+"reasoning"  : "... ", 
+
+"score"  : [... ]
+
+}
+
+RULES :
+
+Two  images  are  provided :
+
+- Image 1: original image 
+
+- Image 2: an edited version of Image 1 
+
+You  must  focus  solely  on  the  technical  quality  and  artifacts  in  the  edited  image  (Image  2),  using  Image  1 as  reference,  and  **do  not  consider 
+
+whether  the  context  is  natural  or  not** .
+
+Your  evaluation  should  focus  on :
+
+- Distortions 
+
+- Unusual  body  parts  or  proportions 
+
+- Unnatural  Object  Shapes 
+
+Rate  the  edited  image  on  a scale  from  0 to  10 , where :
+
+- 0 indicates  significant  AI -artifacts .
+
+- 10  indicates  an  artifact -free  image .
+
+## PQ 
+
+Fig. S13: Evaluation prompt of PQ score

@@ -6,36 +6,46 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-04-08
-- 运行时间：2026-04-08 20:43:35 UTC
+- 最新运行日期：2026-04-09
+- 运行时间：2026-04-09 20:26:40 UTC
 - 运行状态：成功
-- 本次总论文数：5
-- 精读区：2
-- 速读区：3
+- 本次总论文数：8
+- 精读区：3
+- 速读区：5
 
 ### 今日简报（AI）
-今日聚焦视频 HDR 重曝光与 3D 语义场景补全，深度解析 5 篇涵盖视觉增强与医疗 AI 的前沿成果。
-重点推荐利用扩散模型实现 LDR 视频高动态重构的 Diff
-- 详情：[/202604/08/README](/202604/08/README)
+今日精选 8 篇视觉论文，深度聚焦生成辅助的 3D 场景重建与相机阵列多图超分辨率技术。
+GA-GS 通过生成辅助显著提升了高斯泼溅重建质量，而自监督超分方案则为多摄像头成像带来了性能飞跃。
+建议关注生成模型与底层视觉任务的融合趋势，探索如何利用 AI 生成能力提升三维建模与图像修复的精度。
+- 详情：[/202604/09/README](/202604/09/README)
 
 ### 精读区论文标签
-1. [DiffHDR: Re-Exposing LDR Videos with Video Diffusion Models](/202604/08/2604.06161v1-diffhdr-re-exposing-ldr-videos-with-video-diffusion-models)  
-   标签：评分：9.0/10、query:q4
-   evidence：将LDR到HDR的转换建模为生成式辐射修复任务
-2. [Sparsity-Aware Voxel Attention and Foreground Modulation for 3D Semantic Scene Completion](/202604/08/2604.05780v1-sparsity-aware-voxel-attention-and-foreground-modulation-for-3d-semantic-scene-completion)  
+1. [GA-GS: Generation-Assisted Gaussian Splatting for Static Scene Reconstruction](/202604/09/2604.04331v1-ga-gs-generation-assisted-gaussian-splatting-for-static-scene-reconstruction)  
+   标签：评分：9.0/10、query:q1
+   evidence：使用扩散模型对3D场景中的遮挡区域进行图像修复
+2. [Enhanced Self-Supervised Multi-Image Super-Resolution for Camera Array Images](/202604/09/2604.06816v1-enhanced-self-supervised-multi-image-super-resolution-for-camera-array-images)  
+   标签：评分：8.0/10、query:q7
+   evidence：用于图像修复的自监督学习
+3. [RefineAnything: Multimodal Region-Specific Refinement for Perfect Local Details](/202604/09/2604.06870v1-refineanything-multimodal-region-specific-refinement-for-perfect-local-details)  
    标签：评分：8.0/10、query:q1
-   evidence：单张图像的语义场景补全
+   evidence：特定区域图像细化与细粒度细节修复
 
 ### 速读区论文标签
-1. [Probing Intrinsic Medical Task Relationships: A Contrastive Learning Perspective](/202604/08/2604.05651v1-probing-intrinsic-medical-task-relationships-a-contrastive-learning-perspective)  
-   标签：评分：7.0/10、query:q1
-   evidence：研究包括图像补全在内的生成任务
-2. [PR-IQA: Partial-Reference Image Quality Assessment for Diffusion-Based Novel View Synthesis](/202604/08/2604.04576v2-pr-iqa-partial-reference-image-quality-assessment-for-diffusion-based-novel-view-synthesis)  
+1. [Controllable Image Generation with Composed Parallel Token Prediction](/202604/09/2604.05730v1-controllable-image-generation-with-composed-parallel-token-prediction)  
+   标签：评分：7.0/10、query:q4
+   evidence：掩码生成作为离散生成过程的一个特例
+2. [NAIMA: Semantics Aware RGB Guided Depth Super-Resolution](/202604/09/2604.04407v1-naima-semantics-aware-rgb-guided-depth-super-resolution)  
    标签：评分：6.0/10、query:q1
-   evidence：执行质量补全以修复部分质量图
-3. [Free-Range Gaussians: Non-Grid-Aligned Generative 3D Gaussian Reconstruction](/202604/08/2604.04874v1-free-range-gaussians-non-grid-aligned-generative-3d-gaussian-reconstruction)  
+   evidence：深度图修复与结构细节补全
+3. [MIRAGE: Benchmarking and Aligning Multi-Instance Image Editing](/202604/09/2604.05180v1-mirage-benchmarking-and-aligning-multi-instance-image-editing)  
    标签：评分：6.0/10、query:q4
-   evidence：生成式重建与未观测区域内容合成
+   evidence：用于局部图像编辑的无需训练框架
+4. [Graph-PiT: Enhancing Structural Coherence in Part-Based Image Synthesis via Graph Priors](/202604/09/2604.06074v1-graph-pit-enhancing-structural-coherence-in-part-based-image-synthesis-via-graph-priors)  
+   标签：评分：6.0/10、query:q4
+   evidence：基于部件的图像合成生成模型
+5. [Generative Phomosaic with Structure-Aligned and Personalized Diffusion](/202604/09/2604.06989v1-generative-phomosaic-with-structure-aligned-and-personalized-diffusion)  
+   标签：评分：6.0/10、query:q4
+   evidence：使用基于扩散生成的生成式合成方法
 
 
 <div class="dpr-home-promo-card">

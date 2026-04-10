@@ -6,46 +6,49 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-04-09
-- 运行时间：2026-04-09 20:26:40 UTC
+- 最新运行日期：2026-04-10
+- 运行时间：2026-04-10 19:55:19 UTC
 - 运行状态：成功
-- 本次总论文数：8
-- 精读区：3
-- 速读区：5
+- 本次总论文数：9
+- 精读区：1
+- 速读区：8
 
 ### 今日简报（AI）
-今日精选 8 篇视觉论文，深度聚焦生成辅助的 3D 场景重建与相机阵列多图超分辨率技术。
-GA-GS 通过生成辅助显著提升了高斯泼溅重建质量，而自监督超分方案则为多摄像头成像带来了性能飞跃。
-建议关注生成模型与底层视觉任务的融合趋势，探索如何利用 AI 生成能力提升三维建模与图像修复的精度。
-- 详情：[/202604/09/README](/202604/09/README)
+今日聚焦 9 篇视觉前沿成果，重点解析将新视角合成（NVS）重构为视频补全任务的 9.0 分突破性方案。
+核心结论指出视频生成技术正成为 3D 场景重建的新范式，同时多模态模型在处理退化图像理解及海报自动布局上展现出巨大潜力。
+推荐优先研读视角合成的“视频化”思路，把握 3D 生成与视频大模型融合的最新趋势。
+- 详情：[/202604/10/README](/202604/10/README)
 
 ### 精读区论文标签
-1. [GA-GS: Generation-Assisted Gaussian Splatting for Static Scene Reconstruction](/202604/09/2604.04331v1-ga-gs-generation-assisted-gaussian-splatting-for-static-scene-reconstruction)  
+1. [Novel View Synthesis as Video Completion](/202604/10/2604.08500v1-novel-view-synthesis-as-video-completion)  
    标签：评分：9.0/10、query:q1
-   evidence：使用扩散模型对3D场景中的遮挡区域进行图像修复
-2. [Enhanced Self-Supervised Multi-Image Super-Resolution for Camera Array Images](/202604/09/2604.06816v1-enhanced-self-supervised-multi-image-super-resolution-for-camera-array-images)  
-   标签：评分：8.0/10、query:q7
-   evidence：用于图像修复的自监督学习
-3. [RefineAnything: Multimodal Region-Specific Refinement for Perfect Local Details](/202604/09/2604.06870v1-refineanything-multimodal-region-specific-refinement-for-perfect-local-details)  
-   标签：评分：8.0/10、query:q1
-   evidence：特定区域图像细化与细粒度细节修复
+   evidence：将合成任务表述为视频补全任务
 
 ### 速读区论文标签
-1. [Controllable Image Generation with Composed Parallel Token Prediction](/202604/09/2604.05730v1-controllable-image-generation-with-composed-parallel-token-prediction)  
+1. [CLEAR: Unlocking Generative Potential for Degraded Image Understanding in Unified Multimodal Models](/202604/10/2604.04780v1-clear-unlocking-generative-potential-for-degraded-image-understanding-in-unified-multimodal-models)  
    标签：评分：7.0/10、query:q4
-   evidence：掩码生成作为离散生成过程的一个特例
-2. [NAIMA: Semantics Aware RGB Guided Depth Super-Resolution](/202604/09/2604.04407v1-naima-semantics-aware-rgb-guided-depth-super-resolution)  
+   evidence：用于退化图像理解的生成路径
+2. [GAN-based Domain Adaptation for Image-aware Layout Generation in Advertising Poster Design](/202604/10/2604.07409v1-gan-based-domain-adaptation-for-image-aware-layout-generation-in-advertising-poster-design)  
+   标签：评分：7.0/10、query:q1
+   evidence：基于GAN的模型，使用修复后的海报进行布局生成
+3. [SMFD-UNet: Semantic Face Mask Is The Only Thing You Need To Deblur Faces](/202604/10/2604.07477v1-smfd-unet-semantic-face-mask-is-the-only-thing-you-need-to-deblur-faces)  
+   标签：评分：7.0/10、query:q3
+   evidence：在修复中无需高质量参考图像
+4. [GroundingAnomaly: Spatially-Grounded Diffusion for Few-Shot Anomaly Synthesis](/202604/10/2604.08301v1-groundinganomaly-spatially-grounded-diffusion-for-few-shot-anomaly-synthesis)  
+   标签：评分：7.0/10、query:q4
+   evidence：使用图像修复技术的异常合成技术
+5. [Modular Energy Steering for Safe Text-to-Image Generation with Foundation Models](/202604/10/2604.02265v1-modular-energy-steering-for-safe-text-to-image-generation-with-foundation-models)  
+   标签：评分：6.0/10、query:q4
+   evidence：具有推理时引导的图像生成模型
+6. [Learning 3D Reconstruction with Priors in Test Time](/202604/10/2604.03878v1-learning-3d-reconstruction-with-priors-in-test-time)  
+   标签：评分：6.0/10、query:q7
+   evidence：测试时优化的自监督目标
+7. [Synthetic Dataset Generation for Partially Observed Indoor Objects](/202604/10/2604.07010v1-synthetic-dataset-generation-for-partially-observed-indoor-objects)  
    标签：评分：6.0/10、query:q1
-   evidence：深度图修复与结构细节补全
-3. [MIRAGE: Benchmarking and Aligning Multi-Instance Image Editing](/202604/09/2604.05180v1-mirage-benchmarking-and-aligning-multi-instance-image-editing)  
-   标签：评分：6.0/10、query:q4
-   evidence：用于局部图像编辑的无需训练框架
-4. [Graph-PiT: Enhancing Structural Coherence in Part-Based Image Synthesis via Graph Priors](/202604/09/2604.06074v1-graph-pit-enhancing-structural-coherence-in-part-based-image-synthesis-via-graph-priors)  
-   标签：评分：6.0/10、query:q4
-   evidence：基于部件的图像合成生成模型
-5. [Generative Phomosaic with Structure-Aligned and Personalized Diffusion](/202604/09/2604.06989v1-generative-phomosaic-with-structure-aligned-and-personalized-diffusion)  
-   标签：评分：6.0/10、query:q4
-   evidence：使用基于扩散生成的生成式合成方法
+   evidence：部分观测场景的对象补全
+8. [On the Global Photometric Alignment for Low-Level Vision](/202604/10/2604.08172v1-on-the-global-photometric-alignment-for-low-level-vision)  
+   标签：评分：6.0/10、query:q1
+   evidence：底层视觉和内容修复优化
 
 
 <div class="dpr-home-promo-card">

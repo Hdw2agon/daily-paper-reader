@@ -1,0 +1,1008 @@
+Title: On the Global Photometric Alignment for Low-Level Vision
+
+URL Source: https://arxiv.org/pdf/2604.08172v1
+
+Published Time: Fri, 10 Apr 2026 01:16:56 GMT
+
+Number of Pages: 25
+
+Markdown Content:
+# On the Global Photometric Alignment for Low-Level Vision 
+
+Mingjia Li ∗
+
+, Tianle Du ∗
+
+, Hainuo Wang, Qiming Hu, Xiaojie Guo †
+
+Tianjin University {mingjiali, dutianle, hainuo, huqiming}@tju.edu.cn, xj.max.guo@gmail.com 
+
+## Abstract 
+
+Supervised low-level vision models rely on pixel-wise losses against paired references, yet paired training sets exhibit per-pair photometric inconsistency, say, different image pairs demand different global brightness, color, or white-balance mappings. This inconsistency enters through task-intrinsic photometric transfer (e.g., low-light enhancement) or unin-tended acquisition shifts (e.g., de-raining), and in either case causes an optimization pathol-ogy. Standard reconstruction losses allocate disproportionate gradient budget to conflicting per-pair photometric targets, crowding out content restoration. In this paper, we investigate this issue and prove that, under least-squares decomposition, the photometric and structural components of the prediction-target residual are orthogonal, and that the spatially dense photometric component dominates the gradient energy. Motivated by this analysis, we propose Photometric Alignment Loss (PAL). This flexible supervision objective discounts nuisance photometric discrepancy via closed-form affine color alignment while preserving restoration-relevant supervision, requiring only covariance statistics and tiny matrix in-version with negligible overhead. Across 6 tasks, 16 datasets, and 16 architectures, PAL consistently improves metrics and generalization. The implementation is in the appendix. 
+
+## 1 Introduction 
+
+Pixel-wise supervision underpins most state-of-the-art low-level vision models (Xu et al., 2023; Yan et al., 2025; Hu et al., 2025; Mei et al., 2024; Bolun et al., 2016; Wang et al., 2025; Sun et al., 2024a). By regressing network outputs toward paired reference 1 images, models learn complex mappings from degraded inputs to clean targets. Despite its success, this paradigm rests on an implicit assumption: that every pixel-level difference between prediction and target is equally worth fitting. In practice, the prediction-target residual often contains a substantial photometric component, namely global shifts in brightness, color, or white balance, that vary from pair to pair within the training set. We refer to this variation as per-pair photometric inconsistency . Because standard reconstruction losses are disproportionately sensitive to global shifts (Zhao et al., 2025), the gradient signal is dominated by conflicting per-pair photometric targets at the expense of structural restoration. Per-pair photometric inconsistency enters paired datasets through two distinct sources. The first is task-intrinsic : in low-light enhancement (Guo et al., 2017; Zhang et al., 2019) and underwater enhancement (Li et al., 2020), the ground truth intentionally differs from the input in brightness and color, yet different pairs demand different photometric mappings depending on capture conditions and photographer intent. Standard pixel-wise losses allocate most of their gradient to this large but pair-specific photometric signal, leaving content restoration, say, contaminated texture and structure, underrepresented in the gradient. The second source is acquisition-induced : in image dehazing (Bolun et al., 2016) and deraining (Sun et al., 2024a), the restoration target should not differ photometrically from the desired content, yet paired-data acquisition introduces exposure, white-balance, or color-temperature variations that differ from pair to pair. 
+
+> ∗Equal contribution.
+> †Corresponding author.
+> 1In the paper, we follow the convention of calling reference images “ground truth,” though this term is technically inexact for enhancement tasks.
+
+1
+
+> arXiv:2604.08172v1 [cs.CV] 9 Apr 2026
+
+Figure 1: An Illustration of our work. (a) We identified that there exist inconsistent global photometric shift across the paired training datasets. (b) As the photometric shift dominates the gradient, learning texture and structure content from the training data becomes difficult. Our PAL helps rebalance the gradient. (c) Equipped with our PAL, the performance gained across 6 tasks, 16 methods, and 16 datasets, with an average gain in PSNR of 0.45dB across 6 tasks. Because different pairs deviate in random directions, the model receives contradictory supervision about whether and how to alter scene color, wasting capacity on what amounts to photometric label noise. Although the two sources differ in origin and scale, they produce the same optimization pathology, i.e. , the network exhausts its gradient budget resolving per-pair photometric conflicts rather than learning content restoration. The severity depends on the magnitude of the inconsistency and the dataset size, but the underlying mechanism is identical. Shadow removal (Mei et al., 2024) illustrates this clearly: inside shadow regions, photometric transfer is intrinsic to the task, while outside shadow regions, residual acquisition deviation provides contradictory supervision. Both coexist within a single image as instances of the same per-pair inconsistency, motivating a general formulation rather than task-specific fixes. Existing strategies mitigate the issue partially. Perceptual and adversarial losses (Johnson et al., 2016; Goodfellow et al., 2014) can be seen as implicit photometric robustness (Zhang et al., 2018) through deep feature matching, but at substantial computational cost and with only indirect supervision. Alternative color spaces (Lore et al., 2017; Yan et al., 2025; Hu et al., 2025; Guo & Hu, 2023) are successful in many domains, improving the performance, but they are rather reorganizing the problem without eliminating it. Moreover, they are task-specific and typically require sophisticated co-design with modeling. A generalized mechanism that explicitly discounts photometric discrepancy from the supervision signal remains missing. In this paper, we present Photometric Alignment Loss (PAL), a task-agnostic approach for globally uniform photometric inconsistencies that addresses per-pair photometric inconsistency. An overview of our work can be found in Figure 1. PAL models the photometric discrepancy between prediction and target as a global affine color transformation and solves for it in closed form. The reconstruction loss is then computed on the aligned residual, so that restoration-relevant content can better drive the optimization. PAL can also be extended for spatially varying shifts with a mask. We validate PAL across 6 tasks, 16 datasets, and 16 architectures, demonstrating consistent improvements. In summary, our contributions are: 
+
+• We identify per-pair photometric inconsistency as a unified source of optimization distortion in paired low-level vision, and show that it arises from both task-intrinsic and acquisition-induced origins. 
+
+• We propose PAL, a closed-form color alignment loss that discounts nuisance photometric discrepancy from the gradient while preserving content supervision, with negligible computational overhead. 
+
+• We provide extensive real-task validation across 6 low-level vision tasks, 16 datasets, and 16 archi-tectures, demonstrating improvements in fidelity metrics and generalization. 22 Related Work 
+
+2.1 Supervised Learning for Low-level Vision 
+
+Paired supervision has become the dominant training paradigm across a broad range of low-level vision tasks, yet each task family exhibits its own form of vulnerability to photometric inconsistency. In image restoration tasks such as dehazing (Bolun et al., 2016; Qin et al., 2020; Song et al., 2023) and deraining (Li et al., 2019; Zamir et al., 2020; 2022), the objective is to recover clean content without altering the scene photometry. However, paired training data for these tasks are typically generated from synthetic degradation pipelines or collected under controlled but imperfectly matched conditions. Subtle differences in camera exposure, white balance, or tone mapping between the degraded input and its clean counterpart introduce photometric shifts that are artifacts of the acquisition process rather than part of the degradation to be removed. Models trained with strict pixel-wise losses inherit these shifts as spurious supervision targets. This problem is further compounded in all-in-one restoration frameworks (Wang et al., 2025; Sun et al., 2024a), which train a single model across multiple degradation types such as rain, snow, and haze simultaneously. Because each constituent dataset is collected under different imaging conditions with its own photometric profile, mixing them amplifies the inconsistency. The model receives contradictory photometric supervision not only across image pairs, but also across tasks, making the consensus even more challenging. Image enhancement tasks, including low-light enhancement (Wei et al., 2018; Zhang et al., 2019; Xu et al., 2023; Cai et al., 2023; Yan et al., 2025) and underwater image enhancement (Li et al., 2020; Liu et al., 2022; Islam et al., 2020), face the converse challenge. Here, the ground truth intentionally differs from the input in brightness and color, making photometric transfer an integral part of the objective. A substantial body of work has developed architectures that range from Retinex-inspired decomposition networks (Wei et al., 2018; Zhang et al., 2019; Cai et al., 2018) to encoder-decoder (Xu et al., 2023; Zamir et al., 2020) and transformer-based models (Cai et al., 2023; Wang et al., 2022; Zamir et al., 2022). Despite their architectural diversity, these methods universally rely on pixel-wise reconstruction losses and therefore the easy global photometric gap dominates the gradient for both scenarios, suppressing the signal for content recovery. There also exist tasks where intentional and unintentional photometric discrepancies coexist in a single training pair, an example of which is shadow removal (Hu et al., 2025; Guo et al., 2023a;b; Mei et al., 2024). To be specific, the shadow regions require photometric correction, while the non-shadow regions should ideally remain unchanged. Paired datasets for this task are constructed by photographing scenes with and without cast shadows. During the capture of these datasets, the non-shadow area will inevitably introduce global photometric variation as well. This spatial coexistence makes shadow removal a natural testbed for methods that aim to handle both sources of inconsistency. 
+
+2.2 Loss Functions for Pixel-wise Supervision 
+
+Perceptual losses (Johnson et al., 2016; Zhang et al., 2018) shift supervision from pixel space to deep feature space by computing distances between VGG activations of enhanced and reference images. Because these features are learned to be invariant to low-level photometric variations, the loss becomes more robust to exact brightness and color values, focusing instead on semantic and structural content. Similarly, adversarial losses (Goodfellow et al., 2014; Isola et al., 2017) train discriminators to distinguish real from enhanced images, encouraging outputs that lie on the manifold of natural images regardless of specific photometric properties. While these approaches significantly improve perceptual realism and provide implicit photometric robustness, they introduce substantial computational overhead, require careful hyperparameter tuning, and can produce characteristic artifacts (Ledig et al., 2017; Blau & Michaeli, 2018). Moreover, they provide only indirect supervision, and the network must implicitly learn to ignore photometric variations rather than having them explicitly removed from the supervision signal. A related family of techniques, style-transfer losses such as Gram-matrix matching (Gatys et al., 2016) and AdaIN statistics alignment (Huang & Belongie, 2017), also leverage global feature statistics. However, these methods differ from PAL in both purpose and mechanism. Style losses operate in deep feature space (e.g., VGG activations) and serve as additional supervision objectives that encourage the network output to match 3(a) Input (b) Chan. Mean (c) Opti. Scalar (d) Opti. Diagonal (e) PAL (f) GT 
+
+Figure 2: Comparison of alignment families applied to Low-light image pairs. The optimal transforms are computed in closed form and applied. Channel-wise mean (b) and Optimal Scalar (c) cannot correct color-temperature shifts . Optimal Diagonal (d) handles per-channel gain but not cross-channel coupling. Only PAL’s full affine model (e) closely matches the reference (f). a reference style. They add a constraint to the optimization. PAL, by contrast, operates directly in the RGB pixel space and serves as a loss modification : rather than imposing a new target, it removes per-pair photometric nuisance from the existing pixel-wise supervision signal via closed-form affine regression, so that the residual gradient is redirected toward structural content. In short, style losses push outputs toward a desired distribution, whereas PAL subtracts a nuisance component from the training objective. Another strategy decouples intensity from chrominance by operating in color spaces like HSV, YUV, or Lab (Lore et al., 2017; Hu et al., 2025; Guo & Hu, 2023). Recent work has proposed learnable or customized color spaces like HVI (Yan et al., 2025) or rectifed latent space (Li et al., 2026; Liu et al., 2025), specifically designed for a better operation space. However, color/latent space conversions introduce their own challenges. These methods can be non-linear and often require specialized architectures that limit their applicability. Furthermore, they do not solve the photometric inconsistency problem, but reorganize it into different, non-optimal channels with task-specific or even model-specific design. This undermines the generalizability to unknown datasets and tasks. In the low-light enhancement community, GT-Mean (Zhang et al., 2019; Liao et al., 2025) is also proposed to align the global lightness. However, it is biased and can not capture the full global photometric clue. As a result, it is limited to the domain of low-light image enhancement. Drawing on classical color science (Finlayson et al., 2001; Barnard et al., 2002), we recognize that photometric relationships between images involve coupled color channels. White balance creates off-diagonal terms, while exposure affects channels non-uniformly. We analyze and derive a least-squares estimator for the linear color transformation, providing a more accurate and theoretically principled alignment framework that benefits training and improves generalization capability. 
+
+## 3 Problem Analysis and Method 
+
+In this section, we provide theoretical analysis and empirical evidence, then derive PAL as a remedy. 
+
+3.1 Evidence of Photometric Inconsistency 
+
+Paired low-level vision supervision regresses a prediction ˆI toward a target Igt with a pixel-wise loss. This supervision is well-posed only when every prediction-target residual reflects restoration-relevant content alone. In practice, the residual also contains a photometric component, i.e. , global shifts in brightness, color, or white balance, that vary from pair to pair within the training set. Because no single photometric mapping satisfies all pairs simultaneously, the pixel-wise loss receives conflicting supervision, as it tries to fit pair-specific photometric targets that are mutually contradictory, leaving an conflict in the gradient signal. 4Figure 3: Per-pair photometric scatter plots. Each point represents one training pair, with per-channel (R/G/B) input mean on the x-axis, and GT mean on the y-axis. In both LOL-v2 and RESIDE-SOTS cases, the wide per-pair spread means a pixel-wise loss receives conflicting photometric supervision. MSE (log scale)                
+
+> Ratio of the Photo. Gradient
+> 0.8
+> 0.6
+> 0.4
+> 0.2
+> 0.0
+> 0246810 12 14
+> 1.0
+> 0246810 12 14
+> Total MSE
+> Photo. MSE
+> Content MSE
+> Iteration Iteration
+> w/o PALoss
+> w PALoss
+
+Figure 4: (Left) Decomposed photometric/content error on validation set. (Right) Gradient ratio ρ. Plots are sampled from a Retinexformer trained on LOL-V1 every 1000 steps. To expose this variation, we compute the per-channel mean brightness of each input and its ground truth across two representative datasets and plot them against each other in Figure 3. If photometric consistency held, all points would collapse onto a single line ( y=kx +b). Instead, both panels show broad scatter. In LOLv2-Real (left), points sit far from the y=x diagonal and spread widely: different pairs demand different brightness gains, and different color channels deviate by different amounts, indicating pair-specific color-temperature and white-balance shifts rather than a uniform brightness scale. In RESIDE-SOTS (right), the task should not alter scene photometry, yet the point cloud still scatters around the diagonal rather than concentrating on a single trajectory. Regardless of whether the photometric gap is large (enhancement) or small (restoration), the per-pair inconsistency is present and injects conflicting targets into the loss. This conflict has a direct consequence on optimization. It shifts every pixel uniformly since the photometric discrepancy is spatially dense , while structural differences (textures, edges) are spatially sparse . As a result, the photometric component dominates the gradient energy budget. 
+
+3.2 Gradient Dominance of Photometric Error 
+
+As Figure 3 shows, the prediction-target residual contains a per-pair photometric component. We now prove that, under pixel-wise MSE losses, this component dominates the gradient budget, crowding out the structural supervision that actually drives restoration quality. 
+
+Residual decomposition. Let ˆI(i), I(i) 
+
+> gt
+
+∈ R3 denote the prediction and target at pixel i, and let (C∗, b∗) be the least-squares affine alignment that minimizes ∑Ni=1 ∥CˆI(i) +b−I(i) 
+
+> gt
+
+∥2. The per-pixel residual decomposes 5as 
+
+I(i) 
+
+> gt
+
+− ˆI(i) = ( C∗ − E) ˆI(i) + b∗
+
+︸ ︷︷ ︸ 
+
+> ∆(i)
+> p(photometric)
+
++ I(i) 
+
+> gt
+
+− C∗ˆI(i) − b∗
+
+︸ ︷︷ ︸ 
+
+> ∆(i)
+> s(structural)
+
+. (1) 
+
+Proposition 1 (Loss decomposition) . The pixel-wise MSE decomposes exactly into a photometric term and a structural term with zero cross-term: 
+
+∑
+
+> i
+
+∥∥I(i) 
+
+> gt
+
+− ˆI(i)∥∥2 = ∑
+
+> i
+
+∥∥∆(i)
+
+> p
+
+∥∥2 + ∑
+
+> i
+
+∥∥∆(i)
+
+> s
+
+∥∥2. (2) 
+
+Proof. The pixel-wise MSE can be described as 
+
+∑
+
+> i
+
+∥∥I(i) 
+
+> gt
+
+− ˆI(i)∥∥2 = ∑
+
+> i
+
+∥∥∆(i)
+
+> p
+
+∥∥2 + ∑
+
+> i
+
+∥∥∆(i)
+
+> s
+
+∥∥2 + ∑
+
+> i
+
+⟨∆(i) 
+
+> p
+
+, ∆(i) 
+
+> s
+
+⟩. (3) Noticing that the first-order optimality conditions of the least-squares affine fit yield 
+
+∑ 
+
+> i
+
+∆(i) 
+
+> s
+
+= 0, ∑ 
+
+> i
+
+∆(i) 
+
+> s
+
+ˆI(i)⊤ = 0. (4) Expanding the cross-term: 
+
+∑
+
+> i
+
+⟨∆(i) 
+
+> p
+
+, ∆(i) 
+
+> s
+
+⟩ = tr 
+
+[
+
+(C∗ −E)⊤∑ 
+
+> i
+
+∆(i) 
+
+> s
+
+ˆI(i)⊤
+
+]
+
++ b∗⊤ ∑ 
+
+> i
+
+∆(i)
+
+> s
+
+= tr [(C∗ −E)⊤ · 0] + b∗⊤ · 0 = 0 . (5) 
+
+Implication for gradient budget. For a standard Mean Squared Error (MSE) loss LMSE = 1
+
+> N
+
+∑ 
+
+> i
+
+∥I(i) 
+
+> gt
+
+−
+
+ˆI(i)∥2, the per-pixel gradient with respect to the prediction is − 2 
+
+> N
+
+(∆(i) 
+
+> p
+
++ ∆(i) 
+
+> s
+
+). Leveraging the exact orthogonality established above, the total gradient energy perfectly splits into two independent budgets: 
+
+∑
+
+> i
+
+∥∥∇ˆI(i) LMSE 
+
+∥∥2 = 4
+
+N 2
+
+∑
+
+> i
+
+∥∆(i) 
+
+> p
+
+∥2
+
+︸ ︷︷ ︸
+
+> Ephot
+
++ 4
+
+N 2
+
+∑
+
+> i
+
+∥∆(i) 
+
+> s
+
+∥2
+
+︸ ︷︷ ︸
+
+> Estruct
+
+. (6) Let ρ = Ephot /(Ephot + Estruct ) denote the photometric fraction of the total gradient energy. The critical issue lies in the spatial density of these errors. When a macroscopic photometric mismatch occurs (e.g., a global brightness shift), the photometric error is dense , accumulating across all N pixels. Its overall gradient energy Ephot therefore scales proportionally to 1/N . In contrast, the structural error ∆(i) 
+
+> s
+
+is sparse , confined to a small subset of M localized pixels around misaligned textures or edges ( M ≪ N ). Its gradient energy 
+
+Estruct only accumulates over these M pixels, scaling as M/N 2.Consequently, the ratio of gradient energies Ephot /Estruct is proportional to N/M . Because N is typically orders of magnitude larger than M , Ephot overwhelmingly overshadows Estruct (i.e. , ρ → 1), forcing the network to exhaust its gradient budget acting as a global color-matcher rather than a detail restorer. To validate this, we train a Retinexformer (Cai et al., 2023) on LOL-v1 (Wei et al., 2018) dataset and plot the val error decomposed into photometric and content in Figure 4 along with the photometric ratio ρ. It is clear that the photometric component is dominating the gradient, and the content improves slowly. This motivates a loss function that explicitly removes the photometric component ∆p from the supervision signal, so that the full gradient budget is redirected toward structural restoration. 
+
+3.3 Why Affine Alignment 
+
+The gradient analysis above shows that the photometric component must be discounted from the loss func-tion. This requires choosing an alignment model to estimate and remove this component. Alignment models 6Input CIDNet CIDNet+PAL GT Figure 5: Qualitative comparisons on LLIE (CIDNet on LOLv2-real). PAL produces more natural colors. 
+
+Input NAFNet NAFNet+PAL GT Figure 6: Qualitative comparisons on nighttime dehazing (NAFNet on NHR). PAL reduces residual haze and color cast. can be ordered by expressiveness: a scalar correction ( αI, one parameter) removes brightness offset; a diago-nal model (diag (d) I, three parameters) allows independent per-channel gain; and a full affine model ( CI +b,twelve parameters) additionally captures cross-channel coupling and additive bias. Mean-brightness normal-ization (Liao et al., 2025; Zhang et al., 2019) falls in the scalar family and can equalize overall luminance, yet it leaves color-temperature and white-balance shifts intact because these involve coupled, channel-dependent transformations. A diagonal model handles per-channel exposure differences but still cannot represent the off-diagonal terms. Figure 2 illustrates this on real LOL pairs. For each input, the optimal transform from each family is computed in closed form and applied. Only the full affine model reproduces the reference color, confirming that real photometric discrepancy requires cross-channel coupling to be modeled explicitly. The affine model is the natural match for the nuisance we identified. The dominant photometric discrepancy across paired datasets is global : it manifests as per-pair shifts in overall brightness, color temperature, and 7Input Baseline +PAL (Ours) GT Figure 7: Qualitative comparison on MITNet image dehazing. We use error map to highlight the difference. Darker is better. PAL reduces residual color cast relative to the baseline. 
+
+Input LiteEnhanceNet +PAL (Ours) Input Boths +PAL (Ours) Figure 8: Qualitative comparison on underwater image enhancement (EUVP). PAL produces outputs with more natural color and fewer artifacts. white balance, all of which are well described by a twelve-parameter affine transform. Crucially, fitting a global model to a per-image residual that also contains spatially localized content does not absorb that content. By construction, the least-squares affine fit captures only the variance that correlates globally with the prediction, while localized texture and structural differences remain in the residual and continue to supervise the network. Spatially varying photometric effects (e.g., vignetting and local illumination gradients) are not modeled by PAL; however, because they lack global correlation, the affine fit largely ignores them, and PAL turns toward standard pixel-wise supervision. Furthermore, when the photometric inconsistency is negligibly small, the regularized least-squares solution converges to C∗ → E, b∗ → 0, so that LPAL gracefully degenerates to the standard pixel-wise loss. Therefore, PAL discounts photometric nuisance when present and reduces to conventional supervision when absent. The performance across tasks with both global and localized degradation components (all weather) confirms this behavior empirically. 8Table 1: Quantitative comparison on LOL, across PSNR ( ↑), SSIM ( ↑), LPIPS ( ↓), IQA ( ↑) and IAA ( ↑). Methods LOLv1 LOLv2-syn LOLv2-real PSNR SSIM LPIPS IQA IAA PSNR SSIM LPIPS IQA IAA PSNR SSIM LPIPS IQA IAA MIRNet (Zamir et al., 2020) 20.57 0.769 0.254 2.914 1.855 21.74 0.877 0.138 2.650 2.023 21.28 0.791 0.355 2.256 1.377 +PAL (Ours) 21.01 0.791 0.228 2.923 1.729 22.13 0.890 0.117 2.870 2.091 22.32 0.816 0.348 2.535 1.469                        
+
+> Uformer (Wang et al., 2022) 18.85 0.751 0.288 2.751 1.661 21.50 0.884 0.120 2.919 2.058 19.80 0.714 0.346 2.135 1.387 +PAL (Ours) 19.31 0.767 0.247 2.858 1.666 21.79 0.890 0.112 2.952 2.063 20.12 0.738 0.327 2.780 1.649
+> Retinexformer (Cai et al., 2023) 23.40 0.822 0.269 3.148 1.980 25.48 0.930 0.101 2.404 2.096 21.69 0.846 0.276 3.163 1.962 +PAL (Ours) 24.53 0.847 0.239 3.533 2.122 26.01 0.941 0.083 2.435 2.162 22.73 0.864 0.265 3.499 2.077
+> CID-Net (Yan et al., 2025) 23.97 0.849 0.104 3.791 2.071 25.44 0.935 0.047 3.299 2.171 23.19 0.857 0.136 3.699 2.042 +PAL (Ours) 24.13 0.854 0.099 3.923 2.104 25.84 0.937 0.045 3.373 2.185 23.95 0.870 0.112 3.938 2.103
+
+Table 2: Underwater enhancement results on EUVP. Method Loss EUVP PSNR ↑ SSIM ↑ LPIPS ↓
+
+Shallow-UWnet Baseline 19.70 0.780 0.355 +PAL 20.35 0.790 0.327 
+
+Boths Baseline 19.68 0.748 0.367 
+
++PAL 19.85 0.767 0.375 LiteEnhanceNet Baseline 20.40 0.779 0.343 +PAL 20.97 0.787 0.328 
+
+3.4 Photometric Alignment Loss (PAL) 
+
+We model the photometric discrepancy between prediction and target as a global affine color transform, defined by a 3 × 3 matrix C and a 3 × 1 bias vector b:
+
+Igt ≈ CˆI + b. (7) This model captures per-channel gains, cross-channel coupling, and additive color shifts. PAL computes the least-squares alignment that best explains this discrepancy, then measures the residual reconstruction error after alignment. In this way, PAL preserves supervision for content while reducing the influence of photometric mismatch that would dominate or corrupt pixel-wise training. Our goal is to find the optimal parameters (C∗, b∗) that minimize the expected squared L2-norm of the residual: 
+
+L(C, b) = E
+
+[
+
+∥(CˆI + b) − Igt ∥22
+
+]
+
+. (8) The standard solution from multivariate linear regression is b∗ = μgt −C∗μˆI and C∗ = Cov (Igt , ˆI)Cov (ˆI, ˆI)−1.However, a practical issue arises when the prediction has low color variance (e.g., large monochromatic regions). In such cases, the covariance matrix Var (ˆI) can become ill-conditioned or singular, making its inverse numerically unstable and leading to extreme values in C∗. To guarantee a stable solution, we incorporate Ridge Regression by adding an L2 regularization term. Consequently, the solution for the desired transformation matrix C∗ becomes the following: 
+
+C∗ = Cov (Igt , ˆI)
+
+(
+
+Cov (ˆI, ˆI) + ϵE
+
+)−1
+
+. (9) where ϵ is a small, positive hyperparameter that controls the regularization strength, and E is the 3 × 3
+
+identity matrix. This regularization term ensures that the matrix to be inverted is always well-conditioned. The optimal bias remains: 
+
+b∗ = μgt − C∗μˆI, (10) 9Table 3: Dehazing results on RESIDE-SOTS-Indoor. Method Loss RESIDE-SOTS-Indoor PSNR ↑ SSIM ↑ LPIPS ↓
+
+FocalNet Baseline 37.97 0.989 0.012 
+
++PAL 38.18 0.991 0.012 
+
+MITNet Baseline 37.56 0.988 0.006 +PAL 37.80 0.988 0.005 
+
+DehazeXL Baseline 27.77 0.956 0.030 +PAL 28.07 0.961 0.028 
+
+Table 4: Nighttime dehazing results on NHR. Method Loss NHR PSNR ↑ SSIM ↑ LPIPS ↓
+
+NAFNet Baseline 22.06 0.825 0.082 +PAL 22.91 0.838 0.071 
+
+Restormer Baseline 18.30 0.794 0.118 +PAL 18.89 0.816 0.103 
+
+where μˆI = E[ˆI] and μgt = E[Igt ]. The covariance matrices are defined as Cov (ˆI, ˆI) = E[( ˆI − μˆI)( ˆI − μˆI)⊤]
+
+and Cov (Igt , ˆI) = E[( Igt − μgt )( ˆI − μˆI)⊤]. All required statistics can be computed efficiently over training samples. 
+
+Integration into training. With the numerically stable optimal transformation (C∗, b∗), we define our Photometric Alignment Loss (PAL) as the minimum reconstruction error: 
+
+LPAL = ∥(C∗ˆI + b∗) − Igt ∥. (11) During training, it can be integrated with the existing loss Lpixel :
+
+Ltotal = Lpixel + αLPAL . (12) Retaining Lpixel alongside LPAL is deliberate: Lpixel preserves full pixel-level fidelity supervision, while 
+
+LPAL supplies a photometric-invariant gradient that emphasizes content restoration. Here, C∗ and b∗ are computed on-the-fly and then treated as constants (stop-gradient) for the backward pass; this is essential because, if gradients were allowed to flow through C∗ and b∗, the network could trivially minimize LPAL 
+
+without improving structural content, collapsing to degenerate solutions. α is a scalar hyperparameter that balances the pixel term and the alignment term. The compute only costs 0.0037 GFLOPs on a 256 × 256 
+
+image, on the order of 0.01%–0.1% of the backbone. PAL is therefore easy to integrate into existing paired low-level vision pipelines. 
+
+## 4 Experimental Validation 
+
+We organize the experiments by task type. We first evaluate PAL on tasks where photometric inconsistency is intrinsic to the task, including low-light and underwater enhancement (Section 4.1), and then on tasks where it is induced by data acquisition, including dehazing, nighttime dehazing, and all-in-one restoration (Section 4.2). We further examine shadow removal as a hybrid extension where both sources coexist (Sec-tion 4.3), followed by ablation studies (Section 4.4). For all experiments, we keep the original settings of each baseline unchanged and introduce PAL as the only modification. 10 Table 5: Shadow removal results on ISTD. Method Loss ISTD PSNR ↑ SSIM ↑ RMSE ↓              
+
+> RASM Baseline 32.32 0.968 4.12
+> +PAL 32.65 0.968 4.16 HomoFormer Baseline 32.02 0.968 4.24 +PAL 32.49 0.968 4.17
+
+Table 6: All-in-one restoration results across multiple weather degradation benchmarks. Method Loss Snow100K-S Snow100K-L Outdoor RainDrop PSNR ↑ SSIM ↑ LPIPS ↓ PSNR ↑ SSIM ↑ LPIPS ↓ PSNR ↑ SSIM ↑ LPIPS ↓ PSNR ↑ SSIM ↑ LPIPS ↓                                                 
+
+> Histoformer (Sun et al., 2024b) Baseline 37.41 0.965 0.045 32.16 0.926 0.0919 32.08 0.938 0.077 33.06 0.944 0.067 +PAL 37.85 0.968 0.039 32.34 0.929 0.087 32.82 0.945 0.071 32.77 0.945 0.063
+> MODEM (Wang et al., 2025) Baseline 38.08 0.967 0.041 32.52 0.929 0.088 33.10 0.941 0.070 33.01 0.943 0.065 +PAL 38.10 0.968 0.039 32.54 0.930 0.085 33.25 0.942 0.065 33.08 0.944 0.060
+
+4.1 Tasks with Intrinsic Photometric Transfer 
+
+Our evaluation of the task-intrinsic source comes from two representative enhancement tasks: low-light im-age enhancement (LLIE) and underwater image enhancement (UIE). For the low-light task, we evaluate our method on the LOLv1 (Wei et al., 2018), LOLv2-real (Yang et al., 2021), and LOLv2-synthetic (Yang et al., 2021) datasets, using four backbone architectures spanning different design philosophies: MIRNet (Za-mir et al., 2020) (multi-scale residual), Uformer (Wang et al., 2022) (window-based transformer), Retinex-former (Cai et al., 2023) (Retinex-guided transformer), and HVI-CIDNet (Yan et al., 2025) (learnable color space). For the underwater task, we conduct experiments on the EUVP (Islam et al., 2020) dataset and employ three task-specific backbones: Shallow-UWNet (Naik et al., 2021), Boths (Liu et al., 2022), and LiteEnhanceNet (Zhang et al., 2024). For quantitative evaluation across all paired datasets, we report PSNR, SSIM (Wang et al., 2004), and LPIPS (Zhang et al., 2018). We maintain the original training configurations for all backbones and integrate PAL as the only modification. 
+
+Quantitative results. Table 1 shows that PAL consistently improves all four backbones across the three LOL benchmarks on all five metrics (PSNR, SSIM, LPIPS, IQA, IAA). Notably, the improvements are not limited to photometric fidelity (PSNR): structural quality (SSIM, LPIPS) also improves, confirming that discounting the nuisance photometric component re-allocates gradient budget to restoration-relevant content. The gains are most pronounced for Retinexformer (+1.13 dB on LOLv1, +1.04 dB on LOLv2-real), which uses a Retinex decomposition that is particularly sensitive to photometric ambiguity. Table 2 reports UIE results on EUVP. PAL improves all three backbones, with LiteEnhanceNet gaining +0.57 dB PSNR and Shallow-UWNet gaining +0.65 dB. This confirm that PAL addresses a general photometric inconsistency phenomenon rather than a dataset-specific artifact. 
+
+Qualitative results. We present visual comparisons on low-light enhancement in Figure 5 and nighttime dehazing in Figure 6. PAL produces results with less noise and a more pleasant color. As in Figure 8, our UIE result is natural and free from artifact while the baseline method shows an unpleasant shift. 
+
+4.2 Tasks with Acquisition-Induced Mismatch 
+
+Dehazing, nighttime dehazing, and all-in-one weather restoration are representative of acquisition-induced mismatch. Here, the ground truth should ideally share the same photometric profile as the clean scene content, yet data collection under varying conditions introduces per-pair photometric shifts from differing sensor responses, lighting, and environmental scattering. For image dehazing, we evaluate on RESIDE-SOTS-Indoor (Li et al., 2018a) using FocalNet (Cui et al., 2023), MITNet (Shen et al., 2023), and DehazeXL (Chen et al., 2025). For nighttime dehazing, we evaluate on NHR (Zhang et al., 2020) with NAFNet (Chen et al., 2022) and Restormer (Zamir et al., 2022). For all-weather restoration, we evaluate on Snow100K-S, Snow100K-L, Outdoor, and RainDrop using Histoformer (Sun et al., 2024b) and MODEM (Wang et al., 2025). 11 Input Histoformer Histo.+PAL GT Figure 9: Qualitative comparison on the all-in-one task. Setup The choice of α. The choice of ϵ.0.1 0.5 0.6 0.8 1.0 1.2 0.0001 0.001 0.01 0.1 1PSNR ↑ 23.07 23.37 23.95 23.41 23.19 23.45 NaN 23.41 23.08 23.17 23.12 SSIM ↑ 0.822 0.840 0.870 0.861 0.857 0.831 NaN 0.861 0.842 0.850 0.834 Table 7: Ablation analysis of the weight α for our PAL and the regularization term ϵ for matrix inversion. 
+
+Quantitative results. Table 3 shows that PAL improves all three dehazing backbones on RESIDE-SOTS-Indoor. Table 4 reports nighttime dehazing results on NHR. The improvements are substantial. NAFNet gains +0.85 dB PSNR and Restormer gains +0.59 dB, with corresponding LPIPS improvements. Nighttime conditions amplify photometric inconsistency through spatially non-uniform artificial lighting and color-shifted scattering, making PAL’s explicit alignment beneficial. Table 6 presents all-weather restoration results. PAL improves both two models across most benchmarks. This is notable because they is trained on data pooled from multiple degradation, each collected under different imaging conditions with its own photometric profile. The inter-dataset photometric inconsistency compounds the per-pair inconsistency, yet PAL handles both. 
+
+Qualitative results. Figure 7 presents visual comparisons on dehazing, where PAL reduces residual color cast. Figure 9 shows an all-in-one restoration example on deraining, where PAL produces cleaner outputs with fewer color artifacts. 
+
+4.3 Hybrid Case: Shadow Removal 
+
+Shadow removal provides a case in which both sources of per-pair photometric inconsistency coexist within a single image. Inside shadow regions, the model must learn to undo the illumination change. Outside shadow regions, residual photometric deviation is acquisition-induced, as the paired shadow and shadow-free images are captured under slightly different conditions. Because these two regions undergo fundamentally different photometric shifts, a single global affine fit would conflate them. We therefore extend the PAL to a masked version, since the shadow mask is already a standard input to existing pipelines (Mei et al., 2024; Guo et al., 2023a). We calculate the photometric matrix inside and outside the mask as a spatial partition. We evaluate on the ISTD (Wang et al., 2018) dataset with RASM (Liu et al., 2024) and HomoFormer (Xiao et al., 2024). In Table 5, PAL improves PSNR for both methods (+0.33 dB for RASM, +0.47 dB for HomoFormer) with comparable SSIM and RMSE. 
+
+4.4 Ablations and Discussion 
+
+We conduct ablation studies on the LOLv2-real dataset using HVI-CIDNet as the backbone to analyze the impact of the two key hyperparameters α and ϵ. We further examine cross-dataset generalization on 12 Method DICM LIME MEF NPE VV IQA ↑ IAA ↑ IQA ↑ IAA ↑ IQA ↑ IAA ↑ IQA ↑ IAA ↑ IQA ↑ IAA ↑                                                                                
+
+> MIRNet (Zamir et al., 2020) 2.680 1.892 2.409 1.793 2.174 1.557 2.193 1.710 2.580 1.669 +PAL (Ours) 2.875 2.034 2.633 1.939 2.404 1.705 2.496 1.854 2.680 1.740
+> Uformer (Wang et al., 2022) 2.548 1.852 2.499 1.986 2.308 2.017 2.435 1.832 2.567 1.710 +PAL (Ours) 2.640 1.870 2.604 2.026 2.341 2.080 2.699 1.875 2.612 1.712
+> Retinexformer (Cai et al., 2023) 2.869 2.321 3.005 2.528 3.193 2.520 2.785 2.175 2.464 1.923 +PAL (Ours) 2.907 2.391 3.243 2.668 3.343 2.586 2.877 2.227 2.668 2.039
+> CID-Net (Yan et al., 2025) 3.464 2.340 3.286 2.439 3.497 2.482 3.061 2.064 3.086 1.927 +PAL (Ours) 3.632 2.449 3.433 2.549 3.474 2.448 3.434 2.339 3.174 1.995
+
+Table 8: Quantitative results on unpaired datasets across IQA ( ↑) and IAA ( ↑), evaluated using Q-Align. unseen unpaired low-light datasets to understand whether PAL improves robustness beyond the training distribution. 
+
+Effect of Weight α. We first study the influence of the weighting factor α for PAL, with results shown in Table 7. As α increases from 0.1 to 0.6, performance steadily improves, indicating that the alignment term provides a useful complementary signal to the pixel-wise loss. The best performance is achieved at α = 0 .6,with a PSNR of 23.95 dB and an SSIM of 0.870. When α is increased further ( α ≥ 0.8), performance begins to decline, suggesting that over-emphasizing alignment can interfere with the learning of fine-grained restoration details. We thus set α to 0.6 for enhancement tasks, while we empirically set α to 0.8 for the restoration task to further discount photometric discrepancy that shouldn’t be there. 
+
+Effect of Regularization Term ϵ. Next, we analyze the regularization term ϵ (Table 7). Setting ϵ to a very small value (0.0001) resulted in ‘NaN‘ losses during training, confirming that regularization is necessary when the input has low color variance, especially early in training. As ϵ increases, performance degrades because a larger ϵ biases the transformation matrix C∗ toward a scaled identity and reduces its ability to model color correlations. Our experiments show that ϵ = 0 .001 provides the best trade-off, so we apply it to all of our experiments. Please note that the images are in [0, 1]. 
+
+Cross-dataset generalization. To assess whether PAL also improves generalization rather than overfitting, we evaluate LOL-trained models on unseen low-light datasets: DICM (Lee et al., 2013), LIME (Guo et al., 2017), MEF (Ma et al., 2015), NPE (Wang et al., 2013), and VV (Vonikakis et al., 2018). Since they do not provide paired ground truth, we report non-reference quality assessment (IQA) and aesthetic assessment (IAA) scores computed by Q-Align (Wu et al., 2023), following recent works (Yan et al., 2025). As in Table 8, PAL consistently improves both IQA and IAA across all 4 backbones and datasets. This indicates that PAL reduces overfitting to the photometric profile of the training set and leads to outputs with more natural color and better perceptual quality on out-of-distribution data. 
+
+## 5 Conclusion 
+
+Paired low-level vision tasks suffer from per-pair photometric inconsistency: different image pairs demand different global photometric mappings, whether because photometric transfer is intrinsic to the task or because data acquisition introduces unintended shifts. We showed that this produces a unified optimiza-tion pathology in which standard pixel-wise losses allocate disproportionate gradient budget to conflicting photometric targets, with severity determined by the magnitude of inconsistency and the dataset size. To address this, we proposed PAL, which models photometric discrepancy with a closed-form color alignment before measuring reconstruction residuals. PAL is flexible, computationally negligible, and easy to integrate into existing pipelines. Across experiments covering 16 datasets, 6 tasks, and 16 methods on enhancement, restoration, and hybrid tasks, PAL consistently improves fidelity metrics and cross-dataset generalization. These findings highlight the importance of explicitly accounting for photometric inconsistency in paired supervision and suggest a promising direction for designing more robust objectives in low-level vision. 13 Acknowledgement 
+
+The authors would like to express their gratitude to TPU Research Cloud (TRC) for computational resources. 
+
+## References 
+
+Kobus Barnard, Vlad C. Cardei, and Brian V. Funt. A comparison of computational color constancy algorithms. I: methodology and experiments with synthesized data. IEEE TIP , 11(9):972–984, 2002. Yochai Blau and Tomer Michaeli. The perception-distortion tradeoff. In CVPR , pp. 6228–6237, 2018. Cai Bolun, Xu Xiangmin, Jia Kui, Qing Chunmei, and Tao Dacheng. Dehazenet: An end-to-end system for single image haze removal. IEEE TIP , 25(11):5187–5198, 2016. Jianrui Cai, Shuhang Gu, and Lei Zhang. Learning a deep single image contrast enhancer from multi-exposure images. IEEE TIP , 27(4):2049–2062, 2018. Yuanhao Cai, Hao Bian, Jing Lin, Haoqian Wang, Radu Timofte, and Yulun Zhang. Retinexformer: One-stage retinex-based transformer for low-light image enhancement. In ICCV , pp. 12504–12513, 2023. Jiuchen Chen, Xinyu Yan, Qizhi Xu, and Kaiqi Li. Tokenize image patches: Global context fusion for effective haze removal in large images. In CVPR , pp. 2258–2268, 2025. Liangyu Chen, Xiaojie Chu, Xiangyu Zhang, and Jian Sun. Simple baselines for image restoration. In ECCV ,pp. 17–33. Springer, 2022. Yuning Cui, Wenqi Ren, Xiaochun Cao, and Alois Knoll. Focal network for image restoration. In ICCV , pp. 13001–13011, 2023. Graham D. Finlayson, Steven D. Hordley, and Paul M. Hubel. Color by correlation: A simple, unifying framework for color constancy. IEEE TPAMI , 23(11):1209–1221, 2001. Leon A. Gatys, Alexander S. Ecker, and Matthias Bethge. Image style transfer using convolutional neural networks. In CVPR , June 2016. Ian Goodfellow, Jean Pouget-Abadie, Mehdi Mirza, Bing Xu, David Warde-Farley, Sherjil Ozair, Aaron Courville, and Yoshua Bengio. Generative adversarial nets. In NeurIPS , pp. 2672–2680, 2014. Lanqing Guo, Siyu Huang, Ding Liu, Hao Cheng, and Bihan Wen. Shadowformer: Global context helps shadow removal. In AAAI , pp. 710–718, 2023a. Lanqing Guo, Chong Wang, Wenhan Yang, Siyu Huang, Yufei Wang, Hanspeter Pfister, and Bihan Wen. Shadowdiffusion: When degradation prior meets diffusion model for shadow removal. In CVPR , pp. 14049–14058, 2023b. Xiaojie Guo and Qiming Hu. Low-light image enhancement via breaking down the darkness. IJCV , 131(1): 48–66, 2023. Xiaojie Guo, Yu Li, and Haibin Ling. LIME: low-light image enhancement via illumination map estimation. 
+
+IEEE TIP , 26(2):982–993, 2017. Jin Hu, Mingjia Li, and Xiaojie Guo. Shadowhack: Hacking shadows via luminance-color divide and conquer. In ICCV , 2025. Xun Huang and Serge Belongie. Arbitrary style transfer in real-time with adaptive instance normalization. In ICCV , 2017. Md Jahidul Islam, Youya Xia, and Junaed Sattar. Fast underwater image enhancement for improved visual perception. IEEE RAL , 5(2):3227–3234, 2020. 14 Phillip Isola, Jun-Yan Zhu, Tinghui Zhou, and Alexei A Efros. Image-to-image translation with conditional adversarial networks. In CVPR , pp. 1125–1134, 2017. Justin Johnson, Alexandre Alahi, and Li Fei-Fei. Perceptual losses for real-time style transfer and super-resolution. In ECCV , pp. 694–711, 2016. Christian Ledig, Lucas Theis, Ferenc Huszár, Jose Caballero, Andrew Cunningham, Alejandro Acosta, An-drew Aitken, Alykhan Tejani, Johannes Totz, Zehan Wang, et al. Photo-realistic single image super-resolution using a generative adversarial network. In CVPR , pp. 4681–4690, 2017. Chulwoo Lee, Chul Lee, and Chang-Su Kim. Contrast enhancement based on layered difference representation of 2d histograms. IEEE TIP , 22(12):5372–5384, 2013. Boyi Li, Wenqi Ren, Dengpan Fu, Dacheng Tao, Dan Feng, Wenjun Zeng, and Zhangyang Wang. Bench-marking single-image dehazing and beyond. IEEE transactions on image processing , 28(1):492–505, 2018a. Chongyi Li, Jichang Guo, and Chunle Guo. Emerging from water: Underwater image color correction based on weakly supervised color transfer. IEEE Signal Processing Letters , 25(3):323–327, 2018b. doi: 10.1109/LSP.2018.2792050. Chongyi Li, Chunle Guo, Wenqi Ren, Runmin Cong, Junhui Hou, Sam Kwong, and Dacheng Tao. An underwater image enhancement benchmark dataset and beyond. IEEE TIP , 29:4376–4389, 2020. Mingjia Li, Jin Hu, Hainuo Wang, Qiming Hu, Jiarui Wang, and Xiaojie Guo. Rectifying latent space for generative single-image reflection removal. In CVPR , 2026. Siyuan Li, Iago Breno Araujo, Wenqi Ren, Zhangyang Wang, Eric K Tokuda, Roberto Hirata Junior, Roberto Cesar-Junior, Jiawan Zhang, Xiaojie Guo, and Xiaochun Cao. Single image deraining: A comprehensive benchmark analysis. In CVPR , pp. 3838–3847, 2019. Jingxi Liao, Shijie Hao, Richang Hong, and Meng Wang. Gt-mean loss: A simple yet effective solution for brightness mismatch in low-light image enhancement. In ICCV , 2025. Hengxing Liu, Mingjia Li, and Xiaojie Guo. Regional attention for shadow removal. In ACM Multimedia ,pp. 5949–5957, 2024. Xu Liu, Sen Lin, Kaichen Chi, Zhiyong Tao, and Yang Zhao. Boths: Super lightweight network-enabled underwater image enhancement. IEEE Geoscience and Remote Sensing Letters , 20:1–5, 2022. Yidi Liu, Xueyang Fu, Jie Huang, Jie Xiao, Dong Li, Wenlong Zhang, Lei Bai, and Zheng-Jun Zha. La-tent harmony: Synergistic unified uhd image restoration via latent space regularization and controllable refinement. In NeurIPS , 2025. Kin Gwn Lore, Adedotun Akintayo, and Soumik Sarkar. Llnet: A deep autoencoder approach to natural low-light image enhancement. PR , 61:650–662, 2017. Kede Ma, Kai Zeng, and Zhou Wang. Perceptual quality assessment for multi-exposure image fusion. IEEE TIP , 24(11):3345–3356, 2015. Kangfu Mei, Luis Figueroa, Zhe Lin, Zhihong Ding, Scott Cohen, and Vishal M Patel. Latent feature-guided diffusion models for shadow removal. In WACV , pp. 4313–4322, 2024. Ankita Naik, Apurva Swarnakar, and Kartik Mittal. Shallow-uwnet: Compressed model for underwater image enhancement (student abstract). In AAAI , volume 35, pp. 15853–15854, 2021. Xu Qin, Zhilin Wang, Yuanchao Bai, Xiaodong Xie, and Huizhu Jia. Ffa-net: Feature fusion attention network for single image dehazing. In AAAI , volume 34, pp. 11908–11915, 2020. Hao Shen, Zhong-Qiu Zhao, Yulun Zhang, and Zhao Zhang. Mutual information-driven triple interaction net-work for efficient image dehazing. In Proceedings of the 31st ACM international conference on multimedia ,pp. 7–16, 2023. 15 Yuda Song, Zhuqing He, Hui Qian, and Xin Du. Vision transformers for single image dehazing. IEEE TIP ,32:1927–1941, 2023. Shangquan Sun, Wenqi Ren, Xinwei Gao, Rui Wang, and Xiaochun Cao. Restoring images in adverse weather conditions via histogram transformer. In ECCV , 2024a. Shangquan Sun, Wenqi Ren, Xinwei Gao, Rui Wang, and Xiaochun Cao. Restoring images in adverse weather conditions via histogram transformer. In ECCV , pp. 111–129. Springer, 2024b. Vassilios Vonikakis, Rigas Kouskouridas, and Antonios Gasteratos. On the evaluation of illumination com-pensation algorithms. Multimedia Tools and Applications , 77(8):9211–9231, 2018. Hainuo Wang, Qiming Hu, and Xiaojie Guo. Modem: A morton-order degradation estimation mechanism for adverse weather image recovery. In NeurIPS , 2025. Jifeng Wang, Xiang Li, and Jian Yang. Stacked conditional generative adversarial networks for jointly learning shadow detection and shadow removal. In CVPR , pp. 1788–1797, 2018. Shuhang Wang, Jin Zheng, Hai-Miao Hu, and Bo Li. Naturalness preserved enhancement algorithm for non-uniform illumination images. IEEE TIP , 22(9):3538–3548, 2013. Zhendong Wang, Xiaodong Cun, Jianmin Bao, Wengang Zhou, Jianzhuang Liu, and Houqiang Li. Uformer: A general u-shaped transformer for image restoration. In CVPR , pp. 17683–17693, 2022. Zhou Wang, Alan C Bovik, Hamid R Sheikh, and Eero P Simoncelli. Image quality assessment: from error visibility to structural similarity. IEEE TIP , 13(4):600–612, 2004. Chen Wei, Wenjing Wang, Wenhan Yang, and Jiaying Liu. Deep retinex decomposition for low-light en-hancement. In BMVC , 2018. Haoning Wu, Zicheng Zhang, Weixia Zhang, Chaofeng Chen, Liang Liao, Chunyi Li, Yixuan Gao, Annan Wang, Erli Zhang, Wenxiu Sun, et al. Q-align: Teaching lmms for visual scoring via discrete text-defined levels. arXiv preprint arXiv:2312.17090 , 2023. Jie Xiao, Xueyang Fu, Yurui Zhu, Dong Li, Jie Huang, Kai Zhu, and Zheng-Jun Zha. Homoformer: Homog-enized transformer for image shadow removal. In CVPR , pp. 25617–25626, June 2024. Xiaogang Xu, Ruixing Wang, and Jiangbo Lu. Low-light image enhancement via structure modeling and guidance. In CVPR , pp. 9893–9903, 2023. Qingsen Yan, Yixu Feng, Cheng Zhang, Guansong Pang, Kangbiao Shi, Peng Wu, Wei Dong, Jinqiu Sun, and Yanning Zhang. Hvi: A new color space for low-light image enhancement. In CVPR , 2025. Wenhan Yang, Wenjing Wang, Haofeng Huang, Shiqi Wang, and Jiaying Liu. Sparse gradient regularized deep retinex network for robust low-light image enhancement. IEEE TIP , 30:2072–2086, 2021. Syed Waqas Zamir, Aditya Arora, Salman Khan, Munawar Hayat, Fahad Shahbaz Khan, Ming-Hsuan Yang, and Ling Shao. Learning enriched features for real image restoration and enhancement. In ECCV , pp. 492–511, 2020. Syed Waqas Zamir, Aditya Arora, Salman Khan, Munawar Hayat, Fahad Shahbaz Khan, and Ming-Hsuan Yang. Restormer: Efficient transformer for high-resolution image restoration. In CVPR , pp. 5728–5739, 2022. Jing Zhang, Yang Cao, Zheng-Jun Zha, and Dacheng Tao. Nighttime dehazing with a synthetic benchmark. In Proceedings of the 28th ACM international conference on multimedia , pp. 2355–2363, 2020. Richard Zhang, Phillip Isola, Alexei A Efros, Eli Shechtman, and Oliver Wang. The unreasonable effectiveness of deep features as a perceptual metric. In CVPR , pp. 586–595, 2018. 16 Song Zhang, Shili Zhao, Dong An, Daoliang Li, and Ran Zhao. Liteenhancenet: A lightweight network for real-time single underwater image enhancement. Expert Systems with Applications , 240:122546, 2024. Yonghua Zhang, Jiawan Zhang, and Xiaojie Guo. Kindling the darkness: A practical low-light image enhancer. In ACM MM , pp. 1632–1640, 2019. Hao Zhao, Mingjia Li, Qiming Hu, and Xiaojie Guo. Reversible decoupling network for single image reflection removal. In CVPR , pp. 26430–26439, 2025. 17 A Limitations and Future Work 
+
+PAL models the photometric discrepancy as a global affine color transformation ( CˆI + b, 12 parameters), which cannot explicitly capture spatially varying photometric effects such as local illumination. However, this is a deliberate design choice: a global model avoids absorbing spatially localized content (textures, edges) into the alignment, which would undermine restoration supervision. Our all-weather restoration experiments (Table 6 of the main paper), which include both global and localized degradations, empirically confirm that PAL does not interfere with localized restoration. A promising future direction is to explore patch-wise or spatially adaptive affine partitions that can handle local photometric variation while retaining the closed-form efficiency. Real camera pipelines involve non-linear operations such as gamma correction and tone mapping. PAL’s affine model provides a first-order approximation to these transformations. While this is a simplification, it is well justified: in the neighborhood of the operating point, most smooth non-linear color transforms are well approximated by their local tangent (affine) map. Moreover, the affine model strikes an effective balance between expressiveness and robustness, as it captures the dominant modes of photometric variation (gain, bias, cross-channel coupling) without risking overfitting to image content. Our extensive experiments across 16 datasets with diverse imaging pipelines demonstrate that this approximation is practically sufficient. Extending PAL to higher-order models (e.g., polynomial color transforms) is a natural future direction, though care must be taken to prevent the alignment from absorbing content-relevant signal. 
+
+## B Scope and Applicability 
+
+We discuss the scope of tasks and scenarios where PAL is expected to be most beneficial, as well as cases where its impact is limited. 
+
+Tasks with significant per-pair photometric inconsistency. PAL provides the largest improvements when the training data exhibits substantial per-pair variation in global brightness, color, or white bal-ance. This includes: (1) enhancement tasks where photometric transfer is intrinsic (low-light enhancement, underwater image enhancement), (2) restoration tasks where acquisition mismatch introduces spurious pho-tometric shifts (dehazing, deraining), and (3) multi-dataset training (all-in-one restoration) where different constituent datasets have distinct photometric profiles. In all these cases, the per-pair photometric compo-nent dominates the gradient energy (high ρ in Eq. (4) of the main paper), and PAL effectively redirects the gradient budget toward structural content. 
+
+Tasks with minimal photometric shift. For tasks such as image super-resolution and Gaussian denoising, the ground truth and input share nearly identical photometric profiles by construction. In these cases, the affine alignment converges to identity, and PAL provides marginal or no improvement because there is little photometric nuisance to discount. PAL operates in the RGB pixel space and modifies only the reconstruction loss. It is therefore fully compatible with, and complementary to, perceptual losses (Johnson et al., 2016), adversarial losses (Goodfellow et al., 2014), and frequency-domain losses. PAL removes the photometric nuisance from the pixel-level supervision, while these complementary objectives provide additional constraints on perceptual quality or texture fidelity. 
+
+## C Discussion: PAL vs. GT-Mean 
+
+GT-Mean (Liao et al., 2025; Zhang et al., 2019) is an alignment technique tailored for low-light enhance-ment that aligns the global brightness of the prediction to the ground truth via a single scalar ratio before computing the pixel-wise loss or metrics. In this section, we provide a self-contained, formal comparison between PAL and GT-Mean to clarify their relationship in full detail. 18 C.1 Explicit Formulations 
+
+We first state both formulations explicitly. Let ˆI ∈ R3×N denote the predicted image and Igt ∈ R3×N denote the ground truth, where N = H × W is the number of pixels. Each column ˆxi, yi ∈ R3 is the RGB vector of the i-th pixel. 
+
+C.1.1 GT-Mean Loss (Liao et al., 2025) 
+
+GT-Mean computes a single scalar gain from the ratio of the global means of the ground truth and prediction: 
+
+cGM = μ(Igt )
+
+μ(ˆI) , where μ(A) = 13N
+
+> 3
+
+∑
+
+> c=1
+> N
+
+∑
+
+> i=1
+
+Ac,i , (13) i.e., μ(·) averages over all pixels and all three color channels jointly, producing a single number. The aligned prediction and the GT-Mean loss are then: 
+
+ˆIGM = cGM · ˆI, LGT-Mean = ∥∥ˆIGM − Igt 
+
+∥∥. (14) In matrix form, this is equivalent to applying the alignment transform ˆxi 7 → cGM E ˆxi + 0, where E is the 
+
+3×3 identity matrix: 
+
+CGM 
+
+︸ ︷︷ ︸ 
+
+> 3×3
+
+= cGM 
+
+
+
+1 0 00 1 00 0 1
+
+ , bGM 
+
+︸ ︷︷ ︸ 
+
+> 3×1
+
+=
+
+
+
+000
+
+ . (15) Thus, GT-Mean has 1 free parameter (cGM ): it applies the same multiplicative factor to every pixel and every color channel, with no additive bias. 
+
+C.1.2 Photometric Alignment Loss (Ours) 
+
+PAL models the photometric discrepancy as a full affine color transformation with a 3×3 matrix C and a 
+
+3×1 bias vector b:
+
+yi ≈ C ˆxi + b, i = 1 , . . . , N. (16) The optimal parameters are obtained by ridge-regularized least squares (derivation in Section E.1 of this supplement): 
+
+C∗ = Cov( Igt , ˆI)(Cov( ˆI, ˆI) + ϵ E)−1, b∗ = μgt − C∗μˆI, (17) where μˆI, μ gt ∈ R3 are the per-channel means (unlike GT-Mean’s scalar mean). The aligned prediction and the PAL loss are then: ˆIPAL = C∗ˆI + b∗, LPAL = ∥∥ˆIPAL − Igt 
+
+∥∥. (18) In full matrix form, C∗ has 9 free parameters (including off-diagonal entries that capture cross-channel coupling) and b∗ has 3 free parameters (additive per-channel biases), totaling 12 free parameters :
+
+C∗
+
+︸︷︷︸ 
+
+> 3×3
+
+=
+
+
+
+crr crg crb 
+
+cgr cgg cgb 
+
+cbr cbg cbb 
+
+ , b∗
+
+︸︷︷︸ 
+
+> 3×1
+
+=
+
+
+
+br
+
+bg
+
+bb
+
+ . (19) 
+
+C.2 What GT-Mean Cannot Capture 
+
+Since GT-Mean applies a single scalar to all channels identically, it cannot model any phenomenon where the three color channels behave differently: 
+
+• Per-channel gain differences. Exposure and sensor response often affect R, G, B channels non-uniformly. GT-Mean’s scalar applies the same correction to all three channels ( crr =cgg =cbb =cGM ), leaving per-channel gain discrepancies unresolved. 19 Methods LOLv1 LOLv2-syn LOLv2-real PSNR SSIM LPIPS IQA IAA PSNR SSIM LPIPS IQA IAA PSNR SSIM LPIPS IQA IAA MIRNet (Zamir et al., 2020) 20.57 0.769 0.254 2.914 1.855 21.74 0.877 0.138 2.650 2.023 21.28 0.791 0.355 2.256 1.377 +GT-Mean Loss 20.79 0.787 0.233 2.892 1.728 21.92 0.888 0.118 2.840 2.084 21.77 0.800 0.365 2.285 1.331 +PAL (Ours) 21.01 0.791 0.228 2.923 1.729 22.13 0.890 0.117 2.870 2.091 22.32 0.816 0.348 2.535 1.469                                                                                                      
+
+> Uformer (Wang et al., 2022) 18.85 0.751 0.288 2.751 1.661 21.50 0.884 0.120 2.919 2.058 19.80 0.714 0.346 2.135 1.387 +GT-Mean Loss 19.01 0.759 0.279 2.728 1.558 21.62 0.894 0.107 2.996 2.104 19.92 0.729 0.331 2.154 1.416 +PAL (Ours) 19.31 0.767 0.247 2.858 1.666 21.79 0.890 0.112 2.952 2.063 20.12 0.738 0.327 2.780 1.649
+> Retinexformer (Cai et al., 2023) 23.40 0.822 0.269 3.148 1.980 25.48 0.930 0.101 2.404 2.096 21.69 0.846 0.276 3.163 1.962 +GT-Mean Loss 24.03 0.842 0.240 3.412 2.094 25.87 0.940 0.083 2.438 2.189 21.87 0.849 0.253 3.398 2.057 +PAL (Ours) 24.53 0.847 0.239 3.533 2.122 26.01 0.941 0.083 2.435 2.162 22.73 0.864 0.265 3.499 2.077
+> CID-Net (Yan et al., 2025) 23.97 0.849 0.104 3.791 2.071 25.44 0.935 0.047 3.299 2.171 23.19 0.857 0.136 3.699 2.042 +GT-Mean Loss 23.72 0.838 0.105 3.993 2.133 25.53 0.936 0.045 3.410 2.198 23.39 0.863 0.120 3.917 2.089 +PAL (Ours) 24.13 0.854 0.099 3.923 2.104 25.84 0.937 0.045 3.373 2.185 23.95 0.870 0.112 3.938 2.103
+
+Table 9: Direct comparison of Baseline, GT-Mean Loss (Liao et al., 2025), and PAL (Ours) on LOL datasets. Best and second-best results are in bold and underlined. PAL achieves the best PSNR and SSIM across all backbones and datasets, demonstrating that the full affine alignment consistently outperforms mean-based alignment even on GT-Mean’s home domain (LLIE). 
+
+• White-balance shifts. These introduce off-diagonal terms in C (e.g., crb ̸ = 0 for a warm-to-cool shift). GT-Mean’s CGM has all zeros off the diagonal, so it cannot model any cross-channel coupling. 
+
+• Additive color biases. Black-level offsets or ambient light require b̸ = 0. GT-Mean is purely multi-plicative ( bGM = 0) and cannot capture additive shifts. 
+
+• Color-temperature variations. These combine both per-channel multiplicative and cross-channel effects. As shown in Figure 2 of the main paper, GT-Mean leaves substantial color residuals in such cases, while PAL’s full affine model closely recovers the reference color. 
+
+C.3 Estimator Bias of GT-Mean 
+
+From the statistical view, GT-Mean’s ratio-of-means estimator cGM = μ(Igt )/μ (ˆI) is a biased estimator even for the best-fit scalar gain. The least-squares optimal scalar c∗ = E[ˆI · Igt ]/E[ˆI2] differs from cGM unless the pixel intensities are uncorrelated, which is often violated for natural images. 
+
+C.4 Task Generalizability 
+
+GT-Mean was tailored for the low-light image enhancement domain, where the dominant photometric shift is an overall brightness difference. While effective in this context, it fails for tasks with more complex color discrepancy, for instance, underwater enhancement, as these tasks exhibit color-dependent and coupled photometric shifts that GT-Mean’s scalar model cannot address. 
+
+Empirical comparison on low-light enhancement. To provide a direct head-to-head comparison, we train all four LLIE backbones under three configurations: Baseline, +GT-Mean Loss (Liao et al., 2025), and +PAL (Ours), with all other settings identical. Results are shown in Table 9. Even on low-light enhancement, GT-Mean’s home domain, PAL consistently outperforms GT-Mean across all four backbones on the primary fidelity metrics (PSNR, SSIM). The improvements are particularly notable on LOLv2-real, where the photometric inconsistency is strongest: PAL outperforms GT-Mean by +0.55 dB (MIRNet), +0.20 dB (Uformer), +0.86 dB (Retinexformer), and +0.56 dB (CID-Net) in PSNR, with cor-responding SSIM gains. On CID-Net, GT-Mean actually degrades PSNR on LOLv1 relative to the baseline (23.72 vs. 23.97 dB), likely because its additive correction interferes with CID-Net’s learnable color space. PAL, by contrast, improves CID-Net across all three datasets. These results confirm that PAL’s additional modeling capacity (multiplicative gains and cross-channel coupling) translates into measurable improvements even in the specific domain for which GT-Mean was designed. 20 D Implementation of PAL 
+
+We provide a PyTorch implementation of PAL below. The core computation is minimal and introduces no learnable parameters.  
+
+> 1
+
+def pal_loss ( pred , gt , alpha =0.6 , eps =1 e -3) :  
+
+> 2
+
+" " " Photometric Alignment Loss .  
+
+> 3
+
+Args : pred , gt : (B ,3 ,H , W ) in [0 ,1].  
+
+> 4
+
+Returns : scalar loss . " " "  
+
+> 5
+
+B , C , H , W = pred . shape  
+
+> 6
+
+# Flatten to (B , N , 3) pixels  
+
+> 7
+
+P = pred . permute (0 ,2 ,3 ,1) . reshape (B , -1 ,3)  
+
+> 8
+
+T = gt . permute (0 ,2 ,3 ,1) . reshape (B , -1 ,3)  
+
+> 9
+
+# Design matrix X = [P , 1] -> (B , N , 4)  
+
+> 10
+
+X = torch . cat ([ P , P . new_ones (B , P . shape [1] ,1) ] , -1)  
+
+> 11
+
+# Ridge regression : W = ( XtX + eps * I ) ^{ -1} XtT  
+
+> 12
+
+XtX = X . transpose (1 ,2) @ X # (B ,4 ,4)  
+
+> 13
+
+XtT = X . transpose (1 ,2) @ T # (B ,4 ,3)  
+
+> 14
+
+I4 = torch . eye (4 , device = pred . device ) . unsqueeze (0)  
+
+> 15
+
+W = torch . linalg . solve ( XtX + eps * I4 , XtT )  
+
+> 16
+
+M = W . transpose (1 ,2) # (B ,3 ,4)  
+
+> 17
+
+# Apply alignment ( stop - gradient on M )  
+
+> 18
+
+M = M . detach ()  
+
+> 19
+
+Xf = torch . cat ([ pred . reshape (B ,3 , -1) ,  
+
+> 20
+
+pred . new_ones (B ,1 , H * W ) ] , 1)  
+
+> 21
+
+aligned = ( M @ Xf ) . reshape (B , 3 , H , W )  
+
+> 22
+
+# Combined loss  
+
+> 23
+
+return alpha * F . l1_loss ( aligned , gt ) 
+
+## E Extended Theoretical Analysis 
+
+E.1 Derivation of the Closed-Form Alignment E.1.1 Problem Formulation 
+
+Let I ∈ R3×N denote the predicted image and Igt ∈ R3×N denote the ground truth reference image, where 
+
+N represents the total number of pixels (flattened spatial dimensions). Each column xi of I and yi of Igt 
+
+represents the RGB vector of the i-th pixel. We model the photometric relationship as an affine transformation yi ≈ Cx i + b, where C ∈ R3×3 is the linear transformation matrix capturing exposure and color coupling, and b ∈ R3×1 is the bias capturing global offsets. To ensure numerical stability and prevent overfitting to monochromatic regions (where the color covariance would be singular), we employ Ridge Regression ( ℓ2 regularization) on the transformation matrix C. Our objective function is to minimize the regularized Mean Squared Error: 
+
+J (C, b) = 
+
+> N
+
+∑
+
+> i=1
+
+∥(Cx i + b) − yi∥22 + λ∥C∥2 
+
+> F
+
+, (20) where ∥ · ∥ F denotes the Frobenius norm and λ is the regularization coefficient. 
+
+E.2 Optimal Bias 
+
+First, we solve for the optimal bias b∗ by taking the partial derivative of Eq. 20 with respect to b and setting it to zero: 
+
+∂J
+
+∂b =
+
+> N
+
+∑
+
+> i=1
+
+2( Cx i + b − yi) = 0 . (21) 21 Rearranging the terms, we obtain: 
+
+> N
+
+∑
+
+> i=1
+
+yi = C
+
+> N
+
+∑
+
+> i=1
+
+xi +
+
+> N
+
+∑
+
+> i=1
+
+b. (22) Dividing by N , we express the relationship in terms of the expected values (means) of the images, denoted as μI = 1
+
+> N
+
+∑ xi and μgt = 1
+
+> N
+
+∑ yi:
+
+μgt = CμI + b. (23) Thus, the optimal bias is determined by the alignment of the centroids: 
+
+b∗ = μgt − CμI. (24) 
+
+E.2.1 Optimal Transformation Matrix 
+
+Substituting b∗ back into the objective function eliminates b and centers the data. Let ¯xi = xi − μI and 
+
+¯yi = yi − μgt be the mean-centered pixels. The objective function simplifies to: 
+
+J (C) = 
+
+> N
+
+∑
+
+> i=1
+
+∥C¯xi − ¯yi∥22 + λ∥C∥2 
+
+> F
+
+. (25) We can express this in matrix notation. Let ¯I ∈ R3×N and ¯Igt ∈ R3×N be the matrices of centered pixels. The objective becomes: 
+
+J (C) = ∥C¯I − ¯Igt ∥2 
+
+> F
+
++ λ∥C∥2 
+
+> F
+
+. (26) Using the trace properties of the Frobenius norm ( ∥A∥2 
+
+> F
+
+= Tr (A⊤A)), we expand the term: 
+
+J (C) = Tr ((C¯I − ¯Igt )⊤(C¯I − ¯Igt )) + λTr (C⊤C)= Tr (¯I⊤C⊤C¯I − ¯I⊤C⊤¯Igt − ¯I⊤
+
+> gt
+
+C¯I + ¯I⊤
+
+> gt
+
+¯Igt 
+
+)
+
++ λTr (C⊤C).
+
+(27) Taking the derivative with respect to C and setting it to zero: 
+
+∂J
+
+∂C = 2 C¯I¯I⊤ − 2¯Igt ¯I⊤ + 2 λC = 0 . (28) Rearranging to solve for C:
+
+C(¯I¯I⊤ + λE) = ¯Igt ¯I⊤, (29) where E is the 3 × 3 identity matrix. We recognize that the term 1 
+
+> N
+
+¯I¯I⊤ is the covariance matrix of the predicted image, Cov (I, I), and 1 
+
+> N
+
+¯Igt ¯I⊤ is the cross-covariance matrix, Cov (Igt , I). Dividing the equation by N and letting ϵ = λ/N , we arrive at the final closed-form solution: 
+
+C∗ = Cov (Igt , I) ( Cov (I, I) + ϵE)−1 . (30) This matches Eq. (6) in the main paper. The term ϵE ensures that the matrix inverse exists and is numerically stable even when the input image I has low color variance (rank-deficient covariance). 22 E.2.2 Cross-Term Under Ridge Regularization 
+
+Proposition 1 in the main paper establishes exact orthogonal decomposition of the MSE loss under unregu-larized least-squares alignment. In practice, we use ridge regularization ( ϵ > 0) for numerical stability. This modifies the first-order optimality conditions for C∗ (while the bias optimality is unchanged since b is not regularized): ∑ 
+
+> i
+
+∆(i) 
+
+> s
+
+= 0, ∑ 
+
+> i
+
+∆(i) 
+
+> s
+
+ˆI(i)⊤ = λ C∗, (31) where λ = N ϵ is the unnormalized regularization term. Compared to the unregularized case (Eq. (3) of the main paper, where the right-hand side is 0), the structural residual is no longer exactly orthogonal to the prediction. Expanding the cross-term: 
+
+∑
+
+> i
+
+⟨∆(i) 
+
+> p
+
+, ∆(i) 
+
+> s
+
+⟩ = tr [(C∗ −E)⊤∑ 
+
+> i
+
+∆(i) 
+
+> s
+
+ˆI(i)⊤] + b∗⊤ ∑ 
+
+> i
+
+∆(i)
+
+> s
+
+= tr [(C∗ −E)⊤ · λ C∗] + 0 = λ(∥C∗∥2 
+
+> F
+
+− tr( C∗)). (32) The MSE therefore decomposes as: 
+
+∑
+
+> i
+
+∥∥I(i) 
+
+> gt
+
+− ˆI(i)∥∥2 = ∑
+
+> i
+
+∥∥∆(i)
+
+> p
+
+∥∥2 + ∑
+
+> i
+
+∥∥∆(i)
+
+> s
+
+∥∥2 + λ(∥C∗∥2 
+
+> F
+
+− tr( C∗)). (33) The cross-term is proportional to λ and vanishes continuously. In our implementation, the regularization is applied to the unnormalized Gram matrix ¯I¯I⊤ with λ = 0 .001 (equivalently, ϵ = λ/N in the covariance form of Eq. 30), so the cross-term is O(λ) = O(10 −3), negligible relative to the photometric and structural energies that scale as O(N ). As a result, the approximate decomposition holds, and the gradient dominance analysis from the main paper remains valid. The regularization bias also has a well-understood effect on the alignment itself. Ridge shrinks each eigendirection of C∗ by a factor of λk/(λk + ϵ), where λk are the eigenvalues of Cov( ˆI, ˆI). For well-conditioned images where λk ≫ ϵ, this shrinkage is negligible; for ill-conditioned cases (near-monochromatic regions), the shrinkage prevents the degenerate solutions that would arise from inverting a singular covariance. 
+
+E.2.3 Gradient Dominance Under ℓ1 Loss 
+
+The orthogonal decomposition in Proposition 1 of the main paper relies on the quadratic structure of the ℓ2
+
+norm. The ℓ1 loss LL1 = ∑ 
+
+> i
+
+∥I(i) 
+
+> gt
+
+− ˆI(i)∥1 does not admit an analogous exact decomposition, since in general 
+
+∥a + b∥1̸ = ∥a∥1 + ∥b∥1. However, we show that the gradient dominance pathology persists, and in fact is 
+
+more severe , under ℓ1.
+
+Gradient of ℓ1. The per-pixel, per-channel gradient of the ℓ1 loss is: 
+
+∂∂ ˆI(i)
+
+> c
+
+∣∣I(i) 
+
+> gt ,c
+
+− ˆI(i)
+
+> c
+
+∣∣ = −sign (∆(i) 
+
+> p,c
+
++ ∆ (i)
+
+> s,c
+
+), (34) where c indexes the color channel. Unlike ℓ2, where the gradient magnitude is proportional to the residual, the ℓ1 gradient has unit magnitude at every pixel regardless of the error size. The only information carried by the gradient is its sign , which is determined by whichever component, photometric or structural, has a larger absolute value at that pixel-channel. 
+
+Photometric dominance of gradient direction. As established in the main paper, ∆(i) 
+
+> p
+
+is spatially 
+
+dense (non-zero at every pixel, since it is a global affine function of the prediction), while ∆(i) 
+
+> s
+
+is spatially 
+
+sparse (concentrated on edges, textures, and fine structures). For the majority of pixels in smooth regions: 
+
+|∆(i)
+
+> p,c
+
+| ≫ | ∆(i)
+
+> s,c
+
+| =⇒ sign (∆(i) 
+
+> p,c
+
++ ∆ (i)
+
+> s,c
+
+) = sign (∆(i)
+
+> p,c
+
+). (35) Hence, the ℓ1 gradient direction is determined by the photometric component for most pixels, and only the sparse minority where structural error exceeds photometric error contributes a content-relevant gradient. 23 ℓ1 amplifies the pathology. Under ℓ2, a photometric mismatch of magnitude δ at N pixels produces a total gradient energy of O(N δ 2); a structural mismatch of magnitude ∆ at M pixels produces O(M ∆2).The gradient energy ratio is N δ 2/(M ∆2). Under ℓ1, however, both components produce unit-magnitude gradients, so the ratio is simply Np/N s, where Np is the number of pixels where photometric error dominates the sign, and Ns = N − Np is the complement. Since Np ≫ Ns (photometric error is dense), the ℓ1 gradient direction is dominated by the photometric component even when its magnitude is smaller . This analysis demonstrates that PAL is well-motivated under ℓ1 training as under ℓ2. In our experiments, we apply PAL when the baseline model is trained with ℓ1 losses. This empirically confirms the phenomenon. 
+
+## F Additional Per-Pair Photometric Analysis 
+
+To complement the per-pair scatter plots in Figure 2 of the main paper (LOLv2-Real and RESIDE-SOTS), we provide scatter plots for nine datasets used for training in our experiments in Figure 10. Each subplot shows the per-channel (R, G, B) mean intensity of the input versus the ground truth for every image pair in the training set, along with per-channel linear fits. If the photometric mapping were consistent and identity-preserving, all points would lie on the gray diagonal ( y = x). Deviations from this diagonal, scatter around the fitted lines, and separation between the per-channel fits jointly quantify the severity of photometric inconsistency. For each pair (to reduce the number of points, for datasets with more than 1000 images, we plot the first 1000 images ) in the training set, we compute the spatial mean of each color channel independently, yielding a 3-dimensional summary (¯ r, ¯g, ¯b) for both the input and the ground truth. Each channel is then plotted as a separate point (red, green, blue) in the input-mean vs. ground-truth-mean plane, so a dataset of n pairs produces 3n points. To visualize the density of overlapping points, we overlay Gaussian kernel density estimation (KDE) contours for each channel. 
+
+Low-light enhancement (LOL-V2 Real, LOL-V2 Syn, LOL-V1). All three LLIE datasets exhibit the most pronounced inconsistency. The input means cluster near zero (underexposed), while the ground-truth means span a wide range, producing large deviations from the y=x diagonal. This is the canonical example of task-intrinsic photometric inconsistency identified in Section 3.1 of the main paper: different pairs demand different brightness and color-temperature mappings depending on capture conditions and photographer intent. The wide per-pair scatter around each regression line means that the pixel-wise loss receives conflicting photometric supervision across pairs. Moreover, the per-channel regression lines have visibly different slopes, confirming that the inconsistency is not a uniform brightness shift but a channel-dependent color transformation. 
+
+Shadow removal (ISTD), Underwater enhancement (EUVP), and Image dehazing (RESIDE-SOTS). These three datasets illustrate how photometric inconsistency manifests across different task families with varying characteristics. For ISTD, points cluster near the diagonal with ground-truth means slightly above input means, consistent with shadow-free images being brighter. The per-channel regression lines diverge in slope, say, the B channel line is notably steeper than R and G, confirming that shadow attenuation is wavelength-dependent (Hu et al., 2025) and introduces channel-coupled biases beyond a uniform darkening. This per-pair, per-channel variation creates the same conflicting supervision identified in the main paper. For EUVP, R-channel points are systematically shifted below G and B, reflecting the selective attenuation of red wavelengths in underwater imaging (Li et al., 2018b). The per-channel regression lines are clearly separated with different slopes, and the substantial scatter around each line confirms per-pair variability. This channel-coupled behavior exemplifies task-intrinsic inconsistency where physical degradation is inherently wavelength-dependent. For RESIDE-SOTS, points lie below the diagonal (hazy inputs appear brighter than clean ground truth due to additive atmospheric scattering), and the regression lines exhibit non-zero intercepts. These acquisition-induced offsets inject conflicting supervision into the pixel-wise loss. 
+
+All-weather restoration (Snow, Rain+Haze, Raindrop). The three all-weather subsets display qual-itatively different photometric profiles: Snow training data shows tight clustering near the diagonal with moderate scatter since they are synthetic; Rain+Haze exhibits broader scatter with clear channel separation; Raindrop clusters tightly near the diagonal since raindrops cause localized rather than global photometric changes. When combined for all-in-one training, the network receives three distinct photometric profiles simultaneously, amplifying the conflicting supervision. As noted in the main paper (Section 2.1), multi-24 Figure 10: Per-pair photometric analysis across nine datasets spanning four task families. Each plot shows the per-channel (R/G/B) mean intensity of the input vs. ground truth for every training pair, with per-channel linear fits and KDE density contours. The gray dashed line denotes y=x (identity). All datasets exhibit per-pair scatter away from any single trajectory, confirming the ubiquity of per-pair photometric inconsistency that injects conflicting supervision into pixel-wise losses (cf. Section 3.1 of the main paper). The separation between per-channel regression lines further demonstrates that the inconsistency is channel-dependent, requiring a full affine color model to discount. dataset training compounds the inconsistency because each constituent dataset has its own photometric profile, making the per-pair variation even wider. 25

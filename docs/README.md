@@ -6,32 +6,43 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-04-11
-- 运行时间：2026-04-11 19:58:58 UTC
+- 最新运行日期：2026-04-12
+- 运行时间：2026-04-12 19:32:50 UTC
 - 运行状态：成功
-- 本次总论文数：3
-- 精读区：0
-- 速读区：3
+- 本次总论文数：7
+- 精读区：2
+- 速读区：5
 
 ### 今日简报（AI）
-今日聚焦图像编辑与修复前沿，涵盖表情快速迁移、非均匀曝光校正及物理规律约束下的物体操控。
-重点推荐 ExpressEdit 实现的极速风格化表情编辑，以及 PhyEdit 带来的符合物理常识的真实物体操控技术。
-建议关注如何结合物理约束与扩散模型，在复杂
-- 详情：[/202604/11/README](/202604/11/README)
+今日聚焦扩散模型在图像修复与物理感知视频编辑中的突破，深度解析 7 篇前沿成果。
+核心结论揭示了预训练模型潜藏的修复能力，并提出物理感知的视频移除新基准与笔触式生成新思路。
+建议优先研读 9.0 分佳作，掌握如何将生成式 AI 转化为高效的图像恢复与逻辑推理工具。
+- 详情：[/202604/12/README](/202604/12/README)
 
 ### 精读区论文标签
-- 本次无精读推荐。
+1. [Your Pre-trained Diffusion Model Secretly Knows Restoration](/202604/12/2604.04924v1-your-pre-trained-diffusion-model-secretly-knows-restoration)  
+   标签：评分：9.0/10、query:q3
+   evidence：通过提示学习解锁预训练扩散模型的修复行为
+2. [Physics-Aware Video Instance Removal Benchmark](/202604/12/2604.05898v1-physics-aware-video-instance-removal-benchmark)  
+   标签：评分：8.0/10、query:q1
+   evidence：视频实例移除与背景完整性维护
 
 ### 速读区论文标签
-1. [ExpressEdit: Fast Editing of Stylized Facial Expressions with Diffusion Models in Photoshop](/202604/11/2604.03448v1-expressedit-fast-editing-of-stylized-facial-expressions-with-diffusion-models-in-photoshop)  
+1. [Single-Stage Signal Attenuation Diffusion Model for Low-Light Image Enhancement and Denoising](/202604/12/2604.05727v1-single-stage-signal-attenuation-diffusion-model-for-low-light-image-enhancement-and-denoising)  
+   标签：评分：7.0/10、query:q4
+   evidence：用于图像修复和去噪的扩散模型
+2. [Think in Strokes, Not Pixels: Process-Driven Image Generation via Interleaved Reasoning](/202604/12/2604.04746v1-think-in-strokes-not-pixels-process-driven-image-generation-via-interleaved-reasoning)  
    标签：评分：6.0/10、query:q4
-   evidence：使用扩散模型进行图像编辑
-2. [Rethinking Exposure Correction for Spatially Non-uniform Degradation](/202604/11/2604.04136v1-rethinking-exposure-correction-for-spatially-non-uniform-degradation)  
+   evidence：过程驱动的图像生成与合成
+3. [Think in Strokes, Not Pixels: Process-Driven Image Generation via Interleaved Reasoning](/202604/12/2604.04746v2-think-in-strokes-not-pixels-process-driven-image-generation-via-interleaved-reasoning)  
+   标签：评分：6.0/10、query:q4
+   evidence：过程驱动的图像生成与合成
+4. [Think in Strokes, Not Pixels: Process-Driven Image Generation via Interleaved Reasoning](/202604/12/2604.04746v3-think-in-strokes-not-pixels-process-driven-image-generation-via-interleaved-reasoning)  
+   标签：评分：6.0/10、query:q4
+   evidence：通过交替推理的过程驱动图像生成
+5. [SAT: Selective Aggregation Transformer for Image Super-Resolution](/202604/12/2604.07994v1-sat-selective-aggregation-transformer-for-image-super-resolution)  
    标签：评分：6.0/10、query:q1
-   evidence：针对空间非均匀退化的图像修复
-3. [PhyEdit: Towards Real-World Object Manipulation via Physically-Grounded Image Editing](/202604/11/2604.07230v1-phyedit-towards-real-world-object-manipulation-via-physically-grounded-image-editing)  
-   标签：评分：6.0/10、query:q4
-   evidence：用于图像编辑和操作的生成模型
+   evidence：图像超分辨率与修复技术
 
 
 <div class="dpr-home-promo-card">

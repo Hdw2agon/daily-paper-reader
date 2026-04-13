@@ -6,43 +6,34 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-04-12
-- 运行时间：2026-04-12 19:32:50 UTC
+- 最新运行日期：2026-03-15 ~ 2026-04-13
+- 运行时间：2026-04-13 03:40:29 UTC
 - 运行状态：成功
-- 本次总论文数：7
-- 精读区：2
-- 速读区：5
+- 本次总论文数：4
+- 精读区：1
+- 速读区：3
 
 ### 今日简报（AI）
-今日聚焦扩散模型在图像修复与物理感知视频编辑中的突破，深度解析 7 篇前沿成果。
-核心结论揭示了预训练模型潜藏的修复能力，并提出物理感知的视频移除新基准与笔触式生成新思路。
-建议优先研读 9.0 分佳作，掌握如何将生成式 AI 转化为高效的图像恢复与逻辑推理工具。
-- 详情：[/202604/12/README](/202604/12/README)
+深度测评 Nano Banana 2 挑战传统图像修复模型，同步探索智能体驱动与医疗影像修复的前沿进展。
+重点关注 Nano Banana 2 的性能潜力，以及 TIR-Agent 和 RetinexDualV2 在超高清与探索性修复上的突破。
+建议优先研读 Nano Banana 2 的评估结论，判断轻量化模型是否已具备颠覆传统修复架构的实力。
+- 详情：[/20260315-20260413/README](/20260315-20260413/README)
 
 ### 精读区论文标签
-1. [Your Pre-trained Diffusion Model Secretly Knows Restoration](/202604/12/2604.04924v1-your-pre-trained-diffusion-model-secretly-knows-restoration)  
-   标签：评分：9.0/10、query:q3
-   evidence：通过提示学习解锁预训练扩散模型的修复行为
-2. [Physics-Aware Video Instance Removal Benchmark](/202604/12/2604.05898v1-physics-aware-video-instance-removal-benchmark)  
-   标签：评分：8.0/10、query:q1
-   evidence：视频实例移除与背景完整性维护
+1. [Can Nano Banana 2 Replace Traditional Image Restoration Models? An Evaluation of Its Performance on Image Restoration Tasks](/20260315-20260413/2604.03061v1-can-nano-banana-2-replace-traditional-image-restoration-models-an-evaluation-of-its-performance-on-image-restoration-tasks)  
+   标签：评分：8.0/10、query:q3
+   evidence：评估通用生成模型在图像修复任务中的表现
 
 ### 速读区论文标签
-1. [Single-Stage Signal Attenuation Diffusion Model for Low-Light Image Enhancement and Denoising](/202604/12/2604.05727v1-single-stage-signal-attenuation-diffusion-model-for-low-light-image-enhancement-and-denoising)  
-   标签：评分：7.0/10、query:q4
-   evidence：用于图像修复和去噪的扩散模型
-2. [Think in Strokes, Not Pixels: Process-Driven Image Generation via Interleaved Reasoning](/202604/12/2604.04746v1-think-in-strokes-not-pixels-process-driven-image-generation-via-interleaved-reasoning)  
-   标签：评分：6.0/10、query:q4
-   evidence：过程驱动的图像生成与合成
-3. [Think in Strokes, Not Pixels: Process-Driven Image Generation via Interleaved Reasoning](/202604/12/2604.04746v2-think-in-strokes-not-pixels-process-driven-image-generation-via-interleaved-reasoning)  
-   标签：评分：6.0/10、query:q4
-   evidence：过程驱动的图像生成与合成
-4. [Think in Strokes, Not Pixels: Process-Driven Image Generation via Interleaved Reasoning](/202604/12/2604.04746v3-think-in-strokes-not-pixels-process-driven-image-generation-via-interleaved-reasoning)  
-   标签：评分：6.0/10、query:q4
-   evidence：通过交替推理的过程驱动图像生成
-5. [SAT: Selective Aggregation Transformer for Image Super-Resolution](/202604/12/2604.07994v1-sat-selective-aggregation-transformer-for-image-super-resolution)  
-   标签：评分：6.0/10、query:q1
-   evidence：图像超分辨率与修复技术
+1. [TIR-Agent: Training an Explorative and Efficient Agent for Image Restoration](/20260315-20260413/2603.27742v1-tir-agent-training-an-explorative-and-efficient-agent-for-image-restoration)  
+   标签：评分：7.0/10、query:profile-1
+   evidence：用于高效图像修复工具编排的可训练智能体
+2. [RetinexDualV2: Physically-Grounded Dual Retinex for Generalized UHD Image Restoration](/20260315-20260413/2603.27979v1-retinexdualv2-physically-grounded-dual-retinex-for-generalized-uhd-image-restoration)  
+   标签：评分：7.0/10、query:q1
+   evidence：用于多种图像修复的物理基础框架
+3. [MedQ-UNI: Toward Unified Medical Image Quality Assessment and Restoration via Vision-Language Modeling](/20260315-20260413/2603.18465v1-medq-uni-toward-unified-medical-image-quality-assessment-and-restoration-via-vision-language-modeling)  
+   标签：评分：6.0/10、query:q7
+   evidence：通过视觉语言模型进行统一医学图像修复
 
 
 <div class="dpr-home-promo-card">

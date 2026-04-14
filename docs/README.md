@@ -6,46 +6,67 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-04-13
-- 运行时间：2026-04-13 20:26:26 UTC
+- 最新运行日期：2026-04-14
+- 运行时间：2026-04-14 20:48:18 UTC
 - 运行状态：成功
-- 本次总论文数：8
-- 精读区：3
-- 速读区：5
+- 本次总论文数：15
+- 精读区：4
+- 速读区：11
 
 ### 今日简报（AI）
-今日聚焦图像修复新范式，重点解析评分 9.0 的推理型修复框架 RIRF 与多帧超分技术。
-核心突破在于将推理逻辑引入图像重建，并利用 MoE 架构解决无人机及相机阵列的复杂退化问题。
-建议优先研读 RIRF，探索如何通过逻辑推理提升复杂场景下的图像重建质量。
-- 详情：[/202604/13/README](/202604/13/README)
+今日精选 15 篇前沿论文，重点聚焦图像匹配修复与空间布局生成的零样本技术突破。
+最值得关注 MatRes 实现的匹配修复一体化方案，以及 HiddenObjects 利用扩散先验提升物体放置的真实感。
+建议优先研读 MatRes 的测试时自适应机制，探索如何通过单一模型高效解决复杂视觉退化任务。
+- 详情：[/202604/14/README](/202604/14/README)
 
 ### 精读区论文标签
-1. [RIRF: Reasoning Image Restoration Framework](/202604/13/2604.09511v1-rirf-reasoning-image-restoration-framework)  
-   标签：评分：9.0/10、query:profile-1
-   evidence：带有诊断推理的通用图像修复框架
-2. [Enhanced Self-Supervised Multi-Image Super-Resolution for Camera Array Images](/202604/13/2604.06816v2-enhanced-self-supervised-multi-image-super-resolution-for-camera-array-images)  
-   标签：评分：8.0/10、query:q7
-   evidence：自监督多图像超分辨率与修复
-3. [SCoRe: Clean Image Generation from Diffusion Models Trained on Noisy Images](/202604/13/2604.09436v1-score-clean-image-generation-from-diffusion-models-trained-on-noisy-images)  
-   标签：评分：8.0/10、query:q3
-   evidence：无需训练的光谱再生方法，从噪声图像生成清晰图像
+1. [MatRes: Zero-Shot Test-Time Model Adaptation for Simultaneous Matching and Restoration](/202604/14/2604.10081v1-matres-zero-shot-test-time-model-adaptation-for-simultaneous-matching-and-restoration)  
+   标签：评分：9.0/10、query:q3
+   evidence：用于图像修复的零样本测试时自适应
+2. [HiddenObjects: Scalable Diffusion-Distilled Spatial Priors for Object Placement](/202604/14/2604.10675v1-hiddenobjects-scalable-diffusion-distilled-spatial-priors-for-object-placement)  
+   标签：评分：9.0/10、query:q1
+   evidence：基于扩散的图像补全流水线用于物体移除
+3. [Energy-oriented Diffusion Bridge for Image Restoration with Foundational Diffusion Models](/202604/14/2604.10983v1-energy-oriented-diffusion-bridge-for-image-restoration-with-foundational-diffusion-models)  
+   标签：评分：8.0/10、query:profile-1
+   evidence：用于图像修复的扩散桥模型
+4. [Degradation-Aware and Structure-Preserving Diffusion for Real-World Image Super-Resolution](/202604/14/2604.11470v1-degradation-aware-and-structure-preserving-diffusion-for-real-world-image-super-resolution)  
+   标签：评分：8.0/10、query:profile-1
+   evidence：基于扩散模型的图像修复与超分辨率
 
 ### 速读区论文标签
-1. [CatalogStitch: Dimension-Aware and Occlusion-Preserving Object Compositing for Catalog Image Generation](/202604/13/2604.08836v1-catalogstitch-dimension-aware-and-occlusion-preserving-object-compositing-for-catalog-image-generation)  
+1. [RewardFlow: Generate Images by Optimizing What You Reward](/202604/14/2604.08536v1-rewardflow-generate-images-by-optimizing-what-you-reward)  
+   标签：评分：7.0/10、query:q4
+   evidence：用于图像编辑和合成的生成模型
+2. [Multinex: Lightweight Low-light Image Enhancement via Multi-prior Retinex](/202604/14/2604.10359v1-multinex-lightweight-low-light-image-enhancement-via-multi-prior-retinex)  
+   标签：评分：7.0/10、query:profile-1
+   evidence：光照退化下的图像修复
+3. [AmodalSVG: Amodal Image Vectorization via Semantic Layer Peeling](/202604/14/2604.10940v1-amodalsvg-amodal-image-vectorization-via-semantic-layer-peeling)  
    标签：评分：7.0/10、query:q1
-   evidence：在对象合成中恢复生成后的遮挡元素
-2. [Compositional-Degradation UAV Image Restoration: Conditional Decoupled MoE Network and A Benchmark](/202604/13/2604.09313v1-compositional-degradation-uav-image-restoration-conditional-decoupled-moe-network-and-a-benchmark)  
-   标签：评分：7.0/10、query:q1
-   evidence：无人机图像修复与重建
-3. [RHVI-FDD: A Hierarchical Decoupling Framework for Low-Light Image Enhancement](/202604/13/2604.05781v1-rhvi-fdd-a-hierarchical-decoupling-framework-for-low-light-image-enhancement)  
-   标签：评分：6.0/10、query:q7
-   evidence：图像修复与增强框架
-4. [NTIRE 2026 The 3rd Restore Any Image Model (RAIM) Challenge: Multi-Exposure Image Fusion in Dynamic Scenes (Track 2)](/202604/13/2604.09030v1-ntire-2026-the-3rd-restore-any-image-model-raim-challenge-multi-exposure-image-fusion-in-dynamic-scenes-track-2)  
-   标签：评分：6.0/10、query:q7
-   evidence：Restore Any Image Model 图像修复挑战赛
-5. [UHD Low-Light Image Enhancement via Real-Time Enhancement Methods with Clifford Information Fusion](/202604/13/2604.09321v1-uhd-low-light-image-enhancement-via-real-time-enhancement-methods-with-clifford-information-fusion)  
-   标签：评分：6.0/10、query:q7
+   evidence：非模态补全与图像矢量化
+4. [Lightweight Low-Light Image Enhancement via Distribution-Normalizing Preprocessing and Depthwise U-Net](/202604/14/2604.11071v1-lightweight-low-light-image-enhancement-via-distribution-normalizing-preprocessing-and-depthwise-u-net)  
+   标签：评分：7.0/10、query:profile-1
    evidence：低光照图像修复与增强
+5. [Naka-GS: A Bionics-inspired Dual-Branch Naka Correction and Progressive Point Pruning for Low-Light 3DGS](/202604/14/2604.11142v1-naka-gs-a-bionics-inspired-dual-branch-naka-correction-and-progressive-point-pruning-for-low-light-3dgs)  
+   标签：评分：7.0/10、query:profile-1
+   evidence：光度修复与3D重建
+6. [NTIRE 2026 The 3rd Restore Any Image Model (RAIM) Challenge: AI Flash Portrait (Track 3)](/202604/14/2604.11230v1-ntire-2026-the-3rd-restore-any-image-model-raim-challenge-ai-flash-portrait-track-3)  
+   标签：评分：7.0/10、query:q1
+   evidence：真实场景下的图像修复基准
+7. [Monocular Depth Estimation From the Perspective of Feature Restoration: A Diffusion Enhanced Depth Restoration Approach](/202604/14/2604.07664v1-monocular-depth-estimation-from-the-perspective-of-feature-restoration-a-diffusion-enhanced-depth-restoration-approach)  
+   标签：评分：6.0/10、query:q7
+   evidence：扩散增强的深度恢复方法
+8. [Region-Constrained Group Relative Policy Optimization for Flow-Based Image Editing](/202604/14/2604.09386v1-region-constrained-group-relative-policy-optimization-for-flow-based-image-editing)  
+   标签：评分：6.0/10、query:q4
+   evidence：基于流的图像编辑与非目标区域保护
+9. [EditCrafter: Tuning-free High-Resolution Image Editing via Pretrained Diffusion Model](/202604/14/2604.10268v1-editcrafter-tuning-free-high-resolution-image-editing-via-pretrained-diffusion-model)  
+   标签：评分：6.0/10、query:q4
+   evidence：使用预训练生成扩散模型的免微调图像编辑
+10. [UHD-GPGNet: UHD Video Denoising via Gaussian-Process-Guided Local Spatio-Temporal Modeling](/202604/14/2604.11014v1-uhd-gpgnet-uhd-video-denoising-via-gaussian-process-guided-local-spatio-temporal-modeling)  
+   标签：评分：6.0/10、query:q7
+   evidence：视频降噪与修复
+11. [Beyond Model Design: Data-Centric Training and Self-Ensemble for Gaussian Color Image Denoising](/202604/14/2604.11468v1-beyond-model-design-data-centric-training-and-self-ensemble-for-gaussian-color-image-denoising)  
+   标签：评分：6.0/10、query:q7
+   evidence：图像修复与自集成技术
 
 
 <div class="dpr-home-promo-card">

@@ -1,0 +1,499 @@
+Title: SyncFix: Fixing 3D Reconstructions via Multi-View Synchronization
+
+URL Source: https://arxiv.org/pdf/2604.11797v2
+
+Published Time: Thu, 16 Apr 2026 00:19:50 GMT
+
+Number of Pages: 26
+
+Markdown Content:
+# SyncFix: Fixing 3D Reconstructions via Multi-View Synchronization 
+
+Deming Li 1 Abhay Yadav 1 Cheng Peng 2
+
+Rama Chellappa 1 Anand Bhattad 1
+
+> 1
+
+Johns Hopkins University 2University of Virginia 
+
+Project page: https://syncfix.github.io/ 
+
+> View 1 View 2 View 3 View 2 View 3
+
+3DGS Difix3D+ Ours GT 
+
+Fig. 1: Independent diffusion refinement (DifiX3D+) processes each view separately, leading to inconsistent geometry across views (see close-view of table in the bottom panel and highlighted regions above). SyncFix (Ours) instead refines all views jointly, enforcing cross-view agreement during denoising and producing stable 3D structure. 
+
+Abstract. We present SyncFix , a framework that enforces cross-view consistency during the diffusion-based refinement of reconstructed scenes. SyncFix formulates refinement as a joint latent bridge matching prob-lem, synchronizing distorted and clean representations across multiple views to fix the semantic and geometric inconsistencies. This means Sync-Fix learns a joint conditional over multiple views to enforce consistency throughout the denoising trajectory. Our training is done only on im-age pairs, but it generalizes naturally to an arbitrary number of views  
+
+> arXiv:2604.11797v2 [cs.CV] 14 Apr 2026 2Deming Li et al. during inference. Moreover, reconstruction quality improves with addi-tional views, with diminishing returns at higher view counts. Qualitative and quantitative results demonstrate that SyncFix consistently gener-ates high-quality reconstructions and surpasses current state-of-the-art baselines, even in the absence of clean reference images. SyncFix achieves even higher fidelity when sparse references are available.
+
+# 1 Introduction 
+
+Radiance fields [21] and 3D Gaussian splatting [10] under sparse-view or off-trajectory settings often produce scenes plagued by floaters, texture artifacts, and geometric distortions. Recent approaches attempt to mitigate these issues by leveraging the rich priors of 2D generative models [35, 37]. Typically, these methods render novel views, refine each image using a diffusion model condi-tioned on a reference view, and distill the refined outputs back into the 3D representation. However, these refinement methods treat each view as an independent 2D generation task. This ignores important cross-view geometric and semantic con-straints and that all views are projections of the same underlying 3D scene. Therefore, independent refinement can produce inconsistent results for ambigu-ous structures or regions with large artifacts across different viewpoints. When these conflicting signals are distilled back into the 3D model, optimization be-comes unstable, leading to appearance drift and degraded geometry. In this paper, we impose multi-view consistency directly during the refine-ment process rather than correcting it post hoc. To this end, we introduce Sync-Fix , a latent bridge matching formulation that models refinement as joint con-ditional generation over multiple views. SyncFix aligns latent representations across views during the denoising process and encourages information exchange via cross-view attention without any explicit camera information. Each view is therefore refined in the context of all others, ensuring consistent semantics and geometry prior to 3D distillation. During training, we train to refine only two views simultaneously, but its permutation-invariant latent interactions using attention naturally extend seam-lessly to arbitrary numbers of views at inference. As more views are provided, the cross-view constraints become stricter and the solution space narrows, which leads to systematically better final reconstructions. We also find that SyncFix produces consistent multi-view outputs even when no clean reference frames are available, and it can further benefit from sparse references when they exist. We substantiate these claims using perceptual metrics and through analyses of geometric alignment and semantic correspondence. 
+
+# 2 Related Work 
+
+Sparse-View 3D Reconstruction. NeRF [21] and 3DGS [10] produce high-fidelity geometry from dense captures. With sparse inputs the problem becomes SyncFix 3
+
+ill-posed: reconstructions develop floaters, fragmented surfaces, and blurred tex-tures. Regularization-based approaches constrain frequency content [22, 30, 40] or inject depth priors [5, 39]. Feed-forward Gaussian splatting methods [9, 41] leverage learned multi-view encoders [32] for direct prediction. These methods reduce artifacts but do not eliminate them; the residual degradation motivates generative refinement. 
+
+Per-View Refinement with 2D Priors. The dominant repair paradigm ren-ders novel views, refines each independently with a 2D diffusion model, and distills the results back into the 3D representation. This follows the Score Distil-lation Sampling framework [25, 31], originally developed for text-to-3D genera-tion [11,33] and since adapted for reconstruction repair. Nerfbusters [35] applies diffusion guidance during NeRF optimization. ReconFusion [38] trains a multi-view conditioned prior for few-view regularization. Instruct-NeRF2NeRF [8] uses SDEdit [20] on individual renderings. Difix3D+ [37] distills a single-step re-finement filter and adds limited cross-view conditioning through reference-view cross-attention. FreeFix [43] manipulates latent trajectories without retraining. These methods ultimately optimize per-view reconstruction objectives, even when limited cross-view signals are introduced. The 2D prior never sees mul-tiple views simultaneously, so it may interpret the same artifact differently from each angle. The 3D distillation stage must reconcile the resulting conflicts. 
+
+Coupling Views inside the Generator. A natural fix is to condition genera-tion on multiple views at once. Video diffusion models provide implicit coupling through temporal attention: 3DGS-Enhancer [16] casts view consistency as tem-poral coherence and refines 3DGS with a confidence-aware loop; ReconX [15] conditions video diffusion on a global point cloud for sparse-view reconstruction. Multi-view diffusion architectures couple views more directly. MVDream [28], SyncDreamer [18], CAT3D [7], and ViewCrafter [42] synchronize attention across generated views. 3DEnhancer [19] applies this idea to 3D enhancement, us-ing multi-view row attention and epipolar aggregation within a latent diffusion model. These methods demonstrate that coupling views improves coherence. However, they remain within the denoising diffusion framework: views interact only through attention over noisy intermediate states, and sampling requires iterative denoising. 
+
+Flow-Based Multi-View Refinement. Rectified Flow [17] and Flow Match-ing [14] replace iterative denoising with learned ODEs that transport between distributions. Latent Bridge Matching (LBM) [4] extends this to conditional generation via deterministic bridges between paired latents. SyncLight [26] adds cross-view attention to LBM for consistent relighting. SyncFix builds on this foundation but targets a different problem: repairing degraded 3D geometry. We learn a joint flow over the product latent space of multiple distorted renderings and their clean counterparts. Where attention-based diffusion models such as 3DGS-Enhancer couple views implicitly through shared noise states, SyncFix couples them with deterministic latent bridge matching, enforcing semantic and 4 Deming Li et al. 
+
+geometric agreement before any image is decoded. Thus, SyncFix is a single-pass, intrinsically consistent multi-view refinement without iterative denoising. 
+
+# 3 Method 
+
+Our goal is to refine 3D reconstructions while preserving multi-view consistency. Existing approaches refine each rendered view independently and rely on the 3D representation to harmonize conflicting corrections. This harmonization is unreliable. For example, one view may introduce high-frequency structures (e.g., a painting on a wall) while another suppresses them, leading to inconsistent geometry and texture when fused back into the 3D representation. We instead model refinement as a joint conditional generation problem over multiple views. Let a distorted 3D reconstruction produce N rendered views XD = {x(1)  
+
+> D
+
+, . . . , x(N ) 
+
+> D
+
+}, with corresponding clean targets XGT = {x(1)  
+
+> GT
+
+, . . . , x (N ) 
+
+> GT
+
+}. Marginal meth-ods like Difix3D+ [37] learn independent mappings P (x(i) 
+
+> GT
+
+| x(i) 
+
+> D
+
+). SyncFix in-stead models the joint conditional P (XGT | XD ) and enforces cross-view con-sensus during generation. This shift from marginal to joint modeling is central: corrections for each view are conditioned on all other views simultaneously. 
+
+3.1 Data Generation and Distortion Modeling 
+
+To train SyncFix, we construct paired distorted and clean multi-view data re-flecting realistic reconstruction failure modes. We use scenes from the DL3DV [13] dataset and train 3D Gaussian Splatting (3DGS) [10] models under multiple sparsity levels (6, 8, 10, 12, 16, or 32 train-ing views). This induces geometric inconsistencies, floaters, and blurred high-frequency regions at various levels. We further introduce a cross-split strategy: the available training views are partitioned into multiple disjoint subsets, and a separate sparse 3DGS is trained for each split, yielding diverse distortions at different viewpoints from the same underlying scene. Novel views rendered from these degraded 3DGS models form distorted inputs XD , while ground-truth im-ages provide XGT .To encourage multi-view reasoning, rendered views within each batch are sampled with small pose differences to ensure strong visual overlap. At the same time, these poses are far from the sparse 3DGS training views, guaranteeing large artifacts. This construction forces the model to fix shared structural incon-sistencies across views rather than performing independent cosmetic corrections. 
+
+3.2 Multi-View Latent Bridge Matching 
+
+Prior diffusion-based refinement methods [37] inject artificial noise and perform denoising at a fixed timestep. This assumes artifacts resemble Gaussian corrup-tion. In practice, 3D reconstruction errors are spatially structured and view-dependent; uniform denoising is insufficient. SyncFix 5View 1 View 2  𝑧 GT                     
+
+> 2∗
+> SyncFix
+> multi -view latent
+> bridge model
+> VAE encoder
+> VAE decoder
+> 𝑧 GT
+> 1∗
+> 𝑧 t
+> 2
+> 𝑧 GT
+> ref 𝑧 t
+> 1
+> 𝑧 GT
+> 2
+> 𝑧 D
+> 2
+> 𝑧 GT
+> 1
+> zD
+> 1
+> 𝑧 GT
+> ref
+> Optional ref. image
+> (training uses view
+> pairs, N=2)
+> xD
+> 1
+> xD
+> 2
+> 𝑥 GT
+> 1
+> xGT
+> ref
+> xGT
+> 2
+> 𝑥 GT
+> 1∗
+> 𝑥 GT
+> 2∗
+> 𝑧 t=1−𝑡 𝑧 D+𝑡 𝑧 GT
+> Multi -view synchronization
+> via Cross -attention
+> ℒ=ℒLBM +ℒimage
+> ℒ=ℒLBM +ℒimage
+
+Fig. 2: SyncFix overview. Distorted renderings from multiple viewpoints xD are encoded into latent representations and transported toward clean targets xGT using latent bridge matching. SyncFix learns a joint latent bridge over multiple views, cou-pling latent trajectories through cross-view attention to enforce multi-view consistency during refinement. The model is trained using view pairs ( N = 2 ) but generalizes to an arbitrary number of views at inference. Optional reference images can be provided to guide refinement. Here zD denotes distorted latents, zGT clean target latents, and 
+
+zt = (1 − t)zD + tz GT the bridge interpolation between them. 
+
+We adopt a Latent Bridge Matching (LBM) objective to repurpose diffusion model to directly learn the transport from the distorted distribution to clean distribution, yielding a more effective refinement step. Each image is encoded using a pre-trained autoencoder, yielding latent ten-sors zD and zGT . For multi-view inputs, we denote the joint latent tensor as: 
+
+ZD = {z(1)  
+
+> D
+
+, . . . , z (N ) 
+
+> D
+
+}, ZGT = {z(1)  
+
+> GT
+
+, . . . , z (N ) 
+
+> GT
+
+}. (1) Bridge matching defines a continuous path between source and target: 
+
+Zt = (1 − t)ZD + tZ GT + σpt(1 − t)ϵ, t ∈ [0 , 1] , ϵ ∼ N (0 , I ) (2) 
+
+σ controls the stochasticity along the path. The corresponding velocity field from 
+
+v∗(Zt, t ) = ZGT − ZD . (3) We train a network vθ to predict this velocity: 
+
+Lflow = Et,Z D ,Z GT 
+
+∥vθ (Zt, t, c ) − (ZGT − ZD )∥22
+
+ , (4) here c is conditioning signals, including distorted renderings and view indices. Unlike marginal approaches, vθ operates on the full multi-view latent tensor by continuously sampling different paired viewpoints, z(1)  
+
+> D
+
+and z(2)  
+
+> D
+
+, at each it-eration. The predicted vector field is therefore conditioned jointly on all views, defining a probability flow over the product latent space. This naturally induces coupled dynamics: corrections for each view depend on the entire set of views. 6 Deming Li et al. 
+
+Cross-View Attention. To implement joint conditioning, we modify the trans-former self-attention layers to allow tokens from all views within a batch to attend to one another, learning jointly. Concretely, latent tokens from differ-ent views are concatenated along the token dimension, and attention is com-puted globally while preserving within-view positional encodings. This design is permutation-invariant across views and does not assume fixed view ordering. As a result, the predicted velocity for each view depends explicitly on features from other views, enforcing synchronization during refinement. We also add a reference view, which is the closest training view if available, as in [37]. The latent code of reference view zref GT is concatenated with each of {z(1)  
+
+> D
+
+, z(2)  
+
+> D
+
+} and {z(1)  
+
+> GT
+
+, z(2)  
+
+> GT
+
+} to make zD and zGT respectively before building the stochastic interpolant zt. In multi-view bridge model, the reference view’s tokens are self-attended along with other views’ tokens to bridge between contextual information and local details. 
+
+Inference. At inference, we initialize ZD , solve the learned differential equation of Zt, and obtain the predicted latent Z∗ 
+
+> GT
+
+in a single step through: 
+
+dZ t
+
+dt = vθ (Zt, t, c ), Z∗ 
+
+> GT
+
+= Zt + vθ (Zt, t, c ) (5) Decoding Z∗ 
+
+> GT
+
+yields refined images ˆX.Although trained with N = 2 views for efficiency, the model generalizes to arbitrary N at test time due to the permutation-invariant attention mechanism. 
+
+3.3 Supervision 
+
+To isolate the impact of joint latent modeling, we adopt a similar image-space su-pervision used in state-of-the-art marginal refinement methods (e.g., Difix3D+). Predicted clean images ˆX are supervised against XGT using a weighted com-bination of losses: 
+
+Lpixel = ∥ ˆX − XGT ∥1, (6) 
+
+LLPIPS = ∥ϕ( ˆX) − ϕ(XGT )∥22, (7) 
+
+LGram = ∥G(ϕ( ˆX)) − G(ϕ(XGT )) ∥2 
+
+> F
+
+. (8) The total loss to train our model is represented as: 
+
+L = Lflow + Lpixel + λlpips LLPIPS + λGram LGram  (9) Unlike marginal baselines, these losses are applied to jointly coupled outputs, ensuring that structural and textural corrections remain consistent across views. 
+
+# 4 Experiments 
+
+4.1 Datasets 
+
+We build our training set from 360 scenes of the DL3DV dataset [13], cover-ing diverse indoor and outdoor environments. For each scene, we render paired SyncFix 7
+
+corrupted and clean images using 3D Gaussian Splatting (3DGS) [10], resulting in 480,000 paired samples in total. An additional disjoint set of 40 scenes is reserved for testing, comprising 41,442 paired samples. We apply a view-splitting protocol designed to prevent trivial overlap between training and rendering views. Specifically, training views are sampled across different splits to encourage broad coverage, while render views are sampled to be mutually closer within each split yet spatially separated from the training views, yielding a challenging novel-view setting. During training, we dynamically assemble multi-view inputs/targets by sampling from a size-bounded cache for efficient view combinations. To evaluate zero-shot generalization, we report results on Nerfbusters [34], which contains 12 scenes with off-trajectory render views. We adopt their official train/test view split protocol for a fair comparison. 
+
+4.2 Evaluation and Implementation 
+
+We compare SyncFix with Difix3D+ [37], which introduces the iterative refine-ment by adding refined views to 3D reconstruction and post-cleanup with a diffusion model. We also compare with Fixer in the appendix, which is a follow-up work of Difix3D+ using Cosmos-Predict2 [1] as its backbone, with the same training strategy but without a reference view. We evaluate image fidelity using pixel-based metrics (PSNR and SSIM) and perceptual metrics (LPIPS, Dream-Sim [6], and FID). DreamSim is an ensemble of perceptual embedding models fine-tuned to better align with human judgments of visual similarity, and recent studies [36] suggest that it provides a robust signal for assessing image quality in 3D reconstruction and novel view synthesis. Our method is built on the SDXL backbone [24]. We fine-tune the modified multi-view diffusion U-Net while keeping the VAE encoder and decoder frozen. We train our model for 100,000 optimization steps with a learning rate of 4×10 −5
+
+and a batch size of 2, using four NVIDIA H100 GPUs. We set λlpips = 10 and 
+
+λGram = 0 .1.
+
+4.3 Cross-View Semantic Consistency Metric 
+
+Maintaining semantic consistency across views is a central objective in 3D re-construction and multi-view synthesis. Standard reference-based metrics such as PSNR, LPIPS, and DreamSim evaluate image quality at the single-view level and do not capture agreement between views. To quantify multi-view consis-tency, we introduce a Cross-View Semantic Consistency (CVSC) metric that measures semantic feature agreement between matched regions across views. Unlike MEt3R [2], which relies on dense correspondences that can be unreliable under occlusions, scene dynamics, or challenging textures, CVSC emphasizes sparse yet high-confidence correspondences obtained via a keypoint matcher and geometric verification. Formally, given a series of refined views X∗ 
+
+> GT
+
+= {x(1) ∗ 
+
+> GT
+
+, . . . , x (N )∗ 
+
+> GT
+
+}, we form pairs of adjacent views (x(i)∗ 
+
+> GT
+
+, x (i+1) ∗ 
+
+> GT
+
+), yielding N − 1 view pairs. For each pair, 8 Deming Li et al. 
+
+Table 1: Quantitative comparison on the DL3DV and NeRFBusters test sets for re-fining sparse-view 3D Gaussian Splatting reconstruction renderings. SyncFix improves reconstruction quality and cross-view semantic consistency over prior generative re-finement methods. † indicates no reference views during training. ↑ indicates higher-is-better and ↓ indicates lower-is-better. Bold denotes best results and underline denotes second best. DL3DV NeRFBusters Method PSNR ↑ LPIPS ↓ DSIM ↓ FID ↓ CVSC ↑ PSNR ↑ LPIPS ↓ DSIM ↓ FID ↓ CVSC ↑                                                             
+
+> 3DGS [10] 15.94 0.454 0.297 80.8 0.875 11.85 0.575 0.336 139.4 0.951
+> Fixer [23] 15.73 0.466 0.257 45.45 0.822 12.32 0.588 0.296 126.7 0.817 Difix3D+ †[37] 16.05 0.368 0.171 26.2 0.819 11.94 0.528 0.202 97.4 0.925 Difix3D+ [37] 16.17 0.343 0.135 16.7 0.850 12.05 0.496 0.174 81.1 0.931 SyncFix †16.45 0.334 0.129 22.5 0.862 14.07 0.517 0.183 86.2 0.937 SyncFix 16.94 0.305 0.099 17.5 0.880 14.34 0.494 0.173 80.4 0.940
+
+we extract keypoints using RaCo [27] and establish correspondences with Light-Glue [12]. This produces a set of matched keypoints Kpair = {(k(i) 
+
+> A
+
+, k (i) 
+
+> B
+
+)}Mi=1 .To suppress mismatches, we perform geometric verification by estimating the fundamental matrix with RANSAC and retain only inlier correspondences 
+
+ˆKpair = {(ˆk(i) 
+
+> A
+
+, ˆk(i) 
+
+> B
+
+)}.We then extract dense semantic feature maps FA and FB from DINOv3 [29]. For each verified correspondence, we compute cosine similarity between features at the matched locations. The CVSC score for a pair of views is defined as 
+
+CVSC = 1
+
+| ˆK| 
+
+> |ˆK|
+
+X
+
+> i=1
+
+⟨FA(ˆk(i) 
+
+> A
+
+), F B (ˆk(i) 
+
+> B
+
+)⟩∥FA(ˆk(i) 
+
+> A
+
+)∥2 ∥FB (ˆk(i) 
+
+> B
+
+)∥2
+
+. (10) The final CVSC score is obtained by averaging across all view pairs in the sequence. Higher CVSC indicates stronger semantic agreement across viewpoints and thus better multi-view consistency. 
+
+4.4 DL3DV Dataset 
+
+Table 1 (first block) shows the quantitative metrics on DL3DV test set. Although Fixer improves the renderings with a lower DreamSim score and FID compared to 3DGS, it obtains suboptimal results compared with Difix3D+ and SyncFix. We attribute this gap primarily to its single-view nature and the absence of reference images, which limit Fixer’s ability to disambiguate missing content and artifacts for high-fidelity refinements. SyncFix exceeds Difix3D+ by 0.77 dB on PSNR and reduces LPIPS by 0.038. Notably, SyncFix decreases DreamSim score by 27 percent compared to Di-fix3D+ and FID by more than four times compared to the 3DGS renderings. Similarly, Syncfix outperforms Difix3D+ in their versions without using refer-ence images. As seen in Figure 3, Difix3D+ mitigates the noises and sharpens the renderings. However, Difix3D+ struggles in a multi-view context, i.e., changing SyncFix 9View 1 View 2 View 1 View 2 View 1 View 2 
+
+3DGS Difix3D+ Ours † Ours 
+
+Fig. 3: Multi-view consistency under extreme sparse-view degradation . The baseline 3DGS model (left) displays severe structural artifacts and floaters. While the marginal refinement method Difix3D+ (middle) removes these base artifacts, its in-dependently generated views hallucinate inconsistent geometry across camera poses. As highlighted by the red boxes, Difix3D+ distorts the architectural structure of the outdoor bus shelter in the top scene. In the middle scene, it causes the object on the indoor pedestal to undergo shape changes between View 1 and View 2. Similarly, in the bottom scene, a door visible in one view is absorbed into the wall in another. In contrast, SyncFix (Ours) leverages joint latent synchronization to ensure that halluci-nated high-frequency details and structural repairs remain geometrically and semanti-cally consistent across views. Ours † is a model trained without clean reference images. 
+
+geometry of the objects and overfitting to view-dependent artifacts. In compar-ison, our method reduces artifacts globally through a joint refinement of the renderings and maintains a more 3D-consistent geometry of the scene. This re-sult shows that Difix3D+ is akin to single-view refinement with guidance from reference view, and the multi-view inconsistent artifacts are difficult to remove during 3D reconstruction. Our multi-view training strategy enables consistent generation over a joint distribution of the scene. Interestingly, the raw 3DGS 10 Deming Li et al.     
+
+> (a) PSNR vs. number of views. (b) DreamSim vs. number of views.
+> Fig. 4: Performance at different number of 3DGS training views on the DL3DV dataset. SyncFix consistently achieves higher PSNR and lower DreamSim than Difix3D+ at different numbers of views, and the benefit of SyncFix is more pro-nounced at sparser settings.
+
+baseline achieves a relatively high CVSC score. This occurs because artifacts produced by sparse-view reconstruction, such as floaters and blurred textures, are often geometrically consistent across views. As a result, although the recon-struction quality is poor, the errors appear similarly from different viewpoints and therefore yield high semantic agreement. In contrast, marginal refinement methods such as Difix3D+ improve perceptual quality but can introduce view-specific hallucinations, reducing cross-view consistency and lowering the CVSC score. SyncFix addresses this issue by jointly refining multiple views, preserving geometric agreement while improving perceptual fidelity, which leads to a better CVSC score overall. More visual comparison can be found in Sec. A.2. To break down performance under different numbers of 3DGS training views, we report PSNR and DreamSim as a function of the number of views in Fig. 4. SyncFix and its no-reference variant consistently outperform those of Difix3D+ at different view counts. We observe that the performance gap is more prominent in the sparse-view regime: our model provides stronger generative capability to recover missing content under severe corruption, whereas Difix3D+ performs comparatively better when artifacts are milder, and denoising becomes easier. 
+
+4.5 Nerfbusters Dataset 
+
+We evaluate the generalization ability of our method on the out-of-distribution NeRFbusters dataset, which provides off-trajectory testing views from dense-view reconstructions and exhibits different camera aspect ratios than our training data. Based on Table 1 (second block on the right), SyncFix achieves notably better PSNR and CVSC than Difix3D+ quantitatively. As shown in Figure 3, our method synthesizes a coherent scene from these two views that faithfully fills in the missing door frame and walls, whereas Difix3D+ refined renderings often exhibit inconsistencies across the views. In addition, SyncFix suppresses artifacts globally, yielding clean, refined views. This visualization shows that denoising at a fixed step [37] is not sufficient to remove artifacts spanning different severities SyncFix 11 3DGS Difix3D Ours GT  
+
+> View  1View  2View  1View  2
+> Difix3D Ours
+> View  1View  2
+
+Fig. 5: Comparison on the NeRFBusters evaluation dataset. 3DGS reconstruc-tions contain severe artifacts and geometric distortions. Difix3D+ improves the appear-ance of individual renderings but struggles to extrapolate to unseen regions and often produces unstable structures across views. In contrast, SyncFix generates plausible reconstructions that remain consistent across viewpoints, recovering coherent object geometry and scene structure. † are models trained without clean reference images. 12 Deming Li et al. 
+
+and provides limited generative capacity. In contrast, SyncFix learns a direct mapping from the corrupted rendering distribution to the clean distribution, producing richer yet faithful generation guided by implicitly learned multi-view consistency. 
+
+4.6 Generalization to Feedforward Method 
+
+3D Gaussian Splatting (3DGS) [10] achieves high-quality novel view synthesis with efficient rendering. However, it requires per-scene optimization as it overfits to each scene. To enable faster inference and leverage prior knowledge learned from large-scale data, recent feedforward splatting methods have gained traction by directly predicting 3D Gaussian parameters and depth from input images. This motivates evaluating whether SyncFix can generalize to refine multi-view renderings produced by feedforward pipelines. To this end, we conduct exper-iments using AnySplat [9] on the Mip-NeRF 360 dataset [3], which includes both indoor and outdoor scenes, to further assess the zero-shot capability of our method. AnySplat supports feedforward rendering from uncalibrated images by em-ploying separate decoder heads to predict 3D Gaussian parameters, depth, and camera poses. For each scene, we randomly sample 10 input images, and the target views are selected sequentially while being far from the input views. We follow the evaluation protocol that we use VGGT [32] to calibrate the input and target views in two passes. For pose alignment, we normalize camera poses by setting the first camera to the identity and estimate a relative scale factor to align camera translations across the two sets. Table 2 reports quantitative results on AnySplat renderings, with Difix3D+, and with SyncFix. We gray out PSNR because the predicted camera poses con-tain residual errors; the resulting pixel shifts (see Fig. 6) make pixel-aligned metrics unreliable. Overall, SyncFix consistently improves perceptual quality over Difix3D+, achieving lower LPIPS and DSIM. More importantly, SyncFix achieves a significantly higher CVSC score than both Difix3D+ and the raw AnySplat renderings, indicating stronger cross-view consistency. The qualitative comparisons in Fig. 6 support these findings. Difix3D+ shows view-dependent inconsistencies, e.g., around the table mat and the red cap in the Lego scene. A similar pattern is observed in the outdoor bicycle scene: Difix3D+ introduces non-uniform residual artifact patterns around the road and grass regions. In contrast, SyncFix has consistent refinements across views. 
+
+4.7 Ablation Study 
+
+We analyze the contribution of components through a series of ablations on the DL3DV test set (Table 3). While the train-in-loop strategy in Difix3D brings moderate improvement, the CVSC score is still suboptimal to our multi-view synchronization and it requires access of testing-view poses during training. In addition, we augment Difix3D+ with multiple input views during inference by providing the same number of views as SyncFix. This allows us to evaluate SyncFix 13 View 1 View 2 View 1 View 2 
+
+AnySplat Difix3D+ Ours GT 
+
+Fig. 6: Comparison of multi-view refinement with feedforward renderings .SyncFix provides coherent multi-view refinement that reduces the artifacts and main-tains consistency. Notice the region highlighted in the boxes. 
+
+Table 2: Quantitative comparison on the MipNeRF 360 dataset for refining feedfor-ward Gaussian Splatting renderings. SyncFix improves perceptual quality and cross-view semantic consistency over prior generative refinement methods. We gray out the PSNR as pixel shifts make the pixel-aligned metric unreliable. ↑ indicates higher-is-better and ↓ indicates lower-is-better. Bold denotes best results and underline denotes second best. MipNeRF 360 Method PSNR ↑ LPIPS ↓ DSIM ↓ CVSC ↑
+
+AnySplat [9] 13.58 0.454 0.232 0.649 Difix3D+ [37] 13.41 0.448 0.196 0.589 SyncFix (ours) 13.51 0.430 0.189 0.686 
+
+whether supplying additional views is sufficient to improve consistency. The last two rows of Difix3D+ in Table 3 show that performance drops, indicating that the model remains fundamentally limited by its single-view training objective and struggles in fusing multi-view information. We then evaluate variants of SyncFix. A single-view version of our model al-ready improves image quality compared to Difix3D+, demonstrating the benefit of the latent bridge formulation. Introducing joint multi-view refinement further 14 Deming Li et al. View 1 View 2 
+
+3DGS Ours(single-view) Ours(multi-view) 
+
+Fig. 7: Ablation on multi-view synchronization. We compare SyncFix with and without joint multi-view refinement using the same latent-bridge matching training protocol and without any reference images. Processing each view independently (Ours, single-view) improves individual renderings but produces inconsistent scene structure across viewpoints. In particular, the green carpet on the floor and the drawing board on the right wall disappear or are rendered inconsistently across the two views (highlighted in red). Because SyncFix (multi-view) jointly refines the views, it produces coherent geometry and consistent scene layout across viewpoints. 
+
+Table 3: Ablation study on the DL3DV test set evaluating the effect of joint multi-view refinement. We also ablate with and without reference views. Simply applying a multi-view input to Difix3D+ provides limited benefit, while our joint training substantially improves both image quality and cross-view consistency. ↑ indicates higher-is-better and ↓ indicates lower-is-better. Method PSNR ↑ LPIPS ↓ DSSIM ↓ FID ↓ CVSC ↑                                   
+
+> 3DGS [10] 15.94 0.454 0.297 80.8 0.875 Difix3D [37] 16.14 0.445 0.285 76.6 0.853 Difix3D+ [37] 16.17 0.343 0.135 16.7 0.850 Difix3D+ (multi-view inference) 16.08 0.370 0.163 29.28 0.827 Ours (single-view, w/o reference) 16.26 0.347 0.142 22.2 0.821 Ours (multi-view, w/o reference) 16.45 0.334 0.129 22.5 0.862
+> Ours (multi-view, with reference) 16.94 0.305 0.099 17.5 0.880
+
+improves performance across all metrics. In particular, cross-view semantic con-sistency (CVSC) increases from 0.821 to 0.862, confirming that joint training encourages the model to agree on scene structure across viewpoints. Qualitative examples in Fig. 7 illustrate this effect: the single-view model produces incon-sistent hallucinations between views, whereas the multi-view model maintains spatial and semantic coherence. We also find that by supplementing reference views, the textures and details are more aligned with ground truth in the gen-erated content by SyncFix. We note that the multi-view inference setting is five degraded views plus five closest training images as reference views for Difix3D+ and SyncFix. In our supplementary materials, we show that the multi-view con-sistency improves when adding more views during the refinement. SyncFix 15     
+
+> (a) Matches of Difix3D+ refined renderings (b) Matches of SyncFix refined renderings
+> Fig. 8: Cross-view geometric consistency. Keypoint correspondences between two refined views. Difix3D+ produces inconsistent refinements, resulting in irregular corre-spondences across views. SyncFix preserves the underlying scene geometry, producing coherent cross-view matches. For visualization clarity, we display 20 sampled corre-spondences. Matches computed using RaCo + LightGlue.
+
+# 5 Discussion 
+
+Our experiments suggest that refining views independently with a 2D generative prior is fundamentally misaligned with the multi-view nature of 3D reconstruc-tion. Marginal refinement can improve individual images, but the resulting hal-lucinations often differ across viewpoints. The reconstruction process must then harmonize these incompatible predictions, which frequently leads to drift and unstable geometry. SyncFix addresses this by coupling views during generation, forcing the model to agree on structure before the images are produced. An interesting observation is that the multi-view consistency achieved by SyncFix arises purely from cross-view attention. The model does not receive explicit geometric supervision such as camera poses, epipolar constraints, or reprojection losses. Instead, synchronization emerges from learned correlations between views within a shared latent space. This suggests that generative mod-els contain sufficient structure to align views through attention alone, although incorporating explicit geometric constraints may further improve robustness. The results also highlight limitations of current evaluation protocols. Stan-dard image metrics such as PSNR, LPIPS, and DSSIM assume that a single ground-truth image represents the only correct solution. However, sparse-view 3D reconstruction is fundamentally under-constrained: large portions of a scene may be poorly observed or entirely unseen in the training views. In such cases, generative refinement methods must infer plausible geometry and textures con-sistent with the visible context. SyncFix can produce coherent and consistent structures even when the predicted appearance deviates from the ground-truth rendering. Pixel-wise metrics penalize these plausible reconstructions because they measure strict image correspondence rather than semantic or geometric consistency. As Figure 8 shows, consistent refined renderings receive higher patch feature correlation at matched keypoints. Developing evaluation protocols that better capture multi-view agreement and perceptual plausibility remains an im-portant direction for future work. Finally, although SyncFix is trained using view pairs, the architecture natu-rally generalizes to larger sets of views at inference. Additional viewpoints pro-vide stronger constraints and typically improve stability. This suggests that pair-wise training is sufficient to learn consistent multi-view refinement dynamics. 16 Deming Li et al. View 1 View 2 View 1 View 2   
+
+> 3DGS SnycFix GT
+> Fig. 9: Limitation . SyncFix may synthesize content that mismatches the ground-truth information. The resulting pixel-wise metrics are worse for this scene despite being multi-view consistent. Multi-view consistency can break down when views are refined in isolation. As seen in our SyncFix results, the windowsills in the bottom views become inconsistent because the independent network passes fail to synchronize geometric details across different perspectives. Note that the level of corruption for the top and bottom panels is different in the 3DGS views.
+
+Limitations. SyncFix assumes that the input views share sufficient overlap to establish meaningful correspondences during joint refinement. When viewpoints are extremely sparse or observe largely disjoint regions of the scene, the syn-chronization signal becomes weak and the model may revert to view-dependent hallucinations. The approach also relies on the quality of the underlying recon-struction; if the geometry is severely corrupted or missing large structures, the generative prior may produce plausible but incorrect completions. Finally, the generative prior may introduce biases toward visually plausible textures and structures that are consistent with the training distribution but not necessarily faithful to the true scene. Developing generative refinement models that integrate explicit geometric reasoning and more principled evaluation protocols remains an important direction for future work. SyncFix 17 
+
+# 6 Conclusion 
+
+We presented SyncFix, a framework for refining sparse-view 3D reconstructions using a joint multi-view generative prior. The method formulates refinement as latent bridge matching between distorted and clean renderings and synchronizes the latent trajectories of multiple views through cross-view attention. This de-sign allows the model to enforce multi-view agreement during generation rather than relying on post-hoc reconciliation by the 3D reconstruction. Experiments demonstrate improved perceptual quality and stronger cross-view consistency across several reconstruction settings. More broadly, the results suggest that gen-erative priors for visual scenes should operate on joint multi-view distributions rather than independent view marginals. Finally, visual scenes are composed of multi-view objects; generative models that operate on them should reflect this structure. 
+
+# Acknowledgement 
+
+This research is based upon work supported by the Office of the Director of National Intelligence (ODNI), Intelligence Advanced Research Projects Activ-ity (IARPA), via IARPA R&D Contract No. 140D0423C0076. The views and conclusions contained herein are those of the authors and should not be inter-preted as necessarily representing the official policies or endorsements, either expressed or implied, of the ODNI, IARPA, or the U.S. Government. The U.S. Government is authorized to reproduce and distribute reprints for Governmental purposes notwithstanding any copyright annotation thereon. 
+
+# References 
+
+1. Ali, A., Bai, J., Bala, M., Balaji, Y., Blakeman, A., Cai, T., Cao, J., Cao, T., Cha, E., Chao, Y.W., et al.: World simulation with video foundation models for physical ai. arXiv preprint arXiv:2511.00062 (2025) 2. Asim, M., Wewer, C., Wimmer, T., Schiele, B., Lenssen, J.E.: Met3r: Measuring multi-view consistency in generated images. In: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition. pp. 6034–6044 (2025) 3. Barron, J.T., Mildenhall, B., Tancik, M., Hedman, P., Martin-Brualla, R., Srini-vasan, P.P.: Mip-nerf: A multiscale representation for anti-aliasing neural radiance fields. In: Proceedings of the IEEE/CVF international conference on computer vision. pp. 5855–5864 (2021) 4. Chadebec, C., Tasar, O., Sreetharan, S., Aubin, B.: Lbm: Latent bridge matching for fast image-to-image translation. In: Proceedings of the IEEE/CVF Interna-tional Conference on Computer Vision. pp. 29086–29098 (2025) 5. Deng, K., Liu, A., Zhu, J.Y., Ramanan, D.: Depth-supervised nerf: Fewer views and faster training for free. In: Proceedings of the IEEE/CVF conference on computer vision and pattern recognition. pp. 12882–12891 (2022) 6. Fu, S., Tamir, N., Sundaram, S., Chai, L., Zhang, R., Dekel, T., Isola, P.: Dreamsim: Learning new dimensions of human visual similarity using synthetic data. arXiv preprint arXiv:2306.09344 (2023) 18 Deming Li et al. 7. Gao*, R., Holynski*, A., Henzler, P., Brussee, A., Martin-Brualla, R., Srinivasan, P.P., Barron, J.T., Poole*, B.: Cat3d: Create anything in 3d with multi-view dif-fusion models. Advances in Neural Information Processing Systems (2024) 8. Haque, A., Tancik, M., Efros, A., Holynski, A., Kanazawa, A.: Instruct-nerf2nerf: Editing 3d scenes with instructions. In: Proceedings of the IEEE/CVF Interna-tional Conference on Computer Vision (2023) 9. Jiang, L., Mao, Y., Xu, L., Lu, T., Ren, K., Jin, Y., Xu, X., Yu, M., Pang, J., Zhao, F., et al.: Anysplat: Feed-forward 3d gaussian splatting from unconstrained views. ACM Transactions on Graphics (TOG) 44 (6), 1–16 (2025) 10. Kerbl, B., Kopanas, G., Leimkühler, T., Drettakis, G.: 3d gaussian splatting for real-time radiance field rendering. ACM Transactions on Graphics 42 (4) (July 2023), https://repo-sam.inria.fr/fungraph/3d-gaussian-splatting/ 
+
+11. Lin, C.H., Gao, J., Tang, L., Takikawa, T., Zeng, X., Huang, X., Kreis, K., Fidler, S., Liu, M.Y., Lin, T.Y.: Magic3d: High-resolution text-to-3d content creation. In: Proceedings of the IEEE/CVF conference on computer vision and pattern recog-nition. pp. 300–309 (2023) 12. Lindenberger, P., Sarlin, P.E., Pollefeys, M.: Lightglue: Local feature matching at light speed. In: Proceedings of the IEEE/CVF international conference on com-puter vision. pp. 17627–17638 (2023) 13. Ling, L., Sheng, Y., Tu, Z., Zhao, W., Xin, C., Wan, K., Yu, L., Guo, Q., Yu, Z., Lu, Y., et al.: Dl3dv-10k: A large-scale scene dataset for deep learning-based 3d vision. In: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition. pp. 22160–22169 (2024) 14. Lipman, Y., Chen, R.T.Q., Ben-Hamu, H., Nickel, M., Le, M.: Flow matching for generative modeling. In: The Eleventh International Conference on Learning Representations (2023), https://openreview.net/forum?id=PqvMRDCJT9t 
+
+15. Liu, F., Sun, W., Wang, H., Wang, Y., Sun, H., Ye, J., Zhang, J., Duan, Y.: Reconx: Reconstruct any scene from sparse views with video diffusion model. arXiv preprint arXiv:2408.16767 (2024) 16. Liu, X., Zhou, C., Huang, S.: 3DGS-enhancer: Enhancing unbounded 3d gaus-sian splatting with view-consistent 2d diffusion priors. In: The Thirty-eighth Annual Conference on Neural Information Processing Systems (2024), https: //openreview.net/forum?id=P4s6FUpCbG 
+
+17. Liu, X., Gong, C., qiang liu: Flow straight and fast: Learning to generate and trans-fer data with rectified flow. In: The Eleventh International Conference on Learning Representations (2023), https://openreview.net/forum?id=XVjTT1nw5z 
+
+18. Liu, Y., Lin, C., Zeng, Z., Long, X., Liu, L., Komura, T., Wang, W.: Sync-dreamer: Generating multiview-consistent images from a single-view image. In: The Twelfth International Conference on Learning Representations (2024), https: //openreview.net/forum?id=MN3yH2ovHb 
+
+19. Luo, Y., Zhou, S., Lan, Y., Pan, X., Loy, C.C.: 3denhancer: Consistent multi-view diffusion for 3d enhancement. In: Proceedings of the Computer Vision and Pattern Recognition Conference. pp. 16430–16440 (2025) 20. Meng, C., He, Y., Song, Y., Song, J., Wu, J., Zhu, J.Y., Ermon, S.: SDEdit: Guided image synthesis and editing with stochastic differential equations. In: International Conference on Learning Representations (2022), https://openreview.net/forum? id=aBsCjcPu_tE 
+
+21. Mildenhall, B., Srinivasan, P.P., Tancik, M., Barron, J.T., Ramamoorthi, R., Ng, R.: Nerf: Representing scenes as neural radiance fields for view synthesis. In: ECCV (2020) SyncFix 19 22. Niemeyer, M., Barron, J.T., Mildenhall, B., Sajjadi, M.S.M., Geiger, A., Radwan, N.: Regnerf: Regularizing neural radiance fields for view synthesis from sparse inputs. In: Proc. IEEE Conf. on Computer Vision and Pattern Recognition (CVPR) (2022) 23. NVIDIA: Fixer: Official repository for the nvidia fixer model. https://github. com/nv-tlabs/Fixer (2025), gitHub repository. Accessed: 2026-03-12 24. Podell, D., English, Z., Lacey, K., Blattmann, A., Dockhorn, T., Müller, J., Penna, J., Rombach, R.: Sdxl: Improving latent diffusion models for high-resolution image synthesis. arXiv preprint arXiv:2307.01952 (2023) 25. Poole, B., Jain, A., Barron, J.T., Mildenhall, B.: Dreamfusion: Text-to-3d using 2d diffusion. In: The Eleventh International Conference on Learning Representations (2023), https://openreview.net/forum?id=FjNys5c7VyY 
+
+26. Serrano-Lozano, D., Bhattad, A., Herranz, L., Lalonde, J.F., Vazquez-Corral, J.: Synclight: Controllable and consistent multi-view relighting. arXiv preprint arXiv:2601.16981 (2026) 27. Shenoi, A., Lindenberger, P., Sarlin, P.E., Pollefeys, M.: Raco: Ranking and co-variance for practical learned keypoints. arXiv preprint arXiv:2602.15755 (2026) 28. Shi, Y., Wang, P., Ye, J., Mai, L., Li, K., Yang, X.: MVDream: Multi-view dif-fusion for 3d generation. In: The Twelfth International Conference on Learning Representations (2024), https://openreview.net/forum?id=FUgrjq2pbB 
+
+29. Siméoni, O., Vo, H.V., Seitzer, M., Baldassarre, F., Oquab, M., Jose, C., Khali-dov, V., Szafraniec, M., Yi, S., Ramamonjisoa, M., et al.: Dinov3. arXiv preprint arXiv:2508.10104 (2025) 30. Wang, G., Chen, Z., Loy, C.C., Liu, Z.: Sparsenerf: Distilling depth ranking for few-shot novel view synthesis. In: IEEE/CVF International Conference on Computer Vision (ICCV) (2023) 31. Wang, H., Du, X., Li, J., Yeh, R.A., Shakhnarovich, G.: Score jacobian chaining: Lifting pretrained 2d diffusion models for 3d generation. In: Proceedings of the IEEE/CVF conference on computer vision and pattern recognition. pp. 12619– 12629 (2023) 32. Wang, J., Chen, M., Karaev, N., Vedaldi, A., Rupprecht, C., Novotny, D.: Vggt: Visual geometry grounded transformer. In: Proceedings of the IEEE/CVF Confer-ence on Computer Vision and Pattern Recognition (2025) 33. Wang, Z., Lu, C., Wang, Y., Bao, F., Li, C., Su, H., Zhu, J.: Prolificdreamer: High-fidelity and diverse text-to-3d generation with variational score distillation. In: Advances in Neural Information Processing Systems (NeurIPS) (2023) 34. Warburg, F., Weber, E., Tancik, M., Holynski, A., Kanazawa, A.: Nerfbusters: Removing ghostly artifacts from casually captured nerfs. In: Proceedings of the IEEE/CVF International Conference on Computer Vision. pp. 18120–18130 (2023) 35. Warburg*, F., Weber*, E., Tancik, M., Hołyński, A., Kanazawa, A.: Nerfbusters: Removing ghostly artifacts from casually captured nerfs (2023) 36. Wickrema, C., Leary, S., Sarkar, S., Giglio, M., Bianchi, E., Mace, E., Twardowski, M.: Benchmarking image similarity metrics for novel view synthesis applications. arXiv preprint arXiv:2506.12563 (2025) 37. Wu, J.Z., Zhang, Y., Turki, H., Ren, X., Gao, J., Shou, M.Z., Fidler, S., Gojcic, Z., Ling, H.: Difix3d+: Improving 3d reconstructions with single-step diffusion models. In: Proceedings of the Computer Vision and Pattern Recognition Conference. pp. 26024–26035 (2025) 38. Wu, R., Mildenhall, B., Henzler, P., Park, K., Gao, R., Watson, D., Srinivasan, P.P., Verbin, D., Barron, J.T., Poole, B., et al.: Reconfusion: 3d reconstruction 20 Deming Li et al. with diffusion priors. In: Proceedings of the IEEE/CVF conference on computer vision and pattern recognition. pp. 21551–21561 (2024) 39. Xu, H., Peng, S., Wang, F., Blum, H., Barath, D., Geiger, A., Pollefeys, M.: Depth-splat: Connecting gaussian splatting and depth. In: Proceedings of the Computer Vision and Pattern Recognition Conference. pp. 16453–16463 (2025) 40. Yang, J., Pavone, M., Wang, Y.: 41. Ye, B., Chen, B., Xu, H., Barath, D., Pollefeys, M.: Yonosplat: You only need one model for feedforward 3d gaussian splatting. In: The Fourteenth International Conference on Learning Representations (2026), https://openreview.net/forum? id=ImRhA9xmay 
+
+42. Yu, W., Xing, J., Yuan, L., Hu, W., Li, X., Huang, Z., Gao, X., Wong, T.T., Shan, Y., Tian, Y.: Viewcrafter: Taming video diffusion models for high-fidelity novel view synthesis. IEEE transactions on pattern analysis and machine intelligence (2024) 43. Zhou, H., Shao, Z., Miao, S., Wang, P., Bai, D., Liu, B., Liao, Y.: Freefix: Boost-ing 3d gaussian splatting via fine-tuning-free diffusion models. arXiv preprint arXiv:2601.20857 (2026) SyncFix 21 
+
+# A Technical Appendices and Supplementary Material 
+
+A.1 
+
+sectionNumber of Views Analysis SyncFix is trained on view pairs, but our permutation-invariant latent coupling enables it to generalize to and naturally support inference with an arbitrary number of input views, including degraded views and reference views. We therefore perform a systematic study to quantify how performance varies with the number of views provided at test time. Concretely, we vary the number of degraded views from 1 to 5 and the number of reference views from 1 to 5 during inference, yielding 25 configurations in total. We report the results as 5 ×5 matrices, which facilitate direct comparison of performance trends across different view compositions for different metrics. 1 2 3 4 5                    
+
+> Number of Reference Views
+> 12345
+> Number of Degraded Views  0.864 0.863 0.864 0.864 0.865
+> 0.874 0.874 0.875 0.876 0.875
+> 0.877 0.877 0.877 0.878 0.877
+> 0.878 0.879 0.879 0.879 0.880
+> 0.880 0.880 0.880 0.880 0.880
+> 0.864
+> 0.866
+> 0.868
+> 0.870
+> 0.872
+> 0.874
+> 0.876
+> 0.878
+> 0.880
+> CVSC
+
+Fig. 10: CVSC scores as the number of degraded views and reference views changes . Joint refinement of more views leads to better multi-view consistency. 
+
+We draw three insights: 1. Fig. 10 reveals a clear trend that the CVSC score improves with more de-graded views, regardless of the number of reference views. The biggest gain occurs when moving from single-view to two-view inference. This finding supports our claim that jointly refining more views yields better cross-view consistency. 2. Fig. 11 shows that FID tends to increase as either the number of degraded views or the number of reference views grows. We attribute this behavior 22 Deming Li et al. 
+
+to the attention being distributed across a larger set of inputs during joint conditioning, which can introduce a moderate averaging/smoothing effect. 3. Fig. 12 indicates that increasing the number of input views, particularly the reference images, leads to a higher PSNR and plateaus with more views. We observe that the local details are better recovered in the regions that are visible in the reference views. We report the results with 5 degraded views and 5 reference views in our main text. 1 2 3 4 5
+
+Number of Reference Views                      
+
+> 12345
+> Number of Degraded Views  16.51 17.01 17.30 17.57 17.76
+> 16.49 16.76 17.03 17.23 17.40
+> 16.86 16.96 17.07 17.28 17.43
+> 17.19 17.15 17.24 17.33 17.44
+> 17.64 17.46 17.45 17.46 17.52 16.6
+> 16.8
+> 17.0
+> 17.2
+> 17.4
+> 17.6
+> FID
+
+Fig. 11: FID as the number of degraded views and reference views changes .Increasing the total number of input images increases the FID as attention is distributed between views. 
+
+A.2 
+
+sectionMore Qualitative Comparison SyncFix 23 1 2 3 4 5
+
+Number of Reference Views                      
+
+> 12345
+> Number of Degraded Views  16.86 16.90 16.92 16.91 16.91
+> 16.88 16.93 16.95 16.95 16.95
+> 16.87 16.92 16.94 16.95 16.96
+> 16.86 16.90 16.93 16.95 16.95
+> 16.85 16.89 16.92 16.93 16.94 16.86
+> 16.88
+> 16.90
+> 16.92
+> 16.94
+> 16.96
+> PSNR
+
+Fig. 12: PSNR as the number of degraded views and reference views changes . Adding more reference views helps with the local details, thus higher PSNR, and plateaus with more views. 3DGS Fixer Difix3D+ Ours GT View 1 View 2 View 1 View 2 
+
+Fig. 13: Visual comparison on scene f102f93e... , Pair 1. The baseline 3DGS renderings exhibit strong blur and missing structure in the chair and surrounding objects. Fixer improves stability but suppresses fine details, while Difix3D+ produces sharper results with inconsistent textures across views. Our method reconstructs clearer chair geometry and preserves the object boundaries more faithfully, while maintaining consistent appearance across viewpoints. 24 Deming Li et al. 3DGS Fixer Difix3D+ Ours GT View 1 View 2 View 1 View 2 
+
+Fig. 14: Visual comparison on scene f102f93e... , Pair 2. The cropped regions emphasize the chair structure, where baseline methods either blur the geometry or introduce inconsistent textures. Our method restores sharper edges and produces a more coherent object appearance across the two views. Note that the corruption rates are different from Fig 6. 3DGS Fixer Difix3D+ Ours GT View 1 View 2 View 1 View 2 
+
+Fig. 15: Visual comparison on scene e0a5470d... , Pair 1. In the doorway region, the baseline renderings show severe blur and inconsistent geometry. Fixer produces smoother results but removes structural details, while Difix3D+ partially restores tex-tures with view-dependent artifacts. Our method recovers cleaner structural edges and maintains a consistent appearance across both viewpoints. SyncFix 25 3DGS Fixer Difix3D+ Ours GT View 1 View 2 View 1 View 2 
+
+Fig. 16: Visual comparison on scene e0a5470d... , Pair 2. The boxed crops high-light brick and railing structures that are difficult to reconstruct from sparse obser-vations. Our method restores sharper geometric detail and more consistent textures compared with Fixer and Difix3D+. Note that the level of corruption is different in the 3DGS views compared to Fig 9. 3DGS Fixer Difix3D+ Ours GT View 1 View 2 View 1 View 2 
+
+Fig. 17: Visual comparison on scene eba3bdcb... , Pair 1. The baseline 3DGS renderings contain strong blur and missing geometry around the wall fixtures. Fixer produces smoother results but loses structural detail, whereas Difix3D+ introduces artifacts around object boundaries. Our method reconstructs clearer object shapes and preserves the layout of switches and outlets more faithfully. 26 Deming Li et al. 3DGS Fixer Difix3D+ Ours GT View 1 View 2 View 1 View 2 
+
+Fig. 18: Visual comparison on scene eba3bdcb... , Pair 2. The selected crops illustrate improvements in structural clarity and artifact removal. Our method produces sharper boundaries and a more accurate layout of the wall fixtures while maintaining a consistent appearance across views. Note that the level of corruption is different in the 3DGS views compared to Fig 10.

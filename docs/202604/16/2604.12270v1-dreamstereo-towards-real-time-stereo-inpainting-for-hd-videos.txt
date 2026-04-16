@@ -1,0 +1,388 @@
+Title: DreamStereo: Towards Real-Time Stereo Inpainting for HD Videos
+
+URL Source: https://arxiv.org/pdf/2604.12270v1
+
+Published Time: Wed, 15 Apr 2026 01:26:03 GMT
+
+Number of Pages: 16
+
+Markdown Content:
+# DreamStereo: Towards Real-Time Stereo Inpainting for HD Videos 
+
+## Yuan Huang ∗ Sijie Zhao ∗ Jing Cheng Hao Xu Shaohui Jiao †
+
+## ByteDance 
+
+{huangyuan.21, zhaosijie, chengjing.amber, xuhao.sky, jiaoshaohui }@bytedance.com 
+
+## Abstract 
+
+Stereo video inpainting, which aims to fill the occluded regions of warped videos with visually coherent content while maintaining temporal consistency, remains a chal-lenging open problem. The regions to be filled are scattered along object boundaries and occupy only a small fraction of each frame, leading to two key challenges. First, exist-ing approaches perform poorly on such tasks due to the scarcity of high-quality stereo inpainting datasets, which limits their ability to learn effective inpainting priors. Sec-ond, these methods apply equal processing to all regions of the frame, even though most pixels require no mod-ification, resulting in substantial redundant computation. To address these issues, we introduce three interconnected components. We first propose Gradient-Aware Parallax Warping (GAPW), which leverages backward warping and the gradient of the coordinate mapping function to obtain continuous edges and smooth occlusion regions. Then, a Parallax-Based Dual Projection (PBDP) strategy is in-troduced, which incorporates GAPW to produce geomet-rically consistent stereo inpainting pairs and accurate oc-clusion masks without requiring stereo videos. Finally, we present Sparsity-Aware Stereo Inpainting (SASI), which re-duces over 70% of redundant tokens, achieving a 10.7 ×
+
+speedup during diffusion inference and delivering results comparable to its full-computation counterpart, enabling real-time processing of HD ( 768 × 1280 ) videos at 25 FPS on a single A100 GPU. 
+
+## 1. Introduction 
+
+With the advancement of AR/VR devices, stereo digital me-dia are experiencing rapid growth and gaining increasing popularity. These media deliver a more immersive and en-joyable experience by projecting visual content with par-allax to different eyes. However, the high cost of multi-camera visual capture equipment hinders the broader devel-         
+
+> *Equal contribution.
+> †Corresponding author.
+> ‡Project page: https : / / huangyuan2020 . github . io / DreamStereo/ .0.5 124816 32
+> Inference Speed (FPS)
+> 10
+> 15
+> 20
+> 25
+> 30
+> PSNR (dB)
+> NNFE
+
+Figure 1. Comparison among different methods at a resolution of 
+
+768 × 1280 : our method achieves a PSNR of 30.5 dB at 1 NFE, with an inference speed of 24.9 fps. 
+
+opment of stereo visual content. Currently, monocular vi-sual content far exceeds its stereo counterpart, as monocular display devices such as smartphones, tablets, and computers remain the mainstream. Thus, a question emerges: How to convert the vast amount of monocular visual content avail-able into stereo counterparts? Human beings perceive the depth of the 3D world through the parallax between the left and right eyes. Early 2D-to-3D methods, such as Depth Image Based Rendering (DIBR) [14, 42], first predict the depth of the input view and then render it to another view using camera intrinsic and extrinsic parameters. Unfortunately, these methods perform poorly because they fail to fill the occluded areas that often appear at the edges of objects in the other view. Multiplane Images (MPI) methods [5, 27, 43] decompose visual con-tent into different layers along the depth dimension and per-form inpainting on each background layer. However, they struggle when objects within the same layer have large dis-parity. Methods [39, 41, 45] that project images or videos based on the depth and then use diffusion models to in-paint occluded regions have gained growing popularity. A 
+
+> arXiv:2604.12270v1 [cs.CV] 14 Apr 2026
+
+key aspect of such methods is the construction of high-quality stereo inpainting datasets. StereoCrafter [45], Im-mersePro [25], StereoConversion [17] collect stereo im-ages/videos and use stereo matching [11, 32] to establish the disparity between the views of the left and right eyes. How-ever, acquiring stereo videos is typically expensive, and dif-ferent stereo videos may adopt varying binocular projec-tion rules, or even simple pixel translation, which degrades data quality. TrajectoryCrafter [39] proposes building novel view datasets from monocular videos through double repro-jection, but its use of forward warping leads to scattered pixels at the edges of objects, compromising dataset quality and significantly degrading inpainting performance during inference due to incorrect foreground pixels. Another issue is that occlusions only account for a small portion of each frame. However, all the aforementioned stereo inpainting methods [17, 25, 30, 39, 41, 45] process all pixels uniformly, although most pixels do not require modification, leading to an extremely slow inference speed. This prompts us to question whether it is necessary for all visual tokens to participate in computation. In Diffusion Transformers (DiT) [22], the computational complexity of attention can be expressed as O(N 2), where N denotes the number of visual tokens. This implies that when the num-ber of tokens decreases, the inference speed of DiT will be rapidly improved, which is highly appealing. To address the issue of scattered pixels and masks caused by forward warping, we propose Gradient-Aware Parallax Warping, a method that combines backward warping and the gradients of coordinates mapping function to obtain smooth and accurate pixels and occlusion masks for the warped video. Based on this proposed warping method, we introduce Parallax-Based Dual Projection, a strategy that generates stereo inpainting datasets utilizing massive monocular video data, which can be easily scaled up com-pared to the data construction methods based on stereo videos. Finally and most importantly, we present Sparsity-Aware Stereo Inpainting and review the redundancy of vi-sual tokens in such task. By reducing more than 70% of visual tokens, we improve the inference speed of DiT by 
+
+10 .7×, pushing the processing of HD videos in stereo in-painting into the real-time era. Our main contributions are summarized as follows, • We propose Gradient-Aware Parallax Warping (GAPW), a method to warp images or videos to novel views with smoother masks and fewer scattered pixels. • We introduce Parallax-Based Dual Projection (PBDP), a strategy for generating stereo inpainting data without the need for stereo videos. • We present Sparsity-Aware Stereo Inpainting (SASI), a real-time stereo inpainting method for HD videos by eliminating the redundancy of visual tokens. 
+
+## 2. Related Work 
+
+Novel View Synthesis Novel View Synthesis has been a widely studied topic in 3D vision. Early DIBR-based meth-ods [14, 42] render undistorted novel views by utilizing depth and camera pose, yet they are ineffective in handling occluded regions in new perspectives. Later, MPI-Based methods [5, 27, 43] were proposed to decompose visual content into different layers along the depth dimension and render novel views through inpainting background layers. However, they fail to deal with objects with large dispari-ties in a single layer. With the rise of 3D representations, NeRF [6, 18, 23] and 3DGS [13, 35] have been applied to novel view synthesis. These methods usually require frame-by-frame calibration of camera poses for videos, perform-ing poorly when there are large camera and object move-ments. Moreover, they often need separate optimization for each scene, which reduces efficiency. Methods like CAT3D [4] and ViewCrafter [40] achieve the generation of novel views of static objects from single or multiple im-ages by combining diffusion models [1, 24] with NeRF. SV4D [37] and CAT4D [37] further integrate video diffu-sion [1, 38] to generate 4D scenes from single-video inputs. Nevertheless, these methods generally focus on large cam-era baselines and tend to produce blurry backgrounds, mak-ing them difficult to apply to stereo video generation. Tra-jectoryCrafter [39] proposes a double reprojection strategy to produce novel view inpainting data through monocular videos, but the used forward warping causes scattered pix-els at object edges, affecting dataset quality and reducing inpainting performance. 
+
+Mono-to-Stereo Conversion In the field of mono-to-stereo conversion, early work such as Deep3D [36] trained on stereo pairs to directly predict the right view from the left input, but the generated results often exhibit notable disparity artifacts. Recent advances mainly rely on diffu-sion models, leveraging their strong priors to produce vi-sually consistent results. Training-free methods such as StereoDiffusion [29], SVG [2], and ZeroStereo [30] gen-erate stereo images or videos by modifying latent vari-ables during denoising, though this may cause domain gaps during inference. Training-based approaches, including StereoCrafter [45], Restereo [8], ImmersePro [25], Spa-tialMe [41], and StereoConversion [17], typically formulate 2D-to-3D generation as a stereo inpainting task via forward warping. More recent diffusion-based efforts such as Spa-tialDreamer [15] and M2SVid [26] further explore stereo and 4D generation tasks. However, most existing models rely on stereo datasets, whose collection is costly and incon-sistent due to varying binocular projection settings. More-over, none of the diffusion-based methods considers the in-trinsic sparsity of stereo inpainting, leaving real-time per-formance unattainable. 3. Method 
+
+In this section, we first introduce Gradient-Aware Parallax Warping (GAPW), a novel view synthesis technique that re-duces fly-point artifacts and yields cleaner occlusion bound-aries compared to the commonly used forward warping. Subsequently, we present Parallax-Based Dual Projection (PBDP), a strategy for generating high-quality stereo in-painting data directly from monocular videos, without re-quiring ground-truth stereo supervision. Finally, we pro-pose Sparsity-Aware Stereo Inpainting (SASI), a real-time stereo inpainting method for HD videos by eliminating the redundancy of visual tokens. 
+
+3.1. Gradient-Aware Parallax Warping 
+
+In novel view synthesis, the goal is to transform a source image I(x, y ) with coordinates (x, y ) ∈ Ω ⊆ Z2 into a new view I′(x′, y ′) where (x′, y ′) ∈ Ω′ ⊆ Z2. Most exist-ing methods [8, 39, 45] achieve this conversion by forward warping [20]. Let the transform function T : R2 → R2
+
+denote the mapping from (x, y ) to (x′, y ′),
+
+(x′, y ′) = T (x, y ; D, C ) (1) Here, D represents the disparity of the source image, and 
+
+C denotes the camera pose. Once the camera pose is fixed and the disparity is estimated, the function T is uniquely determined. Subsequently, I(x, y ) is assigned to the corre-sponding position (x′, y ′) in the target image as, 
+
+I′(x′, y ′) ← I(x, y ) (2) This method generates holes in regions not assigned by any source pixels, i.e., occluded areas, which facilitates sub-sequent inpainting. However, it often produces misaligned artifacts in multi-layer background regions, possibly re-lated to depth-scale inconsistencies across layers, thereby degrading both stereo dataset construction and inpainting performance. The simplified illustration of this process is shown in Fig. 2(a). To address this issue, we incorporate backward warp-ing [16] with gradient in consideration. For each T , there exists an inverse function T −1 : R2 → R2, such that, 
+
+(x, y ) = T −1(x′, y ′; D, C ) (3) The pixel value of the target image at (x′, y ′) can be ob-tained through interpolation: 
+
+I′(x′, y ′) = Interpolate (I, x, y ) (4) We then calculate the gradients of the (x′, y ′) with re-spect to the (x, y ) based on Eq. 1, 
+
+JT (x′, y ′) = 
+
+∇x′
+
+∇y′
+
+
+
+=
+
+> ∂x ′
+> ∂x ∂x ′
+> ∂y ∂y ′
+> ∂x ∂y ′
+> ∂y
+
+!
+
+(5) Foreground Pixel  
+
+> Warped View
+> Input View
+> Mask
+> (a) Forward Warping
+> Warped View
+> Input View
+> Mask
+> (b) Gradient-Aware Parallax Warping
+> Background Pixel Occlusion Region
+
+Figure 2. Comparison of forward warping and our GAPW in pixel mapping and occlusion mask generation. 
+
+The gradients can be represented by the Jacobian Matrix 
+
+JT (x′, y ′), which describes the deformation of pixels at po-sition (x′, y ′) in x- and y- directions. The occluded pixels in the new view occur in regions with larger deformation. Thus, the occlusion mask M (x′, y ′) can be obtained by a threshold δ,
+
+M (x′, y ′) = ∥ JT (x′, y ′) ∥2 > δ  (6) In the binocular system, pixels undergo warping only in the x-direction, thus can be simplified as, 
+
+M (x′, y ′) = ∂x ′
+
+∂x > δ  (7) Finally, we illustrate the calculation of the warped view and mask under the binocular system in Fig. 2(b). Due to the continuity of the gradient, our method is capable of gen-erating smooth occluded regions and avoiding the artifacts of scattered pixels. 
+
+3.2. Parallax-Based Dual Projection 
+
+Inspired by TrajectoryCrafter [39], we use a reprojection strategy to produce stereo inpainting pairs without the help of stereo videos. As illustrated in Fig. 3(a), given a monoc-ular video V1 in view1 , we first use a depth estimator (e.g., DepthCrafter [7]) to predict the disparity D1. Then we synthesize a warped video V2 and its disparity map D2
+
+in view2 with the help of GAPW, 
+
+V2, D2 = GAPW (V1, D1; v1 → v2) , (8) where v1 → v2 means warping from view1 to view2 .Subsequently, we apply the GAPW for V2 to reconstruct the V ′ 
+
+> 1
+
+and obtain the occlusion mask M1 in view1 ,VAE       
+
+> Encoder ❄️
+> VAE
+> Decoder
+> ❄️
+> Down sample
+> Mask-Based Token Selection
+> ...
+> DiT  Blcok  x N
+> ...
+> Not Selected Tokens ( ~70% )
+> Selected Tokens Diffusion Model Output Tokens
+> Masked Video
+> Occlusion Mask Masked Video
+> Inpainted Video Disparity (view1) Disparity (view2)
+> Video Depth
+> Estimation
+> Input Video (view1) Warped Video (view2)
+> Occlusion Mask (view1)
+> Gradient-Aware
+> Parallax Warping
+> Gradient-Aware
+> Parallax Warping
+> (a) Parallax-Based Dual Projection (b) Sparsity-Aware Stereo Inpainting
+
+Figure 3. ( a) Illustration of the Parallax-Based Dual Projection, which utilizes Gradient-Aware Parallax Warping for reprojection to obtain the occlusion mask under input view. ( b) Our proposed Sparsity-Aware Stereo Inpainting utilizes Mask-Based Token Selection to reduce the redundancy of visual tokens. Input Video & Disparity TrajectoryCrafter Ours 
+
+Figure 4. Qualitative comparison of data construction between TrajectoryCrafter [39] and ours. 
+
+V′
+
+> 1
+
+, M1 = GAPW (V2, D2; v2 → v1) , (9) where v2 → v1 means warping from view2 to view1 .For the inpainting task, only the target video and its corre-sponding mask are required as training pairs. Therefore, we add (V1, M1) to dataset for training the stereo inpainting model. We compare the construction results between our method and TrajectoryCrafter [39] in Fig. 4. As used in TrajectoryCrafter, forward warping introduces misaligned artifacts in multi-layer background regions, whereas our method leverages GAPW to generate cleaner and geometri-cally consistent occlusion masks. 
+
+3.3. Sparsity-Aware Stereo Inpainting 
+
+In stereo inpainting task, where the occluded regions to be filled account for only a small portion of pixels, process-ing all visual tokens equally leads to significant computa-tional redundancy. A straightforward and intuitive approach is to discard part of the visual tokens that do not require in-painting. Our method, developed based on WanVideo [28], consists of two key components: a denoiser Dθ based on a Diffusion Transformer (DiT), and a 3D Variational Autoen-coder (VAE) comprising an Encoder E and a Decoder D,as illustrated in Fig. 3 (b). Our primary objective is to per-form inpainting on a video Vm ∈ R3×T ×H×W containing occlusion regions, which are represented by a specialized mask M ∈ R1×T ×H×W . In training, the corrupted video 
+
+Vm is obtained by performing M on the monocular video 
+
+V ∈ R3×T ×H×W .The 3D VAE is used to compress the input videos into a latent space, reducing both temporal and spatial dimen-sions. Specifically, the Encoder E maps both the target video V and the corrupted video Vm into their respective latents, 
+
+z0 = E(V), zm = E(Vm), (10) where z0, zm ∈ Rc×t×h×w denote the latent representa-tions of V and Vm, each containing t×h×w visual tokens. The mask M is downsampled to m ∈ R1×t×h×w to match the shape of zm. To preserve the spatial and temporal con-text for inpainting, zm undergoes a dilation process and is then used to select visual tokens, 
+
+(ˆz0, ˆzm, ˆm) = S(( z0, zm, m), Φ( m, k )) , (11) where ˆz0, ˆzm, ˆm represent the sparse counterparts, S(·)
+
+denotes a mask-based selection function, and Φ( ·) denotes a dilation function with kernel size k. Our inpainting process is built on the flow matching framework, which involves a forward noising process and a backward denoising process. During the forward process, noise is added to z0 to simulate a transition from the data distribution to a noise distribution, which can be expressed as, 
+
+ˆzt = (1 − σt) · ˆz0 + σt · ϵ, (12) where σt ∈ (0 , 1] controls the noise intensity, and ϵ ∼N (0, I) is sampled from the Gaussian distribution. As σt
+
+increases, the sample ˆzt moves to the noise distribution with a constant velocity v = ϵ − ˆz0.The denoiser Dθ is trained to predict the velocity of ˆzt at time t, enabling the reverse denoising process. The training objective is defined as, 
+
+L = ∥Dθ (ˆzt, ˆzm, ˆm, t ) − v∥2 (13) To integrate the masked video into the denoiser, we con-catenate zt, ˆm, and ˆzm along the channel dimension. For compatibility, the weights corresponding to these additional input channels are initialized to zero. During inference, the denoiser Dθ performs a multi-step denoising on ˆzt as fol-lows, 
+
+ˆzt−1 = ˆzt + Dθ (ˆzt, ˆzm, ˆm, c, t ) · (σt−1 − σt) (14) After N inference steps, ˆz0 is recovered. Finally, the inpainted video V can be obtained by 
+
+V = B(D(B(ˆz0, zm, m)) , Vm, M) (15) where B(·) is a mask-based blending function. With a dila-tion kernel size k = 3 , only 25.6% of the visual tokens par-ticipate in the computation, accelerating the inference speed of DiT by 10 .7× (see Tab. 4 for more details). 
+
+## 4. Experiments 
+
+4.1. Implementation Details 
+
+Model and Training Scheme. Our model is built upon Wan2.1-1.3B [28], whose DiT component is fine-tuned us-ing LoRA adaptation, while a lightweight 3D-aware VAE is distilled separately for faster encoding and decoding fol-lowing [46] (see supplementary for details). We adopt a two-stage training scheme on the OpenVid dataset [19]. Stage 1 uses random masks for generic inpainting pre-training. Stage 2 employs our proposed method described in Sec . 3.2 to generate occlusion masks at three target resolutions( 1280 ×720 , 720 ×1280 , and 768 ×768 ), produc-ing a 56 k×3 pseudo-stereo inpainting dataset with maxi-mum disparity randomly sampled from [0 .3, 0.8] . During training, we adopt fully dense token computation (100%), while the sparsity-aware strategy is explored and applied only at inference time for acceleration. Training is con-ducted on 4 NVIDIA A100 GPUs with a learning rate of 
+
+4 × 10 −5. Stage 1 and Stage 2 are trained for 10k and 2.5k steps with batch sizes of 12 and 2, respectively. 
+
+Evaluation Datasets and Metrics. We evaluate on three stereo test sets with unified 81-frame clips. HD-100 is a real-world dataset collected from internet 4K videos (100                                            
+
+> Method NFE Latency ↓PSNR ↑SSIM ↑LPIPS ↓
+> ProPainter †1668.1 28.30 0.927 0.052 VACE-1.3B 82779.1 25.38 0.859 0.095 ZeroStereo 8506.0 19.12 0.676 0.189 ZeroStereo 50 2024.7 24.73 0.771 0.094 StereoCrafter 8716.5 23.99 0.782 0.142
+> Ours 140.1 30.48 0.900 0.053
+> Ours (blended) 140.1 32.65 0.948 0.026
+> Table 1. HD-100 @ 768 ×1280 . Quality and latency (ms/frame).
+> †non-diffusion.
+
+samples), where the inpainting ground truth is the original RGB sequence and masks are generated following the same procedure as in Stage 2. Dynamic Replica [12] is a syn-thetic stereo dataset (20 validation samples) with ground-truth disparity, while SVD [9] is a spatial video dataset (20 samples) randomly selected from the Apple Vision Pro (AVP) subset (baseline 63.76 mm), with disparity estimated via a stereo matching method [33]. For both stereo datasets, the left view is used as input and the right view as ground truth, and the corresponding masks and warped inputs are constructed using the method described in Sec. 3.1. We re-port PSNR [34], SSIM [31], and LPIPS [44] as evaluation metrics. 
+
+4.2. Comparison of Stereo Inpainting 
+
+We evaluate on the HD-100 benchmark using unified inputs and timing setup on an NVIDIA A100 for fairness. Tab. 1 presents quantitative comparisons in terms of PSNR, SSIM, and LPIPS across both stereo-specific methods (Stere-oCrafter, ZeroStereo) and general video inpainting models (VACE-1.3B [10], ProPainter [47]). For brevity, we show three representative methods in the main paper; complete results for all four baselines are provided in the appendix, along with visual comparisons to two non-released meth-ods [15, 26]. Our approach achieves the best accuracy while maintaining real-time inference. Specifically, ProPainter achieves the second-best performance but produces notice-ably blurry outputs (see Fig. 5), while ZeroStereo shows a strong dependence on diffusion steps, and its performance drops sharply when the default NFE=50 is reduced to 8. In contrast, our model performs single-step inference (NFE=1) in real time (40.1ms ≈ 25fps) while preserving fine stereo structures. Furthermore, we introduce a blended variant that leverages GAPW-derived masks for geometry-aligned re-gion fusion. Unlike previous methods using forward warp-ing, such as StereoCrafter, whose masks exhibit scattered edge artifacts, our masks are cleaner and geometrically con-sistent, enabling stable blending at the native input resolu-tion and yielding further perceptual gains. Input 
+
+> Masked & Mask Ground Truth  Ours(1NFE)  ProPainter StereoCrafter (8NFE)  VACE -1.3B(8NFE)
+
+Figure 5. Qualitative comparison of stereo video inpainting on the HD-100 test set ( 768 ×1280 ). Our inpainting results are much closer to the ground truth, showing sharper details and clearer structures. 
+
+Dynamic Replica SVD Method NFE PSNR ↑ SSIM ↑ LPIPS ↓ PSNR ↑ SSIM ↑ LPIPS ↓
+
+Deep3D † 1 17.11 0.711 0.252 19.32 0.590 0.224 Depthify.ai † 1 18.29 0.727 0.191 20.70 0.617 0.190 Owl3D † 1 17.87 0.726 0.209 19.99 0.615 0.214 StereoCrafter 8 17.93 0.737 0.226 24.68 0.752 0.199 ZeroStereo 50 23.08 0.872 0.105 23.81 0.725 0.148 
+
+Ours 1 29.12 0.920 0.063 24.88 0.776 0.131 
+
+Ours (blended) 1 29.17 0.922 0.057 25.30 0.793 0.113 
+
+Table 2. Quantitative comparison of 2D-to-3D methods on the Dynamic Replica valid set and the SVD AVP test set. †End-to-end ap-proaches. 
+
+4.3. Comparison of 2D-to-3D Conversion 
+
+To further assess cross-domain generalization, we evaluate our method on two stereo datasets: the Dynamic Replica synthetic set and the SVD real-world stereo video dataset collected via AVP. Both datasets provide ground-truth right views, enabling quantitative evaluation of 2D-to-3D conver-Input Left View (a) Owl3D (b) StereoCrafter (c) Ours Figure 6. Qualitative comparison of 2D-to-3D conversion. Each group shows the generated right view , zoomed-in patches , stereo-matched disparity , and anaglyph visualization from left to right. Our method produces sharp, high-quality views with accu-rate and detailed disparity. 
+
+sion accuracy. As summarized in Tab. 2, our method con-sistently achieves the best PSNR, SSIM, and LPIPS across both datasets, outperforming end-to-end approaches [3, 21, 36] and warp-and-inpaint baselines [30, 45]. For clearer visualization, Fig. 6 presents 2D-to-3D con-version results on HD-100, where no ground-truth right views are available. Accordingly, this figure is intended for visual comparison only, while additional results on Replica and SVD are provided in the appendix for completeness. The comparison includes our method, the industrial solu-tion Owl3D, and the academic baseline StereoCrafter, all evaluated using their released default settings. In both the 
+
+horse and rabbit scenes, our model reconstructs sharper tex-tures and cleaner, well-aligned disparity, delivering a more coherent and immersive 3D experience. 
+
+4.4. Ablation Study 
+
+Data Construction Matters. We first assess the impact of our pseudo-stereo data pipeline. Compared with Tra-jectoryCrafter (Fig. 4), our construction yields inpainting pairs with stronger geometric consistency and cleaner oc-clusion masks, especially around fine structures and dis-tant backgrounds. As shown in Tab. 3, fine-tuning on our                
+
+> Dataset Strategy PSNR ↑SSIM ↑LPIPS ↓
+> Random Mask 26.64 0.906 0.092 TrajectoryCrafter 31.14 0.923 0.047 Ours 32.48 0.933 0.049 Table 3. Ablation of inpainting performance on dataset strategy.
+
+dataset achieves the best PSNR/SSIM on HD-100 for both the Stage-1 baseline and the TrajectoryCrafter-trained coun-terpart, indicating that more accurate pseudo-stereo con-struction directly improves downstream stereo inpainting. To isolate the effect of data construction, this ablation keeps the architecture and inference configuration identical across rows (dense inference, original VAE,  576 ×1024  resolution, NFE=8), while the final model reported elsewhere incorpo-rates these orthogonal improvements. 
+
+Sparsity-Aware Acceleration with Negligible Quality Loss. Building on Sec . 3.3, we evaluate our sparsity-aware design at fixed NFE by varying the token retention rate  r guided by GAPW masks. We adjust the retention rate  r by spatially dilating the GAPW mask and tempo-rally striding dense tokens, keeping only those essential for Dilate Stride r (%) Latency ‡↓ PSNR ↑ SSIM ↑ LPIPS ↓
+
+baseline 100.0 380.9 32.48 0.933 0.049 
+
+— — 13.7 18.51 29.84 0.916 0.063 3 — 25.6 35.7 32.01 0.931 0.051 3 20 29.4 44.8 32.10 0.931 0.050 3 10 33.2 54.8 32.16 0.931 0.050 5 — 36.1 58.4 32.31 0.932 0.050 5 20 39.4 68.6 32.34 0.932 0.050 5 10 42.7 78.2 32.36 0.932 0.050 Table 4. HD-100 ( 576 ×1024 ) ablation with fixed NFE = 4 , vary-ing dilation kernel and temporal stride. Retention rate r is the fraction of tokens kept for DiT computation; ‡Latency denotes DiT-only inference time in ms/frame. All settings achieve a sub-stantial speedup with negligible quality loss. The light-gray row (dilate=5 ) indicates the optimal setting adopted in all other exper-iments. 
+
+Max Disparity PSNR ↑ SSIM ↑ LPIPS ↓
+
+0.02 32.18 0.915 0.043 
+
+0.05 32.16 0.905 0.049 0.07 30.48 0.900 0.053 0.08 29.91 0.895 0.058 Table 5. HD-100 ( 768 ×1280 ) ablation with fixed NFE = 1 under wide-baseline settings. The light-gray row ( 0.07 ) corresponds to the setting adopted for all stereo inpainting experiments on the HD-100 test set. Larger disparities enlarge occluded areas, causing a slight expected drop in metrics, yet our method remains robust and effective. 
+
+stereo completion, namely the tokens within the occlusion mask  m and a narrow dilated band around its boundary, while pruning the rest from DiT computation. As shown in Tab. 4, retention rates from 43% to 14% significantly reduce DiT inference latency with only negligible quality changes: SSIM/LPIPS remain stable and PSNR stays com-parably high on HD-100. Thus, GAPW-guided, structure-aware token selection effectively removes redundant com-putation while preserving geometric fidelity and percep-tual quality. Balancing efficiency and robustness, we adopt 
+
+r ≈ 35%  (e.g., dilation kernel  = 5 ) as the default. 
+
+Wide-Baseline Robustness. Finally, we evaluate robust-ness under increasing maximum disparity, which simulates wider stereo baselines, analogous to simulating human in-terocular distance and introducing more occluded regions to inpaint. Figure 7 visualizes the inpainting results and right-view disparity estimates under three disparity settings, showing that our method consistently preserves geometry and visual quality as the baseline widens. Quantitative re-sults in Tab. 5 further confirm that even as occluded regions expand, our single-step model (NFE=1) remains robust with only minor metric drops. In contrast, Fig. 6 shows that Owl3D and StereoCrafter degrade even at smaller dispari-Input Left Vide o Input Left Disparity      
+
+> Warped Video Warped Mask Inpainted  Video Right Disparity
+> Max Disparity = 0.0 2Max Disparity = 0.05 Max Disparity = 0.08
+
+Figure 7. Ablation on max disparity. Our method consistently de-livers high-quality, geometrically accurate results even under large disparity ranges. 
+
+ties. Overall, our approach demonstrates strong resilience to large-baseline stereo, enabling stereo video generation with human-eye scale separation for an immersive 3D viewing experience. 
+
+## 5. Conclusion 
+
+This paper is dedicated to the task of 2D-to-3D stereo video inpainting. To address the issues of scattered pix-els and discontinuous masks in warped videos caused by the commonly used forward warping, we propose Gradient-Aware Parallax Warping (GAPW), which combines back-ward warping and the gradients of the coordinate mapping function to obtain smoother and more continuous edges. Subsequently, based on the proposed GAPW, we introduce Parallax-Based Dual Projection (PBDP), which obtains the occlusion mask of the input view through two projections to construct stereo inpainting data without the need for stereo videos. This high-quality data construction method enables our approach to achieve state-of-the-art performance on the stereo inpainting task. Finally, we present Sparsity-Aware Stereo Inpainting (SASI) to reduce the computational re-dundancy in such an inpainting task. By discarding more than 70% redundant tokens, SASI achieves a 10.7× speedup in DiT inference, while the performance loss is almost neg-ligible compared to its dense computation counterpart, en-abling us to process HD videos at real-time speed on a sin-gle A100 GPU. References 
+
+[1] Andreas Blattmann, Tim Dockhorn, Sumith Kulal, Daniel Mendelevitch, Maciej Kilian, Dominik Lorenz, Yam Levi, Zion English, Vikram Voleti, Adam Letts, et al. Stable video diffusion: Scaling latent video diffusion models to large datasets. arXiv preprint arXiv:2311.15127 , 2023. 2 [2] Peng Dai, Feitong Tan, Qiangeng Xu, David Futschik, Ruofei Du, Sean Fanello, Xiaojuan Qi, and Yinda Zhang. Svg: 3d stereoscopic video generation via denoising frame matrix. arXiv preprint arXiv:2407.00367 , 2024. 2 [3] Depthify.ai. Depthify.ai. https://www.depthify. ai/ , 2025. Accessed: 2025-07-31. 7 [4] Ruiqi Gao, Aleksander Holynski, Philipp Henzler, Arthur Brussee, Ricardo Martin-Brualla, Pratul P. Srinivasan, Jonathan T. Barron, and Ben Poole. Cat3d: Create anything in 3d with multi-view diffusion models. Advances in Neural Information Processing Systems , 2024. 2 [5] Yuxuan Han, Ruicheng Wang, and Jiaolong Yang. Single-view view synthesis in the wild with learned adaptive multi-plane images. In ACM SIGGRAPH , 2022. 1, 2 [6] Yang Hong, Bo Peng, Haiyao Xiao, Ligang Liu, and Juy-ong Zhang. Headnerf: A real-time nerf-based parametric head model. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pages 20374– 20384, 2022. 2 [7] Wenbo Hu, Xiangjun Gao, Xiaoyu Li, Sijie Zhao, Xiaodong Cun, Yong Zhang, Long Quan, and Ying Shan. Depthcrafter: Generating consistent long depth sequences for open-world videos. In CVPR , 2025. 3 [8] Xingchang Huang, Ashish Kumar Singh, Florian Dubost, Cristina Nader Vasconcelos, Sakar Khattar, Liang Shi, Chris-tian Theobalt, Cengiz Oztireli, and Gurprit Singh. Restereo: Diffusion stereo video generation and restoration. arXiv preprint arXiv:2506.06023 , 2025. 2, 3 [9] M.H. Izadimehr, Milad Ghanbari, Guodong Chen, Wei Zhou, Xiaoshuai Hao, Mallesham Dasari, Christian Tim-merer, and Hadi Amirpour. Svd: Spatial video dataset. In 
+
+ACM International Conference on Multimedia (ACM MM) ,2025. Submitted. 5 [10] Zeyinzi Jiang, Zhen Han, Chaojie Mao, Jingfeng Zhang, Yulin Pan, and Yu Liu. Vace: All-in-one video creation and editing. arXiv preprint arXiv:2503.07598 , 2025. 5 [11] Junpeng Jing, Ye Mao, and Krystian Mikolajczyk. Match-stereo-videos: Bidirectional alignment for consistent dy-namic stereo matching. In European Conference on Com-puter Vision , pages 415–432. Springer, 2024. 2 [12] Nikita Karaev, Ignacio Rocco, Benjamin Graham, Natalia Neverova, Andrea Vedaldi, and Christian Rupprecht. Dy-namicstereo: Consistent dynamic depth from stereo videos. 
+
+CVPR , 2023. 5 [13] Bernhard Kerbl, Georgios Kopanas, Thomas Leimk¨ uhler, and George Drettakis. 3d gaussian splatting for real-time radiance field rendering. ACM Trans. Graph. , 42(4):139–1, 2023. 2 [14] Janusz Konrad, Meng Wang, Prakash Ishwar, Chen Wu, and Debargha Mukherjee. Learning-based, automatic 2d-to-3d image and video conversion. IEEE Transactions on Image Processing , 22(9):3485–3496, 2013. 1, 2 [15] Zhen Lv, Yangqi Long, Congzhentao Huang, Cao Li, Chengfei Lv, Hao Ren, and Dian Zheng. Spatialdreamer: Self-supervised stereo video synthesis from monocular in-put. In Proceedings of the Computer Vision and Pattern Recognition Conference , pages 811–821, 2025. 2, 5, 3 [16] Morgan McGuire and Max McGuire. Steep parallax map-ping. I3D 2005 Poster , pages 23–24, 2005. 3 [17] Lukas Mehl, Andr´ es Bruhn, Markus Gross, and Christo-pher Schroers. Stereo conversion with disparity-aware warp-ing, compositing and inpainting. In Proceedings of the IEEE/CVF Winter Conference on Applications of Computer Vision , pages 4260–4269, 2024. 2 [18] Ben Mildenhall, Pratul P Srinivasan, Matthew Tancik, Jonathan T Barron, Ravi Ramamoorthi, and Ren Ng. Nerf: Representing scenes as neural radiance fields for view syn-thesis. Communications of the ACM , 65(1):99–106, 2021. 2[19] Kepan Nan, Rui Xie, Penghao Zhou, Tiehan Fan, Zhen-heng Yang, Zhijie Chen, Xiang Li, Jian Yang, and Ying Tai. Openvid-1m: A large-scale high-quality dataset for text-to-video generation. arXiv preprint arXiv:2407.02371 , 2024. 5[20] Simon Niklaus and Feng Liu. Softmax splatting for video frame interpolation. In IEEE Conference on Computer Vision and Pattern Recognition , 2020. 3 [21] Owl3D. owl3d. https://www.owl3d.com/landing ,2025. Accessed: 2025-07-31. 7 [22] William Peebles and Saining Xie. Scalable diffusion models with transformers. In Proceedings of the IEEE/CVF inter-national conference on computer vision , pages 4195–4205, 2023. 2 [23] Albert Pumarola, Enric Corona, Gerard Pons-Moll, and Francesc Moreno-Noguer. D-nerf: Neural radiance fields for dynamic scenes. In Proceedings of the IEEE/CVF con-ference on computer vision and pattern recognition , pages 10318–10327, 2021. 2 [24] Robin Rombach, Andreas Blattmann, Dominik Lorenz, Patrick Esser, and Bj¨ orn Ommer. High-resolution image syn-thesis with latent diffusion models, 2021. 2 [25] Jian Shi, Zhenyu Li, and Peter Wonka. Immersepro: End-to-end stereo video synthesis via implicit disparity learning. 
+
+arXiv preprint arXiv:2410.00262 , 2024. 2 [26] Nina Shvetsova, Goutam Bhat, Prune Truong, Hilde Kuehne, and Federico Tombari. M2svid: End-to-end inpainting and refinement for monocular-to-stereo video conversion. arXiv preprint arXiv:2505.16565 , 2025. 2, 5, 4 [27] Richard Tucker and Noah Snavely. Single-view view synthe-sis with multiplane images. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition ,pages 551–560, 2020. 1, 2 [28] Team Wan, Ang Wang, Baole Ai, Bin Wen, Chaojie Mao, Chen-Wei Xie, Di Chen, Feiwu Yu, Haiming Zhao, Jianx-iao Yang, Jianyuan Zeng, Jiayu Wang, Jingfeng Zhang, Jin-gren Zhou, Jinkai Wang, Jixuan Chen, Kai Zhu, Kang Zhao, Keyu Yan, Lianghua Huang, Mengyang Feng, Ningyi Zhang, Pandeng Li, Pingyu Wu, Ruihang Chu, Ruili Feng, Shiwei Zhang, Siyang Sun, Tao Fang, Tianxing Wang, Tianyi Gui, Tingyu Weng, Tong Shen, Wei Lin, Wei Wang, Wei Wang, Wenmeng Zhou, Wente Wang, Wenting Shen, Wenyuan Yu, Xianzhong Shi, Xiaoming Huang, Xin Xu, Yan Kou, Yangyu Lv, Yifei Li, Yijing Liu, Yiming Wang, Yingya Zhang, Yi-tong Huang, Yong Li, You Wu, Yu Liu, Yulin Pan, Yun Zheng, Yuntao Hong, Yupeng Shi, Yutong Feng, Zeyinzi Jiang, Zhen Han, Zhi-Fan Wu, and Ziyu Liu. Wan: Open and advanced large-scale video generative models. arXiv preprint arXiv:2503.20314 , 2025. 4, 5, 1 [29] Lezhong Wang, Jeppe Revall Frisvad, Mark Bo Jensen, and Siavash Arjomand Bigdeli. Stereodiffusion: Training-free stereo image generation using latent diffusion models. In 
+
+Proceedings of the IEEE/CVF Conference on Computer Vi-sion and Pattern Recognition , pages 7416–7425, 2024. 2 [30] Xianqi Wang, Hao Yang, Gangwei Xu, Junda Cheng, Min Lin, Yong Deng, Jinliang Zang, Yurui Chen, and Xin Yang. Zerostereo: Zero-shot stereo matching from single images. 
+
+arXiv preprint arXiv:2501.08654 , 2025. 2, 7, 3 [31] Zhou Wang, Alan C Bovik, Hamid R Sheikh, and Eero P Si-moncelli. Image quality assessment: from error visibility to structural similarity. IEEE transactions on image processing ,13(4):600–612, 2004. 5 [32] Bowen Wen, Matthew Trepte, Joseph Aribido, Jan Kautz, Orazio Gallo, and Stan Birchfield. Foundationstereo: Zero-shot stereo matching. In Proceedings of the Computer Vi-sion and Pattern Recognition Conference , pages 5249–5260, 2025. 2 [33] Bowen Wen, Matthew Trepte, Joseph Aribido, Jan Kautz, Orazio Gallo, and Stan Birchfield. Foundationstereo: Zero-shot stereo matching. CVPR , 2025. 5 [34] Wikipedia contributors. Peak signal-to-noise ratio —Wikipedia, the free encyclopedia. https : / / en . wikipedia . org / w / index . php ? title = Peak _ signal- to- noise_ratio&oldid=1210897995 ,2024. [Online; accessed 4-March-2024]. 5 [35] Guanjun Wu, Taoran Yi, Jiemin Fang, Lingxi Xie, Xiaopeng Zhang, Wei Wei, Wenyu Liu, Qi Tian, and Xinggang Wang. 4d gaussian splatting for real-time dynamic scene rendering. In Proceedings of the IEEE/CVF conference on computer vi-sion and pattern recognition , pages 20310–20320, 2024. 2 [36] Junyuan Xie, Ross Girshick, and Ali Farhadi. Deep3d: Fully automatic 2d-to-3d video conversion with deep convo-lutional neural networks. In European conference on com-puter vision , pages 842–857. Springer, 2016. 2, 7 [37] Yiming Xie, Chun-Han Yao, Vikram Voleti, Huaizu Jiang, and Varun Jampani. Sv4d: Dynamic 3d content generation with multi-frame and multi-view consistency. arXiv preprint arXiv:2407.17470 , 2024. 2 [38] Zhuoyi Yang, Jiayan Teng, Wendi Zheng, Ming Ding, Shiyu Huang, Jiazheng Xu, Yuanming Yang, Wenyi Hong, Xiao-han Zhang, Guanyu Feng, et al. Cogvideox: Text-to-video diffusion models with an expert transformer. arXiv preprint arXiv:2408.06072 , 2024. 2 [39] Mark YU, Wenbo Hu, Jinbo Xing, and Ying Shan. Tra-jectorycrafter: Redirecting camera trajectory for monoc-ular videos via diffusion models. arXiv preprint arXiv:2503.05638 , 2025. 1, 2, 3, 4 [40] Wangbo Yu, Jinbo Xing, Li Yuan, Wenbo Hu, Xiaoyu Li, Zhipeng Huang, Xiangjun Gao, Tien-Tsin Wong, Ying Shan, and Yonghong Tian. Viewcrafter: Taming video diffusion models for high-fidelity novel view synthesis. arXiv preprint arXiv:2409.02048 , 2024. 2 [41] Jiale Zhang, Qianxi Jia, Yang Liu, Wei Zhang, Wei Wei, and Xin Tian. Spatialme: Stereo video conversion us-ing depth-warping and blend-inpainting. arXiv preprint arXiv:2412.11512 , 2024. 1, 2 [42] Liang Zhang, Carlos Vazquez, and Sebastian Knorr. 3d-tv content creation: automatic 2d-to-3d video conversion. IEEE Transactions on Broadcasting , 57(2):372–383, 2011. 1, 2 [43] Mingfang Zhang, Jinglu Wang, Xiao Li, Yifei Huang, Yoichi Sato, and Yan Lu. Structural multiplane image: Bridging neural view synthesis and 3d reconstruction. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pat-tern Recognition , pages 16707–16716, 2023. 1, 2 [44] Richard Zhang, Phillip Isola, Alexei A Efros, Eli Shecht-man, and Oliver Wang. The unreasonable effectiveness of deep features as a perceptual metric. In Proceedings of the IEEE conference on computer vision and pattern recogni-tion , pages 586–595, 2018. 5 [45] Sijie Zhao, Wenbo Hu, Xiaodong Cun, Yong Zhang, Xi-aoyu Li, Zhe Kong, Xiangjun Gao, Muyao Niu, and Ying Shan. Stereocrafter: Diffusion-based generation of long and high-fidelity stereoscopic 3d from monocular videos. arXiv preprint arXiv:2409.07447 , 2024. 1, 2, 3, 7 [46] Sijie Zhao, Yong Zhang, Xiaodong Cun, Shaoshu Yang, Muyao Niu, Xiaoyu Li, Wenbo Hu, and Ying Shan. Cv-vae: A compatible video vae for latent generative video mod-els. Advances in Neural Information Processing Systems , 37: 12847–12871, 2024. 5, 1 [47] Shangchen Zhou, Chongyi Li, Kelvin CK Chan, and Chen Change Loy. Propainter: Improving propagation and transformer for video inpainting. In Proceedings of the IEEE/CVF international conference on computer vision ,pages 10477–10486, 2023. 5 DreamStereo: Towards Real-Time Stereo Inpainting for HD Videos 
+
+# Supplementary Material 
+
+## Appendix 
+
+This supplementary material provides additional analyses and visual results that complement the experiments pre-sented in the main paper. Appendix A details the runtime evaluation and component ablations, while Appendix B presents extended qualitative comparisons across datasets and baselines, together with representative failure cases. 
+
+## A. Extended Experiments 
+
+A.1. Runtime Analysis 
+
+Figure 8 illustrates the inference pipeline of 2D-to-3D con-version, which integrates our proposed Gradient-Aware Par-allax Warping (GAPW) for precise occlusion handling and view synthesis. Within this pipeline, DreamStereo serves as the stereo inpainting module responsible for reconstructing occluded regions in the right view. We further analyze the runtime characteristics of this module under identical infer-ence configurations. We compare the end-to-end latency of SASI with our in-ternal baseline that adopts dense tokens (no sparsity) and the original WanVAE. All measurements were conducted on an NVIDIA A100 using HD-100 videos at 768 ×1280 , batch size 1, and FP16 precision. As shown in Fig. 9, our method achieves an overall latency reduction of 84.0% per frame. Specifically, the sparsity-aware DiT reduces computation time by 84.2% , while the distilled 3D-aware VAE lowers encoding and decoding cost by 83.9% . Together, these two optimizations shorten total inference from 250 to 40 ms per frame, enabling real-time HD stereo generation at 25 fps. We also report throughput on commodity GPUs, achieving 
+
+54.2 ms/frame on an RTX 3090 and 33.0 ms/frame on an RTX 4090, compared with 40.1 ms/frame on an A100. 
+
+A.2. Distilled VAE Ablation 
+
+We adopt a method similar to CV-VAE [46] to distill the WanVideo [28] VAE, aiming to reduce the time consump-tion of video encoding and decoding. Tab. 6 reports stereo inpainting results on the HD-100 test set using different VAE while keeping the same final setting as in the main paper, showing that the distilled VAE achieves nearly iden-tical quality to the original WanVAE. For standalone VAE profiling at 1024 ×1024 resolution (Tab. 7), our model re-duces parameter count by 36% and achieves over 4× faster encoding and decoding, providing substantial acceleration with negligible quality impact. Video Depth  
+
+> Estimation
+> Gradient -Aware
+> Parallax Warping
+> Stereo Inpainting
+> Model
+> Input Video
+> (view2)
+> Disparity (view2) Occlusion Mask
+> (view1)
+> Warped Video (view1)
+> Inpainting Result (view1)
+
+Figure 8. Inference pipeline of 2D-to-3D conversion. 0 50 100 150 200 250      
+
+> Latency (ms/frame)
+> Ours
+> Baseline
+> 25ms 15ms
+> Total: 40ms
+> 155ms
+> Original VAE
+> (WanVAE)
+> 95ms
+> Original DiT
+> (w/o Sparsity-Aware)
+> Total: 250ms
+> Latency Reduction
+> VAE 83.9%
+> DiT 84.2%
+> Total 84.0%
+
+Figure 9. Module-wise latency breakdown and reduction on 
+
+768 ×1280 HD videos. 
+
+VAE PSNR ↑ SSIM ↑ LPIPS ↓
+
+WanVAE 30.59 0.906 0.040 Distilled (Ours) 30.48 0.900 0.053 Table 6. Ablation on stereo inpainting quality on HD-100 (768 ×1280 ). Results are evaluated under the same final setting as in the main paper (see Tab. 1), using different VAEs. The distilled VAE achieves nearly identical quality to the original WanVAE. 
+
+VAE Params Encoder Decoder Total 
+
+WanVAE 126.8 M 47.7 ms 75.0 ms 122.7 ms Distilled (Ours) 80.2 M 9.3 ms 18.5 ms 27.8 ms Table 7. Ablation on VAE parameter efficiency and latency at 
+
+1024 ×1024 resolution. 
+
+A.3. Training Sparsity Ablation 
+
+We further conduct an ablation on applying sparsity during training. Tab. 8 compares the default setting, which uses sparsity only at inference, with a variant that applies spar-sity in both training and inference. The results show that introducing sparsity during training brings no clear perfor-mance gain across metrics. Therefore, we use sparsity only at inference in the final model, which reduces redundant computation without changing the training pipeline.          
+
+> Train-time token filtering PSNR ↑SSIM ↑LPIPS ↓
+> No (dense training) 32.48 0.933 0.049 Yes (sparse training) 32.31 0.932 0.050 Table 8. Ablation on applying sparsity during training.
+
+## B. Additional Visual Results 
+
+B.1. Comparison with ZeroStereo 
+
+Figure 10 complements Fig. 5 in the main paper by adding the stereo inpainting baseline ZeroStereo [30]. ZeroStereo is a training-free, single-image stereo inpainting method that fails to maintain temporal coherence and often yields distorted textures and geometry. In contrast, our approach produces temporally consistent, geometrically accurate, and perceptually clean stereo reconstructions. 
+
+B.2. Comparison with SpatialDreamer and M2SViD 
+
+We further compare our results with recent non-released stereo synthesis models using publicly available demo videos. The left view is used as input, and the generated right view is compared. As illustrated in Figs. 11 and 12, SpatialDreamer [15] exhibits truncation artifacts near im-age boundaries, while M2SViD [26] shows color shifts and degraded structure fidelity. Our approach maintains com-plete, sharp, and geometrically aligned stereo structures. 
+
+B.3. Qualitative Results on Dynamic Replica and SVD 
+
+While the main paper reports quantitative results on SVD AVP and Dynamic Replica test sets, we provide qualitative comparisons in Figs. 13 and 14. Our approach produces faithful stereo completions with sharper details and fewer artifacts, consistent with the quantitative improvements ob-served in the main paper. 
+
+B.4. Geometry-Consistency Comparison 
+
+We therefore add a geometry-consistency metric on Dy-namic Replica (Table 2), where disparity is estimated from                  
+
+> Metrics Deep3D Depthify.ai Owl3D StereoCrafter ZeroStereo Ours
+> AbsRel. ↓0.029 0.035 0.042 0.039 0.018 0.019
+> δ < 1.05 ↑0.847 0.770 0.716 0.751 0.929 0.914
+> Table 9. Geometry-consistency comparison on Dynamic Replica.
+
+the generated left-right pair and depth accuracy is evalu-ated after alignment to metric depth using scale and shift (Table 9). While ZeroStereo achieves the best depth score, it is an image-only, training-free baseline and still exhibits noticeable edge artifacts in the stereo views (Fig. 14). In contrast, our method achieves competitive depth accuracy while producing cleaner stereo geometry. 
+
+B.5. Failure Cases 
+
+Due to the lack of stronger priors for challenging real-world scenes, directly performing pixel-domain warping based on estimated depth still has inherent limitations. As shown in Figure 15, our method exhibits noticeable artifacts in sev-eral representative cases. • Transparent objects. Due to the geometric ambiguity introduced by transparency, the utility pole seen through the bus window becomes noticeably distorted. • Reflective surfaces. The shadows reflected on the corri-dor glass are inconsistent with the true scene geometry, since the model cannot properly account for such view-dependent reflection effects. • High-frequency details. The synthesized results appear insufficiently sharp, indicating limited fidelity in pre-serving fine-grained high-frequency textures. These examples suggest that transparency, reflection, and dense high-frequency textures remain challenging for depth-based warping methods. We consider such cases as long-tail scenarios in view synthesis, which may be further alleviated in future work by improving geometric reasoning and incorporating stronger visual priors. Input 
+
+> Masked & Mask Ground Truth  Ours(1NFE)  ZeroStereo (50NFE)
+
+Figure 10. Qualitative comparison on HD-100 ( 768 ×1280 ). This figure complements Fig. 5 by including ZeroStereo [30], a training-free stereo inpainting method that often produces random, spatially inconsistent fillings and distorted textures. Input SpatialDreamer Ours 
+
+Figure 11. Comparison with SpatialDreamer [15]. Highlighted regions show truncation artifacts in SpatialDreamer, whereas our results preserve complete and consistent stereo geometry. Input M2SVid Ours Figure 12. Comparison with M2SViD [26]. Our results show sharper details, larger disparities, and better color consistency, while M2SViD suffers from color drift and structural degradation. Ground Truth Ours ZeroStereo StereoCrafter Owl3D Depthify.ai Deep3D 
+
+Figure 13. Qualitative comparison on the SVD AVP test set ( 768 ×768 ). The second row shows per-pixel MSE maps, where blue denotes small errors and red large deviations from the ground truth. Our results exhibit the smallest errors and best overall consistency. Input Ground Truth Ours ZeroStereo StereoCrafter Owl3D Depthify.ai Deep3D Figure 14. Qualitative comparison on the Dynamic Replica valid set( 720 ×1280 ). Our method yields the most accurate and artifact-free stereo completions, consistent with quantitative improvements in Tab. 2. Ground Truth Input Generated Figure 15. Representative failure cases on transparent, reflective, and highly textured scenes from the SVD AVP test set.

@@ -6,60 +6,44 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-04-16
-- 运行时间：2026-04-16 20:09:58 UTC
+- 最新运行日期：2026-04-17
+- 运行时间：2026-04-17 20:08:16 UTC
 - 运行状态：成功
-- 本次总论文数：13
+- 本次总论文数：8
 - 精读区：2
-- 速读区：11
+- 速读区：6
 
 ### 今日简报（AI）
-今日聚焦 13 篇视觉前沿成果，深度解析高清视频实时立体补全与鲁棒张量恢复技术。
-满
-- 详情：[/202604/16/README](/202604/16/README)
+今日聚焦视频场景外扩与医疗影像自监督学习，深度解析 8 篇视觉合成与增强前沿成果。
+- 详情：[/202604/17/README](/202604/17/README)
 
 ### 精读区论文标签
-1. [DreamStereo: Towards Real-Time Stereo Inpainting for HD Videos](/202604/16/2604.12270v1-dreamstereo-towards-real-time-stereo-inpainting-for-hd-videos)  
-   标签：评分：10.0/10、query:q1
-   evidence：立体视频修复以填充遮挡区域
-2. [Robust Low-Rank Tensor Completion based on M-product with Weighted Correlated Total Variation and Sparse Regularization](/202604/16/2604.13525v1-robust-low-rank-tensor-completion-based-on-m-product-with-weighted-correlated-total-variation-and-sparse-regularization)  
-   标签：评分：8.0/10、query:q1
-   evidence：恢复具有缺失条目的受损高维张量数据
+1. [Seen-to-Scene: Keep the Seen, Generate the Unseen for Video Outpainting](/202604/17/2604.14648v1-seen-to-scene-keep-the-seen-generate-the-unseen-for-video-outpainting)  
+   标签：评分：9.0/10、query:q1
+   evidence：视频外扩绘制以扩展边界外的可见内容
+2. [Co-distilled attention guided masked image modeling with noisy teacher for self-supervised learning on medical images](/202604/17/2604.14506v1-co-distilled-attention-guided-masked-image-modeling-with-noisy-teacher-for-self-supervised-learning-on-medical-images)  
+   标签：评分：8.0/10、query:q7
+   evidence：用于特征提取的自监督掩码图像建模
 
 ### 速读区论文标签
-1. [SyncFix: Fixing 3D Reconstructions via Multi-View Synchronization](/202604/16/2604.11797v2-syncfix-fixing-3d-reconstructions-via-multi-view-synchronization)  
-   标签：评分：7.0/10、query:profile-1
-   evidence：基于扩散的细化以修复语义和几何不一致性
-2. [DiffusionPrint: Learning Generative Fingerprints for Diffusion-Based Inpainting Localization](/202604/16/2604.12443v1-diffusionprint-learning-generative-fingerprints-for-diffusion-based-inpainting-localization)  
+1. [NTIRE 2026 Challenge on Single Image Reflection Removal in the Wild: Datasets, Results, and Methods](/202604/17/2604.10321v1-ntire-2026-challenge-on-single-image-reflection-removal-in-the-wild-datasets-results-and-methods)  
    标签：评分：7.0/10、query:q1
-   evidence：基于扩散模型的图像修补定位
-3. [StructDiff: A Structure-Preserving and Spatially Controllable Diffusion Model for Single-Image Generation](/202604/16/2604.12575v1-structdiff-a-structure-preserving-and-spatially-controllable-diffusion-model-for-single-image-generation)  
-   标签：评分：7.0/10、query:q4
-   evidence：单图生成的生成式框架
-4. [Image-to-Image Translation Framework Embedded with Rotation Symmetry Priors](/202604/16/2604.12805v1-image-to-image-translation-framework-embedded-with-rotation-symmetry-priors)  
-   标签：评分：7.0/10、query:profile-1
-   evidence：无配对数据的无监督图像翻译
-5. [VibeFlow: Versatile Video Chroma-Lux Editing through Self-Supervised Learning](/202604/16/2604.13425v1-vibeflow-versatile-video-chroma-lux-editing-through-self-supervised-learning)  
-   标签：评分：7.0/10、query:q7
-   evidence：用于视频编辑和修复的自监督框架
-6. [Dehaze-then-Splat: Generative Dehazing with Physics-Informed 3D Gaussian Splatting for Smoke-Free Novel View Synthesis](/202604/16/2604.13589v1-dehaze-then-splat-generative-dehazing-with-physics-informed-3d-gaussian-splatting-for-smoke-free-novel-view-synthesis)  
-   标签：评分：7.0/10、query:q4
-   evidence：生成式去雾和物理启发式修复
-7. [FineEdit: Fine-Grained Image Edit with Bounding Box Guidance](/202604/16/2604.10954v1-fineedit-fine-grained-image-edit-with-bounding-box-guidance)  
+   evidence：图像修复中的基础任务
+2. [Lightweight Low-Light Image Enhancement via Distribution-Normalizing Preprocessing and Depthwise U-Net](/202604/17/2604.11071v2-lightweight-low-light-image-enhancement-via-distribution-normalizing-preprocessing-and-depthwise-u-net)  
+   标签：评分：6.0/10、query:profile-1
+   evidence：低光照图像增强与修复
+3. [Generative Refinement Networks for Visual Synthesis](/202604/17/2604.13030v1-generative-refinement-networks-for-visual-synthesis)  
    标签：评分：6.0/10、query:q4
-   evidence：用于图像合成与编辑的生成模型
-8. [SyncFix: Fixing 3D Reconstructions via Multi-View Synchronization](/202604/16/2604.11797v1-syncfix-fixing-3d-reconstructions-via-multi-view-synchronization)  
-   标签：评分：6.0/10、query:q1
-   evidence：基于扩散的细化与语义不一致修复
-9. [LiveMoments: Reselected Key Photo Restoration in Live Photos via Reference-guided Diffusion](/202604/16/2604.12286v1-livemoments-reselected-key-photo-restoration-in-live-photos-via-reference-guided-diffusion)  
-   标签：评分：6.0/10、query:q1
-   evidence：用于照片质量增强的图像修复框架
-10. [Rethinking Satellite Image Restoration for Onboard AI: A Lightweight Learning-Based Approach](/202604/16/2604.12807v1-rethinking-satellite-image-restoration-for-onboard-ai-a-lightweight-learning-based-approach)  
-   标签：评分：6.0/10、query:q7
-   evidence：卫星图像修复与质量提升
-11. [M3D-Stereo: A Multiple-Medium and Multiple-Degradation Dataset for Stereo Image Restoration](/202604/16/2604.12917v1-m3d-stereo-a-multiple-medium-and-multiple-degradation-dataset-for-stereo-image-restoration)  
-   标签：评分：6.0/10、query:q7
-   evidence：多种退化情况下的立体图像修复数据集
+   evidence：用于视觉合成与重建的生成式细化网络
+4. [Deep Spatially-Regularized and Superpixel-Based Diffusion Learning for Unsupervised Hyperspectral Image Clustering](/202604/17/2604.13307v1-deep-spatially-regularized-and-superpixel-based-diffusion-learning-for-unsupervised-hyperspectral-image-clustering)  
+   标签：评分：6.0/10、query:q2
+   evidence：用于图像表示的无监督掩码自编码器
+5. [Prompt-Guided Image Editing with Masked Logit Nudging in Visual Autoregressive Models](/202604/17/2604.14591v1-prompt-guided-image-editing-with-masked-logit-nudging-in-visual-autoregressive-models)  
+   标签：评分：6.0/10、query:q4
+   evidence：视觉自回归模型中的图像编辑
+6. [OmniLight: One Model to Rule All Lighting Conditions](/202604/17/2604.15170v1-omnilight-one-model-to-rule-all-lighting-conditions)  
+   标签：评分：6.0/10、query:q3
+   evidence：光照相关的图像修复与内容恢复
 
 
 <div class="dpr-home-promo-card">

@@ -1,0 +1,749 @@
+Title: Generative Refinement Networks for Visual Synthesis
+
+URL Source: https://arxiv.org/pdf/2604.13030v1
+
+Published Time: Wed, 15 Apr 2026 01:40:27 GMT
+
+Number of Pages: 24
+
+Markdown Content:
+# Generative Refinement Networks for Visual Synthesis 
+
+Jian Han, Jinlai Liu, Jiahuan Wang, Bingyue Peng, Zehuan Yuan ∗
+
+ByteDance 
+
+{hanjian.thu123,liujinlai.licio}@bytedance.com {wangjiahuan.123,bingyue.peng,yuanzehuan}@bytedance.com 
+
+Code and models: https://github.com/MGenAI/GRN 
+
+Figure 1: Qualitative results for the class-to-image generation task. 
+
+## Abstract 
+
+While diffusion models dominate the field of visual generation, they remain com-putationally inefficient, as they allocate uniform computational effort to samples with varying levels of complexity. In contrast, autoregressive (AR) models are inherently complexity-aware, as evidenced by their variable likelihoods, but are often hindered by lossy discrete tokenization and error accumulation. In this work, we introduce Generative Refinement Networks (GRN), a next-generation visual synthesis paradigm to address these issues. At its core, GRN addresses the discrete tokenization bottleneck through a theoretically near-lossless Hierarchical Binary Quantization (HBQ), achieving a reconstruction quality comparable to continuous counterparts. Built upon HBQ’s latent space, GRN fundamentally upgrades AR generation with a global refinement mechanism that progressively perfects and cor-rects artworks — like a human artist painting. Besides, GRN integrates an entropy-guided sampling strategy, enabling complexity-aware, adaptive-step generation without compromising visual quality. On the ImageNet benchmark, GRN estab-lishes new records in image reconstruction (0.56 rFID) and class-conditional image generation (1.81 gFID). We also scale GRN to more challenging text-to-image and text-to-video generation, delivering superior performance on an equivalent scale. We release all models and code to foster further research on GRN. 
+
+## 1 Introduction 
+
+The field of visual generation has advanced rapidly, driven primarily by scaling diffusion transformers [ 43 , 4 , 29 , 65 , 22 ]. By progressively integrating trajectories along a learned velocity field that transports simple noise prior to the empirical data distribution, these models demonstrate strong capabilities in synthesizing high-quality visual content. However, this continuous flow paradigm 
+
+> ∗
+
+Corresponding author: yuanzehuan@bytedance.com Preprint. Under review. 
+
+> arXiv:2604.13030v1 [cs.CV] 14 Apr 2026
+
+inherently lacks adaptive-step capacity. Optimized via mean squared error (MSE) without explicit likelihoods, these models are restricted to a fixed number of steps, rigidly allocating identical computational resources to all samples regardless of varying levels of complexity. Meanwhile, inspired by the success of token-level likelihood estimation in large language models[ 41 ,1], autoregressive (AR) models have also garnered extensive research interest in visual synthesis[ 58 ,52 , 26 , 56 ]. Nevertheless, current AR approaches are bottlenecked by two critical shortcomings. First, they intrinsically suffer from inferior reconstruction quality when utilizing discrete tokens as opposed to continuous representations. Second, their strictly causal prediction mechanism, whether they operate token-by-token or scale-by-scale, inevitably causes severe error accumulation over multi-step generation. This exposes a critical lack of error-correction capability, as the model cannot retroactively refine previous mistakes. Furthermore, even with parallel prediction in masked AR models [ 7 , 17 ], high-confidence tokens become immutable and cannot be revised later. Consequently, such models still inherently lack a holistic refinement mechanism. These observations motivate us to propose a simple yet intuitive refinement-based AR generation framework equipped with adaptive computation capabilities. Specifically, we introduce Generative Refinement Networks (GRN), a next-generation visual synthesis paradigm designed to overcome the rigidly fixed computational costs of diffusion models and the inherent shortcomings of standard autoregressive models. Specifically, to address the inferior reconstruction of discrete tokens, we first propose Hierarchical Binary Quantization (HBQ). By ensuring an exponential decay of reconstruc-tion error without increasing latent channels, HBQ empowers discrete image and video tokenizers to achieve near-lossless reconstruction, matching the performance of continuous tokenizers at a higher compression rate. Building upon these robust representations, GRN executes a complexity-aware adaptive-step generation process by employing an entropy-guided sampling mechanism. It dynamically distributes computational loads based on the varying difficulty of visual content, while employing a global refinement mechanism to retroactively mitigate accumulated errors. Extensive experiments on diverse visual tasks validate the superiority of our framework. On the ImageNet 256 ×256 benchmark [ 16 ] for class-conditional image synthesis, GRN sets a new record for both image reconstruction and generation quality. Furthermore, demonstrating exceptional task generalization and scalability, we also successfully scale GRN to high-resolution text-to-image (T2I) and text-to-video (T2V) scenarios. When scaled up, GRN demonstrates the capability to generate photorealistic 1024 ×1024 images alongside dynamic, high-fidelity 480p videos ranging from 2 to 10 seconds. In summary, our main contributions are as follows: 1. We propose GRN, the next-generation visual synthesis framework. It is characterized by a global refinement mechanism and complexity-aware generation, achieving robust and efficient visual generation. 2. We introduce Hierarchical Binary Quantization and contribute a series of discrete im-age/video tokenizers. For the first time, discrete visual tokenizers are on par with continuous ones with the same latent dimensions. 3. Extensive experiments show that GRN achieves state-of-the-art results on standard C2I benchmarks, with an rFID of 0.56 and a gFID of 1.81. When scaled to more challenging T2I and T2V tasks, it demonstrates superior performance compared to methods at an equivalent scale. 
+
+## 2 Related Work 
+
+2.1 Visual Tokenizer 
+
+Visual tokenizers [ 47 , 53 , 19 ] compress visual content for efficient generation. Early vector quan-tization methods [ 53 , 19 ] map continuous features to a discrete codebook, but suffer from limited scalability, prompting lookup-free approaches [66, 39] to enable larger vocabularies. Despite this, a performance gap to continuous representations remains. Recent works [ 26 , 2] aim to close this gap by drastically scaling vocabularies, outperforming continuous VAEs. However, this gain comes at the cost of slower convergence and larger generative models, motivating more efficient quantization schemes. 2[-1, 1]                           
+
+> [-1, 0] (0, 1]
+> [-1, -0.5] (-0.5, 0] (0, 0.5] (0.5, 1]
+> [-1, -0.75] (-0.75, -0.5] (-0.5, -0.25] (-0.25, 0] (0, 0.25] (0.25, 0.5] (0.5, 0.75] (0.75, 1]
+> [-1,-0.875] (-0.875,-0.75] (-0.75,-0.675] (-0.675,-0.5] (-0.5,-0.375] (-0.375,-0.25] (-0.25,-0.125] (-0.125, 0] (0 , 0.125] (0.125, 0.25] (0.25, 0.375] (0.375, 0.5] (0.5, 0.625] (0.625, 0.75] (0.75,0.875] (0.875,1.0]
+> 10
+
+......                        
+
+> 0101
+> 01
+> 01
+> 010101
+> 01010101010101
+
+Figure 2: Hierarchical Binary Quantization. Each element from the VAE encoded features under-goes several rounds of hierarchical binary quantization. The quantization error decays exponentially with the number of rounds, theoretically enabling lossless quantization to be achieved rapidly. 
+
+2.2 Autoregressive Models 
+
+Inspired by large language models, [ 19 , 50 , 28 , 55 ] explore visual generation via next-token prediction. MaskGIT [ 7] accelerates generation using parallel decoding, where it first generates high-confidence tokens and then iteratively fills in the remainder. VAR [ 52 ] shifts autoregression to next-scale prediction, improving quality and achieving over 10 × faster inference. Nevertheless, AR models remain limited by lossy discrete tokenization and error accumulation, and still lag behind diffusion methods. Although Infinity [ 26 ] introduces self-correction by randomly flipping bitwise tokens, its assumption of less than 30% diffuse errors covers limited patterns. 
+
+2.3 Adaptive-step Generation 
+
+Diffusion models dominate visual generation [ 31 , 44 , 18 , 4, 54 ], but typically require tens of inference steps. Distillation methods [ 61 , 60 ] reduce sampling steps substantially, yet still rely on predefined schedules with fixed steps. This “one-size-fits-all” strategy wastes computational resources on simple prompts. Recently, AdaDiff [ 64 ] employs an external network to determine instance-specific steps and uses a policy gradient method to maximize the reward. The sophisticated pipeline requires an additional network and reward signals. 
+
+## 3 Method 
+
+3.1 Visual Tokenizer 
+
+The visual tokenizer plays a vital role in learning a compact latent space to compress high-dimensional realistic data. We adopt the 3D causal VAE design proposed in Wan 2.1 [ 54 ] so that images and videos can be tokenized in a unified framework. Specifically, given an image or a video 
+
+X ∈ R(1+4 T )×H×W ×3, the tokenizer encodes its spatio-temporal information into dimensions 
+
+[1 + T, H/ 16 , W/ 16] while expanding the number of channels to C. Since our goal is lossless discrete compression, and VAE features are continuous signals, we frame feature quantization as a signal transformation problem. Inspired by Harr Wavelet [ 24 ] in signal processing, we introduce Hierarchical Binary Quantization to transform VAE features into discrete ones. 
+
+Hierarchical Binary Quantization. We first append a tanh( ·) non-linear activation function after the VAE encoder to map the feature representation F from an unbounded range to the closed interval 
+
+(−1, +1) . As illustrated in Fig. 2, each element in F undergoes several rounds of binary quantization based on a binary tree of buckets with center c as defined in Eq. 1 and Eq. 2. 
+
+ci =
+
+> i−1
+
+X
+
+> j=1
+
+δ[qj ]2j (1) 
+
+qi =
+
+0 if F ≤ ci,
+
+1 if F > c i. (2) 3q1 q2 q3 q4 GT Figure 3: An example of Hierarchical Binary Quantization (M=4). For q1, q2, and q3, we truncate the complete sequence and take the truncated parts for reconstruction. where δ(·) is a delta function with -1 when qi = 0 and 1 otherwise. Then we obtain the quantized binary labels {q1, q 2, ..., q M }, where qj ∈ { 0, 1}[1+ T,H/ 16 ,W/ 16 ,C ]. Here M is the total round of hierarchical binary quantization. In this way, we perform quantization from coarse to fine to represent information of different frequencies, and the quantization error ej for the round j is less than 12j . The upper bound of the quantization error decays exponentially with the number of rounds, theoretically enabling lossless quantization to be achieved rapidly. Fig. 3 shows the images reconstructed from the quantized intermediate results, revealing the coarse-to-fine property. 
+
+ˆF = δ[q1] · 2−1 + δ[q2] · 2−2 + ... + δ[qM ] · 2−M (3) Subsequently, the quantized feature ˆF can be derived according to Eq. 3. The detailed algorithm for HBQ is provided in Appendix A. During the training phase of the visual tokenizer, the quantized feature ˆF is taken as input to the decoder to reconstruct the raw image or video X. Following the common practice for training discrete visual tokenizers, we adopt the Straight-Through Estimator (STE) to backpropagate gradients to the encoder. The training loss is a weighted combination of the reconstruction loss ( λrecons ), LPIPS perceptual loss ( λLP IP S ), and the GAN loss ( λGAN ) from a PatchGAN discriminator. After tokenization, we obtain binary outputs with the size [1 + T, H/ 16 , W/ 16 , C, M ]. However, it is nearly impossible to encode outputs into INT scalars to perform generation by merging C
+
+and M dimensions due to its equivalence to introducing a codebook with the large size 2CM .Inspired by bitwise tokens [ 26 ], we propose two variants of GRN, i.e. GRN ind and GRN bit to support generation. For GRN ind we simply encode the M dimension to INT scalars, resulting in 
+
+Yind ∈ { 0, ..., 2M − 1}[1+ T,H/ 16 ,W/ 16 ,C ]. For GRN bit we concatenate the last two dimensions and predict Ybit ∈ { 0, 1}[1+ T,H/ 16 ,W/ 16 ,CM ]. For both variants, we flatten the spatiotemporal dimensions and predict the entire channel dimension in parallel for each token via multi-token prediction [34]. 
+
+3.2 Generative Refinement Network 
+
+Inspired by the intuition of human drawing, we propose an elegantly simple autoregressive refinement framework for visual generation, which commences with a random token map. Let Ft represent the state of the token map in step t. The objective is to predict the drawing map Yt+1 , based on the current state Ft. To explicitly formulate this process, we define Ft as a composition of three components: a random map Yrand , a drawing map Yt, and a binary selection map St. The relationship is formally expressed in Eq. 4, where Ft is constructed by selecting from Yt or Yrand based on the values in St.
+
+Ft = St · Yt ⊕ St · Yrand  (4) Intuitively, St ·Yt represents the current drawing while St ·Yrand corresponds to the blank area without any information to mimic the intermediate step during the human drawing procedure. S is designed to make the accumulation statistic l, namely the proportion of ones in S, increase monotonically from 0% to 100% during the refinement steps. Therefore, F gradually converges to ideal token maps. In order to obtain Yt+1 , we employ a transformer Φ( ·) and approximate p(Yt+1 ) as 
+
+p(Yt+1 ) = Φ( Ft, cond ) (5) to model next-step drawing by fitting real token maps, where cond denotes the generation condition, such as class embeddings or texts. St+1 is constructed following Eq. 6 based on Yt+1 . An alternative 4R R R                                            
+
+> RRR
+> RRR
+> R
+> R
+> R
+> RRRR
+> RRR
+> RFR
+> FRR
+> F
+> R
+> R
+> RRFR
+> FFR
+> FRR
+> RRR
+> F
+> F
+> R
+> RFFF
+> FFF
+> FFF
+> FFF
+> F
+> F
+> F
+> FFFF
+> Step #1
+> 100% Random Labels
+> Step #2
+> Sample 25% Predicitons
+> Step #3
+> Sample 50% Predicitons
+> Step #5
+> Sample 100% Predicitons
+> FFR
+> RFF
+> FFR
+> F
+> F
+> F
+> FFRF
+> Step #4
+> Sample 75% Predicitons
+> F
+> F
+> R
+> Newly filled token
+> Kept fill token
+> Erased token
+> RBlank random token
+
+Figure 4: Generative Refinement Framework. Starting from a random token map, GRN randomly selects more predictions at each step and refines all input tokens. For example, compared to the second step, the third step filled six new tokens (pink), kept two tokens (blue), erased two tokens (yellow), and left six tokens blank (gray). approach based on prediction confidence was also investigated for constructing St+1 . However, it produced inferior results, as detailed in Appendix E.2. 
+
+St = RandLike (Yt) < l t (6) We introduce a complexity-aware sampling strategy to control lt to not only maintain its monotonicity, but also consider the uncertainty of Y . We will discuss the details below. Based on the prediction 
+
+Yt+1 and selection map St+1 , the state Ft+1 is updated accordingly as mentioned in Eq. 4. Thus, a coherent loop of progressive generation and refinement is formed. The autoregressive mechanism allows us not only to improve more and more tokens with high certainty, but also to erase obvious errors with more context included as the drawing proceeds. Ideally, the process converges to the best result as more and more information accumulates. The toy process is demonstrated in Fig. 4. 
+
+Training. For each iteration in the training stage, we randomly sample random tokens Yrand from a uniform distribution {0, 1, ..., 2M − 1} for GRN ind and {0, 1} for GRN bit . The binary map St is also uniformly sampled with varying selection ratios that control how many real tokens are used as input. Therefore, the input Ft to the transformer consists of N · lt tokens sampled from ground-truth tokens Ygt and N · (1 − lt) tokens sampled from random tokens Yrand . Note that token sampling is randomly conducted along the spatial, temporal, and channel dimensions, with no additional priors (Eq. 6). N refers to the total number of tokens, which equals (1 + T ) · H/ 16 · W/ 16 · (C or CM ).Taking Ft constructed by Eq. 4 as input with partial information, our goal is to predict ground-truth similar to x-prediction in diffusion setting using the simple Cross-Entropy loss as illustrated in Eq. 7. Here yi denotes the ground truth token. 
+
+L = −E[ 1
+
+N
+
+> N
+
+X
+
+> i=0
+
+log p(yi | Ft, cond )]  (7) The detailed training and inference process for GRN is provided in Appendix B. Additional compar-isons between GRN and other autoregressive models are provided in Appendix C. 
+
+Complexity-Aware Sampling. We propose an entropy-guided scheduling function to determine lt,where t refers to the index of the refinement step. In particular, we calculate the average entropy 
+
+H(Yt) for step t during generation as 
+
+H(Yt) = 1
+
+N · 1log 2 K ·
+
+> N
+
+X
+
+> i=0
+> K
+
+X
+
+> j=0
+
+−p(y(i,j ) | Ft−1, cond ) · log 2 p(y(i,j ) | Ft−1, cond ). (8) In Eq. 8, we denote i as the token index and j ∈ { 1, 2, ..., K } as the category index, where K is the total number of categories. Note that K = 2 M for GRN ind and K = 2 for GRN bit . Generation complexity is measured by the entropy H(Yt), bounded between 0 and 1. Given that a smaller 
+
+H(Yt) denotes greater predictive confidence, we allocate fewer refinement steps alongside a steeper increase in lt, thereby retaining more information from Yt. Conversely, when high entropy indicates substantial complexity, we apply more refinement steps and a moderate progression of lt. Specifically, we formulate lt as 5Table 1: Reconstruction performance comparison of image tokenizers on ImageNet (256 ×256).                                                                     
+
+> Method Tokenizer Spatial Latent Channel Compress rFID ↓LPIPS ↓SSIM ↑PSNR ↑
+> Type Ratio Channel Bits Ratio SD-VAE [47] Continuous 16 16 16 24 0.87 -0.68 24.08 RAE [67] Continuous 16 768 16 0.5 0.62 0.25 0.44 19.20 VAR †[52] Discrete 16 N/A N/A 193 0.85 0.15 0.64 22.47 LlamaGen [50] Discrete 16 114 439 2.19 -0.68 20.79 Open-MAGVIT2 [36] Discrete 16 118 341 1.17 --22.64
+> HBQ (M=4) Discrete 16 16 496 0.56 0.13 0.71 23.01
+
+Table 2: Reconstruction performance comparison of video tokenizers. To evaluate reconstruction quality, we curated a challenging validation set of 160 high-motion videos. For continuous tokenizers, we consider each latent channel to hold 16 bits of information. An HBQ tokenizer with M rounds introduces M bits within each latent channel. Method Tokenizer Latent Spatial Temporal Channel Compress rFVD ↓ LPIPS ↓ SSIM ↑ PSNR ↑                                                                                                 
+
+> Type Channel Stride Stride Bits Ratio Wan 2.1 (patchify) Continuous 64 16 416 24 19.5 0.058 0.929 34.10 Wan 2.2 (patchify) Continuous 48 16 416 27 22.6 0.052 0.932 34.54 HBQ (w/o quant) Continuous 16 16 416 96 144.6 0.141 0.879 31.14 HBQ (M=4) Discrete 16 16 44384 163.6 0.148 0.872 30.40 HBQ (M=6) Discrete 16 16 46256 148.8 0.142 0.878 30.98 HBQ (M=8) Discrete 16 16 48192 144.9 0.141 0.879 31.10 HBQ (w/o quant) Continuous 64 16 416 24 43.2 0.078 0.935 34.79 HBQ (M=4) Discrete 64 16 4496 50.6 0.084 0.930 33.97 HBQ (M=4, tune λGAN )Discrete 64 16 4496 30.1 0.078 0.928 33.98
+
+lt = l (Y, t ) = tα 1t≤t0 +
+
+ t0
+
+α + α − t0
+
+α · (t − t0)
+
+k · H(Y(t0+1) ) + b
+
+
+
+1t>t 0 . (9) Here, H(Y(t0+1) ) represents the average entropy calculated from a specific step. We set a warm-up period with t0 = 5 and α = 50 , as we observed that the entropy values are unstable during the initial steps. The hyperparameters k control the dynamic range of adaptive steps, and b is the bias. We also clip the value of k · H(Y(t0+1) ) + b to ensure the total number of inference steps remains within the range of [Tmin , T max ].
+
+## 4 Experiments 
+
+4.1 Visual Tokenizer Implementation. We introduce two visual tokenizers: an image-only tokenizer tailored for class-conditional image generation, and a joint image-video tokenizer designed for text-to-image and text-to-video generation tasks. Both tokenizers adopt the 3D causal encoder and decoder architecture from Wan 2.1 [ 54 ] and are trained from scratch. Specifically, the image-only tokenizer is trained on the OpenImages dataset [ 30 ], while the joint tokenizer is trained on a combination of publicly available image and video datasets. During training, the overall objective comprises reconstruction, perceptual, and adversarial (GAN) losses. The respective loss weights are set to 1.0, 1.0, and 0.3 for the image-only tokenizer, and 1.0, 0.2, and 0.005 for the joint image-video tokenizer. 
+
+Results. As shown in Tab. 1, our tokenizer demonstrates state-of-the-art reconstruction performance on the 256 ×256 ImageNet benchmark. Utilizing four HBQ rounds, it achieves a remarkable rFID of 
+
+Figure 5: Effect of HBQ rounds. 8-round configuration matches the continuous baseline. 60.56. This result significantly surpasses not only the continuous SD-VAE (0.87 rFID) while operating at a 4 × higher compression rate, but also substantially outperforms other leading methods, including RAE (0.62), VAR (0.85), LlamaGen (2.19), and Open-MAGVIT-v2 (1.17). These results underscore our method’s superior ability to achieve high fidelity reconstruction under stringent compression. In Tab. 2, we present a series of joint image-video tokenizers, exploring the impact of varying HBQ rounds and latent channel dimensions. We first analyze the effect of HBQ rounds and observe a clear trend: reconstruction metrics such as rFVD and PSNR consistently improve as the number of HBQ rounds increases. While four to six rounds already yield strong performance, an eight-round configuration achieves reconstruction quality nearly identical to that of the continuous baseline as depicted in Tab. 2 and Fig. 5. This demonstrates that our HBQ tokenizer can match its continuous counterpart’s fidelity while operating at a higher compression rate. Crucially, this is achieved without increasing the latent channels. While other methods (e.g., Infinity [ 26 ], BitDance [ 2]) can also bridge the gap to continuous models, they typically rely on expanding the latent dimension. As recent studies [18 , 26 , 10 ] suggest, such an approach often slows convergence and necessitates larger models. In contrast, our primary results are achieved without increasing the latent dimension. We also experimented with expanding the latent channels from 16 to 64. This single change boosts the PSNR from 30.40 to an impressive 33.97. Notably, this performance is comparable to the state-of-the-art Wan 2.1 tokenizer, but is achieved at a 4 × higher compression rate. By carefully tuning the GAN loss weight, our proposed HBQ tokenizer maintains nearly identical SSIM and PSNR scores while significantly improving perceptual metrics, reducing rFVD from 50.6 to 30.1 and LPIPS from 0.084 to 0.078. More details on tuning λGAN are provided in Appendix E.1. 
+
+4.2 Class-to-Image Results Implementation. Following JiT [ 32 ], we incorporate SwiGLU, RMSNorm, RoPE, qk-norm, and in-context class conditioning to the original transformer. We train GRN ind with four different model sizes: 130M, 458M, 952M, and 2B parameters, denoted as GRN-B, GRN-L, GRN-H, GRN-G, respectively. We train them for 600 epochs on the ImageNet [ 16 ] dataset. The learning rate is set to 2e-4 and is constant during the training phase. We randomly discard 10% conditions for Classifier-Free Guidance. During the inference stage, we grid search the best decoding hyperparameters. Additional implementation details are provided in Appendix D. 
+
+Results. As shown in Tab. 3, GRN is benchmarked against state-of-the-art diffusion, hybrid, and autoregressive models on the ImageNet 256 ×256 class-conditional generation task. With nearly half the parameters of MaskGIT [ 7 ], our GRN-B model achieves a superior FID of 3.56 (vs. 6.18), demonstrating remarkable efficiency. Our largest variant, GRN-G, achieves a state-of-the-art FID of 1.81, rivaling top diffusion and hybrid models. Notably, GRN-G surpasses foundational models like DiT [ 43 ] and SiT [ 37 ] in both FID and Inception Score. This is significant as they form the backbone of many current industrial T2I and T2V models. Furthermore, GRN-G outperforms the autoregressive model LlamaGen [ 50 ] and VAR [ 52 ]. We attribute this advantage to our proposed global refinement generation, which effectively mitigates error propagation. The high-quality visual samples generated by GRN-G, shown in Fig. 1, also confirm its capabilities. Please refer to Fig. 13 in the Appendix for additional uncurated qualitative results. These strong results establish GRN as a powerful and scalable baseline for high-fidelity visual generation, motivating its application to more complex text-to-image and text-to-video tasks. 
+
+4.3 Text-to-Image Results Implementation. We train GRN bit for the text-to-image task with 2B parameters from scratch. In contrast to C2I models, the T2I model leverages in-context self-attention instead of adaln-zero to inject conditions. The model was pre-trained on large-scale public datasets and subsequently fine-tuned on a small, high-quality proprietary dataset. We first train GRN on the pre-training dataset with 256 resolution for 150K iterations using a batch size of around 15400 and a learning rate of 2e-4. Then we fine-tune GRN at 1024 resolution with a smaller, high-quality dataset. In this stage, we train GRN for 60K iterations using a batch size of 2048 and a learning rate of 2e-5. Additional implementation details are provided in Appendix D. 
+
+Results. As shown in Tab. 4, our model, augmented with a re-writer, achieves an overall score of 0.76 on the GenEval benchmark [ 21 ]. While our model is surpassed by larger-scale methods such 7Table 3: Reference results on ImageNet 256 ×256. FID [ 27 ] and IS [ 48 ] of 50K samples are evaluated. Tokenizer “D” refers to a discrete tokenizer, while “C” refers to a continuous tokenizer. 
+
+Type Model Tokenizer Loss #Param FID ↓ IS ↑
+
+Diffusion DiT-L/2 [43] C MSE 458M 5.02 167.2 Diffusion DiT-XL/2 [43] C MSE 675M 2.27 278.2 Flow SiT-XL/2 [37] C MSE 675M 2.06 277.5 Flow REPA [62], SiT-XL/2 C MSE 675M 1.42 305.7 Flow RAE [67], DiT DH -XL/2 C MSE 839M 1.13 262.6 Flow JiT-B/16 [32] C MSE 131M 3.66 275.1 Flow JiT-L/16 [32] C MSE 459M 2.36 298.5 Flow JiT-H/16 [32] C MSE 953M 1.86 303.4 Flow JiT-G/16 [32] C MSE 2B 1.82 292.6 Hybrid MAR [33] C MSE 943M 1.55 303.7 Hybrid BitDance-H-1x [2] D MSE 1B 1.24 304.4 AR LlamaGen-L [50] D CE 343M 3.07 256.1 AR LlamaGen-XL [50] D CE 775M 2.62 244.1 AR LlamaGen-XXL [50] D CE 1.4B 2.34 253.9 AR MaskGIT [7] D CE 227M 6.18 182.1 AR VAR-d20 [52] D CE 600M 2.57 302.6 AR VAR-d24 [52] D CE 1B 2.09 312.9 AR VAR-d30 [52] D CE 2B 1.92 323.1 AR RandAR-XXL [42] D CE 1.4B 2.15 322.0 AR GRN-B D CE 130M 3.56 280.3 AR GRN-L D CE 458M 2.64 314.8 AR GRN-H D CE 952M 2.06 316.1 AR GRN-G D CE 2B 1.81 299.0 as Z-Image-Turbo [ 5 ], HiDream [ 6], Qwen-Image [ 46 ], and BitDance [ 3 ], it is crucial to note the significant disparity in model size: these models utilize 6B to 20B parameters, whereas GRN is a far more compact 2B model. When compared at an equivalent scale, GRN demonstrates superior performance, significantly outperforming models of a similar 2B size like SD3 Medium [ 18 ] (0.62) and Infinity [ 26 ] (0.71). The qualitative results in Fig. 14 in the Appendix showcase GRN’s strong capability to generate high-fidelity and diverse images that accurately follow user prompts. 
+
+4.4 Text-to-Video Results Implementation. Beyond the class-to-image and text-to-image generation tasks, we extend GRN to the most challenging text-to-video synthesis task. The T2V variant of GRN shares the same architecture as its T2I counterpart but is trained exclusively on video data. For this purpose, we curated a training dataset of approximately 40 million video clips, each with a resolution of at least 256 × 256 and a duration of 2 to 10 seconds. The training process consists of two stages. First, we train GRN at a 192p resolution for 150K iterations with a batch size of 4096 and a learning rate of 2e-4. Subsequently, we switch to a 480p resolution for fine-tuning, training for an additional 9K iterations with a reduced batch size of 1350 and a learning rate of 2e-5. Additional implementation details are provided in Appendix D. 
+
+Results. As demonstrated in Tab. 5, GRN exhibits superior performance in generating videos from tex-tual prompts. When benchmarked against contemporary diffusion and flow-based models—including AnimateDiff-V2 [ 23 ], VideoCraft-2.0 [ 8], OpenSora V1.2 [ 68 ], Show-1 [ 63 ], and CogVideoX-5B [59 ]—GRN achieves significantly higher scores across quality, semantic, and overall scores. Notably, despite having only 2 billion parameters, GRN surpasses the much larger CogVideoX-5B [ 59 ] model, highlighting its exceptional parameter efficiency. Furthermore, our approach outperforms URSA [ 15 ], a discrete diffusion model of comparable size. The performance advantage of GRN becomes even more pronounced when compared to autoregressive counterparts such as Nova [ 14 ], Emu3 [ 56 ], and Lumos-1 [ 49 ]. While the 8B parameter model, InfinityStar [ 35 ], currently holds a higher overall score of 83.74, we are confident that the performance gap can be bridged by scaling up the size of GRN. We present qualitative results in Fig. 6. Please refer to Fig. 15 and Fig. 16 in the Appendix for 8Table 4: Evaluation of Text-to-Image generation on GenEval [21]. 
+
+Model #Param #Data Single Obj. Two Obj. Count Colors Pos. Color Attri. Overall ↑
+
+Proprietary Models 
+
+GPT Image 1 [40] N/A N/A 0.99 0.92 0.85 0.92 0.75 0.61 0.84 Seedream 3.0 [20] N/A N/A 0.99 0.96 0.91 0.93 0.47 0.80 0.84 
+
+Diffusion Models 
+
+PixArt-α [9] 0.6B N/A 0.98 0.50 0.44 0.80 0.08 0.07 0.48 SD3 Medium [18] 2B N/A 0.98 0.74 0.63 0.67 0.34 0.36 0.62 JanusFlow [38] 1.3B N/A 0.97 0.59 0.45 0.83 0.53 0.42 0.63 FLUX.1-Dev [31] 12B N/A 0.98 0.81 0.74 0.79 0.22 0.45 0.66 SD3.5-Large [18] 8B N/A 0.98 0.89 0.73 0.83 0.34 0.47 0.71 Lumina-Image-2.0 [45] 2.6B 111M - 0.87 0.67 - - 0.62 0.73 Show-o2 [57] N/A N/A 1.00 0.87 0.58 0.92 0.52 0.62 0.76 Z-Image-Turbo [5] 6B N/A 1.00 0.95 0.77 0.89 0.65 0.68 0.82 HiDream-I1-Full [6] 17B N/A 1.00 0.98 0.79 0.91 0.60 0.72 0.83 Z-Image [5] 6B N/A 1.00 0.94 0.78 0.93 0.62 0.77 0.84 Qwen-Image [46] 20B N/A 0.99 0.92 0.89 0.88 0.76 0.77 0.87 BAGEL [13] 14B N/A 0.98 0.95 0.84 0.95 0.78 0.77 0.88 
+
+Autoregressive Models 
+
+Emu3-Gen [56] 8B N/A 0.98 0.71 0.34 0.81 0.17 0.21 0.54 Infinity † [26] 2B 160M - 0.85 - - 0.49 0.57 0.73 Janus-Pro [11] N/A N/A 0.99 0.89 0.59 0.90 0.79 0.66 0.80 Tar [25] N/A N/A 0.98 0.92 0.83 0.85 0.80 0.65 0.84 NextStep-1 [51] 14B N/A - - - - - - 0.73 BitDance [3] 14B N/A 1.00 0.96 0.71 0.95 0.72 0.83 0.86 
+
+GRN † 2B 80M 0.99 0.90 0.72 0.84 0.52 0.60 0.76 
+
+Table 5: Evaluation on the VBench benchmark. † result is with prompt rewriting. 
+
+Models # Params Human Scene Multiple Appear. Quality Semantic Overall 
+
+Action Objects Style Score Score Diffusion / Flow Models AnimateDiff-V2 [23] 1.5B 92.60 50.19 36.88 22.42 82.90 69.75 80.27 VideoCrafter-2.0 [8] 1.5B 95.00 55.29 40.66 25.13 82.20 73.42 80.44 OpenSora V1.2 [68] 1.1B 85.80 42.47 58.41 23.89 80.71 73.30 79.23 Show-1 [63] 6B 95.60 47.03 45.47 23.06 80.42 72.98 78.93 URSA [15] 1.7B - 52.30 70.60 - 83.40 78.50 82.40 CogVideoX-5B [59] 5B 99.40 53.20 62.11 24.91 82.75 77.04 81.61 HunyuanVideo [29] 13B 94.40 53.88 68.55 19.80 85.09 75.82 83.24 Wan 2.1 [54] 14B 98.80 53.67 81.44 21.13 85.64 80.95 84.70 AutoRegressive Models Nova † [14] 0.6B 95.20 54.06 77.52 20.92 80.39 79.05 80.12 Emu3 [56] 8B 77.71 37.11 44.64 20.92 84.09 68.43 80.96 Lumos-1 [49] 3.6B - - - - 79.50 73.50 78.30 InfinityStar † [35] 8B 96.43 52.08 78.66 21.81 84.73 79.78 83.74 
+
+GRN † 2B 93.75 50.44 70.83 21.30 84.41 77.35 82.99 
+
+additional results. The generated videos not only accurately capture the semantic details of the user prompts but also maintain a high degree of aesthetic and visual quality. 
+
+4.5 Ablation Studies 4.5.1 Predict Indices vs. Predict Bits 
+
+Table 6: Predict Indices vs. Predict Bits on the C2I generation task.                         
+
+> CFG interval τFID ↓IS ↑
+> GRN ind -B 2.4 [0.4,1] 1.33 3.56 280.3 GRN bit -B 2.4 [0.44,1] 1.23 3.63 285.5 GRN ind -L 2.0 [0.40,1] 1.30 2.64 314.8 GRN bit -L 1.9 [0.45,1] 1.20 2.47 287.0
+
+As detailed in Sec. 3, GRN supports predicting either discrete indices (GRN ind ) or their binary represen-tations (GRN bit ). We compare these two prediction targets on the 256 ×256 class-conditional image gen-eration task using two model scales: GRN-B (130M) and GRN-L (458M). For each variant, we performed a grid search to identify the optimal decoding param-eters, including CFG, CFG interval, and the temperature τ . The results, presented in Tab. 6, indicate 9A man with black hair, wearing a black button-up shirt, is standing indoors 
+
+with a woman who has long brown hair and is wearing a white headband. 
+
+The background features a beige wall with a decorative object hanging on it. 
+
+The man looks at the woman, then turns his head to the left and lowers it. 
+
+A woman dressed in a pink uniform and cap is sitting at a table with a metal 
+
+lunchbox and a bowl of green grapes in front of her. She is holding 
+
+chopsticks and appears to be eating. The background features green plants 
+
+and a light-colored wall. The woman looks to her right and begins to speak. 
+
+A little girl in a red and white floral coat whispers into Santa Claus's ear while sitting on his lap. Santa Claus, dressed in a traditional red suit with white 
+
+gloves and a white beard, listens attentively. An elf in a green and red outfit is seen in the background, busy with something. Santa Claus then gently 
+
+pushes the girl off his lap. The girl starts to get down from Santa's lap. The background features a festive with colorful striped walls and wrapped presents. 
+
+A man is sitting at a table in a restaurant, holding a piece of food in his right hand and gesturing with his left hand while talking. The background features 
+
+a wall with colorful artwork and a TV screen. The man continues to gesture with both hands, emphasizing his points. He then looks down at the food in his 
+
+right hand, still talking. The table has a colorful tablecloth with various patterns. There is text in the video. 
+
+A pair of hands, adorned with rings, is seen holding a cracked egg over a wooden bowl. The hands carefully pour the egg contents into the bowl, allowing 
+
+the egg white to flow through while keeping the yolk inside the eggshell. The egg white continues to pour into the bowl, and the yolk remains in the 
+
+eggshell. The hands then tilt the eggshell to ensure the yolk is fully separated and poured into the bowl. The quality is very high! 
+
+A woman with long, wavy hair is seated at a table in a modern office, with a black office chair and a plant in the background. She is wearing a black top 
+
+and initially has her right hand raised, holding a small object. She then lowers her hand and turns her head to left, looking at the person sitting next to her. Figure 6: Qualitative results of GRN (2B) on the text-to-video task. 
+
+that both approaches achieve comparable performance. Specifically, for the smaller GRN-B model, predicting indices yields a slightly better FID score. Conversely, for the larger GRN-L model, predict-ing bits proves superior, achieving a lower FID of 2.47 compared to 2.64. This suggests that GRN is well-suited for both prediction formats on the class-to-image generation task. Predict Indices Predict Bits 
+
+Figure 7: Predict Indices vs. Predict Bits on the T2V generation task. 
+
+We further extend this compari-son to the more challenging T2V generation task. As illustrated in Fig. 7, we observe that the bit prediction approach generates better videos with fewer artifacts. We hypothesize that this is be-cause predicting bits provides a more explicit supervisory signal and mitigates the token aliasing effect inherent in index prediction, thus demonstrating superior performance on complex generation tasks. While some prior works argue that bit prediction as-sumes independence between bits, leading to suboptimal results, our global refinement mechanism effectively addressed this issue. 10 10 
+
+> steps
+> 30
+> steps
+> 50
+> steps
+
+Figure 8: Complexity-Aware Sampling: T2I Qualitative Results. 4.5.2 Global Refinement Mechanism                    
+
+> Table 7: Ablation on Global Refinement Mecha-nism.
+> CFG interval τFID ↓IS ↑
+> Refine 2.4 [0.44,1] 1.23 3.63 285.5 Mask 2.4 [0.44,1] 1.23 185.62 4.3 Mask 8.0 [0.00,1] 0.50 18.13 220.2
+
+In the ablation study, we validate the effective-ness of our global refinement mechanism, termed Refine. We contrast its performance with a con-ventional mask-based generation pipeline like MaskGIT [ 7] or BERT [ 17 ], where previously generated tokens are fixed. The results are strik-ing: using identical decoding hyperparameters, the mask-based approach collapses into generating nonsensical outputs (FID=185.62), as detailed in Tab. 7. Even with optimal decoding parameters found via grid search (higher CFG, lower temperature 
+
+τ ), the mask-based method (FID=18.13) still lags significantly behind our approach (FID=3.63). This experiment clearly demonstrates that our refinement AR paradigm effectively mitigates error propagation, a critical weakness in standard AR, and thus achieves superior generation performance. 
+
+4.5.3 Complexity-Aware Sampling 
+
+> Figure 9: Complexity-Aware Sampling.
+
+We evaluate the efficacy of our complexity-aware sampling on GRN bit -B, with hyperparameters set to 
+
+k = 600 , b = −547 . Following standard settings in diffusion models, we set the maximum number of refinement steps to Tmax = 50 . To strike a balance between performance and efficiency, we empirically set the minimum number of steps to Tmin = 20 . We synthesize 63K images and plot the distribution of their allocated generation steps in a histogram (Fig. 9). The results demonstrate that our proposed method enables GRN to dynamically allocate computational resources based on varying levels of complexity. As observed, different examples are assigned different numbers of refinement steps, ranging from 20 to 50. Over 62.7% of samples require fewer 11 than 50 refinement steps. Intriguingly, around 200 images are generated using a minimum of 20 steps, which suggests the model possesses high confidence in these particular predictions. Compared to the fixed-step baseline (50 steps for all samples), our complexity-aware sampling incurs only a minor FID degradation (from 3.6 to 3.8) while offering significant computational savings for those low-complexity examples. Furthermore, we apply complexity-aware sampling to the text-to-image generation task and set Tmin = 10 . The qualitative results in Fig. 8 visually confirm that our method effectively enables complexity-aware, adaptive-step generation. For future work, we plan to explore refinement-step distillation for GRN, which is naturally compatible with complexity-aware sampling and could enable more efficient visual generation. We also conduct ablation studies on the bit prediction target for GRN bit and the decoding parameters. For brevity, please refer to Appendix E.3 and Appendix E.4 for more details. 
+
+## 5 Conclusion 
+
+In this paper, we introduce GRN, a next-generation visual synthesis framework characterized by a global refinement mechanism and complexity-aware generation. We propose Hierarchical Binary Quantization (HBQ) to develop a series of discrete image and video tokenizers that are on par with their continuous counterparts while using the same number of latent channels and offering a significantly higher compression rate. In the generation phase, GRN sets new state-of-the-art results in both image reconstruction and class-conditional image generation. Extensive experiments demonstrate that, at equivalent scales, GRN surpasses existing autoregressive and diffusion-based approaches in both text-to-image and text-to-video generation tasks. Moreover, as an autoregressive framework built entirely on discrete tokens, we believe GRN can be more naturally integrated into existing large language models. Unified learning over discrete text and visual tokens could substantially promote multimodal understanding and generation. At a fundamental level, GRN resolves the issues of quantization loss and error accumulation that have long limited previous visual autoregressive generative models. We believe it has the potential to emerge as a strong competitor to the currently dominant Transfusion [69] architecture. 
+
+## 6 Limitation 
+
+This work also has several limitations. Due to limited computational resources, we have not scaled up the training compute or model size to the level of leading visual generation models. In addition, for the text-to-video generation task, we observe that GRN performs better in human-related scenarios. The generated videos may sometimes lack rich visual details and exhibit distortions. We believe that these limitations could be alleviated by balancing the data distribution and scaling up the model size. 
+
+## 7 Acknowledgements 
+
+We would like to thank Ruibiao Lu for his contributions to data collection and the video demo, and Hui Wu for his valuable advice on infrastructure. 
+
+## References           
+
+> [1] J. Achiam, S. Adler, S. Agarwal, L. Ahmad, I. Akkaya, F. L. Aleman, D. Almeida, J. Altenschmidt, S. Altman, S. Anadkat, et al. Gpt-4 technical report. arXiv preprint arXiv:2303.08774 , 2023. 2 [2] Y. Ai, J. Han, S. Zhuang, W. Mao, X. Hu, Z. Yang, Z. Yang, H. Huang, X. Yue, and H. Chen. Bitdance: Scaling autoregressive generative models with binary tokens. arXiv preprint arXiv:2602.14041 , 2026. 2, 7, 8[3] Y. Ai, J. Han, S. Zhuang, W. Mao, X. Hu, Z. Yang, Z. Yang, H. Huang, X. Yue, and H. Chen. Bitdance: Scaling autoregressive generative models with binary tokens. arXiv preprint arXiv:2602.14041 , 2026. 8, 9 [4] T. Brooks, B. Peebles, C. Holmes, W. DePue, Y. Guo, L. Jing, D. Schnurr, J. Taylor, T. Luhman, E. Luhman, C. Ng, R. Wang, and A. Ramesh. Video generation models as world simulators. OpenAI , 2024. 1, 3 [5] H. Cai, S. Cao, R. Du, P. Gao, S. Hoi, Z. Hou, S. Huang, D. Jiang, X. Jin, L. Li, et al. Z-image: An efficient image generation foundation model with single-stream diffusion transformer. arXiv preprint arXiv:2511.22699 , 2025. 8, 9
+
+12 [6] Q. Cai, Y. Li, Y. Pan, T. Yao, and T. Mei. Hidream-i1: An open-source high-efficient image generative foundation model. In Proceedings of the 33rd ACM International Conference on Multimedia , pages 13636–13639. ACM, 2025. 8, 9 [7] H. Chang, H. Zhang, L. Jiang, C. Liu, and W. T. Freeman. Maskgit: Masked generative image transformer. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pages 11315– 11325, 2022. 2, 3, 7, 8, 11, 17 [8] H. Chen, M. Xia, Y. He, Y. Zhang, X. Cun, S. Yang, J. Xing, Y. Liu, Q. Chen, X. Wang, et al. Videocrafter1: Open diffusion models for high-quality video generation. arXiv preprint arXiv:2310.19512 , 2023. 8, 9 [9] J. Chen, J. Yu, C. Ge, L. Yao, E. Xie, Y. Wu, Z. Wang, J. Kwok, P. Luo, H. Lu, et al. Pixart: Fast training of diffusion transformer for photorealistic text-to-image synthesis. arXiv preprint arXiv:2310.00426 , 2023. 9 [10] J. Chen, D. Zou, W. He, J. Chen, E. Xie, S. Han, and H. Cai. Dc-ae 1.5: Accelerating diffusion model convergence with structured latent space. In Proceedings of the IEEE/CVF International Conference on Computer Vision , pages 19628–19637, 2025. 7 [11] X. Chen, Z. Wu, X. Liu, Z. Pan, W. Liu, Z. Xie, X. Yu, and C. Ruan. Janus-pro: Unified multimodal understanding and generation with data and model scaling. arXiv preprint arXiv:2501.17811 , 2025. 9 [12] M. Dehghani, B. Mustafa, J. Djolonga, J. Heek, M. Minderer, M. Caron, A. Steiner, J. Puigcerver, R. Geirhos, I. M. Alabdulmohsin, et al. Patch n’pack: Navit, a vision transformer for any aspect ratio and resolution. Advances in Neural Information Processing Systems , 36:2252–2274, 2023. 17 [13] C. Deng, D. Zhu, K. Li, C. Gou, F. Li, Z. Wang, S. Zhong, W. Yu, X. Nie, Z. Song, G. Shi, and H. Fan. Emerging properties in unified multimodal pretraining. arXiv preprint arXiv:2505.14683 , 2025. 9 [14] H. Deng, T. Pan, H. Diao, Z. Luo, Y. Cui, H. Lu, S. Shan, Y. Qi, and X. Wang. Autoregressive video generation without vector quantization. arXiv preprint arXiv:2412.14169 , 2024. 8, 9 [15] H. Deng, T. Pan, F. Zhang, Y. Liu, Z. Luo, Y. Cui, W. Wang, C. Shen, S. Shan, Z. Zhang, et al. Uniform discrete diffusion with metric path for video generation. arXiv preprint arXiv:2510.24717 , 2025. 8, 9 [16] J. Deng, W. Dong, R. Socher, L.-J. Li, K. Li, and L. Fei-Fei. Imagenet: A large-scale hierarchical image database. In 2009 IEEE conference on computer vision and pattern recognition , pages 248–255. Ieee, 2009. 2, 7 [17] J. Devlin, M.-W. Chang, K. Lee, and K. Toutanova. Bert: Pre-training of deep bidirectional transformers for language understanding. arXiv preprint arXiv:1810.04805 , 2018. 2, 11 [18] P. Esser, S. Kulal, A. Blattmann, R. Entezari, J. Müller, H. Saini, Y. Levi, D. Lorenz, A. Sauer, F. Boesel, et al. Scaling rectified flow transformers for high-resolution image synthesis. In Forty-first International Conference on Machine Learning , 2024. 3, 7, 8, 9 [19] P. Esser, R. Rombach, and B. Ommer. Taming transformers for high-resolution image synthesis. In 
+
+Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pages 12873–12883, 2021. 2, 3 [20] Y. Gao, L. Gong, Q. Guo, X. Hou, Z. Lai, F. Li, L. Li, X. Lian, C. Liao, L. Liu, et al. Seedream 3.0 technical report. arXiv preprint arXiv:2504.11346 , 2025. 9 [21] D. Ghosh, H. Hajishirzi, and L. Schmidt. Geneval: An object-focused framework for evaluating text-to-image alignment. Advances in Neural Information Processing Systems , 36, 2024. 7, 9 [22] Y. Guo, Q. Gan, Y. Zhang, J. Liu, Y. Hu, P. Xie, D. Qian, Y. Zhang, R. Li, Y. Zhang, R. Lu, X. Mei, B. Han, X. Yin, B. Peng, and Z. Yuan. Alive: Animate your world with lifelike audio-video generation. arXiv preprint arXiv:2602.08682 , 2026. 1 [23] Y. Guo, C. Yang, A. Rao, Z. Liang, Y. Wang, Y. Qiao, M. Agrawala, D. Lin, and B. Dai. Animated-iff: Animate your personalized text-to-image diffusion models without specific tuning. arXiv preprint arXiv:2307.04725 , 2023. 8, 9 [24] A. Haar. Zur theorie der orthogonalen funktionensysteme. Mathematische Annalen , 69(3):331–371, 1910. 3[25] J. Han, H. Chen, Y. Zhao, H. Wang, Q. Zhao, Z. Yang, H. He, X. Yue, and L. Jiang. Vision as a dialect: Unifying visual understanding and generation via text-aligned representations. arXiv preprint arXiv:2506.18898 , 2025. 9 [26] J. Han, J. Liu, Y. Jiang, B. Yan, Y. Zhang, Z. Yuan, B. Peng, and X. Liu. Infinity: Scaling bitwise autoregressive modeling for high-resolution image synthesis. arXiv preprint arXiv:2412.04431 , 2024. 2, 3, 4, 7, 8, 9 [27] M. Heusel, H. Ramsauer, T. Unterthiner, B. Nessler, and S. Hochreiter. Gans trained by a two time-scale update rule converge to a local nash equilibrium. Advances in neural information processing systems , 30, 2017. 8 [28] D. Kondratyuk, L. Yu, X. Gu, J. Lezama, J. Huang, G. Schindler, R. Hornung, V. Birodkar, J. Yan, M.-C. Chiu, K. Somandepalli, H. Akbari, Y. Alon, Y. Cheng, J. Dillon, A. Gupta, M. Hahn, A. Hauth, D. Hendon, A. Martinez, D. Minnen, M. Sirotenko, K. Sohn, X. Yang, H. Adam, M.-H. Yang, I. Essa, H. Wang, D. A. Ross, B. Seybold, and L. Jiang. Videopoet: A large language model for zero-shot video generation, 2024. 3[29] W. Kong, Q. Tian, Z. Zhang, R. Min, Z. Dai, J. Zhou, J. Xiong, X. Li, B. Wu, J. Zhang, et al. Hunyuanvideo: A systematic framework for large video generative models. arXiv preprint arXiv:2412.03603 , 2024. 1, 9 [30] A. Kuznetsova, H. Rom, N. Alldrin, J. Uijlings, I. Krasin, J. Pont-Tuset, S. Kamali, S. Popov, M. Malloci, A. Kolesnikov, et al. The open images dataset v4: Unified image classification, object detection, and visual relationship detection at scale. International Journal of Computer Vision , 128(7):1956–1981, 2020. 6, 17 [31] B. F. Labs. Flux. https://blackforestlabs.ai/announcing-black-forest-labs/ , 2024. 3, 9 
+
+13 [32] T. Li and K. He. Back to basics: Let denoising generative models denoise. arXiv preprint arXiv:2511.13720 ,2025. 7, 8, 17, 20 [33] T. Li, Y. Tian, H. Li, M. Deng, and K. He. Autoregressive image generation without vector quantization. 
+
+Advances in Neural Information Processing Systems , 37:56424–56445, 2024. 8 [34] A. Liu, B. Feng, B. Xue, B. Wang, B. Wu, C. Lu, C. Zhao, C. Deng, C. Zhang, C. Ruan, et al. Deepseek-v3 technical report. arXiv preprint arXiv:2412.19437 , 2024. 4 [35] J. Liu, J. Han, B. Yan, H. Wu, F. Zhu, X. Wang, Y. Jiang, B. Peng, and Z. Yuan. Infinitystar: Unified spacetime autoregressive modeling for visual generation. arXiv preprint arXiv:2511.04675 , 2025. 8, 9 [36] Z. Luo, F. Shi, Y. Ge, Y. Yang, L. Wang, and Y. Shan. Open-magvit2: An open-source project toward democratizing auto-regressive visual generation. arXiv preprint arXiv:2409.04410 , 2024. 6 [37] N. Ma, M. Goldstein, M. S. Albergo, N. M. Boffi, E. Vanden-Eijnden, and S. Xie. Sit: Exploring flow and diffusion-based generative models with scalable interpolant transformers. In European Conference on Computer Vision , pages 23–40. Springer, 2024. 7, 8 [38] Y. Ma, X. Liu, X. Chen, W. Liu, C. Wu, Z. Wu, Z. Pan, Z. Xie, H. Zhang, X. Yu, et al. Janusflow: Harmonizing autoregression and rectified flow for unified multimodal understanding and generation. In 
+
+Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pages 7739–7751, 2025. 9 [39] F. Mentzer, D. Minnen, E. Agustsson, and M. Tschannen. Finite scalar quantization: Vq-vae made simple. 
+
+arXiv preprint arXiv:2309.15505 , 2023. 2, 16 [40] OpenAI. Introducing gpt-4o image generation. https://openai.com/zh-Hans-CN/index/ introducing-4o-image-generation/ , 2025. Accessed: 2025-03-05. 9 [41] L. Ouyang, J. Wu, X. Jiang, D. Almeida, C. Wainwright, P. Mishkin, C. Zhang, S. Agarwal, K. Slama, A. Ray, et al. Training language models to follow instructions with human feedback. Advances in Neural Information Processing Systems , 35:27730–27744, 2022. 2 [42] Z. Pang, T. Zhang, F. Luan, Y. Man, H. Tan, K. Zhang, W. T. Freeman, and Y.-X. Wang. Randar: Decoder-only autoregressive visual generation in random orders. In Proceedings of the Computer Vision and Pattern Recognition Conference , pages 45–55, 2025. 8 [43] W. Peebles and S. Xie. Scalable diffusion models with transformers. In Proceedings of the IEEE/CVF International Conference on Computer Vision , pages 4195–4205, 2023. 1, 7, 8 [44] D. Podell, Z. English, K. Lacey, A. Blattmann, T. Dockhorn, J. Müller, J. Penna, and R. Rombach. Sdxl: Improving latent diffusion models for high-resolution image synthesis. arXiv preprint arXiv:2307.01952 ,2023. 3 [45] Q. Qin, L. Zhuo, Y. Xin, R. Du, Z. Li, B. Fu, Y. Lu, J. Yuan, X. Li, D. Liu, et al. Lumina-image 2.0: A unified and efficient image generative framework. arXiv preprint arXiv:2503.21758 , 2025. 9 [46] Qwen-Image Team. Qwen-image technical report. arXiv preprint arXiv:2508.02324 , 2025. 8, 9 [47] R. Rombach, A. Blattmann, D. Lorenz, P. Esser, and B. Ommer. High-resolution image synthesis with latent diffusion models. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pages 10684–10695, 2022. 2, 6 [48] T. Salimans, I. Goodfellow, W. Zaremba, V. Cheung, A. Radford, and X. Chen. Improved techniques for training gans. Advances in neural information processing systems , 29, 2016. 8 [49] A. Shenoy, Y. Lu, S. Jayakumar, D. Chatterjee, M. Moslehpour, P. Chuang, A. Harpale, V. Bhardwaj, D. Xu, S. Zhao, L. Zhao, A. Ramchandani, X. L. Dong, and A. Kumar. Lumos : Empowering multimodal llms with scene text recognition, 2024. 8, 9 [50] P. Sun, Y. Jiang, S. Chen, S. Zhang, B. Peng, P. Luo, and Z. Yuan. Autoregressive model beats diffusion: Llama for scalable image generation. arXiv preprint arXiv:2406.06525 , 2024. 3, 6, 7, 8, 17 [51] N. Team, C. Han, G. Li, J. Wu, Q. Sun, Y. Cai, Y. Peng, Z. Ge, D. Zhou, H. Tang, et al. Nextstep-1: Toward autoregressive image generation with continuous tokens at scale. arXiv preprint arXiv:2508.10711 , 2025. 9[52] K. Tian, Y. Jiang, Z. Yuan, B. Peng, and L. Wang. Visual autoregressive modeling: Scalable image generation via next-scale prediction. arXiv preprint arXiv:2404.02905 , 2024. 2, 3, 6, 7, 8, 17 [53] A. Van Den Oord, O. Vinyals, et al. Neural discrete representation learning. Advances in neural information processing systems , 30, 2017. 2 [54] A. Wang, B. Ai, B. Wen, C. Mao, C.-W. Xie, D. Chen, F. Yu, H. Zhao, J. Yang, J. Zeng, et al. Wan: Open and advanced large-scale video generative models. arXiv preprint arXiv:2503.20314 , 2025. 3, 6, 9 [55] J. Wang, Y. Chen, J. Yu, G. Lu, and W. Pei. Editinfinity: Image editing with binary-quantized generative models. arXiv preprint arXiv:2510.20217 , 2025. 3 [56] X. Wang, X. Zhang, Z. Luo, Q. Sun, Y. Cui, J. Wang, F. Zhang, Y. Wang, Z. Li, Q. Yu, et al. Emu3: Next-token prediction is all you need. arXiv preprint arXiv:2409.18869 , 2024. 2, 8, 9 [57] J. Xie, Z. Yang, and M. Z. Shou. Show-o2: Improved native unified multimodal models. arXiv preprint arXiv:2506.15564 , 2025. 9 [58] W. Yan, Y. Zhang, P. Abbeel, and A. Srinivas. Videogpt: Video generation using vq-vae and transformers. 
+
+arXiv preprint arXiv:2104.10157 , 2021. 2 [59] Z. Yang, J. Teng, W. Zheng, M. Ding, S. Huang, J. Xu, Y. Yang, W. Hong, X. Zhang, G. Feng, et al. Cogvideox: Text-to-video diffusion models with an expert transformer. arXiv preprint arXiv:2408.06072 ,2024. 8, 9 [60] T. Yin, M. Gharbi, T. Park, R. Zhang, E. Shechtman, F. Durand, and B. Freeman. Improved distribu-tion matching distillation for fast image synthesis. Advances in neural information processing systems ,
+
+14 37:47455–47487, 2024. 3 [61] T. Yin, M. Gharbi, R. Zhang, E. Shechtman, F. Durand, W. T. Freeman, and T. Park. One-step diffusion with distribution matching distillation, 2024. URL https://arxiv. org/abs/2311.18828 . 3 [62] S. Yu, S. Kwak, H. Jang, J. Jeong, J. Huang, J. Shin, and S. Xie. Representation alignment for generation: Training diffusion transformers is easier than you think. arXiv preprint arXiv:2410.06940 , 2024. 8 [63] D. J. Zhang, J. Z. Wu, J.-W. Liu, R. Zhao, L. Ran, Y. Gu, D. Gao, and M. Z. Shou. Show-1: Marrying pixel and latent diffusion models for text-to-video generation. International Journal of Computer Vision ,pages 1–15, 2024. 8, 9 [64] H. Zhang, Z. Wu, Z. Xing, J. Shao, and Y.-G. Jiang. Adadiff: adaptive step selection for fast diffusion models. In Proceedings of the AAAI Conference on Artificial Intelligence , volume 39, pages 9914–9922, 2025. 3 [65] Y. Zhang, H. Yang, Y. Zhang, Y. Hu, F. Zhu, C. Lin, X. Mei, Y. Jiang, B. Peng, and Z. Yuan. Waver: Wave your way to lifelike video generation. arXiv preprint arXiv:2508.15761 , 2025. 1 [66] Y. Zhao, Y. Xiong, and P. Krähenbühl. Image and video tokenization with binary spherical quantization. 
+
+arXiv preprint arXiv:2406.07548 , 2024. 2 [67] B. Zheng, N. Ma, S. Tong, and S. Xie. Diffusion transformers with representation autoencoders. arXiv preprint arXiv:2510.11690 , 2025. 6, 8 [68] Z. Zheng, X. Peng, T. Yang, C. Shen, S. Li, H. Liu, Y. Zhou, T. Li, and Y. You. Open-sora: Democratizing efficient video production for all. arXiv preprint arXiv:2412.20404 , 2024. 8, 9 [69] C. Zhou, L. Yu, A. Babu, K. Tirumala, M. Yasunaga, L. Shamis, J. Kahn, X. Ma, L. Zettlemoyer, and O. Levy. Transfusion: Predict the next token and diffuse images with one multi-modal model. arXiv preprint arXiv:2408.11039 , 2024. 12 
+
+15 A Algorithm for Hierarchical Binary Quantization 
+
+We outline the procedure for our proposed Hierarchical Binary Quantization (HBQ) in Alg. 1. The HBQ binary tokens are ordered from coarse to fine. Early tokens in the sequence correspond to core semantic concepts, while later tokens introduce high-frequency details, progressively enriching the representation. Furthermore, our multi-round quantization process generates binary tokens sequentially, with each round corresponding to a single bit. This inherent structure makes HBQ particularly well-suited for direct, bitwise prediction tasks. In contrast to methods like FSQ [ 39 ], which quantize vectors holistically, our approach offers a more natural framework for bitwise generation, i.e. , GRN bit .
+
+Algorithm 1 Hierarchical Binary Quantization 
+
+Require: VAE encoder E, VAE encoder D, an image or a video X, HBQ round M , δ(·) function where δ(0) = −1 and δ(1) = 1 
+
+Qqueue ← [] ▷ HBQ binary labels 
+
+F = E(X) ▷ VAE Encoding 
+
+F = tanh (F ) ▷ restrict data range to [-1,1] 
+
+c1 = ZerosLike( F ) ▷ initialize bucket centroids 
+
+for i = 1 , 2, . . . , M do ▷ HBQ rounds 
+
+qi = ( F > ci) ▷ binary quantization 
+
+QueuePush( Qqueue , qi) ▷ update HBQ binary labels 
+
+ci+1 = ci + δ[qi] · 2−i ▷ update bucket centroids for next round 
+
+end for 
+
+ˆF = δ[q1] · 2−1 + δ[q2] · 2−2 + ... + δ[qM ] · 2−M ▷ obtain quantized feature 
+
+ˆF = StopGrad[ ˆF − F ] + F ▷ Straight-Through Estimator 
+
+ˆX = D( ˆF ) ▷ VAE Decoding 
+
+Ensure: Qqueue = [ q1, q2, ..., qM ], ˆF , ˆX
+
+## B Algorithm for Generative Refinement Network 
+
+Alg. 2 outlines the pseudo-code for a single training step. The model input, denoted as Ft, is a hybrid feature map composed of a subset of ground truth tokens and a complementary subset of random tokens. Taking Ft as input, GRN is trained to predict the complete set of ground truth tokens. Despite its simplicity, this training strategy implicitly teaches the model to differentiate between reliable (ground truth) and unreliable (random) ones. Consequently, the model learns to preserve reliable tokens while refining the unreliable ones. The sampling procedure of GRN is detailed in Alg. 3 (we omit complexity-aware sampling for clarity). The process is analogous to human drawing, where a state is iteratively refined. At each step t, the current state Ft consists of the already drawn content, represented by St · Yt, and the remaining blank regions filled with random tokens, represented by St · Yrand . The model then predicts a complete set of tokens based on the current state. A randomly selected subset of these new predictions is then used to update the state for the next refinement step. This straightforward random selection mechanism elegantly unifies three essential operations into a single framework: • Filling: Introducing predicted tokens into previously blank areas. • Refining: Improving the quality of previously predicted tokens. • Erasing: Replacing previously predicted tokens with random ones. To better illustrate this process, both Fig. 4 in the paper and the fourth column of Fig. 10 in the appendix visualize the sampling process of GRN. We especially highlight concrete examples of the filling, refining, and erasing tokens described above. 16 Algorithm 2 Generative Refinement Network: Training Step 
+
+> # net(z): GRN network # y_gt: HBQ index labels or HBQ bit labels # C: classes, C=2^n for index labels, C=2 for bit labels pt = sample_pt() y_rand = randint(C, y_gt.shape) st = rand_like(y_gt) < pt ft = st * y_gt + logical_not(st) * y_rand y_pred = net(ft) loss = cross_entrophy_loss(y_pred, y_gt)
+
+Algorithm 3 Global Refinement Network: Sampling Process 
+
+> # We omit Complexity Aware Sampling for ease of understanding y_rand = randint(C, target_shape) y_pred = y_rand for t in range(T): pt = (t + 1) / T st = rand_like(y_pred) < pt ft = st * y_pred + logical_not(st) * y_rand y_pred = net(ft)
+
+## C Difference with Other Autoregressive Models 
+
+In Fig. 10, we compare GRN with conventional autoregressive models, including GPT-Style AR models (next-token prediction) [ 50 ], VAR (next-scale prediction) [ 52 ], and Masked AR models (BERT-Style) [ 7]. Conventional AR models are constrained by a fixed generation order, where previously generated tokens are immutable. This often leads to issues like error propagation. In stark contrast, GRN employs a flexible global refinement strategy, leveraging its unique filling, refining, and erasing mechanism. This allows our model to iteratively revise and enhance the entire visual representation, effectively mitigating the error propagation issue inherent in conventional autoregressive models. 
+
+## D Implementation Details 
+
+Model Architecture. Tab. 8 summarizes the architectural details of our proposed C2I, T2I, and T2V models. Following the methodology of JiT [ 32 ], we implement four variants for the C2I task, with model sizes scaling from 130M to 2B parameters. For T2I and T2V generation, we introduce a new 2B-parameter architecture specifically designed to meet the FlexAttention requirement, which requires the head dimension to be a multiple of 128. Furthermore, our models support sequence packing to accelerate training, and NaViT [12] to handle arbitrary aspect ratios and resolutions. 
+
+Visual Tokenizer. For the C2I generation task, we employ an image-only visual tokenizer trained on the OpenImage dataset [ 30 ]. This tokenizer features a latent dimension of 16 and utilizes 4 rounds of HBQ. It compresses a 256 × 256 image into 16 × 16 × 16 × 4 binary tokens with a spatial stride of 16, achieving a state-of-the-art reconstruction FID of 0.56 on the ImageNet benchmark. In contrast, our T2I and T2V models share a unified visual tokenizer, which is jointly optimized on a mixture of images and videos. This unified tokenizer is configured with a 64-dimensional latent space, a spatial stride of 16, a temporal stride of 4, and also undergoes 4 rounds of HBQ, attaining a FVD of 30.0 and a PSNR of 33.98 on our video reconstruction benchmark. Additional results for the released tokenizers are provided in Tab. 1 and Tab. 2 in the paper, as well as Tab. 9 in the appendix. 
+
+Training. For our C2I models (GRN-B/L/H/G), we conduct training on the ImageNet dataset using 256×256 resolution images. The models are trained for 600 epochs, equivalent to 750K iterations, with a batch size of 1024. We employ a constant learning rate of 2e-4 throughout the training process. We apply a 10% condition dropping rate to enable Classifier-Free Guidance. For our GRN-T2I and GRN-T2V models, we adopt a coarse-to-fine training strategy. For instance, the GRN-T2I model is 17 Step #1 Step #2 Step #3 Step #5 Step #4             
+
+> F❄F❄❄F❄❄❄
+> F
+> ❄❄❄❄F
+> ❄
+> FNewly filled token
+> Frozen token
+
+GPT-Style AR Models: Next-Token Prediction                                                 
+
+> MMM
+> MMM
+> MMM
+> M
+> M
+> M
+> MMMM
+> MMM
+> MFM
+> FMM
+> F
+> M
+> M
+> MMFM
+> FMM
+> M❄M
+> ❄MM
+> ❄
+> F
+> M
+> MF❄F
+> ❄FF
+> F❄❄
+> ❄❄F
+> ❄
+> ❄
+> ❄
+> ❄❄❄❄
+> ❄MM
+> M❄F
+> ❄FM
+> ❄
+> ❄
+> F
+> F❄❄❄
+> ❄
+> FNewly filled token
+> Frozen token
+> MMasked token
+
+Masked AR Models: Predict Masked Tokens in BERT-style                                               
+
+> RRR
+> RRR
+> RRR
+> R
+> R
+> R
+> RRRR
+> RRR
+> RFR
+> FRR
+> F
+> R
+> R
+> RRFR
+> FFR
+> FRR
+> RRR
+> F
+> F
+> R
+> RFFF
+> FFF
+> FFF
+> FFF
+> F
+> F
+> F
+> FFFF
+> FFR
+> RFF
+> FFR
+> F
+> F
+> F
+> FFRF
+> F
+> F
+> R
+> Newly filled token
+> Kept fill token
+> Erased token
+> RBlank random token
+
+Generative Refinement Networks: Predict Tokens with Global Refinement                                 
+
+> F
+> FF
+> ❄FF
+> ❄❄
+> ❄❄❄
+> FFF
+> FFF
+> FFF
+> ❄
+> FNewly filled token
+> Frozen token
+> FFF
+> FFF
+> FFF
+> F
+> F
+> F
+> FFFF
+> ❄❄
+> ❄❄❄
+> ❄❄❄
+> ❄❄❄
+> ❄❄❄
+
+VAR: Next-Scale Prediction Figure 10: Comparison between GRN with other autoregressive models in visual generation. 
+
+With the global refinement mechanism, GRN iteratively revises and enhances the entire visual representation, effectively mitigating the error propagation issue in conventional autoregressive models. trained for 150K under 256 ×256 resolution and 60K iterations under 1024 ×1024 resolution with batch sizes of 15400 and 2048, respectively, using corresponding learning rates of 2e-4 and 2e-5. Other hyperparameters, such as the constant learning rate schedule, zero weight decay, and 10% condition drop, remain consistent across these models. 
+
+Sampling. During the inference phase, we utilize Classifier-Free Guidance to enhance sample quality and adherence to conditioning. For our ImageNet-trained models, we dynamically start CFG based on an optimal threshold pt found within the range of [0, 0.5]. The CFG strength is swept within [1.0, 3.0] to find the best results. For our text-conditional models (GRN-T2I and GRN-T2V), we apply CFG throughout the entire sampling process. We search for optimal CFG strength range of [1.0, 4.0] and a temperature τ range of [0.5, 1.5] to generate diverse and high-fidelity results. For the benchmark experiments on the C2I, T2I, and T2V tasks, we use 50 fixed refinement steps. In Sec. 4.5.3, we apply complexity-aware sampling to the C2I and T2I tasks. The proposed complexity-aware sampling method is controlled by parameters k and b, where k is optimized in the range of [300, 1200] and b is set accordingly to determine overall sampling steps. 
+
+## E More Ablation Studies 
+
+E.1 GAN Loss in Tokenizer 
+
+Fig. 5 illustrates a clear trend: reconstruction quality steadily improves as more HBQ rounds are introduced. Although four to six rounds are sufficient for decent performance, an eight-round model closes the gap, achieving results nearly the same as the baseline without quantization. 18 Table 8: Implementation details for our C2I, T2I, T2V models. We elaborate on four key aspects: model architecture, visual tokenizer, training, and sampling. 
+
+GRN-B GRN-L GRN-H GRN-G GRN-T2I GRN-T2V Architecture 
+
+Depth 12 24 32 40 28 28 Hidden dim 768 1024 1280 1664 2304 2304 Heads 12 16 16 16 18 18 Parameter 130M 458M 952M 2B 2B 2B Data ImageNet 256 ×256 images Images Videos 
+
+Tokenizer 
+
+Tokenizer Stride 16 ×16 16 ×16 ×4Tokenizer dim 16 64 HBQ Round 4 4
+
+Training 
+
+Epoch 600 N/A Iter 750K 150K/60K 150K/9K Batch Size 1024 15400/2048 4096/1350 LR 2e-4 2e-4/2e-5 2e-4/2e-5 LR Schedule constant constant Weight Decay 0 0Condition Drop 10% 10% 
+
+Sampling 
+
+k,b optimal k in [300,1200], b is set accordingly 
+
+τ sweep range [1.0,1.5] [0.5,1.5] CFG sweep range [1.0, 3.0] [1.0,4.0] CFG interval optimal pt in [0, 0.5] to start CFG never used Table 9: Comparison between different GAN loss weights.                                                             
+
+> Method λGAN Channel Stride Compress rFVD ↓LPIPS ↓SSIM ↑PSNR ↑
+> Wan 2.1 (patchify) N/A 64 16 ×16 ×424 19.5 0.058 0.929 34.10 HBQ (baseline) 0.001 64 16 ×16 ×496 50.6 0.084 0.930 33.97 HBQ ( M= 4 )0.001 64 16 ×16 ×496 48.6 0.083 0.930 34.05
+> HBQ ( M= 4 )0.005 64 16 ×16 ×496 30.0 0.078 0.928 33.98 HBQ ( M= 4 )0.02 64 16 ×16 ×496 28.6 0.081 0.925 33.73 HBQ ( M= 4 )0.1 64 16 ×16 ×496 29.5 0.084 0.923 33.55
+
+We further investigate the impact of varying the GAN loss weight, λGAN . For this study, we fine-tune a baseline model (an HBQ tokenizer with 64 latent channels and four quantization rounds) using different λGAN values. As detailed in Tab. 9, increasing the GAN loss weight from 0.001 to 0.02 significantly improves perceptual quality, reducing the rFVD from 48.6 to 28.6. However, this comes at the cost of a drop in reconstruction fidelity, with the PSNR decreasing from 34.05 to 33.73. Empirically, we found that a weight of 0.005 strikes an effective balance between these two metrics. Consequently, this setting is applied to our GRN-T2I and GRN-T2V models. 
+
+E.2 Binary Selection Map: Random vs. Confidence           
+
+> Table 10: Random sampling vs. Confidence sam-pling on the C2I task.
+> Sampling Metrics Random Confidence FID ↓IS ↑
+> GRN bit -B ✓3.63 285.5 GRN bit -B ✓10.64 246.8
+
+As detailed in Eq. 6, the binary selection map St
+
+is constructed without prior constraints during gen-eration, meaning that we randomly select current predictions to update the state Ft+1 for the next re-finement step. To understand the importance of this random sampling, we conducted an experiment using a confidence-based sampling alternative. In this setting, tokens to update Ft+1 are selected based on their prediction confidence. While this prioritizes tokens deemed more ‘correct’, the outcome was a severe performance drop (FID: 3.63 → 10.64), as detailed in Tab. 10. The reason for this 19 counter-intuitive result lies in the discrepancy between training and inference patterns. Our model is trained to operate on a state where ground truth and random tokens are uniformly distributed. The confidence-based method breaks this assumption by selecting high-confidence tokens that are not uniformly distributed but are instead clustered. This distributional shift moves the input far from the manifold learned during training, resulting in a catastrophic failure of the generative process. 
+
+E.3 Bit Prediction Target: Absolute vs. Relative 
+
+We investigate two different prediction targets for the binary labels in GRN bit : absolute bits versus relative bits. While absolute bit prediction directly targets the ground-truth bits ( Ygt ), relative bit prediction targets whether the input bit should be flipped. This can be formulated as predicting a residual, Y rel gt = ( Ft̸ = Ygt ), where a ‘1’ indicates a required flip and a ‘0’ indicates preservation. As shown in Fig. 11, our experiments reveal that predicting absolute bits yields superior results, leading to generated images with significantly better structural stability compared to those from relative bit prediction. 
+
+Figure 11: Comparison of Absolute and Relative Bit Prediction. E.4 Decoding Hyper-Parameters 
+
+Table 11: Effect of different k and b for complexity-aware sampling (GRN bit -B).                                       
+
+> Dynamic kbTmin Tmax k·E(H) + bFID ↓IS ↑
+> ×050 50 50 50 3.63 285.5
+> ✓400 -351.5 20 50 40 3.86 283.4
+> ✓600 -547.2 20 50 40 3.82 282.0
+> ✓800 -743.0 20 50 40 3.87 280.0
+
+Regarding the decoding parameters, we use GRN bit -B as a representative example. The op-timal parameters were found to be τ = 1.23 ,
+
+CF G = 2 .4, and an interval of [0 .44 , 1] . We empir-ically observed that a lot of parameter combinations can achieve similar results. Intuitively, increasing 
+
+τ or decreasing CF G encourages more diverse generation but can also lead to greater instability. The CFG interval is introduced to restore diversity when applying a higher CFG strength, as it disables CFG during the initial decoding steps, which are crucial for determining the overall semantics. The effect of varying each parameter while keeping the others fixed is detailed in Fig. 12. In our complexity-aware sampling, the parameters k and b control the dynamic range and the average number of decoding steps, respectively. We analyze the impact of varying k and b in Table 11. We observe that a moderate dynamic range, achieved with k = 600 , yields the best FID score. 
+
+Figure 12: Influence of decoding hyper-parameters: τ , CFG, and CFG start pt.
+
+## F More Qualitative Results 
+
+F.1 C2I Qualitative Results 
+
+Similar to JiT [ 32 ], we present uncurated 256 ×256 samples generated by GRN-G in Fig. 13. To ensure a fair and representative visualization of our model’s capabilities, these images were generated with the same CFG scale 1.7 and CFG interval = [0.3, 1.0] used to achieve the best FID of 1.81. This contrasts with the common approach of using a higher CFG scale for qualitative examples, which may not reflect the model’s real performance as measured by FID. 20 Class 001: goldfish, Carassius auratus Class 042: agama     
+
+> Class 130: flamingo Class 210: German short-haired pointer
+> Class 300: tiger beetle Class 366: gorilla, Gorilla gorilla
+> Class 411: apron Class 505: coffeepot
+> Class 586: half track Class 698: palace
+
+Figure 13: Uncurated 256 ×256 samples from GRN-G on ImageNet . To ensure representative results, these images are generated using the same parameters that yielded our reported FID of 1.81 (CFG scale = 1.7, CFG interval = [0.3, 1.0]), rather than using a higher CFG scale typically favored for visualization. 
+
+F.2 T2I Qualitative Results 
+
+In Fig. 14, we present 1024 ×1024 images generated by GRN-T2I. 
+
+F.3 T2V Qualitative Results 
+
+In Fig. 15 and Fig. 16, we present more text-to-video generation results of GRN-T2V. 21 Figure 14: More qualitative results for the text-to-image generation task. 
+
+22 A man wearing a green cap, black t-shirt, gray shorts, and black shoes is in a gym with various weights and equipment in the background. 
+
+He is holding a black kettlebell in his right hand and walking forward on a green and black mat. He then bends down and places the 
+
+kettlebell on the ground. After placing the kettlebell down, he turns to his right. 
+
+A woman with blue hair is sitting in a chair in front of a bookshelf filled with books and various items, including a plant and a small 
+
+figurine. She is wearing a white sweater and is speaking into a microphone. She gestures with her hand, moving it near her face and then 
+
+lowering it. She then turns her head to the left and continues speaking. 
+
+A man wearing a red beanie and a black hoodie with long hair is sitting at a table with a green background, holding a piece of bread in his 
+
+right hand and gesturing with his left hand while talking. A woman with curly hair, wearing a black t-shirt with a graphic design, is sitting 
+
+next to him, holding a piece of bread in her right hand and resting her left hand on her chin. The man looks at the woman while continuing 
+
+to talk, and the woman looks back at him. The man then looks down at the table, and the woman also looks down at the table. 
+
+A person holds a blue Huawei smartphone with both hands, positioning it on a clear stand. The person then releases the phone, leaving it 
+
+standing upright on the stand. The background is a neutral, indoor setting with a door visible in the distance. There is text in the video. 
+
+A woman with long, wavy, reddish-brown hair is standing in front of a background that features a circular, blue-gray gradient design and a 
+
+beige wall with horizontal lines. She turns her head to the right and looks forward. The image has black borders. 
+
+A person wearing a green jacket places a small white bowl on a wooden table next to a glass bowl containing a bay leaf. The person then 
+
+reaches into a wooden bowl filled with various onions and garlic bulbs, including white and purple onions, and picks up two garlic bulbs. 
+
+The person removes the outer layers of the garlic bulbs and throws them into a black pot on the right side of the table. 
+
+A woman is sitting inside a tent, which is set up on a rocky terrain with some grass visible around. She is wearing a purple jacket and has a 
+
+braid. The tent is light green with a visible logo on the fabric. There is a green water bottle placed near the entrance of the tent. The woman 
+
+initially looks straight ahead, then turns her head to the left and begins to speak. 
+
+A woman stands in front of an open closet, holding up a striped skirt with black, white, and beige lines. She slightly moves the skirt while 
+
+talking. The closet behind her is filled with various clothes, including jackets and shirts, and has shelves with items like a 'Zooretown' box 
+
+and other miscellaneous objects. The woman then turns around and hangs the skirt inside the closet. There is text in the video. Figure 15: More qualitative results for the text-to-video generation task. 
+
+23 A man in a dark purple shirt is standing in a kitchen with wooden cabinets and a tiled backsplash. He begins to turn his body to the right. 
+
+As he continues to turn, he starts to move forward. The man completes his turn and continues to walk forward, passing by the kitchen 
+
+counter and cabinets. 
+
+A person is stirring a yellowish mixture with green and brown bits in a glass bowl using a pink spatula. The bowl is placed on a wooden 
+
+table, and there is a small bowl with a brownish liquid and a pink flower on the left side of the frame. The person continues to stir the 
+
+mixture, ensuring it is evenly mixed. The mixture appears to be thick and creamy, with visible chunks of vegetables or other ingredients. 
+
+The person then lifts the spatula, showing some of the mixture clinging to it. 
+
+A woman is seated at a table in a room with a white door and shelves in the background, holding a box of 'santact Vitamin C' in her right 
+
+hand. She rotates the box to show different angles while speaking. She points to the box with her left hand, highlighting various details on 
+
+the packaging. She continues to hold and display the box, occasionally pointing to it and speaking. 
+
+A man in a blue blazer and patterned shirt is speaking into a microphone in a room with dark blue walls. Behind him, there is a painting of 
+
+a ship on the wall, a golden vase with dried flowers, and a shelf with various decorative items including a small figurine and a golden bowl. 
+
+The man raises his right hand and points upwards with his index finger, then brings his hands together in a prayer-like gesture. He 
+
+continues to speak while gesturing with his hands, occasionally pointing upwards and forward. 
+
+A close-up view shows a person applying black eyeliner with a fine-tipped eyeliner pen to their lower lash line, which is already adorned 
+
+with purple eyeshadow. The person then uses their finger to blend the black eyeliner into the purple eyeshadow on the lower lash line. 
+
+In a forest setting, a woman wearing a pink jacket with a striped scarf around her neck is seen holding a metal bowl filled with ingredients. 
+
+She places the bowl on a cutting board on a table that has various items including a large mixing bowl, a can, a bottle of oil, and some 
+
+packaged goods. She then reaches for a seasoning packet and opens it, preparing to pour its contents into the bowl. 
+
+A woman with shoulder-length blonde hair is standing indoors, wearing a white top and a necklace with a green pendant. She initially 
+
+looks straight ahead, then turns her head to the left. 
+
+Two men are seated in a car, with the man in the blue shirt driving and the man in the white shirt sitting in the passenger seat. The man in 
+
+the blue shirt is talking and gesturing with his right hand, pointing his finger. The man in the white shirt turns his head to look at the man in 
+
+the blue shirt and then turns back to face forward, speaking. The man in the blue shirt briefly turns his head to look at the man in the white 
+
+shirt before turning back to face forward. Figure 16: More qualitative results for the text-to-video generation task. 
+
+24

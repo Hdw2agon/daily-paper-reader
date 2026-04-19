@@ -1,0 +1,379 @@
+Title: TokenGS: Decoupling 3D Gaussian Prediction from Pixels with Learnable Tokens
+
+URL Source: https://arxiv.org/pdf/2604.15239v1
+
+Published Time: Fri, 17 Apr 2026 01:16:19 GMT
+
+Number of Pages: 11
+
+Markdown Content:
+# TokenGS: Decoupling 3D Gaussian Prediction from Pixels with Learnable Tokens 
+
+# Jiawei Ren * Michal Jan Tyszkiewicz * Jiahui Huang † Zan Gojcic †
+
+# NVIDIA 
+
+{jiaweir, mtyszkiewicz, jiahuih, zgojcic }@nvidia.com 
+
+# Project: research.nvidia.com/labs/toronto-ai/tokengs …
+
+> GS -LRM Baseline Higher -quality Rendering & Geometry
+> Better 3DGS Spatial Distribution
+> Emergent Dynamic Scene Flow
+
+…
+
+> Dynamic Scene Reconstruction
+> Outdoor Scene Reconstruction
+> Indoor Scene Reconstruction 2-View Input
+> Multi -View Input
+> Dynamic Sequence Input
+> Gaussian Center
+
+Figure 1. TokenGS is a feed-forward reconstruction framework that outputs a 3D Gaussian Splatting (3DGS) representation from posed input images. Our novel encoder-decoder architecture detaches 3D Gaussians from input pixels and enables multiple properties desirable for 3D reconstruction, as demonstrated in each example. 
+
+# Abstract 
+
+In this work, we revisit several key design choices of modern Transformer-based approaches for feed-forward 3D Gaus-sian Splatting (3DGS) prediction. We argue that the com-mon practice of regressing Gaussian means as depths along camera rays is suboptimal, and instead propose to directly regress 3D mean coordinates using only a self-supervised rendering loss. This formulation allows us to move from the standard encoder-only design to an encoder-decoder architecture with learnable Gaussian tokens, thereby un-binding the number of predicted primitives from input im-age resolution and number of views. Our resulting method, 
+
+TokenGS , demonstrates improved robustness to pose noise and multiview inconsistencies, while naturally supporting  
+
+> *Equal contribution, †Equal advising.
+
+efficient test-time optimization in token space without de-grading learned priors. TokenGS achieves state-of-the-art feed-forward reconstruction performance on both static and dynamic scenes, producing more regularized geometry and more balanced 3DGS distribution, while seamlessly recov-ering emergent scene attributes such as static-dynamic de-composition and scene flow. 
+
+# 1. Introduction 
+
+The field of feed-forward neural reconstruction has re-cently seen great progress in terms of reconstruction qual-ity [47, 54], scalability to large datasets [57], and support for dynamic scenes [23, 24, 49]. In certain scenarios, these methods are even starting to approach the quality of com-putationally intensive per-scene optimization methods. 
+
+> arXiv:2604.15239v1 [cs.CV] 16 Apr 2026
+
+Despite this rapid progress, the dominant paradigm of using a large encoder-only 1 Transformer backbone to pre-dict pixel-aligned 3D Gaussian primitives, still faces several fundamental limitations. First, predicting Gaussian means as depths along camera rays restricts the model’s ability to internally correct for noisy camera poses and multiview-inconsistencies, and poses challenges for dynamic scenes, where points/pixels must be warped over time. Second, the common strategy of tying the number of predicted Gaus-sians to the resolution and number of images (e.g., one par-ticle per pixel or patch) leads to an excessive number of primitives, e.g. 32 images at 512 × 512 resolution yield over 8 million particles. This coupling makes the rep-resentation scale with the number of input views regard-less of the intrinsic scene complexity. Indeed, repeating each input N times will result in N times more particles for the same scene, introducing high redundancy. Finally, while feed-forward neural reconstruction naturally enables self-supervised test-time refinement, directly optimizing the Gaussian parameters tends to degrade the learned priors of the network , particularly in low-view regime. To address these challenges, we present TokenGS that revisits this standard formulation and incorporates sev-eral key modifications. Instead of predicting Gaussian means/centers as depths along the camera rays, we directly regress their 3D coordinates. This is akin to point map pre-diction in feed-forward Structure-from-Motion (SfM) mod-els such as VGGT [41], but importantly trained without explicit point-map ground-truth supervision, only through self-supervised rendering loss. This formulation enables us to replace the commonly-used encoder-only backbone with a novel encoder–decoder architecture, where a set of learn-able 3DGS tokens cross-attend to compact image features and predict the corresponding 3DGS parameters. As a re-sult, the number of predicted Gaussians becomes a hyper-parameter independent from the input resolution and num-ber of images. By decoupling the Gaussian prediction from the input images, TokenGS can freely assign Gaussians to places with higher scene complexity. In the meantime, this unlocks scene completion beyond input views, increases robustness to noisy camera inputs, and naturally extends to dynamic content. Moreover, the token-based formula-tion supports self-supervised test-time optimization by re-fining only the token embeddings, thereby preserving the global priors encoded by the model. Through extensive ex-periments, we demonstrate that TokenGS achieves state-of-the-art performance in both reconstruction quality and effi-ciency, producing compact representations with more regu-larized geometry, while also recovering emergent scene at-tributes such as scene flow. 
+
+> 1We adopt the terminology common in Large Language Models (LLMs), referring to a sequence of self-attention layers as in [10].
+
+# 2. Related works 
+
+3D Scene Representation. The choice of 3D scene rep-resentation is highly coupled with the reconstruction algo-rithm. Per-scene optimization methods typically adopt neu-ral radiance fields (NeRF) [1, 31] based on tri-plane [12] or hash-grid encodings [33], or explicit point-based represen-tations such as 3DGS [22] and its variants [18, 32, 44, 52]. To handle dynamic scenes, these approaches extend the rep-resentation by introducing either a direct 4D extension [11, 34], deformation fields from canonical geometry [30, 43], or keyframe-based interpolations [48]. While these repre-sentations can all achieve high-fidelity reconstruction, they are typically optimized from scratch using image supervi-sion and optionally learned optimizers [5, 45], leading to slow reconstruction times. 
+
+Feed-forward 3D Reconstruction. Feed-forward recon-struction methods infer 3D scenes directly from input im-ages in a single forward pass. They are typically trained on large multiview datasets, enabling them to generalize to novel scenes at inference time. Early approaches fo-cused on static scenes and were based on NeRF [17, 51] or more recently Gaussian splatting [3, 6, 21, 45–47, 54, 57]. This paradigm has also been extended to dynamic and long-horizon reconstruction, predicting spatiotempo-ral Gaussians or recurrently updating scene states over time [35, 45, 49]. Feed-forward design significantly reduces reconstruction latency, yet current formulations still lag be-hind optimization-based methods in visual fidelity, motivat-ing the improvements proposed herein. 
+
+Test-Time Scaling. Test-Time Scaling (TTS) refers to al-locating additional compute at inference time to improve model performance and robustness under unseen or chal-lenging data distributions. This concept has been most thoroughly explored in large language models [27, 42, 50] and further advanced through deliberate reasoning ap-proaches [14, 19]. In computer vision, TTS commonly appears in form of test-time adaptation or refinement, im-proving both discriminative tasks [37, 40] and genera-tive models [7, 26]. Representative strategies include prompt tuning [20], slow–fast weight updates [55], and self-consistency augmentations [53]. For 3D reconstruction, prior methods largely rely on per-scene optimization dur-ing inference [22]. More recent work applies TTS to geom-etry foundation models through online finetuning [4, 29]. However, applying test-time scaling to large reconstruction models, especially those predicting 3DGS representations, remains largely unexplored. 
+
+# 3. Method 
+
+Given a set of input views I = {Ii ∈ RH×W ×3}Ni=1 
+
+together with the corresponding camera extrinsics T =…            
+
+> 3DGS Attributes …
+> Image
+> Features
+> 3DGS Tokens
+> (Optional) Test -Time Token Tuning (TT )
+> …
+> …
+> Supervision Images
+> Render
+> Base Model Training
+> Cross -Image
+> Self -Attention
+> KVQImage -3DGS
+> Cross -Attention
+> KVQ
+> 3DGS
+> Self -Attention
+> KVQ
+> …
+> Input Images
+> Plü cker
+> Encoding
+
+⊕     
+
+> 3DGS Tokens
+> …
+> 3DGS Attributes …
+> Image
+> Features
+> Image -3DGS
+> Cross -Attention
+> KVQ
+> 3DGS
+> Self -Attention
+> KVQ
+
+Figure 2. Our method . We design a novel network architecture that reconstructs 3DGS from input images, directly predicting 3D Gaussian mean coordinates. The model follows an encoder-decoder structure. In the decoder, 3DGS tokens are fed in as queries to obtain the final Gaussian attributes. After the base model is trained, we allow test-time token tuning from input images to improve reconstruction quality. 
+
+{Ti ∈ SE (3) }Ni=1 and intrinsics, our goal is to directly pre-dict a set of M 3DGS particles G ∈ RM ×14 from which novel views can be synthesized through volume render-ing [22, 31]. Each Gaussian particle is parameterized by its mean μ ∈ R3, color c ∈ [0 , 1] 3, scale s ∈ R3+, opac-ity σ ∈ [0 , 1] , and rotation represented as a unit quaternion 
+
+q ∈ H.We design our feed-forward 3D reconstruction frame-work around the idea of learnable Gaussian tokens , thereby decoupling the positions of the Gaussian particles from the camera rays and their number from the resolution and num-ber of input images. Specifically, we directly regress 3D Gaussian means μ in a canonical coordinate space and train them end-to-end using volume rendering supervision and a visibility-aware regularization (Sec. 3.1). This formula-tion enables us to adopt an encoder–decoder architecture in which learnable Gaussian tokens cross-attend to the multi-view image tokens (Sec. 3.2). At inference time, our model design further allows efficient test-time tuning of the Gaus-sian token embeddings, improving reconstruction quality while preserving the learned priors (Sec. 3.3). An overview of our framework is illustrated in Fig. 2. 
+
+3.1. Directly Regressing Gaussian Means 
+
+Instead of predicting depth along camera rays (or depth plus 3D offsets), we directly regress the 3D coordinates of Gaus-sian means μ in a global coordinate frame defined by the camera extrinsics and shared across all views. To demon-strate its effectiveness, we did a preliminary study on Ob-javerse [9] dataset, where three feed-forward models using different output parametrizations are trained and compared. As shown in Fig. 3, with only one view as input, the repre-sentation power of pixel-aligned parametrization is limited, not being able to recover the occluded part of the geometry. Pixel -Aligned Coordinates Pixel -Aligned Distance  Direct 3D Coordinates 
+
+> (Ours )
+
+Figure 3. Comparison of 3DGS parametrizations in feed-forward networks. While all methods reconstruct the single input view well (shown in the inset), the quality of the occluded region behind the table varies. 
+
+Decoupling the Gaussian mean prediction from the cam-era rays offers several additional benefits: (i) it enables ex-trapolation and scene completion ( cf . Fig. 6), (ii) improves robustness to noise in the camera poses ( cf . Fig. 7), and (iii) eliminates the spiky artifacts commonly observed in depth-prediction networks ( cf . Fig. 5). 
+
+Zero-Gradient Problem. Despite the above advantages, training a direct coordinate regression formulation is non-trivial. Gaussians that lie outside all camera frusta do not contribute to the rendered supervision images and therefore receive zero gradients from the rendering loss. Such “in-active” Gaussians degrade training stability, waste model capacity, and manifest as floating, noisy points around the scene. Recent feed-forward SfM approaches [41] mitigate this issue by supervising their point-map outputs with explicit 3D supervision obtained by transforming depth map labels into the global coordinate frame. However, such super-vision is difficult to obtain in real-world settings (or it is noisy) and reintroduces the bias of forcing the predicted means to lie along camera rays. This is precisely the cou-pling that our formulation seeks to avoid. 2
+
+Visibility Loss. Instead, we introduce a visibility loss that softly constrains Gaussian particles to remain visible in at least one of the supervision views. Specifically, we project the centroids μm = ( xm, y m, z m) of the Gaussians to im-age plane of all supervision views Ii ∈ I sup to obtain their image coordinates (uim, v im). After normalization by image width W and height H:
+
+˜uim = 2( uim/W ) − 1, ˜vim = 2( vim/H ) − 1, (1) points inside the image plane satisfy ˜u, ˜v ∈ [−1, 1] . The visibility loss measures the minimum distance from each Gaussian to the nearest visible boundary: 
+
+Lvis = X
+
+> m
+
+min 
+
+> Ii∈I sup
+
+ReLU( |˜uim| − 1) + ReLU( |˜vim| − 1)  .
+
+(2) 
+
+This penalty is zero when the Gaussian projects inside at least one view and provides gradients to pull it back into view otherwise. In practice, to avoid spurious gradients, we clip the loss value with a constant factor 1.0. A conceptual illustration is shown in the inset figure and the effectiveness is demonstrated with Fig. 11. Besides the novel visibility loss, we supervise on render-ings with a combination of pixel-wise mean squared error and SSIM losses:  L = LMSE + λSSIM LSSIM + λvis Lvis .
+
+3.2. Decoding Learnable Gaussian Tokens 
+
+We employ an encoder–decoder Transformer where the encoder converts input images and camera parameters into image tokens, and the decoder predicts a set of learnable Gaussian tokens through cross-attention. Each Gaussian to-ken decodes independently of the number of input pixels, effectively decoupling the number of output Gaussians from image resolution. 
+
+3.2.1. Model Architecture 
+
+We use a ViT-based encoder [10]. Specifically, each input view {Iv ∈ I c}Nc 
+
+> v=1
+
+is first patchified into a set of patches 
+
+{Ivk ∈ Rp×p×3}HW/p 2 
+
+> k=1
+
+, for a total of NI = NcHW/p 2
+
+> 2In the token formulation introduced in Sec. 3.2, we decouple 3D points from pixels, removing their correspondence and necessitating a Chamfer or similar distance for supervision, which adds further complexity.
+
+patches. These are projected into a C-dimensional latent space using a linear layer xvk = Linear( Ivk ). In parallel, we patchify the Pl¨ ucker coordinates associated with each view into a set of patches {Pvk ∈ Rp×p×6}HW/p 2 
+
+> k=1
+
+and project them as svk = Linear( Pvk ). The two embeddings are then summed avk = xvk + svk and flattened into a 1D sequence of encoder input tokens A ∈ RNI×C . We apply standard ViT layers, allowing attention across all views, and finally apply layer normalization to obtain the image tokens 
+
+B ∈ RNI×C .Our decoder follows the DETR design [2]. We initial-ize Nt learnable token embeddings TIN ∈ RNt×C (which we refer to as 3DGS tokens ) and apply Transformer decoder blocks [39] consisting of (i) cross-attention to the image to-kens B, (ii) self-attention among the GS tokens, and (iii) per-token MLP. This produces output embeddings TOUT .From each output embedding, we regress the 14 Gaus-sian attributes for NG = 64 Gaussian primitives using a linear layer. As these are real-valued, we need to map each attribute to its domain. Following [41], we predict XYZ coordinates using f (x) = sign (x) · (exp( x) − 1) . For the remaining 3DGS attributes we follow [54]: scaled tanh 
+
+for color c and opacity σ, clipped exponential for the scale 
+
+s, and unit normalization for the rotation quaternion q. Af-ter this mapping, we flatten the Gaussians from all tokens to obtain G ∈ RNcNg ×14 , introduced at the beginning of Sec. 3. Because there are typically far more image tokens than GS tokens ( NI ≫ Nt), making decoder’s memory foot-print depend primarily on Nt allows for scaling to deeper architecture. Thus, we use an optimization in which all decoder cross-attention layers share their key–value pro-jections of image tokens. These projections are computed once at the start of decoding, which for a decoder of depth 
+
+Ddec replaces an allocation of size O(NIDdec ) with a sin-gle O(NI).For both the encoder and the decoder, we use Lay-erScale [38] and QK-normalization [16], which we find crucial for stable training. Contrary to standard practice, we omit the layer-normalization before the final regression head, as we find it degrades reconstruction quality. 
+
+3.2.2. Dynamic Scene Modeling 
+
+For dynamic scenes, we extend the framework with time-conditioned dynamic 3DGS tokens following a bullet-time reconstruction formulation [23]. Each dynamic token re-ceives a learnable time embedding representing the tar-get frame, while the static tokens remain time-invariant. Dynamic tokens attend causally to static ones, allowing the model to decompose the scene into static and motion components while maintaining consistent correspondences across time. A schematic figure is shown in Fig. 4. 
+
+Static and Dynamic Tokens. Concretely, we split the orig-Static Tokens  Dynamic Tokens 
+
+⊕ ⊕ ⊕Bullet -Time Embedding 
+
+> Static to Static
+> Attention
+> No
+> Attention
+> Dynamic to Dynamic
+> Attention
+> Dynamic to Static
+> Attention
+
+Figure 4. Attention masking for dynamic scenes. The fig-ure shows one instantiation of the 3DGS self-attention block. The horizontal axis shows queries, while the vertical axis shows keys/values of the corresponding tokens. 
+
+inal set of 3DGS tokens T into two separate sets of tokens: 
+
+TS = { TS1 , . . . , TS 
+
+> Ns
+
+} ∈ RNs×C ,
+
+TD = { TD1 , . . . , TD 
+
+> Nd
+
+} ∈ RNd×C , (3) where TS is intended to represent the static (time-invariant) part of the scene and T D represents the dynamic part. We borrow the formulation introduced in [23], and augment the dynamic token with the timestamp t (i.e . bullet-time ) that one wants to reconstruct. Specifically, we add a learned time embedding as follows: 
+
+˜TD 
+
+> j
+
+(t) = TD 
+
+> j
+
++ Linear( τ (t)) , (4) where τ (t) ∈ Rdτ represents sinusoidal encoding which gets linearly projected to the latent space. 
+
+Attention Masking. We impose a structured attention mask over the combined token set T(t) = TS∪ ˜TD(t) in the self-attention part of our Transformer-decoder. Specifically, we impose a causal structure where the dynamic tokens can only attend/query unidirectionally to the static tokens. This provides inductive bias that the dynamic part of the scene is dependent on the static part, enabling the model to de-compose a scene into time-invariant (static) structure and time-varying (dynamic) motion. The dynamic tokens pre-serve consistent correspondences across all frames. 
+
+3.3. Test-Time Scaling 
+
+Our encoder-decoder design naturally supports two comple-mentary forms of test-time scaling without requiring net-work retraining. The first, context extension , is achieved by supplying more image tokens at inference time than were used during training (e.g., providing 4 views instead of 2). In alternative formulations (e.g, encoder-only de-sign) this would increase the number of predicted Gaus-sians, whereas in our formulation the number of Gaussians 
+
+Table 1. Reconstruction performance with two input views on RealEstate10K [56]. Resolution is 256 × 256 .                               
+
+> Method PSNR ↑SSIM ↑LPIPS ↓#GS MVSplat [6] 26.39 0.869 0.128 131K DepthSplat [46] 27.47 0.889 0.114 131K GS-LRM [54] 28.10 0.892 0.114 131K
+> Ours (1024 tok) 28.02 0.896 0.147 66K
+> Ours (4096 tok) 28.41 0.903 0.135 262K
+> Ours (4096 tok, +TT) 28.82 0.910 0.130 262K
+
+Table 2. Evaluations on DL3DV [25] dataset with different number of input views. Ours is trained on 4-view, 2- and 6-view experiments show generalization to other context lengths ( Ours* ). Prior work uses separate models for each #Views. Resolution is 
+
+448 × 256 .Method #Views PSNR ↑ SSIM ↑ LPIPS ↓ Time (s) #GS MVSplat [6] 217.54 0.529 0.402 0.072 229k DepthSplat [46] 19.31 0.615 0.310 0.083 229k                                                    
+
+> Ours ∗19.35 0.609 0.440 0.049 262k
+> Ours ∗(+TT) 19.32 0.601 0.435 4.00 262k MVSplat [6] 421.63 0.721 0.233 0.146 458k DepthSplat [46] 23.12 0.780 0.178 0.107 458k
+> Ours 23.02 0.747 0.326 0.075 262k
+> Ours (+TT) 23.57 0.766 0.314 4.82 262k MVSplat [6] 622.93 0.775 0.193 0.263 688k DepthSplat [46] 24.19 0.823 0.147 0.132 688k
+> Ours ∗23.69 0.766 0.311 0.085 262k
+> Ours ∗(+TT) 24.51 0.792 0.295 5.61 262k
+
+Table 3. View extrapolation evaluation with two input views on DL3DV and RealEstate10K. Ours outperforms models finetuned with PM-Loss [36], a point map supervision loss. 
+
+Method DL3DV [25] RealEstate10K [56] 
+
+PSNR ↑ SSIM ↑ LPIPS ↓ PSNR ↑ SSIM ↑ LPIPS ↓
+
+DepthSplat 18.46 0.689 0.261 20.43 0.788 0.218 MVSplat 16.79 0.592 0.322 19.52 0.757 0.231 MVSplat+PM 19.25 0.615 0.291 22.18 0.787 0.199 DepthSplat+PM 20.77 0.705 0.245 22.48 0.814 0.194 Ours 20.98 0.688 0.364 22.60 0.831 0.222 
+
+remains fixed and independent of the context length. The second, token-tuning (TT) , is a lightweight test-time train-ing procedure in which we fine-tune only the Gaussian to-ken embeddings using self-supervision on the input views, with the network parameters and image features frozen. A small number of gradient steps adapts the attention patterns to the specific scene, leading to improved Gaussian param-eters while preserving the learned priors encoded in the rest of the network. Together, these two strategies provide flex-ible test-time scaling and yield substantial improvements in reconstruction quality, with fidelity increasing as more in-put views become available. 
+
+# 4. Experiments 
+
+Implementation details. Our model has 6 encoder layers and 24 decoder layers with channel dimension C = 1024 .To test with higher resolution and more input views on Table 4. Dynamic reconstruction on 4-view Kubric 4D [23] .         
+
+> Method PSNR ↑SSIM ↑LPIPS ↓
+> BTimer [23] 24.45 0.835 0.162 Ours 24.84 0.821 0.287
+
+DL3DV [25], we reduce the encoder and decoder depth to 3 and 12, respectively. We apply a z-axis offset to the XYZ activation function to initialize Gaussians in front of the reference camera whose pose is set to identity. We use FlashAttention2 [8] and FlexAttention [15] for attention and masked attention computation. 
+
+Training details. We optimize the model with AdamW [28] optimizer. We use a batch size of 64 across 8 NVIDIA A100 GPUs. We first train our model for 150K iterations with 1024 Gaussian tokens on resolution 256 × 256 , and then finetune it for 10K iterations with 4096 Gaussian to-kens. We change the resolution to 448 × 256 in finetuning for DL3DV to match the baselines. We use a cosine learn-ing rate scheduler with an initial learning rate of 4 · 10 −4
+
+and 2,000 warmup iterations. We reduce the learning rate and warmup iterations to 4 · 10 −5 and 400, respectively, for finetuning. For token tuning, we use 50 steps and lr= 10 −4 unless indicated otherwise. We use λSSIM = 0 .2
+
+and λvis = 1 .0.
+
+4.1. Static Scene Reconstruction 
+
+RE10K. We first compare our model with baselines on RE10K [56] with two input views. We evaluate the base model with 1024 Gaussian tokens, the finetuned model with 4096 Gaussian tokens, and the finetuned model with token-tuning. The results are shown in Tab. 1. Compared to baselines, the base model achieves on-par performance with 
+
+50% of the Gaussians, and the finetuned model wins by a clear margin with 2× of the Gaussians, which showcases our flexible control over the number of Gaussians. Token-tuning effectively improves the reconstruction quality with-out suffering from overfitting, even with only two train-ing views. Qualitative comparisons with the GS-LRM [54] baseline are shown in Fig. 5, where one can clearly see the spike artifacts from the 3DGS visualizations. 
+
+DL3DV. We then evaluate our model on DL3DV [25] with varying number of input views. We fix our model to the finetuned model with 4096 Gaussian tokens, and focus on the generalization to other context lengths. The results are shown in Tab. 2. On the 4-view setting which our model is trained, we achieve comparable performance with the baselines with half of the Gaussians. When generalizing to the 2-view and 6-view settings with context extension, our model can still stay competitive with the baselines with no additional finetuning. Notabaly, on the 6-view setting, our model together with TT outperforms the baseline with a clear margin with 72% fewer Gaussians. Input  GS -LRM  Ours        
+
+> Figure 5. Qualitative results on RE10K [56]. Compared to the pixel-aligned Gaussian prediction of GS-LRM [54], our formu-lation, which is based on direct XYZ prediction and decoupling from pixel rays, produces noticeably cleaner geometry with fewer spiky artifacts. GS -LRM Ours GS -LRM Ours
+> Figure 6. View Extrapolation .Both GS-LRM and our model have been finetuned for view extrapolation. The lower-left inset figures show the ground-truth images.
+
+4.2. View Extrapolation 
+
+We further evaluate our model on a view extrapolation benchmark from [36] that samples target views beyond the context window to test the reconstructed geometry on the boundaries that are not observed by the inputs. The results are shown in Tab. 3. Without requiring any pointmap or depth annotation, our model outperforms the baselines with a clear margin, and matches the performance of the base-lines with pointmap supervised finetuning. Additionally, we finetune both GS-LRM and our model specifically for the view extrapolation task ( i.e ., with target view sampled beyond the context window to test its extrapolation capabil-ity), with the visibility loss disabled for ours. The results are shown in Fig. 6. Since our Gaussian prediction is decoupled from the input rays, our model is able to reconstruct more complete geometry beyond the input cameras, which rein-forces the findings from object-level experiments in Fig. 3. 
+
+4.3. Reconstruction with Camera noise 
+
+We evaluate the robustness of our model to noisy camera poses on RE10K with two input views. To this end, we inject random rotations to the second camera pose by sam-pling a random axis and applying a rotation with a magni-1 2 3 4 5 6 7 8 9 10 
+
+> Camera rotation [ ◦]
+> −0.1
+> 0.0
+> 0.1
+> 0.2
+> 0.3
+> 0.4
+> 0.5
+> ∆PSNR (Ours - GS-LRM)
+> −0.005 0.000 0.005 0.010 0.015 0.020 0.025
+> -∆LPIPS (Ours - GS-LRM)
+
+Figure 7. Reconstruction under camera noise on 2-view RE10K . We add camera pose noise of magnitude 1–10 degrees to the non-reference view. We show the difference to GS-LRM [54] in terms of PSNR and LPIPS. Note, that we visualize −∆LPIPS so higher values indicate better performance for both metrics. 
+
+tude of up to 10 degrees. We plot the gap between our model and GS-LRM in terms of PSNR and LPIPS across different noise magnitudes in Fig. 7. By decoupling the Gaussian prediction from the input rays, our model is less susceptible to the noise in the input camera poses, and the gap between our model and GS-LRM becomes larger as the noise mag-nitude increases. 
+
+4.4. Dynamic Reconstruction 
+
+We evaluate the dynamic reconstruction capability of our model on Kubric [13] with 4 input views and resolution 
+
+256 × 256 . We first train a 4-view base model on both RE10K and DL3DV and then finetune on Kubric with 256 additional dynamic Gaussian tokens for 50K iterations. The evaluation is performed on 16 held-out scenes. A compar-ison with BTimer [23] is shown in Fig. 8. As the pixel-aligned representation in BTimer prevents it from modeling the motion of Gaussian centers, the model compensates by instead varying the Gaussian opacity across time. As a re-sult, dynamic objects tend to disappear and reappear from one input frame to the next. In contrast, the 3D coordi-nates that our model predicts are continuous in time and hence better reconstruct object motion. This is especially prominent when target timestamps are between input times-tamps. In addition, by conditioning the target time embed-ding on dynamic Gaussian tokens instead of on input pix-els, our model can provide a consistent tracking over time. We visualize the scene flow between different time stamps in Fig. 9. A quantitative comparison is shown in Tab. 4 where our method outperforms BTimer in terms of PSNR. 
+
+4.5. Ablation Study 
+
+Visualization of spatial token correspondence. In Fig. 10 we visualize the Gaussians resulting from specific tokens across two scenes and scene decomposition across splats from different tokens. We find that Gaussians from a single token stay close to each other within a scene and remain in a similar 3d location across scenes – a phenomenon similar to slot specialization reported in [2]. Looking at the decompo-sition of the entire image, one can see that tokens can cover Input View  Input View 
+
+> BTimer
+> Ours
+
+Figure 8. Dynamic reconstruction on Kubric [13] . We show in-between time stamps to examine temporal consistency. 
+
+Figure 9. Emergent scene flow . We visualize the trajectories of each dynamic Gaussian across time. 
+
+Figure 10. Token assignments . Left : rendering. Center : GS from 5 random tokens highlighted with per-token colors to show their location across scenes. Others set to gray; overlaid with GT image. Right : GS from each token assigned a consistent color. 
+
+regions of uneven areas, with more tokens (and Gaussians) allocated to regions with higher frequency details. 
+
+Visibility Loss. We evaluate the importance of visibility loss (described in Sec. 3.1) by training and evaluating two 4-view models on RE10K, with and without this regularizer. The visibility loss term prevents degraded geometry, shown in Fig. 11, and leads to 0.4 PSNR improvement. 
+
+Test-time scaling. Our model can scale at test time on two axes: the number of input views and the number of token-tuning steps (see Sec. 3.3). In Fig. 12 we compare both strategies on DL3DV [25]. The setting mirrors Tab. 2, except that we now sweep over a larger number of input views, uniformly spaced between the first and the last one. w/o Visibility Loss  w/ Visibility Loss        
+
+> PSNR
+> 28.4
+> PSNR
+> 28.8 Figure 11. Effect of the visibility loss . Regularizing the model removes floaters from unobserved parts of the scene and improves the final PSNR on novel views.
+> Figure 12. Test-time scaling : PSNR when scaling #input views vs #gradient steps in two variants: optimizing Gaussian tokens (solid) or Gaussian parameters directly (dashed). Gaussian Tuning No Tuning Token Tuning ( Ours )
+> Figure 13. Center : renders of a feed-forward reconstruction from 4 views, completely novel viewpoint. Left : Gaussian Tuning de-grades scene geometry, despite quantitative advantage on close-by views. Right : Our Token Tuning (TT) improves scene geometry with sharper renderings.
+
+We use a 4-view base model and evaluate against fixed 50 target views, which include the input views. Context extension: our method benefits from up to 4×
+
+more inputs than it was trained for, after which the per-formance saturates. Token-tuning: even just 10 step opti-mization of Gaussian tokens leads to significantly improved PSNR, a trend continuing up to 250 steps but slowly satu-rating. CE and TT can be combined for additional benefit. We also compare against a simple baseline that directly optimizes Gaussian parameters instead of token embed-500 1000 1500 2000 2500 3000 3500 4000 Number of Gaussian tokens     
+
+> 18
+> 19
+> 20
+> 21
+> 22
+> 23
+> 24 PSNR
+> 2 views 4 views 6 views
+> Figure 14. PSNR vs # Gaussian tokens. We study how recon-struction quality changes with different numbers of Gaussian to-kens given fixed number of input views.
+
+dings. This baseline achieves higher PSNR and faster con-vergence, particularly when many input views are avail-able and the reconstruction problem is less ill-posed. How-ever, as shown in Fig. 13 , extensive Gaussian-parameter tuning degrades geometry, while token tuning improves it—reflecting the stronger learned prior encoded in the to-kens. A deeper exploration of joint optimization strategies (token and Gaussian tuning) is left for future work. 
+
+Effect of number of tokens. We evaluate the effect of the number of Gaussian tokens on the reconstruction qual-ity on DL3DV. We finetune the 1024-token 4-view base model with number of tokens ranging from 256 to 4096 and number of views ranging from 2 to 6. As shown in Fig. 14, our approach offers independent control over both the number of Gaussians and input views, provid-ing two-dimensional scalability that pixel-aligned methods lack. This flexibility enables us to adjust the trade-off be-tween compression efficiency and reconstruction quality: fewer Gaussians yield compact representations while more Gaussians achieve higher fidelity, all without changing the number of input views. 
+
+# 5. Conclusion 
+
+We introduced TokenGS, a feed-forward 3DGS framework that directly regresses the 3D coordinates of the Gaus-sian centroids and uses learnable Gaussian tokens to de-couple the reconstruction from input pixels. This design improves robustness, enhances geometric fidelity, supports dynamic-scene modeling, and enables efficient test-time scaling through context extension and token tuning. 
+
+Limitations. Our method inherits limitations common to feed-forward approaches: it can struggle with large-scale environments and fine-grained geometric detail. Test-time token tuning is also relatively costly, typically requiring sev-eral dozen optimization steps. However, token tuning pre-serves strong learned priors, suggesting that hybrid strate-gies combining both approaches present a promising direc-tion for future research. A. More Implementation Details 
+
+Gaussian Token Details. We use a patch size 8 for the decoder, so each Gaussian token decodes 64 Gaussians. We initialize Gaussian tokens with a standard deviation of 0.01. When increasing the number of Gaussian tokens or adding dynamic Gaussian tokens, we initialize the new tokens to existing tokens and apply a small random perturbation with standard deviation 0.01. To make sure most Gaussians are visible at initialization, we initialize the linear output pro-jection layer with a small standard deviation of 2e-3 and initialize the Layer Scale layer in the decoder with 1e-5. 
+
+Training Details. We apply a gradient clipping with a threshold of 1.0 to the gradients of the model. Weight decay of 0.05 is applied except for the bias terms and the Layer Normalization layers. A random flip augmentation is ap-plied to the images and camera poses during training. The view sampling strategy follows DepthSplat [46]. We rescale the camera translations of RE10K, DL3DV, and Kubric by 0.25, 0.15, and 0.1 respectively to make the mean depths roughly 1. The 150K-iteration base model training takes 36 hours on 8 NVIDIA A100 GPUs and the 10K-iteration finetuning usually takes another 4 hours depending on the number of Gaussian tokens and the resolution. 
+
+Baseline Details. For comparison, we reproduced GS-LRM [54] and BTimer [23] following the training details provided in the original papers. We directly compare with the numbers provided in the original papers when available. 
+
+# References 
+
+[1] Jonathan T Barron, Ben Mildenhall, Dor Verbin, Pratul P Srinivasan, and Peter Hedman. Zip-nerf: Anti-aliased grid-based neural radiance fields. In Proceedings of the IEEE/CVF International Conference on Computer Vision ,pages 19697–19705, 2023. 2 [2] Nicolas Carion, Francisco Massa, Gabriel Synnaeve, Nicolas Usunier, Alexander Kirillov, and Sergey Zagoruyko. End-to-end object detection with transformers. In European confer-ence on computer vision , pages 213–229. Springer, 2020. 4, 7[3] David Charatan, Sizhe Lester Li, Andrea Tagliasacchi, and Vincent Sitzmann. pixelsplat: 3d gaussian splats from image pairs for scalable generalizable 3d reconstruction. In Pro-ceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pages 19457–19467, 2024. 2 [4] Xingyu Chen, Yue Chen, Yuliang Xiu, Andreas Geiger, and Anpei Chen. Ttt3r: 3d reconstruction as test-time training. 
+
+arXiv preprint arXiv:2509.26645 , 2025. 2 [5] Yun Chen, Jingkang Wang, Ze Yang, Sivabalan Mani-vasagam, and Raquel Urtasun. G3r: Gradient guided gen-eralizable reconstruction. In European Conference on Com-puter Vision , pages 305–323. Springer, 2025. 2 [6] Yuedong Chen, Haofei Xu, Chuanxia Zheng, Bohan Zhuang, Marc Pollefeys, Andreas Geiger, Tat-Jen Cham, and Jianfei Cai. Mvsplat: Efficient 3d gaussian splatting from sparse multi-view images. In European Conference on Computer Vision , pages 370–386. Springer, 2025. 2, 5 [7] Karan Dalal, Daniel Koceja, Jiarui Xu, Yue Zhao, Shihao Han, Ka Chun Cheung, Jan Kautz, Yejin Choi, Yu Sun, and Xiaolong Wang. One-minute video generation with test-time training. In Proceedings of the Computer Vision and Pattern Recognition Conference , pages 17702–17711, 2025. 2 [8] Tri Dao. Flashattention-2: Faster attention with bet-ter parallelism and work partitioning. arXiv preprint arXiv:2307.08691 , 2023. 6 [9] Matt Deitke, Dustin Schwenk, Jordi Salvador, Luca Weihs, Oscar Michel, Eli VanderBilt, Ludwig Schmidt, Kiana Ehsani, Aniruddha Kembhavi, and Ali Farhadi. Objaverse: A universe of annotated 3d objects. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pages 13142–13153, 2023. 3 [10] Alexey Dosovitskiy. An image is worth 16x16 words: Transformers for image recognition at scale. arXiv preprint arXiv:2010.11929 , 2020. 2, 4 [11] Yuanxing Duan, Fangyin Wei, Qiyu Dai, Yuhang He, Wen-zheng Chen, and Baoquan Chen. 4d-rotor gaussian splatting: towards efficient novel view synthesis for dynamic scenes. In ACM SIGGRAPH 2024 Conference Papers , pages 1–11, 2024. 2 [12] Sara Fridovich-Keil, Giacomo Meanti, Frederik Rahbæk Warburg, Benjamin Recht, and Angjoo Kanazawa. K-planes: Explicit radiance fields in space, time, and appearance. In 
+
+Proceedings of the IEEE/CVF Conference on Computer Vi-sion and Pattern Recognition , pages 12479–12488, 2023. 2 [13] Klaus Greff, Francois Belletti, Lucas Beyer, Carl Doersch, Yilun Du, Daniel Duckworth, David J Fleet, Dan Gnanapra-gasam, Florian Golemo, Charles Herrmann, et al. Kubric: A scalable dataset generator. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition ,pages 3749–3761, 2022. 7 [14] Daya Guo, Dejian Yang, Haowei Zhang, Junxiao Song, Ruoyu Zhang, Runxin Xu, Qihao Zhu, Shirong Ma, Peiyi Wang, Xiao Bi, et al. Deepseek-r1: Incentivizing reasoning capability in llms via reinforcement learning. arXiv preprint arXiv:2501.12948 , 2025. 2 [15] Horace He, Driss Guessous, Yanbo Liang, and Joy Dong. FlexAttention: The Flexibility of PyTorch with the Perfor-mance of FlashAttention. https://pytorch.org/ blog/flexattention/ , 2024. 6 [16] Alex Henry, Prudhvi Raj Dachapally, Shubham Shantaram Pawar, and Yuxuan Chen. Query-key normalization for transformers. In Findings of the Association for Computa-tional Linguistics: EMNLP 2020 , pages 4246–4253, 2020. 4[17] Yicong Hong, Kai Zhang, Jiuxiang Gu, Sai Bi, Yang Zhou, Difan Liu, Feng Liu, Kalyan Sunkavalli, Trung Bui, and Hao Tan. Lrm: Large reconstruction model for single image to 3d. arXiv preprint arXiv:2311.04400 , 2023. 2 [18] Binbin Huang, Zehao Yu, Anpei Chen, Andreas Geiger, and Shenghua Gao. 2d gaussian splatting for geometrically ac-curate radiance fields. In ACM SIGGRAPH 2024 conference papers , pages 1–11, 2024. 2 [19] Aaron Jaech, Adam Kalai, Adam Lerer, Adam Richard-son, Ahmed El-Kishky, Aiden Low, Alec Helyar, Aleksander Madry, Alex Beutel, Alex Carney, et al. Openai o1 system card. arXiv preprint arXiv:2412.16720 , 2024. 2 [20] Menglin Jia, Luming Tang, Bor-Chun Chen, Claire Cardie, Serge Belongie, Bharath Hariharan, and Ser-Nam Lim. Vi-sual prompt tuning. In European conference on computer vision , pages 709–727. Springer, 2022. 2 [21] Haian Jin, Hanwen Jiang, Hao Tan, Kai Zhang, Sai Bi, Tianyuan Zhang, Fujun Luan, Noah Snavely, and Zexiang Xu. Lvsm: A large view synthesis model with minimal 3d inductive bias. arXiv preprint arXiv:2410.17242 , 2024. 2 [22] Bernhard Kerbl, Georgios Kopanas, Thomas Leimk¨ uhler, and George Drettakis. 3d gaussian splatting for real-time radiance field rendering. ACM Trans. Graph. , 42(4):139–1, 2023. 2, 3 [23] Hanxue Liang, Jiawei Ren, Ashkan Mirzaei, Antonio Tor-ralba, Ziwei Liu, Igor Gilitschenski, Sanja Fidler, Cen-giz Oztireli, Huan Ling, Zan Gojcic, et al. Feed-forward bullet-time reconstruction of dynamic scenes from monocu-lar videos. arXiv preprint arXiv:2412.03526 , 2024. 1, 4, 5, 6, 7, 9 [24] Chenguo Lin, Yuchen Lin, Panwang Pan, Yifan Yu, Hon-glei Yan, Katerina Fragkiadaki, and Yadong Mu. Movies: Motion-aware 4d dynamic view synthesis in one second. 
+
+arXiv preprint arXiv:2507.10065 , 2025. 1 [25] Lu Ling, Yichen Sheng, Zhi Tu, Wentian Zhao, Cheng Xin, Kun Wan, Lantao Yu, Qianyu Guo, Zixun Yu, Yawen Lu, et al. Dl3dv-10k: A large-scale scene dataset for deep learning-based 3d vision. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition ,pages 22160–22169, 2024. 5, 6, 7 [26] Fangfu Liu, Hanyang Wang, Yimo Cai, Kaiyan Zhang, Xiao-hang Zhan, and Yueqi Duan. Video-t1: Test-time scaling for video generation. arXiv preprint arXiv:2503.18942 , 2025. 2 [27] Runze Liu, Junqi Gao, Jian Zhao, Kaiyan Zhang, Xiu Li, Biqing Qi, Wanli Ouyang, and Bowen Zhou. Can 1b llm sur-pass 405b llm? rethinking compute-optimal test-time scal-ing. arXiv preprint arXiv:2502.06703 , 2025. 2 [28] Ilya Loshchilov and Frank Hutter. Decoupled weight decay regularization. arXiv preprint arXiv:1711.05101 , 2017. 6 [29] Ziqi Lu, Heng Yang, Danfei Xu, Boyi Li, Boris Ivanovic, Marco Pavone, and Yue Wang. Lora3d: Low-rank self-calibration of 3d geometric foundation models. arXiv preprint arXiv:2412.07746 , 2024. 2 [30] Jonathon Luiten, Georgios Kopanas, Bastian Leibe, and Deva Ramanan. Dynamic 3d gaussians: Tracking by persistent dynamic view synthesis. arXiv preprint arXiv:2308.09713 , 2023. 2 [31] Ben Mildenhall, Pratul P Srinivasan, Matthew Tancik, Jonathan T Barron, Ravi Ramamoorthi, and Ren Ng. Nerf: Representing scenes as neural radiance fields for view syn-thesis. Communications of the ACM , 65(1):99–106, 2021. 2, 3[32] Nicolas Moenne-Loccoz, Ashkan Mirzaei, Or Perel, Ric-cardo de Lutio, Janick Martinez Esturo, Gavriel State, Sanja Fidler, Nicholas Sharp, and Zan Gojcic. 3d gaussian ray trac-ing: Fast tracing of particle scenes. ACM Transactions on Graphics and SIGGRAPH Asia , 2024. 2 [33] Thomas M¨ uller, Alex Evans, Christoph Schied, and Alexan-der Keller. Instant neural graphics primitives with a mul-tiresolution hash encoding. ACM transactions on graphics (TOG) , 41(4):1–15, 2022. 2 [34] Keunhong Park, Utkarsh Sinha, Peter Hedman, Jonathan T Barron, Sofien Bouaziz, Dan B Goldman, Ricardo Martin-Brualla, and Steven M Seitz. Hypernerf: A higher-dimensional representation for topologically varying neural radiance fields. arXiv preprint arXiv:2106.13228 , 2021. 2 [35] Jiawei Ren, Kevin Xie, Ashkan Mirzaei, Hanxue Liang, Xi-aohui Zeng, Karsten Kreis, Ziwei Liu, Antonio Torralba, Sanja Fidler, Seung Wook Kim, et al. L4gm: Large 4d gaus-sian reconstruction model. arXiv preprint arXiv:2406.10324 ,2024. 2 [36] Duochao Shi, Weijie Wang, Donny Y Chen, Zeyu Zhang, Jia-Wang Bian, Bohan Zhuang, and Chunhua Shen. Revisit-ing depth representations for feed-forward 3d gaussian splat-ting. arXiv preprint arXiv:2506.05327 , 2025. 5, 6 [37] Yu Sun, Xiaolong Wang, Zhuang Liu, John Miller, Alexei Efros, and Moritz Hardt. Test-time training with self-supervision for generalization under distribution shifts. In 
+
+International conference on machine learning , pages 9229– 9248. PMLR, 2020. 2 [38] Hugo Touvron, Matthieu Cord, Alexandre Sablayrolles, Gabriel Synnaeve, and Herv´ e J´ egou. Going deeper with im-age transformers. In Proceedings of the IEEE/CVF interna-tional conference on computer vision , pages 32–42, 2021. 4 [39] A Vaswani. Attention is all you need. Advances in Neural Information Processing Systems , 2017. 4 [40] Dequan Wang, Evan Shelhamer, Shaoteng Liu, Bruno Ol-shausen, and Trevor Darrell. Tent: Fully test-time adaptation by entropy minimization. arXiv preprint arXiv:2006.10726 ,2020. 2 [41] Jianyuan Wang, Minghao Chen, Nikita Karaev, Andrea Vedaldi, Christian Rupprecht, and David Novotny. Vggt: Vi-sual geometry grounded transformer. In Proceedings of the Computer Vision and Pattern Recognition Conference , pages 5294–5306, 2025. 2, 3, 4 [42] Xuezhi Wang, Jason Wei, Dale Schuurmans, Quoc Le, Ed Chi, Sharan Narang, Aakanksha Chowdhery, and Denny Zhou. Self-consistency improves chain of thought reason-ing in language models. arXiv preprint arXiv:2203.11171 ,2022. 2 [43] Guanjun Wu, Taoran Yi, Jiemin Fang, Lingxi Xie, Xiaopeng Zhang, Wei Wei, Wenyu Liu, Qi Tian, and Xinggang Wang. 4d gaussian splatting for real-time dynamic scene rendering. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pages 20310–20320, 2024. 2[44] Qi Wu, Janick Martinez Esturo, Ashkan Mirzaei, Nicolas Moenne-Loccoz, and Zan Gojcic. 3dgut: Enabling distorted cameras and secondary rays in gaussian splatting. In Pro-ceedings of the Computer Vision and Pattern Recognition Conference , pages 26036–26046, 2025. 2 [45] Haofei Xu, Daniel Barath, Andreas Geiger, and Marc Polle-feys. Resplat: Learning recurrent gaussian splats. arXiv preprint arXiv:2510.08575 , 2025. 2 [46] Haofei Xu, Songyou Peng, Fangjinhua Wang, Hermann Blum, Daniel Barath, Andreas Geiger, and Marc Pollefeys. Depthsplat: Connecting gaussian splatting and depth. In 
+
+Proceedings of the Computer Vision and Pattern Recognition Conference , pages 16453–16463, 2025. 5, 9 [47] Yinghao Xu, Zifan Shi, Wang Yifan, Hansheng Chen, Ceyuan Yang, Sida Peng, Yujun Shen, and Gordon Wet-zstein. Grm: Large gaussian reconstruction model for ef-ficient 3d reconstruction and generation. In European Con-ference on Computer Vision , pages 1–20. Springer, 2024. 1, 2[48] Zhen Xu, Yinghao Xu, Zhiyuan Yu, Sida Peng, Jiaming Sun, Hujun Bao, and Xiaowei Zhou. Representing long volumet-ric video with temporal gaussian hierarchy. ACM Transac-tions on Graphics (TOG) , 43(6):1–18, 2024. 2 [49] Jiawei Yang, Jiahui Huang, Yuxiao Chen, Yan Wang, Boyi Li, Yurong You, Apoorva Sharma, Maximilian Igl, Peter Karkus, Danfei Xu, et al. Storm: Spatio-temporal re-construction model for large-scale outdoor scenes. arXiv preprint arXiv:2501.00602 , 2024. 1, 2 [50] Shunyu Yao, Dian Yu, Jeffrey Zhao, Izhak Shafran, Tom Griffiths, Yuan Cao, and Karthik Narasimhan. Tree of thoughts: Deliberate problem solving with large language models. Advances in neural information processing systems ,36:11809–11822, 2023. 2 [51] Alex Yu, Vickie Ye, Matthew Tancik, and Angjoo Kanazawa. pixelnerf: Neural radiance fields from one or few images. In 
+
+Proceedings of the IEEE/CVF conference on computer vi-sion and pattern recognition , pages 4578–4587, 2021. 2 [52] Zehao Yu, Anpei Chen, Binbin Huang, Torsten Sattler, and Andreas Geiger. Mip-splatting: Alias-free 3d gaussian splat-ting. In Proceedings of the IEEE/CVF conference on com-puter vision and pattern recognition , pages 19447–19456, 2024. 2 [53] Yuheng Yuan, Qiuhong Shen, Shizun Wang, Xingyi Yang, and Xinchao Wang. Test3r: Learning to reconstruct 3d at test time. arXiv preprint arXiv:2506.13750 , 2025. 2 [54] Kai Zhang, Sai Bi, Hao Tan, Yuanbo Xiangli, Nanxuan Zhao, Kalyan Sunkavalli, and Zexiang Xu. Gs-lrm: Large recon-struction model for 3d gaussian splatting. In European Con-ference on Computer Vision , pages 1–19. Springer, 2025. 1, 2, 4, 5, 6, 7, 9 [55] Tianyuan Zhang, Sai Bi, Yicong Hong, Kai Zhang, Fujun Luan, Songlin Yang, Kalyan Sunkavalli, William T Freeman, and Hao Tan. Test-time training done right. arXiv preprint arXiv:2505.23884 , 2025. 2 [56] Tinghui Zhou, Richard Tucker, John Flynn, Graham Fyffe, and Noah Snavely. Stereo magnification: Learning view synthesis using multiplane images. arXiv preprint arXiv:1805.09817 , 2018. 5, 6 [57] Chen Ziwen, Hao Tan, Kai Zhang, Sai Bi, Fujun Luan, Yi-cong Hong, Li Fuxin, and Zexiang Xu. Long-lrm: Long-sequence large reconstruction model for wide-coverage gaussian splats. In Proceedings of the IEEE/CVF Interna-tional Conference on Computer Vision , pages 4349–4359, 2025. 1, 2

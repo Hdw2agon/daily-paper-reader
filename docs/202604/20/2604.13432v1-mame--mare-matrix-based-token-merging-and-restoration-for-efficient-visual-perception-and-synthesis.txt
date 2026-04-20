@@ -1,0 +1,1078 @@
+Title: MaMe & MaRe: Matrix-Based Token Merging and Restoration for Efficient Visual Perception and Synthesis
+
+URL Source: https://arxiv.org/pdf/2604.13432v1
+
+Published Time: Thu, 16 Apr 2026 00:30:21 GMT
+
+Number of Pages: 20
+
+Markdown Content:
+# MaMe & MaRe: Matrix-Based Token Merging and Restoration for Efficient Visual Perception and Synthesis 
+
+Simin Huo 1, Ning Li 1, ∗
+
+> Shanghai Jiao Tong University, , Shanghai, 200240, Shanghai, China
+
+Abstract 
+
+Token compression is crucial for mitigating the quadratic complexity of self-attention mechanisms in Vision Transformers (ViTs), which often involve numerous input tokens. Existing methods, such as ToMe, rely on GPU-inefficient operations (e.g., sorting, scat-tered writes), introducing overheads that limit their effectiveness. We introduce MaMe, a training-free, differentiable token merging method based entirely on matrix operations, which is GPU-friendly to accelerate ViTs. Additionally, we present MaRe, its inverse operation, for token restoration, forming a MaMe+MaRe pipeline for image synthesis. When applied to pre-trained models, MaMe doubles ViT-B throughput with a 2% accuracy drop. Notably, fine-tuning the last layer with MaMe boosts ViT-B accuracy by 1.0% at 1.1 × speed. In SigLIP2-B@512 zero-shot classification, MaMe provides 1.3× acceleration with negligible performance degra-dation. In video tasks, MaMe accelerates VideoMAE-L by 48.5% on Kinetics-400 with only a 0.84% accuracy loss. Furthermore, MaMe achieves simultaneous improvements in both performance and speed on some tasks. In image synthesis, the MaMe+MaRe pipeline enhances quality while reducing Stable Diffusion v2.1 generation latency by 31%. Collectively, these results demonstrate MaMe’s and MaRe’s effectiveness in accelerating vision models. The code is available at https://github.com/cominder/mame. 
+
+Keywords: 
+
+token merging, token restoration, efficient transformer, matrix operation, image generation 
+
+1. Introduction 
+
+Vision Transformers (ViTs)[1] have revolutionized computer vision by adopting the transformer architecture from natural language models[2]. However, the complexity of self-attention is quadratic O(N2), where N represents the number of tokens. For applications requiring dense token representations, such as high-resolution images, this quadratic complexity presents a significant challenge, limiting the deployment of large-scale ViT models on resource-limited devices or in real-time applica-tions. To address the O(N2) computational challenge, a straightfor-ward yet effective approach is to reduce the number of tokens 
+
+N involved in the process. The strategies that have emerged include token pruning, token merging, and hybrid methods that integrate both. Pioneering works like DynamicViT[3] in-troduced a dynamic token sparsification framework that uses a lightweight, learnable prediction module to hierarchically prune tokens at various stages of the network. EViT[4] uses the class token to evaluate token importance, keeping the most at-tentive tokens while merging the others. Pruning’s main draw-back is irreversible information loss. Token merging combines similar tokens instead of discarding them. ToMe[5] introduced a training-free method, using a fast bipartite soft matching algo-rithm to progressively merge similar tokens. Token Pooling[6] 
+
+> 1Corresponding Author: Ning Li (ning_li@sjtu.edu.cn)
+
+uses cluster analysis to aggregate information from neighbor-ing tokens. DiffRate[7] makes compression rate differentiable to learn layer-wise rates, while Token Transforming[8] gener-alizes both pruning and merging as specific cases of a broader matrix transformation, enabling more flexible, many-to-many mappings that can better preserve information. PruMerge [9] and VisionZip [10] first prune inattentive visual tokens based on attention scores and subsequently merge the remaining re-dundant tokens using spatial or semantic similarity matching for MLLMs. Despite recent advancements, existing token reduction meth-ods face several challenges. A primary issue is the non-differentiable nature of the token selection process when using the Top-K operation, which often requires complex workarounds for end-to-end training. Some methods are slow due to their reliance on clustering techniques like k-means, which are computationally intensive in practice. Addition-ally, many methods introduce extra learnable parameters for token selection or merging modules, leading to increased model complexity and training overhead. Lastly, an issue is the depen-dency on specific architectures ; for example, EViT’s reliance on a class token restricting its use in models where a class token might not be available. To simultaneously address these limitations, inspired by ToMe, we introduce a training-free token merging approach that overcomes the mentioned challenges through several ways: 
+
+Differentiable Design : Our method employs only differ-
+
+> arXiv:2604.13432v1 [cs.CV] 15 Apr 2026
+
+entiable operations throughout the token merging process, en-abling seamless end-to-end training. By avoiding discrete op-erations, we maintain gradient flow and allow the model to be trained from scratch. 
+
+Efficient Matrix Operations : Instead of relying on oper-ations such as clustering algorithms, sorting or explicit max-imum selection,we utilize efficient, GPU-friendly full-matrix operations. This approach offers both theoretical efficiency and practical speedup. 
+
+Parameter-Free Architecture : Our approach introduces no additional learnable parameters, maintaining the original model’s parameter, simplifying deployment, and reducing the complexity of model management. 
+
+Plug-and-Play Integration : Our approach can be directly applied to pre-trained models without any extra training, or seamlessly integrated during training from scratch. This flex-ibility significantly lowers the barrier to adoption. Our contributions can be summarized as follows: • We propose MaMe, a differentiable, and training-free to-ken merging algorithm. MaMe leverages efficient full-matrix operations based on normalized cosine similarity to merge similar tokens while preserving distinct and critical tokens. • We introduce MaRe, the inverse operation of MaMe for to-ken restoration, also realized through efficient full-matrix operations. The MaMe+MaRe pipeline can enhance im-age quality and reduce image synthesis latency. • We conduct extensive experiments across various tasks, including image classification, zero-shot classification, COCO Caption, video recognition and image generation. These demonstrate MaMe’s and MaRe’s effectiveness. • We discuss how MaMe’s design inherently preserves causality, making it a feasible candidate for efficiently re-ducing KV cache size in Large Language Models (LLMs). This is an extended version of our paper titled "MaMe: Matrix-Based Token Merging" accepted to CVPR 2026 Find-ings. 
+
+2. Related Work 
+
+To tackle the quadratic computational complexity caused by the self-attention mechanism in Vision Transformer models, re-searchers have proposed various methods to reduce the number of tokens fed into attention. 
+
+2.0.1. Token Pruning 
+
+Pruning methods hierarchically discard tokens deemed non-informative based on importance metrics. DynamicViT[3] pio-neered this approach by attaching lightweight prediction heads at intermediate layers to score token relevance, using differen-tiable attention masking to enable end-to-end training. EViT[4] enhanced this framework by fusing pruned tokens into the class token, preserving partial information while reducing se-quence length. Recent advancements include AdaViT[11], which extends pruning beyond tokens to attention heads and transformer blocks, implementing instance-adaptive computa-tion graphs that allocate more resources to complex inputs. Re-cently, FastV[12] revealed that visual token attention becomes highly sparse in the early layers of Multimodal Large Language Models (MLLMs), allowing for aggressive pruning of over 50% of visual tokens without performance degradation. Similarly, VTW [13] demonstrates that visual tokens can be entirely with-drawn after specific LLM layers, drastically improving decod-ing efficiency.However, these methods face fundamental lim-itations: 1) Early pruning decisions risk irreversible informa-tion loss, 2) Discrete selection operations create optimization challenges, and 3) Task-specific tuning is required for optimal threshold calibration. 
+
+2.0.2. Token Merging 
+
+Merging techniques combine similar tokens rather than dis-carding them, preserving information while reducing computa-tional load. ToMe[5] revolutionized this area with training-free bipartite soft matching to merge the most similar token pairs at each layer. However, ToMe’s fixed merge ratio per layer limits adaptability to varying input complexities. DiffRate[7] addresses the challenge of selecting an optimal merge ratio by rendering the rate itself differentiable. It utilizes a learn-able budget controller to optimize this rate for each input, fa-cilitating instance-adaptive efficiency through standard gradi-ent descent but increasing complexity. ToFu[14] diverges from ToMe’s training-free methodology by proposing a learnable fu-sion module that is co-trained with the models to generate new, more expressive tokens. Hybrid approaches such as Pumer[15] and LTPM[16] integrate token pruning and merging within a unified framework. Pumer introduces a learnable router to dy-namically determine the number of tokens to prune and merge on a per-instance basis, whereas LTPM employs learnable pa-rameters to decide whether a token should be pruned or which tokens should be merged. Extending beyond pure vision mod-els, recent works like PruMerge [9] and VisionZip [10] propose highly effective hybrid strategies for MLLMs. They typically first prune inattentive visual tokens based on attention scores and subsequently merge the remaining redundant tokens using spatial or semantic similarity matching. 
+
+2.0.3. Clustering-Based Reduction 
+
+Clustering approaches use offline algorithms to group sim-ilar tokens. TCFormer[17] employs KNN-enhanced Density Peaks Clustering to group tokens and merge redundant ones through averaging for human activity tasks like pose estimation. ClusTR[18] uses hierarchical token merging with cosine simi-larity across Transformer layers for vision tasks, but its fixed ratios limit flexibility and may hinder small object detection. For handling severe spatiotemporal redundancy in long videos, Chat-UniVi [19] successfully adapts Density Peak Clustering (DPC-KNN) to group semantically similar frame representa-tions, unifying image and video token compression within a sin-gle framework. While these methods preserve global context, 2they face three drawbacks: 1) Iterative clustering algorithms with O(nk) complexity offset computational gains, 2) Discrete cluster assignments prevent gradient flow, and 3) Fixed cluster counts lack input adaptability. 
+
+2.0.4. Learnable Token Reduction 
+
+End-to-end trainable methods optimize reduction policies through differentiable architectures. ATS[20] implements to-ken merging via weighted averaging with gating mechanisms. Dynamic Token Morphing[21] uses cross-attention between original and learnable proxy tokens for information absorp-tion. Gumbel Token Selector[22] employs Gumbel-Softmax to sample token subsets through residual connections. These approaches show promise but increase model complexity (15-30% more parameters) and risk overfitting on small datasets. In the context of long-context multimodal processing, query-based token distillation has emerged as a powerful paradigm. For instance, LLaMA-VID [23] compresses each video frame into a minimal set of learnable tokens guided by text prompts, achieving extreme token reduction while preserving crucial contextual semantics. 
+
+3. Methodology 
+
+3.1. Merging Process 
+
+Token Partitioning Let the input sequence from a given layer be represented by the matrix X ∈ RL×d, where L is the number of tokens and d is the feature dimension. We first partition this sequence into two disjoint sets: a set of M destination tokens, denoted by Xdst ∈ RM×d, and a set of N source tokens, Xsrc ∈
+
+RN×d, where L = M + N.
+
+Xdst = {xi : i ∈ I dst }
+
+Xsrc = {x j : j ∈ I src } (1) where Idst and Isrc represent the index sets for destination and source tokens, respectively, such that Idst ∩ I src = ∅ and Idst ∪Isrc = I covers all token indices, excluding any special tokens (e.g., class tokens). The specific strategy for partitioning into 
+
+Idst and Isrc can vary (e.g., fixed interleaved patterns or random selection). 
+
+Similarity-Based Fusion Matrix We begin by computing the cosine similarity between each destination token and every source token. This yields a similarity matrix S ∈ RM×N , where each element S i j is defined as: 
+
+S i j = xdst  
+
+> i
+
+· xsrc 
+
+> j
+
+∥xdst  
+
+> i
+
+∥ · ∥ xsrc  
+
+> j
+
+∥ (2) To isolate the most significant relationships, we apply a rectified linear unit (ReLU) activation with a shifting threshold τ. This step filters out weak connections, producing a sparse similarity matrix ˜S ∈ RM×N :
+
+˜S i j = ReLU (S i j − τ) (3) 
+
+Adaptive Weight Refining. From the sparse similarity matrix 
+
+˜S , we first compute an initial weight matrix W ∈ RM×N by nor-malizing its columns. This ensures the initial influence of each source token is properly distributed among its similar destina-tion tokens. 
+
+Wi j = ˜S i j 
+
+PMi=1 ˜S i j + ϵ (4) where ϵ is a small constant for numerical stability. To further refine these weights, we introduce a dynamic, column-specific thresholding mechanism. For each source to-ken j, we define a threshold ζ j as the average of its non-zero weights in W:
+
+ζ j =
+
+PMi=1 Wi j 
+
+C j + ϵ (5) where C j is the count of non-zero entries along the destination dimension and can be computed as 
+
+C j =
+
+> M
+
+X
+
+> i=1
+
+Wi j 
+
+Wi j + ϵ (6) The threshold ζ j is to prune connections that are weak rela-tive to a source token’s other connections. We apply this thresh-old to obtain a pruned weight matrix ˜W:
+
+˜Wi j = ReLU (Wi j − ζ j) (7) Finally, the pruned matrix ˜W is re-normalized column-wise to produce the final fusion weights WF ∈ RM×N :
+
+WF 
+
+> i j
+
+= ˜Wi j 
+
+PMi=1 ˜Wi j + ϵ (8) 
+
+Token Aggregation and Preservation The destination tokens are updated by aggregating the features from source tokens, guided by the final fusion weights. The fused destination to-kens, X′′  
+
+> dst
+
+∈ RM×d, are computed as: 
+
+X′ 
+
+> dst
+
+= Xdst + WFXsrc 
+
+x′′  
+
+> dst ,i
+
+= x′
+
+> dst ,i
+
+1 + PNj=1 WF
+
+> i j
+
+(9) A key component of our methodology is the preservation of unique source tokens Xpres . A source token xsrc  
+
+> j
+
+is preserved if it exhibits no similarity to any destination token, which means the sum of its similarities to all M destination tokens is zero: 
+
+m j = I(PMi=1 WFi j = 0) , where I(·) is the indicator function. So 
+
+Xpres = {xsrc j | m j = 1}.The final reduced sequence X′ is formed by concatenating any special tokens Xspec , the fused destination tokens X′′ 
+
+> dst
+
+, and the set of preserved source tokens Xpres .
+
+X′ = concat (Xspec , X′′ 
+
+> dst
+
+, Xpres ) (10) If r source tokens satisfy the preservation condition and there are lspec special tokens, the resulting sequence will have a re-duced length of lspec + M + r.3Batch Processing Implementation For efficient implementa-tion on batched data, the preservation decision must be con-sistent across all samples in a batch. Given the fusion ma-trix for a batch be WF ∈ RB×M×N . A per-sample preserva-tion mask m(b) ∈ { 0, 1}N is computed for each sample b, where 
+
+m(b) 
+
+> j
+
+= I(PMi=1 WFbi j = 0) . To ensure batch consistency, a source token j is preserved if it is marked for preservation in any sam-ple, yielding a final batch-wide mask mfinal  
+
+> j
+
+= WBb=1 m(b) 
+
+> j
+
+. So the preserved source tokens Xpres = {xsrc j | mfinal  
+
+> j
+
+= 1}. Subse-quently, to prevent preserved tokens from fusing, the corrected fusion matrix ˜WF is obtained by ˜WFb,i, j = WFb,i, j·(1 −mfinal  
+
+> j
+
+), zero-ing out columns corresponding to preserved tokens and keeping others unchanged. 
+
+3.2. Computational Efficiency 
+
+Our token merging method aims to reduce the computational cost of self-attention by effectively shortening the sequence length. The overhead introduced by the merging process itself is analyzed as follows: • Similarity Matrix Calculation ( S ): Computing cosine similarity 2 between M destination tokens and N source tokens involves a matrix multiplication of shape (M × d)
+
+with (d × N), resulting in O(MNd ) operations. • Adaptive Weight Pruning ( W, ζ j, ˜W, WF): These involve several matrix operations, primarily column-wise summa-tions and element-wise operations. These steps are dom-inated by the O(MN ) complexity of iterating through the similarity matrix. • Token Aggregation ( X′
+
+> dst
+
+): The aggregation 9 involves a matrix multiplication of shape (M × N) with (N × d),resulting in O(MNd ) operations. • Token Preservation: Identifying preserved tokens in-volves column-wise summation on ˜S , which is O(MN ).Given that M and N are fractions of the original sequence length 
+
+L (i.e., M ≈ αL, N ≈ (1 − α)L), this overhead scales approxi-mately as O(α(1 −α)L2d), similar to self-attention. When merg-ing is applied, the subsequent attention computation is reduced to O(L′2d). Assuming L′ ≈ βL with α ≤ β ≤ 1, this becomes 
+
+O(β2 L2d). Therefore, the total cost is O  α(1 − α) + β2 L2d.For more efficient than standard self-attention, it requires α(1 −
+
+α) + β2 < 1, which simplifies to the condition β < √α2 − α + 1.To assess the strictness of this condition, we consider the case where α and β are uniformly distributed over (0 , 1) with 
+
+α ≤ β. The probability that β < √α2 − α + 1 is given by: The area of the region A = (α, β ) | 0 < α ≤ β ≤ 1 is 12 ;the area of the region B = (α, β ) ∈ A | β < √α2 − α + 1 is 
+
+R 10
+
+ √α2 − α + 1 − α dα = 38 ln 3 . Therefore, the probability is P = B/A = 34 ln 3 ≈ 0.824 ,, indicating that the condition holds in approximately 82.4% of cases. This means that for most parameter choices, it achieves computational efficiency. Moreover, even if the condition is not strictly met in the current block, the reduced sequence length L′ propagates to subsequent blocks, ensuring that all following attention computations ben-efit from the shorter sequence, leading to overall computational savings across the network. 
+
+3.3. Restoration Process 
+
+The restoration process aims to reconstruct the original se-quence X ∈ RL×d from the reduced sequence X′. This process utilizes the stored fusion matrix WF ∈ RM×N from the merging step. 
+
+Split the Merged Sequence: The input to the unmerging pro-cess is X′, which consists of special tokens Xspec , X′
+
+> dst
+
+, and Xpres .We first separate these components. Let X′ 
+
+> dst
+
+∈ RM×d be the fused destination tokens and Xpres ∈ Rr×d be the adaptively pre-served source tokens. 
+
+Reconstruct Source Tokens ( Xrec src ): For the source tokens that were adaptively preserved, they are directly taken from Xpres .For source tokens that were not preserved (i.e., those that were merged into destination tokens), the ideal reconstruction would require inverting the fusion process9. For a non-square matrix 
+
+WF, a principled choice is to get its Moore–Penrose pseudo-inverse, which provides the minimum-norm least-squares solu-tion but is expensive. Intuitively, the unmerging process can be understood as: a source token retrieves a similar proportion of information it originally contributed to the merged destina-tion tokens. Therefore, we simply aggregate the corresponding fractions of every fused destination token to which the source token originally contributed, utilizing the weights stored in ma-trix WF. Each reconstructed source token xrec   
+
+> src ,j
+
+is computed as: 
+
+xrec   
+
+> src ,j
+
+=
+
+> M
+
+X
+
+> i=1
+
+
+
+WF
+
+> ji
+
+Ri
+
+ X′ 
+
+> dst ,i
+
+(11) where Ri = 1 + P j WF
+
+> i j
+
+. This term WF 
+
+> ji
+> Ri
+
+represents the proportion of the j-th source token’s contribution to the i-th merged desti-nation token, scaled by the total weight of the i-th merged token during the merging process. This effectively distributes the in-formation from fused destination tokens back to their original source token positions. 
+
+Reconstruct Destination Tokens ( Xrec dst ): The original destina-tion tokens xrec  
+
+> dst ,i
+
+are reconstructed from the merged destination tokens X′ 
+
+> dst ,i
+
+is effectively performed as: 
+
+xrec  
+
+> dst ,i
+
+= X′
+
+> dst ,i
+
+Ri
+
+(12) This step aims to retrieve the original destination tokens by de-scaling the merged output. 
+
+Assemble the Original Sequence: Finally, the preserved to-kens Xpres , the reconstructed destination tokens Xrec dst , the recon-structed source tokens Xrec src , and any special tokens Xspec are reassembled into their original sequence order to recover Xrec .
+
+Xrec = concat (Xspec , Xrec src , Xrec dst , Xpres ) (13) 
+
+3.4. Integration with Transformers 
+
+Our proposed MaMe module, denoted as MaMe (·), and its inverse, MaRe (·), are seamlessly integrated into the 4transformer-based architecture. Let xl−1 be the token sequence output by block l − 1, and MSA, MLP, and LN denote Multi-head Self-Attention, Multi-Layer Perceptron, and Layer Nor-malization, respectively. 
+
+Integration for Visual Perception 
+
+For visual representation tasks, the primary objective is to maximize computational efficiency without incurring signifi-cant accuracy degradation. The operations within a modified Transformer block l for classification are formalized as follows: 
+
+x′ 
+
+> l
+
+= MSA (LN (xl−1)) + xl−1 (14) 
+
+x′′  
+
+> l
+
+= MaMe (x′ 
+
+> l
+
+) (15) 
+
+xl = MLP (LN (x′′  
+
+> l
+
+)) + x′′  
+
+> l
+
+(16) 
+
+Integration for Image Synthesis 
+
+For image generation tasks where maintaining the original token count or spatial resolution throughout the network is crit-ical. The operations within a modified Transformer block l for generation are outlined as follows: 
+
+x′ 
+
+> l
+
+= MaRe (MSA (MaMe (LN (xl−1)))) + xl−1 (17) 
+
+xl = MLP (LN (x′ 
+
+> l
+
+)) + x′ 
+
+> l
+
+(18) 
+
+4. Experiments 
+
+4.1. Image Classification 
+
+We conduct comprehensive experiments on the ImageNet-1K dataset, a visual recognition benchmark containing 1.28 million training images and 50,000 validation images across 1,000 object categories. We report Top-1 accuracy for perfor-mance comparison and throughput for efficiency measurement. 
+
+4.1.1. Implementation Details 
+
+Training-Free The evaluation employs two representative ar-chitectures: DeiT[24] and MAE[25], utilizing their pre-trained weights without any fine-tuning. For these off-the-shelf exper-iments, we apply MaMe to the first 8 layers of each model, where we empirically set the similarity threshold to 0.8. All other things remain identical to [7]. 
+
+Training-From-Scratch For end-to-end training experiments, we follow the training recipes [26] while incorporating our compression strategy. In standard ViT architectures, we set the similarity threshold 0.5 and apply merging at layers 3, 6, and 9, implementing a consistent 2:1 token reduction ratio (reducing token count, except for the special class token, to half of orig-inal) at each compression point. . All other training settings including optimization (AdamW), and learning rate schedule (cosine decay with 20-epoch warmup) remain identical to [26]. 
+
+Fine-tuning To assess the adaptability of MaMe on pre-trained models, we investigate two compression configurations under a fine-tuning protocol. The first setting applies MaMe at layers 3, 6, and 9, mirroring the from-scratch setup. The second setting restricts compression exclusively to the final transformer block. 
+
+Algorithm 1 Matrix-Based Token Merging 
+
+Require: Input tokens X ∈ RL×d , similarity threshold τ
+
+Ensure: Reduced and fused token sequence X′ ∈ RL′×d 
+
+> 1:
+
+Note: Xspec refers to any special tokens (e.g., class tokens) that are preserved without modification.  
+
+> 2:
+
+function MAME(X, τ ) 
+
+> 3:
+
+Partition X into destination tokens Xdst ∈ RM×d and source tokens Xsrc ∈ RN×d 
+
+> 4:
+
+Step 1. Compute Similarity Matrix  
+
+> 5:
+
+Initialize similarity matrix S ∈ RM×N 
+
+> 6:
+
+for i = 0 → M − 1 do  
+
+> 7:
+
+for j = 0 → N − 1 do  
+
+> 8:
+
+S i j ← xdst     
+
+> i·xsrc
+> j
+> ∥xdst
+> i∥·∥ xsrc
+> j∥
+> 9:
+
+end for  
+
+> 10:
+
+end for  
+
+> 11:
+
+˜S ← ReLU (S − τ) 
+
+> 12:
+
+Step 2. Compute Fusion Weights  
+
+> 13:
+
+Initialize W, ˜W, WF ∈ RM×N (all zeros initially)  
+
+> 14:
+
+for j = 0 → N − 1 do  
+
+> 15:
+
+for i = 0 → M − 1 do  
+
+> 16:
+
+Wi j ← ˜S i j /(PM−1 
+
+> i=0
+
+˜S i j + ϵ) 
+
+> 17:
+
+end for  
+
+> 18:
+
+C j ← PM−1 
+
+> i=0
+
+I(Wi j > 0)  
+
+> 19:
+
+ζj ← (PM−1 
+
+> i=0
+
+Wi j )/(C j + ϵ) 
+
+> 20:
+
+for i = 0 → M − 1 do  
+
+> 21:
+
+˜Wi j ← ReLU (Wi j − ζj) 
+
+> 22:
+
+end for  
+
+> 23:
+
+Mask ← PM−1 
+
+> i=0
+
+˜Wi j  
+
+> 24:
+
+for i = 0 → M − 1 do  
+
+> 25:
+
+WF 
+
+> i j
+
+← Wi j /(Mask j + ϵ) 
+
+> 26:
+
+end for  
+
+> 27:
+
+end for  
+
+> 28:
+
+Step 3. Compute Preserved and Fusion Tokens  
+
+> 29:
+
+Initialize Xpres ← ∅  
+
+> 30:
+
+Initialize fused destination tokens X′ 
+
+> dst
+
+∈ RM×d 
+
+> 31:
+
+for j = 0 → N − 1 do  
+
+> 32:
+
+if Mask j = 0 then  
+
+> 33:
+
+Add xsrc  
+
+> j
+
+to Xpres  
+
+> 34:
+
+end if  
+
+> 35:
+
+end for  
+
+> 36:
+
+for i = 0 → M − 1 do  
+
+> 37:
+
+x′ 
+
+> dst ,i
+
+← Xdst  
+
+> i
+
++ PN−1 
+
+> j=0
+
+WF
+
+> i j
+
+xsrc  
+
+> j
+> 38:
+
+x′′  
+
+> dst ,i
+
+= x′
+
+> dst ,i
+
+/(1 + PNj=1 WF
+
+> i j
+
+) 
+
+> 39:
+
+end for  
+
+> 40:
+
+Step 4. Assemble the Final Tokens  
+
+> 41:
+
+X′ ← concat (Xspec , X′′ 
+
+> dst
+
+, Xpres ) ▷ Concatenate the special, fused destination, and preserved tokens  
+
+> 42:
+
+return X′ 
+
+> 43:
+
+end function 
+
+Both configurations are fine-tuned for 1 epoch to adapt the com-pressed architecture to the pre-trained weights. All other train-ing settings, including optimization (AdamW) and learning rate schedules, remain identical to [26]. 
+
+4.1.2. Results 
+
+Training-Free Table 1 evaluates several token compression methods on ViT models. For ViT-S (DeiT), MaMe achieves 5Figure 1: The visualization illustrates the progression of token count reduction in the first 8 blocks of the AugReg ViT-B/16 with MaMe. Each color square represents a distinct type of token. More results are in the supplementary material. 
+
+Algorithm 2 Matrix-Based Token Restoration 
+
+Require: Reduced sequence X′ ∈ RL′×d , Fusion matrix WF ∈ RM×N ,mask ∈ { 0, 1}N , Length lspec 
+
+Ensure: Reconstructed original sequence Xrec ∈ RL×d 
+
+> 1:
+
+function RESTORATION (X′, WF, mask , lspec ) 
+
+> 2:
+
+Step 1. Split the Merged Tokens  
+
+> 3:
+
+Extract Xspec ← X′[0 . . . lspec − 1, :]  
+
+> 4:
+
+Extract X′ 
+
+> dst
+
+← X′[lspec . . . lspec + M − 1, :]  
+
+> 5:
+
+Extract Xpres ← X′[lspec + M . . . L′ − 1, :]  
+
+> 6:
+
+Step 2. Reconstruct Destination Tokens ( Xdst ) 
+
+> 7:
+
+Initialize Xrec dst ∈ RM×d (all zeros initially)  
+
+> 8:
+
+for i = 0 → M − 1 do  
+
+> 9:
+
+Ri ← PNj=1 WF 
+
+> i j
+
++ 1 
+
+> 10:
+
+xrec  
+
+> dst ,i
+
+← x′
+
+> dst ,i
+
+/Ri 
+
+> 11:
+
+end for  
+
+> 12:
+
+Step 3. Reconstruct Source Tokens ( Xsrc ) 
+
+> 13:
+
+Initialize Xrec src ∈ RN×d (all zeros initially)  
+
+> 14:
+
+for j = 0 → N − 1 do  
+
+> 15:
+
+if mask j = 0 then  
+
+> 16:
+
+xrec   
+
+> src ,j
+
+← PM−1 
+
+> i=0
+
+WF
+
+> ji
+
+xrec dst ,i 
+
+> 17:
+
+else  
+
+> 18:
+
+xrec   
+
+> src ,j
+
+← corresponding token from Xpres  
+
+> 19:
+
+end if  
+
+> 20:
+
+end for  
+
+> 21:
+
+4. Assemble the Original Sequence  
+
+> 22:
+
+Initialize Xrec ∈ RL×d (all zeros initially)  
+
+> 23:
+
+Xrec ← concat (Xpres , Xspec , Xrec dst , Xrec src ) ▷ Place 
+
+Xpres , Xspec , Xrec dst , Xrec src back into their original positions  
+
+> 24:
+
+return Xrec  
+
+> 25:
+
+end function 
+
+9015 img/s, 79% higher than baseline while maintaining 78.61% accuracy (1.2 points below original), surpassing EViT (8950 img/s, 73.83% accuracy) and ToMe (8874 img/s, 77.99% accuracy). For ViT-B (DeiT), MaMe delivers 4117 img/s (93% faster) with 79.80% accuracy. EViT shows higher throughput (4230 img/s) but lower accuracy (74.61%), while DiffRate[7] has similar speed but 78.98% accuracy. Notably, comparing ViT-B (DeiT) and ViT-B (MAE), which share identical architecture, reveals significant differences in MaMe’s performance. On ViT-B (DeiT), MaMe achieves 4117 imgs/s with 79.80% accuracy, while on MAE, throughput in-creases to 5418 imgs/s, representing a 31.6% throughput im-provement, while maintaining 79.83% accuracy. This high-lights MaMe’s ability to leverage MAE’s self-supervised rep-resentations more effectively than supervised ones. EViT and ToMe show no throughput change between ViT-B models. MaMe’s advantage grows with model size: for ViT-L (MAE), it achieves 2764 imgs/s (EViT’s 1.63x) while maintaining the highest accuracy (84.81%). On ViT-H (MAE), MaMe delivers 908 imgs/s (almost EViT’s 2x), with only a marginal accuracy decrease compared to DiffRate. 
+
+Traing From Scratch Table 2 shows results for training-from-scratch ViT models with MaMe compression at layers 3/6/9 (marked †). MaMe consistently enhances throughput across all model scales while maintaining competitive accuracy. ViT-T †
+
+achieves 4462 img/s, nearly doubling the baseline throughput (2291 img/s) with only a 1.3 percentage point accuracy drop (70.9% vs. 72.2%). For larger models, ViT-B † reaches 813 img/s (93% speedup) at a 5.8-point accuracy cost (76.0% vs. 81.8%). However, compared to fine-tuning, it is not recom-mended to train from scratch. 
+
+Fine-tuning We evaluate two fine-tuning strategies: MaMe at layers 3/6/9 ( ‡) (mirroring to training-from-scratch) versus 6Table 1: The Results of Token compression on the off-the-shelf models. Throughput is measured on an A100 GPU with a batchsize of 1024 using FP16 precision. 
+
+Model Method FLOPs Throughput Top-1 Acc (G) (img/s) (%) 
+
+Training Free on ImageNet-1K (224 ×224) 
+
+ViT-S (DeiT) Baseline 4.6 5039 79.82 EViT 2.3 8950 73.83 ToMe 2.3 8874 77.99 DiffRate 2.3 8875 78.75 MaMe 2.3 9015 78.61 ViT-B (DeiT) Baseline 17.6 2130 81.83 EViT 8.7 4230 74.61 ToMe 8.8 4023 77.84 DiffRate 8.7 4124 78.98 MaMe 8.7 4117 79.80 ViT-B (MAE) Baseline 17.6 2130 83.72 EViT 8.7 4230 75.15 ToMe 8.8 4023 78.86 DiffRate 8.7 4150 79.96 MaMe 8.7 5418 79.83 ViT-L (MAE) Baseline 61.6 758 85.95 EViT 29.7 1672 81.52 ToMe 31.0 1550 84.24 DiffRate 31.0 1580 84.65 MaMe 31.0 2764 84.81 ViT-H (MAE) Baseline 167.4 299 86.88 ToMe 92.9 500 86.01 EViT 99.1 512 85.54 DiffRate 93.2 504 86.40 MaMe 93.2 908 85.51 
+
+compression at the final transformer block ( ⋆). Two consistent trends emerge in Table 2. First, fine-tuning consistently out-performs from-scratch training: ViT-S ‡ (78.2%) exceeds ViT-S† (77.0%) by +1.2 pp, and ViT-B ‡ (77.7%) surpasses ViT-B †
+
+(76.0%) by +1.7 pp, indicating better adaptation to pre-trained representations. Second, last-layer compression ( ⋆) improves accuracy be-yond uncompressed baselines: ViT-T ⋆ achieves 72.4% (+0.2 pp), ViT-S ⋆ reaches 80.2% (+0.4 pp), and ViT-B ⋆ attains 82.8% (+1.0 pp). This suggests selective compression acts as an im-plicit regularizer, pruning redundant tokens while preserving discriminative features.Overall, fine-tuning or last-layer-fine-tuning is recommended. 
+
+4.2. Multimodal Large Language Models 
+
+Zero-shot Image Classification We conducted zero-shot im-age classification on ImageNet-1K validation set to evaluate token merging strategies across CLIP[27], SigLIP[28], and SigLIP2[29]. For CLIP, MaMe ( τ = 0.8) increased through-put by 25% (64.01 img/s) with 0.39% accuracy drop, while ToMe (r=12) gave 3% throughput gain with 4.34% accuracy loss. For SigLIP, MaMe ( τ = 0.9) improved throughput by 25% (58.10 img/s) with 1.11% accuracy reduction, while ToMe 
+
+Table 2: The Results of Vision Architectures with MaMe Compression. The mark † denotes MaMe compression applied to three blocks (layers 3/6/9) with training from scratch; ‡ indicates MaMe applied to three blocks (layers 3/6/9) followed by fine-tuning; ⋆ denotes MaMe applied only to the last transformer block followed by fine-tuning. Throughput is measured on an A100 GPU with a batch size of 64 using FP32 precision. Model Param FLOPs Throughput Top-1 Acc (M) (G) (img/s) (%) 
+
+ImageNet-1K Results (224 ×224) 
+
+ViT-T 5.72 1.3 2291 72.2 ViT-T † 5.72 0.6 4462 70.9 ViT-T ‡ 5.72 1.0 4462 71.2 ViT-T ⋆ 5.72 1.2 2468 72.4 ViT-S 22.0 4.6 1157 79.8 ViT-S † 22.0 2.1 2257 77.0 ViT-S ‡ 22.0 2.1 2257 78.2 ViT-S ⋆ 22.0 4.1 1250 80.2 ViT-B 86.4 17.6 422 81.8 ViT-B † 86.4 8.4 813 76.0 ViT-B ‡ 86.4 8.4 813 77.7 ViT-B ⋆ 86.4 16.0 460 82.8 
+
+(r=32) achieved 19% speedup with 1.28% accuracy loss. For SigLIP2, MaMe ( τ = 0.95 ) increased throughput by 28% (56.15 img/s) with 0.35% accuracy drop, while ToMe (r=32) gave 16% throughput gain with 1.91% accuracy loss. SigLIP2’s ability to merge tokens at τ = 0.95 indicates its confident se-mantic representations. MaMe demonstrates better balance be-tween throughput and accuracy versus baseline and ToMe. 
+
+Table 3: Zero-shot image classification results. Inference throughput measured on a 3090 GPU with FP32 precision.                                                                
+
+> Model Method Input Size Throughput Top-1 Acc (px) (img/s) (%)
+> Zero-Shot Classification on ImageNet-1K
+> CLIP (ViT-L/14) Baseline 224 51.22 70.34 ToMe(r=8) 224 51.33 68.98 ToMe(r=12) 224 52.86 66.00 MaMe( τ=0.7)224 69.09 67.60 MaMe( τ=0.8)224 64.01 69.95 SigLIP (ViT-B/16) Baseline 512 46.28 75.61 ToMe(r=32) 512 55.10 74.33 ToMe(r=64) 512 71.94 70.66 MaMe( τ=0.8)512 79.25 71.17 MaMe( τ=0.9)512 58.10 74.50 SigLIP2 (ViT-B/16) Baseline 512 43.90 78.37 ToMe(r=32) 512 50.89 76.46 ToMe(r=64) 512 68.07 71.60 MaMe( τ=0.9)512 76.15 75.09 MaMe( τ=0.95 )512 56.15 78.02
+
+7Text-Image to Text We investigated the impact of MaMe on the LLaVA-1.5-7B model[30] with the VLMEvalKit frame-work [31], evaluating performance on COCO Caption[32] task. The token merging were applied to the visual encoder, aiming to reduce the number of visual tokens fed into the large lan-guage model , thereby enhancing computational efficiency. We compare the baseline LLaVA-1.5-7B against two distinct token merging strategies: ToMe, employing a fixed reduction num-ber of r = 8 per layer, and MaMe, which utilizes a similarity threshold of τ = 0.8.                            
+
+> Table 4: COCO caption task performance of the LLaVA-1.5-7B model and its modified versions by ToMe and MaMe.
+> Method Latency(s) Bleu-1 Bleu-2 Bleu-3 Bleu-4 ROUGE_L CIDEr
+> LLaVA-1.5-7B 3.12 20.72 13.28 8.08 4.93 20.94 0.71 + ToMe 2.30 20.15 12.90 7.90 4.89 21.67 1.60 + MaMe 2.61 20.10 12.87 7.87 4.83 21.69 2.71
+
+Results Table 4 shows MaMe achieved a CIDEr score of 2.71, a 3.8× improvement over the baseline and 69% higher than ToMe (1.60)—while maintaining competitive Bleu and ROUGE_L scores. Qualitative results in Table A.9 further confirm MaMe’s superiority, with more accurate object identification and spa-tial descriptions, aligning better with human consensus. These findings demonstrate that MaMe enhances both efficiency and caption quality. 
+
+4.3. Video Classification 
+
+Setup We apply token merging to VideoMAE[33] models’ vi-sion encoder and compare MaMe with ToMe on Kinetics-400 validation set[34]. For evaluation, 16 frames were sampled per video clip, each resized to a 224 × 224 resolution. We report Top-1 accuracy and inference throughput, measured in videos per second (videos/s) on a 3090 GPU with FP16 precision. 
+
+Results Table 6 shows token merging accelerates video trans-former inference. For VideoMAE-B, the baseline achieved 76.81% accuracy with 13.24 videos/s throughput. MaMe( τ =
+
+0.9) maintained 76.03% accuracy while reaching 13.33 videos/s, outperforming ToMe(r=128) at 14.06 videos/s but 3.47% lower accuracy. MaMe( τ = 0.85 ) achieved 13.81 videos/s comparable to ToMe(r=96). With VideoMAE-L, the baseline achieved 82.31% accuracy at 6.25 videos/s. While ToMe(r=32) increased throughput to 6.97 videos/s, MaMe( τ =
+
+0.8) reached 9.28 videos/s with 81.47% accuracy, showing a 49% speed increase. This demonstrates MaMe’s effectiveness for larger models in balancing throughput gains with perfor-mance. 
+
+4.4. Image Synthesis 
+
+Setup We employed a baseline (unmodified Stable Diffusion v2.1[35] ) and modified models with two token merging meth-ods: ToMeSD [36] and proposed MaMe+MaRe, to generate 2,000 images at a resolution of 768 × 768 with the DPMSolver sampler, seed 42, a guidance scale of 7.5 and FP32 preci-sion. The prompts were created from 2,000 randomly selected 
+
+COCO Caption Task 
+
+Question: Please describe this image in general. Directly provide the description, do not include prefix like "This image depicts". 
+
+LLaVA: The image features a white plate with a variety of food items on it. There are two pieces of broccoli, one on the left side and the other on the right side of the plate. Additionally, there are two pieces of fish, one on the left side and the other on the right side of the plate. A fork is placed on the right side of the plate, ready to be used for eating. The plate is placed on a dining table, which is the main focus of the image. 
+
++ToMe: The image features a white plate with a variety of food items on it. There are two pieces of fish, one on the left side and the other on the right side of the plate. A gen-erous portion of broccoli is spread across the plate, with some pieces located near the fish and others scattered around the plate. A fork and a knife are placed on the table, ready for use. The dining table occupies most of the image, with the plate and utensils placed on it. 
+
++MaMe: The image features a white plate with a variety of food items on it. There are two pieces of broccoli, one on the left side and the other on the right side of the plate. Two pieces of fish are also present on the plate, located towards the center. In addition to the food, there are utensils on the table. A fork is placed on the left side of the plate, while a knife is located on the right side. A cup can be seen on the left side of the table, and a bowl is placed on the right side. The dining table occupies the majority of the image, with the plate and utensils placed on top of it.  
+
+> Table 5: MaMe correctly identified core components (plate, broccoli, fish, fork, knife) and their spatial arrangements, plus additional items (cup) that the other models miss. While it includes an erroneous "bowl," its output is structured with greater descriptive precision compared to the more generic and less de-tailed descriptions from LLaVA and ToMe. More results are in the supplemen-tary material.
+
+from the GEMRec dataset [37] and ImageNet–1K names of the classes. According to the formula 16, token merging and re-store were applied before and after the attention calculation. For ToMeSD, we examined two configurations: removing 25% and 50% of the tokens. For MaMe+MaRe, we tested two sim-ilarity thresholds: τ = 0.7 and τ = 0.8. To evaluate speed, we averaged the time taken to generate images across all 2,000 samples on a 3090 GPU. 
+
+Results The performance of baseline Stable Diffusion v2.1 and its variants, modified by ToMeSD and MaMe, is summarized in Table 7. The evaluation focuses on two aspects: inference 8Figure 2: Qualitative Results. Images from left to right generated by Stable Diffusion v2.1, ToMeSD and MaMe+MaRe. MaMe+MaRe retains high-frequency details (left) and produce images with higher aesthetic quality (right). More results are in the supplementary material. 
+
+Figure 3: Qualitative Results. The image generated by the model with MaMe. The clarity of the picture changed with the similarity threshold. A higher similarity threshold brings a more detailed and clearer painting. More results are in the supplementary material. Table 6: Results of VideoMAE on action recognition benchmarks. Inference throughput is measured on a 3090 GPU with FP16 precision. 
+
+Model Method Input Throughput Top-1 Acc (FxHW) (videos/s) (%) 
+
+Action Recognition on Kinetics-400 
+
+VideoMAE-B Baseline 16x224 13.24 76.81 ToMe(r=96) 16x224 13.76 75.54 ToMe(r=128) 16x224 14.06 73.34 MaMe( τ = 0.8) 16x224 13.81 74.23 MaMe( τ = 0.9) 16x224 13.33 76.03 VideoMAE-L Baseline 16x224 6.25 82.31 ToMe(r=32) 16x224 6.97 82.05 MaMe( τ = 0.8) 16x224 9.28 81.47 
+
+speed, measured by latency (seconds per image generation), and image quality, assessed through a suite of metrics including FID (Fréchet Inception Distance)[38], IS (Inception Score)[39], LPIPS (Learned Perceptual Image Patch Similarity)[40], PSNR (Peak Signal-to-Noise Ratio)[41], SSIM (Structural Similarity Index Measure)[42], and CLIP Score[27]. Table 7 shows MaMe+MaRe achieves highest accelera-tion, reducing latency from 17.26s to 11.87s at τ = 0.7
+
+Table 7: Text-to-image generation performance comparison results with SD2.1 (baseline) in generating 768×768 images, based on 50 sampling steps. Speed Image Quality Latency (s) ↓ FID ↓ IS ↑ LPIPS ↓ PSNR ↑ SSIM ↑ CLIP ↑                                  
+
+> baseline 17.26 1.93 22.75 0.68 8.80 0.17 23.41 ToMeSD(25% ratio) 14.81 2.04 23.47 0.64 9.07 0.19 23.48 ToMeSD(50% ratio) 12.67 3.68 22.21 0.65 9.13 0.21 23.51 MaMe+MaRe( τ=0.7)11.87 2.54 20.84 0.63 9.77 0.20 24.15 MaMe+MaRe( τ=0.8)12.45 2.28 23.31 0.63 9.79 0.21 24.18
+
+(31.2% speedup) and 12.45s at τ = 0.8 (27.9% speedup), sur-passing ToMeSD’s 14.81s (25% ratio) and 12.67s (50% ra-tio). MaMe+MaRe delivers better image fidelity with low-est LPIPS scores (0.63) and highest PSNR values (9.77–9.79), indicating superior quality than baseline and ToMeSD vari-ants. Semantic alignment, measured by CLIP Score, fur-ther distinguishes MaMe+MaRe. At τ = 0.8, MaMe+MaRe reaches 24.18, exceeding the baseline (23.41) by 3.3% and ToMeSD(50%) (23.51) by 2.8%. This suggests MaMe+MaRe pipeline preserves text-image semantic consistency better. While ToMeSD(50%) achieves comparable speed (12.67s), it has higher FID degradation (3.68 vs. 1.93 baseline), whereas MaMe+MaRe( τ = 0.8) maintains a better FID of 2.28. And we discovered that image clarity can be controlled by adjust-ing the similarity threshold as shown in Figure A.10, which 9feature acc im/s       
+
+> x83.35 73.06
+> k71.63 72.45
+> k-mean 69.01 75.06
+
+(a) Feature Choice.           
+
+> function acc im/s eucl 81.58 73.60 cosine 83.35 73.06 dot 80.43 81.14 softmax 61.90 80.33
+
+(b) Similarity Func.         
+
+> order acc im/s sequential 84.14 71.81 alternating 83.35 73.06 random 83.24 73.74
+
+(c) Partition Style.              
+
+> src refine acc im/s mae 77.51 85.59 mae ✓80.02 78.96 aug 72.47 78.59 aug ✓83.35 73.06
+
+(d) Refine Weight. 
+
+> Figure 4: Ablation experiments using AugReg ViT-B/16. Our default settings are marked in Gray. We report Top-1 accuracy (acc) and model inference throughput (im/s) with FP32 precision and batchsize 1 on a 3090 GPU. The visualization results of different methods are shown in Figure 5.
+> Figure 5: The visualization of the final token count in the 8th block of the AugReg ViT-B/16. Each color square represents a distinct type of token.
+
+demonstrates pipeline’s unique tunability. These results show MaMe+MaRe surpasses the typical efficiency-quality trade-off, delivering better latency and quality for text-to-image genera-tion. 
+
+Why does MaMe+MaRe enhance image quality? 
+
+We think MaMe plays the role of a high-pass filter by adaptively compressing redundant, low-frequency information (e.g., smooth image regions), while preserving unique, high-frequency tokens (e.g., edges and textures) unchanged through into attention layers. And then the reduction of token count hap-pens to mitigate the "attention dilution" effect, also known as “rank-collapse” or “token uniformity,”[43] where a large soft-max denominator in MSA disperses finite attention capacity, suppressing significant tokens. Unique tokens, previously di-luted, now compete within a smaller candidate set, thereby re-ceiving higher attention scores, which means amplifying high-frequency signals. The preserved and enhanced details im-prove visual responses, also explaining the CIDEr score im-provement on the COCO caption task and indicating MaMe’s potential for enhancing the Vision Language Model (VLM). Fi-nally, MaRe accurately restores the processed information back to the original spatial structure by maintaining the original to-ken relationships. So the final result has benefited from a more focused attention computation while fully retaining its original spatial resolution and high-frequency detailed content. 
+
+4.5. Ablation Study 4.5.1. Algorithmic Design Choices 
+
+Our ablation studies extend to the core algorithmic compo-nents of MaMe, with results summarized in Table 4. Four key design dimensions are investigated: 
+
+Feature Choice: The raw token matrix x achieves opti-mal accuracy (83.35%) with competitive throughput. Features 
+
+k and k-mean show lower accuracy (71.63% and 69.01%), confirming x preserves the most discriminative information for merging decisions. 
+
+Similarity Function: Cosine similarity achieves the best balance (83.35% accuracy, 73.06 im/s throughput). Dot prod-uct improves throughput (81.14 im/s) but sacrifices accuracy (80.43%), while Euclidean and softmax-based methods under-perform in either metric. 
+
+Partition Style: Sequential ordering maximizes accuracy (84.14%) but reduces throughput (71.81 im/s). Alternating or-der offers the best trade-off (83.35% accuracy, 73.06 im/s), out-performing random ordering, which slightly boosts throughput at the cost of accuracy. 
+
+Adaptive Weight Refining: AugReg models require prun-ing to achieve best 83.35% accuracy. MAE models show mod-erate gains but remain less dependent on pruning. 
+
+4.5.2. Where and What 
+
+To investigate where MaMe should be applied within mod-els and what similarity threshold yields optimal performance, we examine the joint impact of similarity threshold ( τ) and the number of blocks applying token merging ( num _block ) on ac-curacy and throughput on ViT models as shown in Figure 6. 
+
+Accuracy The relationship between similarity threshold and accuracy shows a non-linear pattern across ViT architectures, influenced by MaMe applied block depth. As the threshold increases from 0.6 to 0.8, accuracy improves rapidly before plateauing, indicating diminishing returns from stricter token retention and suggesting that exceeding a critical threshold suf-ficiently distinguishes features. 10 0.600 0.625 0.650 0.675 0.700 0.725 0.750 0.775 0.800 
+
+Similarity Threshold 
+
+> 60
+> 65
+> 70
+> 75
+> 80
+> 85
+> Top-1 Accuracy (%)
+> Model / Numblock
+> ViT-L
+> ViT-B
+> ViT-S
+> num_block=7
+> num_block=8
+> num_block=9
+> num_block=16
+
+(a) Accuracy vs. Sim. Threshold with Alternating partition 0.600 0.625 0.650 0.675 0.700 0.725 0.750 0.775 0.800 
+
+Similarity Threshold  
+
+> 500
+> 1000
+> 1500
+> 2000
+> Throughput (img/s)
+> Model / Numblock
+> ViT-L
+> ViT-B
+> ViT-S
+> num_block=7
+> num_block=8
+> num_block=9
+> num_block=16
+
+(b) Throughput vs. Sim. Threshold with Alternating partition 0.70 0.72 0.74 0.76 0.78 0.80 
+
+Similarity Threshold 
+
+> 67.5
+> 70.0
+> 72.5
+> 75.0
+> 77.5
+> 80.0
+> 82.5
+> 85.0
+> Top-1 Accuracy (%)
+> Ratio / Model
+> ViT-B
+> 10%
+> 30%
+> 50%
+> 70%
+> 90%
+> 0.740
+> 80.0
+> 80.25
+
+(c) Accuracy vs. Sim. Threshold with Random partition 0.70 0.72 0.74 0.76 0.78 0.80 
+
+Similarity Threshold  
+
+> 400
+> 500
+> 600
+> 700
+> 800
+> 900
+> 1000
+> 1100
+> Throughput (img/s)
+> Ratio / Model
+> ViT-B
+> 10%
+> 30%
+> 50%
+> 70%
+> 90%
+> 0.740
+> 540.0
+> 560.0
+
+(d) Throughput vs. Sim. Threshold with Random partition Figure 6: The accuracy and throughput change with the similarity threshold under both alternating and random partitions. num _block denotes the number of blocks used for merging. There is a non-linear, saturating relationship between the similarity threshold and accuracy across ViT architectures. Five different random seeds are employed to conduct five experiments under different ratios of tokens as source tokens as shown in the box in the Figures (c) and (d), illustrating that the default, determined alternating partition curves represent a Pareto frontier. 
+
+Throughput Throughput monotonically decreases with sim-ilarity threshold, dropping sharply at low thresholds due to ris-ing computational costs. Threshold sensitivity inversely corre-lates with model size: ViT-S experiences the steepest decline, followed by ViT-B and ViT-L, indicating larger models better mitigate merging overhead. 
+
+Model-Scale Sensitivity Model sensitivity to token merging varies by size: ViT-L maintains >85% accuracy across thresh-olds (0.6–0.8) with throughput gains, ViT-B shows moderate sensitivity, and ViT-S is most vulnerable (accuracy drops from 79% to 60% with aggressive merging). Larger models exhibit greater representational redundancy, allowing coarser merging with minimal performance loss. 
+
+Random Partition The comparison between deterministic default configurations (dashed lines) and stochastic trials (scat-ter points) indicates that the default settings define a Pareto frontier: stochastic partitions yield higher accuracy (points above the dashed line) but lower throughput (points below the dashed line). This trade-off suggests that while stochasticity en-hances accuracy, it undermines computational efficiency. The deterministic, alternating partition thus serves as a robust base-line, balancing performance and efficiency. 
+
+5. Discussion 
+
+5.1. Pros and Cons 
+
+One of the primary advantages of MaMe is its non-intrusive nature with respect to standard attention mechanisms. Un-like ToMe, which requires attention computation modifications, MaMe changed nothing and works seamlessly with optimized implementations like Flash Attention[44]. Another advantage is MaMe’s matrix-only operations are GPU-friendly, avoiding sorting or scattered writes that are GPU-inefficient. MaMe’s drawback is that the optimal similarity threshold ( τ) for maxi-mal effect require manual determination. Future work will de-velop automated methods for determining it. 
+
+5.2. Future Work 
+
+The observed improvements of MaMe on COCO Caption 
+
+and image generation quality suggest that MaMe effectively preserves semantic-rich features critical for generative tasks. 11 This implies MaMe’s potential in two areas: (1) Video un-derstanding and generation , where MaMe could optimize long-range spatiotemporal modeling by compressing redun-dant frame-level tokens; and (2) Vision-Language-Action (VLA) models , where efficient token reduction may enhance real-time decision-making in embodied AI systems. Another frontier for MaMe lies in its application to LLMs. Token merging approaches like ToMe, which rely on sorting tokens by similarity, can break the causality constraint in au-toregressive LLMs by allowing tokens to merge with future to-kens. MaMe enables causal token merging by partitioning to-kens into two mutually exclusive sets (destination tokens set for odd-indexed tokens like 1, 3, 5... and source tokens set for even-indexed tokens like 0, 2, 4, 6...) and applying a causal-ity mask M to set the upper triangular part of the final fusion weights WF 
+
+> i j
+
+to zero by WF 
+
+> i j
+
+⊙ Mi j , where Mi, j = 1 if j ≤ i and 0
+
+otherwise. This restricts each destination token (e.g., token 5) to merge only with preceding source tokens (e.g., tokens 0, 2, 4), preserving causality and allowing reduce KV cache size in LLMs. 
+
+6. Conclusion 
+
+In this paper, we present MaMe and MaRe, forming a GPU-friendly plug-and-play token merging and restoration frame-work with pure matrix computations, eliminating the overhead of sorting or clustering. While MaMe, like ToMe, typically balances speed with performance trade-offs in most tasks, it achieves simultaneous improvements in both captioning and image synthesis, suggesting that MaMe reduces a multitude of mediocre tokens, allowing the importance of critical tokens to emerge during compression. We infer that MaMe can make performance better in more image and video understanding and generation tasks through direct application or fine-tuning. 
+
+References 
+
+[1] A. Dosovitskiy, L. Beyer, A. Kolesnikov, D. Weissenborn, X. Zhai, T. Unterthiner, M. Dehghani, M. Minderer, G. Heigold, S. Gelly, et al., An image is worth 16x16 words: Transformers for image recognition at scale, Inter-national Conference on Learning Representations (ICLR) (2021). [2] A. Vaswani, N. Shazeer, N. Parmar, J. Uszkoreit, L. Jones, A. N. Gomez, Ł. Kaiser, I. Polosukhin, Attention is all you need, Advances in Neural Information Processing Sys-tems (NeurIPS) 30 (2017). [3] Y. Rao, W. Zhao, B. Liu, J. Lu, J. Zhou, C.-J. Hsieh, Dy-namicvit: Efficient vision transformers with dynamic to-ken sparsification, Advances in neural information pro-cessing systems 34 (2021) 13937–13949. [4] Y. Liang, C. Ge, Z. Tong, Y. Song, J. Wang, P. Xie, Not all patches are what you need: Expediting vision transformers via token reorganizations (2022). arXiv: 2202.07800 .URL https://arxiv.org/abs/2202.07800 
+
+[5] D. Bolya, C.-Y. Fu, X. Dai, P. Zhang, C. Feichtenhofer, J. Hoffman, Token merging: Your vit but faster, Interna-tional Conference on Learning Representations (2022). [6] D. Marin, J.-H. R. Chang, A. Ranjan, A. Prabhu, M. Rastegari, O. Tuzel, Token pooling in vision trans-formers for image classification, in: 2023 IEEE/CVF Winter Conference on Applications of Computer Vi-sion (WACV), 2023, pp. 12–21. doi:10.1109/ WACV56688.2023.00010 .[7] M. Chen, W. Shao, P. Xu, M. Lin, K. Zhang, F. Chao, R. Ji, Y. Qiao, P. Luo, Diffrate: Differentiable compres-sion rate for efficient vision transformers, in: Proceedings of the IEEE/CVF international conference on computer vision, 2023, pp. 17164–17174. [8] F. Zeng, D. Yu, Z. Kong, H. Tang, Token transform-ing: A unified and training-free token compression frame-work for vision transformer acceleration (2025). arXiv: 2506.05709 .URL https://arxiv.org/abs/2506.05709 
+
+[9] Y. Shang, M. Cai, B. Xu, Y. J. Lee, Y. Yan, Llava-prumerge: Adaptive token reduction for efficient large multimodal models, in: International Conference on Computer Vision (ICCV), 2025. [10] S. Yang, Y. Chen, Z. Tian, C. Wang, J. Li, B. Yu, J. Jia, Visionzip: Longer is better but not necessary in vi-sion language models, in: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR), 2025. [11] L. Meng, H. Li, B.-C. Chen, S. Lan, Z. Wu, Y.-G. Jiang, S.-N. Lim, Adavit: Adaptive vision transformers for effi-cient image recognition, in: Proceedings of the IEEE/CVF conference on computer vision and pattern recognition, 2022, pp. 12309–12318. [12] L. Chen, H. Zhao, T. Liu, S. Bai, J. Lin, C. Zhou, B. Chang, An image is worth 1/2 tokens after layer 2: Plug-and-play inference acceleration for large vision-language models, in: European Conference on Computer Vision (ECCV), 2024. [13] Z. Lin, M. Lin, L. Lin, R. Ji, Boosting multimodal large language models with visual tokens withdrawal for rapid inference, in: Proceedings of the AAAI Conference on Artificial Intelligence (AAAI), 2025. [14] H. Song, Y.-J. Kim, S.-W. Oh, S.-J. Chun, ToFu: To-ken fusion for fast and accurate vision transformers, arXiv preprint arXiv:2403.14950 (2024). [15] Z. Fu, Z. Huang, Y. Liu, S. Han, Y. Sun, Y. Zhu, J. Yan, Pumer: Pruning and merging for efficient vision trans-formers, arXiv preprint arXiv:2405.02835 (2024). 12 [16] B. Li, W. Zhao, Z. Zhang, LTPM: A learnable token prun-ing and merging method for vision transformer, Journal of Machine Learning Research (2024). [17] W. Zeng, S. Jin, L. Xu, W. Liu, C. Qian, W. Ouyang, P. Luo, X. Wang, Tcformer: Visual recognition via to-ken clustering transformer, IEEE Transactions on Pattern Analysis and Machine Intelligence 46 (12) (2024) 9521– 9535. doi:10.1109/TPAMI.2024.3425768 .[18] Y. Xie, J. Zhang, Y. Xia, A. van den Hengel, Q. Wu, Clustr: Exploring efficient self-attention via clustering for vision transformers (2022). arXiv:2208.13138 .URL https://arxiv.org/abs/2208.13138 
+
+[19] P. Jin, R. Takanobu, W. Zhang, X. Cao, L. Yuan, Chat-univi: Unified visual representation empowers large lan-guage models with image and video understanding, in: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR), 2024. [20] M. Fayyaz, S. A. Koohpayegani, F. R. Jafari, S. Sengupta, H. R. V. Joze, E. Sommerlade, H. Pirsiavash, J. Gall, Adaptive token sampling for efficient vision transformers, in: European conference on computer vision, Springer, 2022, pp. 396–414. [21] Y. Wang, Y. Chen, L. Wang, J. Chen, Token morphing for vision transformer, in: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition, 2023, pp. 16584–16593. [22] D.-H. Kim, H.-J. Kim, T.-H. Kim, Gumbel-gate: Agumbel-based gating network for vision transformers, in: Proceedings of the AAAI Conference on Artificial Intelli-gence, Vol. 37, 2023, pp. 1454–1462. [23] Y. Li, C. Wang, J. Jia, Llama-vid: An image is worth 2 to-kens in large language models, in: European Conference on Computer Vision (ECCV), 2024. [24] H. Touvron, M. Cord, M. Douze, F. Massa, A. Sablay-rolles, H. Jégou, Training data-efficient image transform-ers & distillation through attention, in: International con-ference on machine learning, PMLR, 2021, pp. 10347– 10357. [25] K. He, X. Chen, S. Xie, Y. Li, P. Dollár, R. Girshick, Masked autoencoders are scalable vision learners, in: Pro-ceedings of the IEEE/CVF conference on computer vision and pattern recognition, 2022, pp. 16000–16009. [26] Z. Liu, Y. Lin, Y. Cao, H. Hu, Y. Wei, Z. Zhang, S. Lin, B. Guo, Swin transformer: Hierarchical vision trans-former using shifted windows, in: Proceedings of the IEEE/CVF international conference on computer vision, 2021, pp. 10012–10022. [27] A. Radford, J. W. Kim, C. Hallacy, A. Ramesh, G. Goh, S. Agarwal, G. Sastry, A. Askell, P. Mishkin, J. Clark, G. Krueger, I. Sutskever, Learning transferable vi-sual models from natural language supervision (2021). 
+
+arXiv:2103.00020 .URL https://arxiv.org/abs/2103.00020 
+
+[28] X. Zhai, B. Mustafa, A. Kolesnikov, L. Beyer, Sigmoid loss for language image pre-training (2023). arXiv: 2303.15343 .[29] M. Tschannen, A. Gritsenko, X. Wang, M. F. Naeem, I. Alabdulmohsin, N. Parthasarathy, T. Evans, L. Beyer, Y. Xia, B. Mustafa, O. Hénaff, J. Harmsen, A. Steiner, X. Zhai, Siglip 2: Multilingual vision-language encoders with improved semantic understanding, localization, and dense features (2025). arXiv:2502.14786 .URL https://arxiv.org/abs/2502.14786 
+
+[30] H. Liu, C. Li, Q. Wu, Y. J. Lee, Visual instruction tuning (2023). [31] H. Duan, J. Yang, Y. Qiao, X. Fang, L. Chen, Y. Liu, X. Dong, Y. Zang, P. Zhang, J. Wang, et al., Vlmevalkit: An open-source toolkit for evaluating large multi-modality models, in: Proceedings of the 32nd ACM International Conference on Multimedia, 2024, pp. 11198–11201. [32] T.-Y. Lin, M. Maire, S. Belongie, J. Hays, P. Perona, D. Ramanan, P. Dollár, C. L. Zitnick, Microsoft coco: Common objects in context, in: Computer vision–ECCV 2014: 13th European conference, zurich, Switzerland, September 6-12, 2014, proceedings, part v 13, Springer, 2014, pp. 740–755. [33] Z. Tong, Y. Song, J. Wang, L. Wang, VideoMAE: Masked autoencoders are data-efficient learners for self-supervised video pre-training, in: Advances in Neural In-formation Processing Systems, 2022. [34] W. Kay, J. Carreira, K. Simonyan, B. Zhang, C. Hillier, S. Vijayanarasimhan, F. Viola, T. Green, T. Back, P. Nat-sev, M. Suleyman, A. Zisserman, The kinetics hu-man action video dataset, CoRR abs/1705.06950 (2017). 
+
+arXiv:1705.06950 .URL http://arxiv.org/abs/1705.06950 
+
+[35] R. Rombach, A. Blattmann, D. Lorenz, P. Esser, B. Om-mer, High-resolution image synthesis with latent diffusion models, in: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR), 2022, pp. 10684–10695. [36] D. Bolya, J. Hoffman, Token merging for fast stable dif-fusion, arXiv preprint arXiv:2303.17604 (2023). [37] Y. Guo, H. Liu, H. Wen, Gemrec: Towards generative model recommendation, in: Proceedings of the 17th ACM International Conference on Web Search and Data Min-ing, Vol. 9 of WSDM ’24, ACM, 2024, p. 1054–1057. 
+
+doi:10.1145/3616855.3635700 .13 URL http://dx.doi.org/10.1145/3616855. 3635700 
+
+[38] M. Heusel, H. Ramsauer, T. Unterthiner, B. Nessler, S. Hochreiter, Gans trained by a two time-scale update rule converge to a local nash equilibrium, Advances in Neural Information Processing Systems 30 (2017). [39] T. Salimans, I. Goodfellow, W. Zaremba, V. Cheung, A. Radford, X. Chen, Improved techniques for training gans, arXiv preprint arXiv:1606.03498 (2016). [40] R. Zhang, P. Isola, A. A. Efros, E. Shechtman, O. Wang, The unreasonable effectiveness of deep features as a per-ceptual metric, in: CVPR, 2018. [41] R. C. Gonzalez, R. E. Woods, Digital image processing, Pearson Education India, 2008. [42] Z. Wang, A. C. Bovik, H. R. Sheikh, E. P. Simoncelli, Im-age Quality Assessment: From Error Visibility to Struc-tural Similarity, IEEE Transactions on Image Processing 13 (4) (2004) 600–612. [43] Y. Dong, J.-B. Cordonnier, A. Loukas, Attention is not all you need: Pure attention loses rank doubly exponen-tially with depth, in: International conference on machine learning, PMLR, 2021, pp. 2793–2803. [44] T. Dao, FlashAttention-2: Faster attention with better par-allelism and work partitioning, in: International Confer-ence on Learning Representations (ICLR), 2024. 14 Appendix A. Appendix 
+
+15 Figure A.7: The visualization in the 8th block of the AugReg ViT-B/16 using MaMe with different settings. Each color square represents a distinct type of token. Default is our default method. 
+
+16 COCO Caption Task 
+
+Question: Please describe this image in general. Directly provide the description, do not include prefix like "This image depicts". 
+
+LLaVA: 2 people are standing in front of a table with a variety of wine bottles and a plate of food. The man is holding a wine bottle and the woman is holding a wine glass. They are both smiling and enjoying their time together. The table is filled with wine bottles and a few wine glasses, and there is a cake on the table as well. 
+
++ToMe: 2 people are standing at a table with a variety of wine bottles and glasses. The man is wearing a yellow shirt and the woman is wearing a black shirt. They are both holding wine glasses and appear to be tasting different wines. There are several bottles of wine on the table, some of which are placed closer to the man and others near the woman. A plate of food is also present on the table, adding to the ambiance of the wine tasting event. 
+
++MaMe: 2 people are standing at a table with a variety of food and drinks. The man is wearing a yellow shirt and the woman is wearing a black shirt. They are both holding wine glasses and appear to be enjoying a meal together. The table is filled with several bottles of wine, a plate of food, and a fork. The scene is set in a restaurant with a window view. 
+
+> Table A.8: MaMe provides the most accurate and comprehensive description, correctly identifying clothing details (yellow shirt, black shirt) and contextual elements (restaurant setting, window view). ToMe captures basic elements accurately but lacks environmental context. LLaVA omitting important visual details like clothing colors. MaMe demonstrates superior visual grounding and contextual understanding.
+
+COCO Caption Task 
+
+Question: Please describe this image in general. Directly provide the description, do not include prefix like "This image depicts". 
+
+LLaVA: A man wearing a green and white ski suit is skiing down a snowy hill. He is holding ski poles in his hands and appears to be enjoying the activity. The man is the main focus of the image, and the snowy hill and trees in the background provide a picturesque winter scene. 
+
++ToMe: 24 is the number on the man’s outfit. 
+
++MaMe: A man wearing a green and white ski suit is skiing down a snowy hill. He is holding ski poles in his hands and appears to be enjoying the activity. The man is wearing a hat and goggles, which are essential for protecting his eyes from the cold and snow. The scene captures the excitement and thrill of skiing in a beautiful winter landscape. 
+
+> Table A.9: MaMe delivers the most comprehensive and context-aware description, accurately identifying all visual elements (ski suit, poles, hat, goggles) and providing relevant contextual reasoning about protective gear. LLaVA covers basics but omits key details like headgear, while ToMe fails entirely, producing only an unrelated fragment ("number 24").
+
+17 Figure A.8: The visualization illustrates the progression of token count reduction in the first 8 blocks of the AugReg ViT-B/16 with MaMe. Each color square represents a distinct type of token. 
+
+18 Figure A.9: Images from left to right generated by Stable Diffusion v2.1, ToMeSD and MaMe+MaRe. MaMe+MaRe retains high-frequency details, making the picture more realistic. 
+
+19 Figure A.10: Images generated by the model with MaMe+MaRe. The clarity of the painting changed with the similarity threshold. A higher similarity threshold brings a more detailed and clearer painting. 
+
+20

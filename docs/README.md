@@ -6,35 +6,38 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-04-19
-- 运行时间：2026-04-19 19:23:37 UTC
+- 最新运行日期：2026-04-20
+- 运行时间：2026-04-20 20:31:50 UTC
 - 运行状态：成功
-- 本次总论文数：4
-- 精读区：0
+- 本次总论文数：6
+- 精读区：2
 - 速读区：4
 
 ### 今日简报（AI）
-今日聚焦 3D 空间智能与视频编辑，深入探索多视图先验下的物体插入与光照归一化技术。
-重点关注利用多视图先验实现可控视频物体插入，以及从无位姿图像中学习 3D 空间表征的新进展。
-建议关注多视图几何与生成模型的结合，这是提升视频编辑真实感与空间感知能力的关键。
-- 详情：[/202604/19/README](/202604/19/README)
+今日精选 6 篇视觉前沿论文，深度聚焦扩散自编码器在眼底图像修复及免训练文本引导编辑中的
+- 详情：[/202604/20/README](/202604/20/README)
 
 ### 精读区论文标签
-- 本次无精读推荐。
+1. [Diffusion Autoencoder for Unsupervised Artifact Restoration in Handheld Fundus Images](/202604/20/2604.15723v1-diffusion-autoencoder-for-unsupervised-artifact-restoration-in-handheld-fundus-images)  
+   标签：评分：9.0/10、query:q2
+   evidence：用于伪影修复的无监督扩散自编码器
+2. [From Competition to Coopetition: Coopetitive Training-Free Image Editing Based on Text Guidance](/202604/20/2604.15948v1-from-competition-to-coopetition-coopetitive-training-free-image-editing-based-on-text-guidance)  
+   标签：评分：8.0/10、query:q3
+   evidence：用于图像编辑与重建的零样本框架
 
 ### 速读区论文标签
-1. [Controllable Video Object Insertion via Multiview Priors](/202604/19/2604.14556v1-controllable-video-object-insertion-via-multiview-priors)  
-   标签：评分：7.0/10、query:q4
-   evidence：用于物体插入和合成的生成模型
-2. [Learning 3D Representations for Spatial Intelligence from Unposed Multi-View Images](/202604/19/2604.10573v1-learning-3d-representations-for-spatial-intelligence-from-unposed-multi-view-images)  
-   标签：评分：6.0/10、query:q7
-   evidence：用于表示学习的自监督双重掩码策略
-3. [UniBlendNet: Unified Global, Multi-Scale, and Region-Adaptive Modeling for Ambient Lighting Normalization](/202604/19/2604.13383v1-uniblendnet-unified-global-multi-scale-and-region-adaptive-modeling-for-ambient-lighting-normalization)  
+1. [From Zero to Detail: A Progressive Spectral Decoupling Paradigm for UHD Image Restoration with New Benchmark](/202604/20/2604.15654v1-from-zero-to-detail-a-progressive-spectral-decoupling-paradigm-for-uhd-image-restoration-with-new-benchmark)  
+   标签：评分：7.0/10、query:q3
+   evidence：超高清图像修复与光谱解耦
+2. [Saturation-Aware Space-Variant Blind Image Deblurring](/202604/20/2604.16200v1-saturation-aware-space-variant-blind-image-deblurring)  
+   标签：评分：7.0/10、query:q7
+   evidence：盲图像去模糊与修复
+3. [MaMe & MaRe: Matrix-Based Token Merging and Restoration for Efficient Visual Perception and Synthesis](/202604/20/2604.13432v1-mame--mare-matrix-based-token-merging-and-restoration-for-efficient-visual-perception-and-synthesis)  
+   标签：评分：6.0/10、query:q4
+   evidence：用于图像合成的标记恢复
+4. [Winner of CVPR2026 NTIRE Challenge on Image Shadow Removal: Semantic and Geometric Guidance for Shadow Removal via Cascaded Refinement](/202604/20/2604.16177v1-winner-of-cvpr2026-ntire-challenge-on-image-shadow-removal-semantic-and-geometric-guidance-for-shadow-removal-via-cascaded-refinement)  
    标签：评分：6.0/10、query:q1
-   evidence：修复受复杂光照退化的图像
-4. [TokenGS: Decoupling 3D Gaussian Prediction from Pixels with Learnable Tokens](/202604/19/2604.15239v1-tokengs-decoupling-3d-gaussian-prediction-from-pixels-with-learnable-tokens)  
-   标签：评分：6.0/10、query:q7
-   evidence：用于3D预测的自监督渲染损失
+   evidence：图像阴影去除与修复
 
 
 <div class="dpr-home-promo-card">

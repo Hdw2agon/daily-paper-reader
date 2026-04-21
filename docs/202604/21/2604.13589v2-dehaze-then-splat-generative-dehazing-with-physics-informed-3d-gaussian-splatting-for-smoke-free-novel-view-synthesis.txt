@@ -1,0 +1,185 @@
+Title: Dehaze-then-Splat: Generative Dehazing with Physics-Informed 3D Gaussian Splatting for Smoke-Free Novel View Synthesis
+
+URL Source: https://arxiv.org/pdf/2604.13589v2
+
+Published Time: Tue, 21 Apr 2026 00:36:18 GMT
+
+Number of Pages: 6
+
+Markdown Content:
+# Dehaze-then-Splat: Generative Dehazing with Physics-Informed 3D Gaussian Splatting for Smoke-Free Novel View Synthesis 
+
+## Boss Chen Hanqing Wang 
+
+The Hong Kong University of Science and Technology (Guangzhou) 
+
+## hwang201@connect.hkust-gz.edu.cn 
+
+## Abstract 
+
+We present Dehaze-then-Splat, a two-stage pipeline for multi-view smoke removal and novel view synthesis devel-oped for Track 2 of the NTIRE 2026 3D Restoration and Reconstruction Challenge [1]. In the first stage, we pro-duce pseudo-clean training images via per-frame genera-tive dehazing using Nano Banana Pro, followed by bright-ness normalization. In the second stage, we train 3D Gaussian Splatting (3DGS) with physics-informed auxil-iary losses—depth supervision via Pearson correlation with pseudo-depth, dark channel prior regularization, and dual-source gradient matching—that compensate for cross-view inconsistencies inherent in frame-wise generative process-ing. We identify a fundamental tension in dehaze-then-reconstruct pipelines: per-image restoration quality does not guarantee multi-view consistency, and such inconsis-tency manifests as blurred renders and structural instabil-ity in downstream 3D reconstruction. Our analysis shows that MCMC-based densification with early stopping, com-bined with depth and haze-suppression priors, effectively mitigates these artifacts. On the Akikaze validation scene, our pipeline achieves 20.98 dB PSNR and 0.683 SSIM for novel view synthesis, a +1.50 dB improvement over the un-regularized baseline. 
+
+## 1. Introduction 
+
+Multi-view smoke and haze removal poses a joint chal-lenge: restoring visual quality in each degraded view while maintaining cross-view photometric and geometric con-sistency for downstream 3D reconstruction. This paper describes our solution for Track 2 of the NTIRE 2026 3D Restoration and Reconstruction (3DRR) Challenge [1], which requires removing physically captured smoke from multi-view images and synthesizing novel views of the clean scene. The challenge is built on the RealX3D benchmark [2], a physically-degraded 3D dataset featuring real-world smoke and low-light conditions for multi-view restoration and reconstruction evaluation. Our key insight is that 2D dehazing quality sets the per-formance ceiling for downstream 3D reconstruction —but high per-image quality alone is insufficient. State-of-the-art generative dehazing models such as Nano Banana Pro 1
+
+produce visually compelling per-frame results, yet process each view independently without cross-view conditioning. This frame-wise independence introduces stochastic varia-tions in color, texture, and hallucinated detail that, when used as training data for 3D Gaussian Splatting (3DGS) [4], cause blurred renders, texture drift, and structural instabil-ity. Motivated by this analysis, we propose Dehaze-then-Splat , a two-stage pipeline that combines generative de-hazing with physics-informed 3DGS training. Stage 1 pro-duces pseudo-clean training images via Nano Banana Pro with brightness normalization. Stage 2 trains 3DGS with auxiliary losses—depth supervision, dark channel prior (DCP) regularization, and dual-source gradient matching— that serve as implicit multi-view consistency regularizers, compensating for the per-frame variations introduced in Stage 1. On the Akikaze validation scene, our pipeline achieves 20.98 dB PSNR with 0.683 SSIM, a +1.50 dB im-provement over the unregularized baseline. Figure 1 illustrates the overall architecture. 
+
+## 2. Method 
+
+2.1. Generative Dehazing with Nano Banana Pro 
+
+Since 2D dehazing quality directly limits the achievable NVS quality, we prioritize dehazing fidelity. We employ Nano Banana Pro ( gemini-3-pro-image-preview )through the Gemini API [3] for per-frame smoke removal. Each smoky training image is sent with a structured prompt requesting comprehensive smoke removal while preserv-ing scene composition, geometry, and photorealistic appear-ance.               
+
+> 1Nano Banana Pro refers to the image generation capability of the Gemini API ( gemini-3-pro-image-preview ) [3].
+> arXiv:2604.13589v2 [cs.CV] 18 Apr 2026 Stage 1: Data Preparation Stage 2: 3DGS Reconstruction
+> Smoky Images Nano Banana Pro
+> −−−−−−−−→Dehazed Resize+Norm
+> −−−−−−→Clean ∗3DGS + Priors
+> −−−−−−−→Novel Views x
+> Ldepth (Pearson)
+> LDCP (haze suppression)
+> Lgrad (dual-source edges) Smoky Images Depth Anything V2
+> −−−−−−−−−→Pseudo-depth −→ Depth supervision during training Figure 1. Overall pipeline of our Dehaze-then-Splat method. Stage 1 produces pseudo-clean training images via generative dehazing and brightness normalization. Stage 2 trains 3DGS with physics-informed auxiliary losses (depth, DCP, gradient) and MCMC densification with early stopping.
+
+Nano Banana Pro demonstrates remarkable per-image dehazing capability, producing visually compelling smoke-free outputs that preserve scene geometry and photorealistic appearance. As shown in Table 4, it achieves 20.07 dB per-frame PSNR against ground truth after brightness normal-ization, substantially outperforming both classical methods such as DCP [5] (11.9 dB) and learning-based alternatives such as MB-TaylorFormer [6] (17.00 dB). The generative nature of the model enables it to hallucinate plausible scene content in heavily occluded regions where discriminative methods produce artifacts. 
+
+Prompt engineering. A structured 6-point prompt speci-fying explicit removal targets and preservation constraints outperforms a simple 4-sentence prompt by +0.44 dB on average. Scene-specific prompts and few-shot examples proved counterproductive, as additional input complexity amplifies output variance. 
+
+Resolution alignment. Nano Banana Pro outputs images at approximately 1696 ×2528 , which does not match the cam-era intrinsics. We resize all outputs to the exact resolution in transforms train.json to ensure pixel-accurate alignment with camera parameters. 
+
+2.2. Brightness Normalization 
+
+Frame-wise processing introduces inter-frame brightness inconsistency (max shift of 0.12 between adjacent frames). Without correction, 3DGS averages over conflicting color signals, degrading both PSNR and visual sharpness. We apply per-channel mean/std normalization to align each frame’s brightness distribution. When ground-truth clean images are available (Akikaze), we normalize to the GT statistics (+0.8 dB). For scenes without GT, we nor-malize to the median statistics across all frames (self-normalization), reducing the max brightness jump from 0.12 to 0.001. Note that brightness normalization addresses only global (zero-order) photometric inconsistency. Local variations in texture detail, hallucinated content, and color rendition across views persist after normalization, as we discuss in the following subsection. 
+
+2.3. The Multi-View Consistency Gap 
+
+As a single-image generative model, Nano Banana Pro processes each view independently without access to cross-view correspondences or scene-level priors. This frame-wise independence introduces stochastic variations in color rendition, texture detail, and hallucinated content across views depicting the same 3D region. We observe inter-frame brightness standard deviations of up to 0.12 (Ta-ble 4), and—more critically—local texture inconsisten-cies that persist even after global brightness normaliza-tion. While each individual output may be visually satisfac-tory, the collection of outputs does not form a multi-view-consistent set suitable for direct 3D reconstruction (Fig-ure 2). When trained on such view-inconsistent pseudo-clean images, 3D Gaussian Splatting must reconcile conflicting photometric signals from different viewpoints observing the same scene region. The optimization responds by broaden-ing Gaussian kernels to average over the discrepancies, re-sulting in blurred novel-view renders and loss of fine detail. In more severe cases, the inconsistency manifests as texture flickering across viewpoints, geometric drift in low-texture regions, and floater artifacts where the model allocates ad-ditional Gaussians to fit per-view noise rather than genuine scene structure. This effect is corroborated by our check-point analysis (Section 2.7): optimal NVS quality occurs at early training steps (step 2000, ∼104k Gaussians), before the model has sufficient capacity to memorize per-view ar-tifacts. This observation motivates the physics-informed auxil-iary losses described below, which serve as implicit multi-view consistency regularizers. 
+
+2.4. 3DGS Training with Physics-Informed Priors 
+
+To mitigate the cross-view inconsistencies introduced by frame-wise dehazing, we augment standard 3DGS pho-Figure 2. Per-frame dehazing quality versus multi-view consistency on Akikaze. (a, b) Ground-truth clean images exhibit consistent color and texture across adjacent views. (c, d) Nano Banana Pro outputs, despite global brightness normalization, show visible differences in color rendition and texture detail. Red boxes highlight the plant region where color shifts are most apparent. Such cross-view inconsistencies degrade downstream 3DGS reconstruction. 
+
+tometric reconstruction with physics-informed auxiliary losses that anchor geometry and suppress residual degrada-tion artifacts. We train a 3DGS model [4] using the gsplat library [7] with the following loss: 
+
+L = (1 −λs)L1 + λsLSSIM + λdLDCP + λpLdepth + λg Lgrad 
+
+(1) where λs=0 .2, λd=0 .01 , λp=0 .1, λg =0 .1.
+
+Depth supervision via Pearson correlation (most impact-ful, +0.79 dB) . We generate pseudo-depth maps from the original smoky images using Depth Anything V2 (ViT-L) [8], which demonstrates strong robustness to smoke degradation. Since pseudo-depth lacks metric scale, we use a scale-invariant weighted Pearson correlation loss between rendered expected depth dr and pseudo inverse-depth dp:
+
+Ldepth = 1 + 
+
+P 
+
+> i
+
+wi(dir − ¯dr )( dip − ¯dp)
+
+qP 
+
+> i
+
+wi(dir − ¯dr )2 ·
+
+qP 
+
+> i
+
+wi(dip − ¯dp)2
+
+(2) where weights wi are the detached rendering alpha values. 
+
+Dark Channel Prior (DCP) regularization. The dark channel prior [5] states that clean images have near-zero dark channel values. We regularize the rendered image ˆI
+
+so that its dark channel approaches zero: 
+
+LDCP = mean 
+
+
+
+min 
+
+> c∈{ R,G,B }
+
+ MinPool k( ˆIc)
+
+(3) where k=15 is the patch size. 
+
+Dual-source gradient loss. We supervise edge structure us-ing Sobel gradient matching against a secondary structural reference (MB-TaylorFormer [6] output), after brightness normalization to match the primary source: 
+
+Lgrad = ∥∇ ˆI − ∇ Norm (Istruct , I nano )∥1 (4) 
+
+MCMC densification strategy. We adopt the MCMC-Strategy from gsplat [9], which manages Gaussian density through stochastic noise injection and relocation rather than manual split/clone/prune heuristics. A controlled 2 ×2 ex-periment confirms that MCMC provides +0.47 dB PSNR over DefaultStrategy at matched stopping points. 
+
+Early densification stopping. Late densification is the primary cause of floater artifacts. Setting 
+
+DENSIFY STOP STEP=3000 locks the Gaussian count early (typically 104k–161k), preventing overfitting and floaters in the few-view regime. 
+
+2.5. Alternative: End-to-End Scattering Decompo-sition 
+
+Inspired by DehazeNeRF [10] and DehazeGS [11], we also explored an end-to-end approach integrating the Koschmieder atmospheric scattering model into 3DGS: 
+
+I(x) = J(x) · t(x) + A · (1 − t(x)) , where t(x) = e−β·d(x).Without sufficient geometric constraints, the model col-lapses to β → 0 (t → 1, J ≈ I), achieving only 10.28 dB. This collapse is complementary evidence for our design: just as per-frame 2D dehazing achieves high per-image quality but lacks multi-view consistency, end-to-end 3D de-hazing preserves consistency by construction but fails to produce adequate restoration quality without strong scene priors. The failure of both extremes motivated our hybrid dehaze-then-reconstruct design with physics-informed reg-ularization. 
+
+2.6. Implementation Details 
+
+Common settings. All scenes use: SH degree 3 (pro-gressively increased 0 →3), scene scale 2.0, learning rates lr means =1 .6×10 −4, lr SH0 =2 .5×10 −3, total 20k training steps with validation every 1k steps. GAMMA must be set to 1.0 (the gsplat default 0.5 causes ∼5 dB loss). 
+
+Per-scene adaptation. Table 1 summarizes scene-specific settings. The dark scene Hinoki requires reduced initializa-tion (20k vs. 50k) and black background to prevent Gaus-sian explosion. 
+
+MCMC configuration. CAP MAX=500k, NOISE LR= 5×10 5 (decayed to 0 after step 8000). Den-sification runs from step 500 to DENSIFY STOP STEP 
+
+(3000). 
+
+Checkpoint selection. We save checkpoints every 1000 steps and select the one maximizing PSNR on validation views. The optimal checkpoint typically appears at step 2000–4000, where the Gaussian count is still low ( ∼104– 161k). This early optimality is a direct consequence of the multi-view consistency gap (Section 2.3): at low Gaussian counts, the model lacks the capacity to overfit to per-view                                                             
+
+> Table 1. Per-scene configuration. Scene Init Points BG Color Notes Akikaze 50k 255 Validation (has GT) Futaba 50k 255 Bright outdoor Koharu 50k 255 High brightness var. Midori 50k 255 Low contrast Hinoki 20k 0Dark, dense smoke Natsume 50k 255 Test scene Shirohana 50k 255 Test scene Tsubaki 50k 255 Test scene Table 2. Ablation on Akikaze NVS (4 test views). Best-PSNR checkpoint per row. λDCP =0 .01 ,λdepth =0 .1,λgrad =0 .1.Configuration PSNR ↑SSIM ↑LPIPS ↓Step Baseline (Default, STOP=5k) 19.48 0.632 0.432 20k +DCP+Depth 20.27 0.644 0.396 20k +MCMC (STOP=15k) 20.53 0.651 0.450 20k +MCMC+DCP+Depth (STOP=15k) 20.57 0.655 0.450 20k +MCMC+DCP+Depth (STOP=3k) 20.92 0.680 0.598 2k +Dual-source Gradient 20.98 0.683 0.600 2k
+
+dehazing artifacts and instead learns a view-averaged repre-sentation that generalizes to novel viewpoints. 
+
+2.7. Ablation Studies 
+
+All ablations are on the Akikaze validation scene (25 training views, 4 test views with GT). 
+
+Component-wise ablation. Table 2 shows the contribution of each component. Key findings: (1) Depth supervision is the most impact-ful auxiliary loss (+0.79 dB), anchoring geometry despite per-view texture variations. (2) MCMC outperforms De-faultStrategy (+0.47 dB at matched STOP). (3) Early stop-ping (STOP=3k) yields +0.35 dB over STOP=15k by keep-ing the Gaussian budget tight, limiting the model’s ca-pacity to memorize per-view inconsistencies (Section 2.3). (4) DCP regularization primarily improves perceptual qual-ity by suppressing residual haze. The consistently early op-timal checkpoint (step 2000, ∼104k Gaussians) across all configurations further supports our analysis: extended train-ing with view-inconsistent data leads to overfitting rather than refinement (Figure 3). 
+
+MCMC × STOP decoupling. The initial ablation con-founded MCMC strategy with STOP timing. A clean 2 ×2factorial experiment (Table 3) without auxiliary losses con-firms MCMC’s genuine +0.47 dB contribution. 
+
+2D dehazing model comparison. Table 4 and Fig-ure 4 show that Nano Banana Pro with GT normalization achieves the best per-frame PSNR (20.07 dB), closely pre-dicting the NVS ceiling. Our best NVS result (20.98 dB) Figure 3. Training progression without early stopping (DefaultStrategy, STOP=15k, no auxiliary losses). Novel-view quality peaks at early steps and degrades catastrophically with continued training. By step 18k, Gaussians have exploded from 104k to 933k, producing severe floater artifacts, color bleeding, and structural collapse. Table 3. Decoupling MCMC vs. STOP (no auxiliary losses, best-PSNR checkpoint). †Catastrophic degradation: PSNR drops to 17.84, Gaussians explode to 933k by step 18k. STOP=5k STOP=15k PSNR SSIM PSNR SSIM Default 20.39 0.667 19.99 † 0.667 †                   
+
+> MCMC 20.86 0.677 20.58 0.674 Table 4. 2D dehazing quality on Akikaze (per-frame PSNR vs. GT, averaged over 25 training views). Method PSNR Brightness Std ↓
+> Nano Banana Pro + GT norm 20.07 0.012 Nano Banana Pro (raw) 19.25 0.120 Nano Banana 2 18.72 0.094 MB-TaylorFormer-L 17.00 0.048
+> DCP (classical) ∼11.9 —Original smoky 11.01 —
+
+modestly exceeds this because multi-view 3DGS averaging compensates for per-frame noise. 
+
+2.8. Final Results 
+
+Table 5 summarizes our results on the Akikaze valida-tion scene. The total improvement from baseline to our full pipeline is +1.50 dB PSNR and +0.051 SSIM . All eight competition scenes were trained with the STOP=3k, 
+
+λdepth =0 .1 configuration and submitted using step-2000 checkpoints. Figure 5 shows qualitative results on test view 0026. 
+
+## 3. Discussion 
+
+Our results highlight a fundamental tension in dehaze-then-reconstruct pipelines: methods that excel at per-image restoration do not necessarily produce multi-view-consistent outputs, yet consistency is a prerequisite for high-                    
+
+> Table 5. Final NVS results on Akikaze (4 test views). Configuration PSNR SSIM LPIPS Step Full pipeline (all losses) 20.98 0.683 0.600 2k w/o gradient loss 20.92 0.680 0.598 2k Baseline (no aux. losses) 19.48 0.632 0.432 20k Route B (Dehaze3DGS) 10.28 0.573 0.780 20k
+
+fidelity 3D reconstruction. Nano Banana Pro achieves state-of-the-art single-image dehazing quality (20.07 dB per-frame PSNR), but the downstream 3DGS must compensate for its view-to-view variations through auxiliary losses and careful capacity control. This tension also explains the failure of the opposite extreme: our end-to-end scattering decomposition (Sec-tion 2.5) maintains multi-view consistency by construction but collapses without adequate restoration priors. Neither purely 2D nor purely 3D approaches are sufficient; effective solutions must balance restoration quality with cross-view coherence. We believe future work integrating cross-view consis-tency constraints into the dehazing stage—whether through video-based generative models, multi-view attention mech-anisms, or test-time consistency optimization—could sub-stantially narrow this gap. Additionally, adaptive capacity scheduling that allocates more Gaussians only after cross-view consistency is established may offer further improve-ments. 
+
+## 4. Conclusion 
+
+We presented Dehaze-then-Splat, a two-stage pipeline for multi-view smoke removal and novel view synthesis. Our analysis reveals a fundamental tension between per-image dehazing quality and multi-view consistency: gener-ative models such as Nano Banana Pro produce compelling individual frames but introduce cross-view variations that degrade downstream 3D reconstruction. We address this through physics-informed auxiliary losses and early densi-Figure 4. Comparison of 2D dehazing methods on Akikaze (view 0001). Nano Banana Pro with GT normalization achieves the highest per-frame PSNR (20.07 dB), substantially outperforming MB-TaylorFormer (17.00 dB) and classical DCP ( ∼11.9 dB). 
+
+Figure 5. Qualitative comparison of novel view synthesis on Akikaze (test view 0026). (a) Ground truth. (b) Our full pipeline produces sharp renders with accurate color. (c) Baseline without auxiliary losses shows moderate blur and color shift. (d) End-to-end scattering decomposition (Route B) fails to separate smoke from scene content. Bottom row: zoom crops of color checker (red box) and bear face (cyan box) regions. 
+
+fication stopping, achieving 20.98 dB PSNR on the Akikaze validation scene. Future work should explore consistency-aware dehazing, either through multi-view generative mod-els or test-time consistency optimization, to bridge the gap between 2D restoration and 3D reconstruction. Code is available at: https : / / github . com / chen-yu-chao/3DRR_codebase .
+
+## References 
+
+[1] S. Liu, C. Bao, Z. Cui, X. Chu, B. Ren, L. Gu, X. Chen, M. Li, L. Ma, M. V. Conde, et al. , “NTIRE 2026 3D restora-tion and reconstruction in real-world adverse conditions: Re-alX3D challenge results,” arXiv preprint arXiv:2604.04135 ,2026. 1 [2] S. Liu, C. Bao, Z. Cui, Y. Liu, X. Chu, L. Gu, M. V. Conde, R. Umagami, T. Hashimoto, Z. Hu, T. Xu, Y. Gan, Y. Kurose, and T. Harada, “RealX3D: A physically-degraded 3D bench-mark for multi-view visual restoration and reconstruction,” 
+
+arXiv preprint arXiv:2512.23437 , 2025. 1 [3] Google AI for Developers, “Nano Banana image gener-ation.” https://ai.google.dev/gemini- api/ docs/nanobanana , 2026. Official Gemini API docu-mentation; accessed March 26, 2026. 1 [4] B. Kerbl, G. Kopanas, T. Leimk¨ uhler, and G. Drettakis, “3D gaussian splatting for real-time radiance field rendering,” 
+
+ACM Transactions on Graphics , vol. 42, no. 4, pp. 139:1– 139:14, 2023. 1, 3 [5] K. He, J. Sun, and X. Tang, “Single image haze removal us-ing dark channel prior,” in IEEE Conference on Computer Vision and Pattern Recognition , pp. 1956–1963, 2009. 2, 3 [6] Y. Qiu, K. Zhang, C. Wang, W. Luo, H. Li, and Z. Jin, “MB-TaylorFormer: Multi-branch efficient transformer expanded by taylor formula for image dehazing,” in Proceedings of the IEEE/CVF International Conference on Computer Vision ,pp. 12802–12813, 2023. 2, 3 [7] V. Ye, M. Turkulainen, J. Gao, Z. Levis, C. Loop, E. Yumer, J. Tenenbaum, D. Slack, H.-Y. Su, J. Tang, and A. Kanazawa, “gsplat: An open-source library for gaussian splatting,” Jour-nal of Machine Learning Research , vol. 26, no. 34, pp. 1–17, 2025. 3 [8] L. Yang, B. Kang, Z. Huang, Z. Zhao, X. Xu, J. Feng, and H. Zhao, “Depth Anything V2,” in Advances in Neural In-formation Processing Systems , vol. 37, 2024. 3 [9] S. Kheradmand, D. Rebain, G. Sharma, W. Sun, Y.-C. Tseng, H. Isack, A. Tagliasacchi, A. Kar, and K. M. Yi, “3D gaus-sian splatting as markov chain monte carlo,” in Advances in Neural Information Processing Systems , vol. 37, 2024. 4 [10] W.-T. Chen, Y. Wang, S.-Y. Kuo, and G. Wetzstein, “De-hazeNeRF: Multi-image haze removal and 3D shape recon-struction using neural radiance fields,” in 2024 International Conference on 3D Vision , pp. 247–256, 2024. 4 [11] C. Ma, J. Zhao, and J. Chen, “DehazeGS: 3D gaussian splat-ting for multi-image haze removal,” IEEE Signal Processing Letters , vol. 32, pp. 736–740, 2025. 4

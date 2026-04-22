@@ -6,49 +6,46 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-04-21
-- 运行时间：2026-04-21 19:55:55 UTC
+- 最新运行日期：2026-04-22
+- 运行时间：2026-04-22 20:07:53 UTC
 - 运行状态：成功
-- 本次总论文数：9
-- 精读区：2
-- 速读区：7
+- 本次总论文数：8
+- 精读区：5
+- 速读区：3
 
 ### 今日简报（AI）
-今日深挖 9 篇视觉算法前沿，重点攻克张量补全与古碑刻纹理修复两大核心挑战。
-推荐关注 MESA 框架如何实现无需训练的古籍修复，以及归纳卷积核范数在处理任意采样张量补全中的突破。
-建议读者留意物理先验与 3D 高斯泼溅（3DGS）结合的去雾技术，这是提升复杂环境三维重建质量的新趋势。
-- 详情：[/202604/21/README](/202604/21/README)
+今日精选 8 篇前沿论文，重点聚焦古籍纹理修复与生成式图像恢复技术的跨越式突破。
+推荐关注无需训练的古碑文修复框架 MESA，以及通过修正流（Rectified Flow）统一判别与生成式修复的 IR-Flow。
+建议优先研读两篇 9 分佳作，探索深度学习在文物数字化保护与高质量影像重建中的最新应用。
+- 详情：[/202604/22/README](/202604/22/README)
 
 ### 精读区论文标签
-1. [Inductive Convolution Nuclear Norm Minimization for Tensor Completion with Arbitrary Sampling](/202604/21/2604.17001v1-inductive-convolution-nuclear-norm-minimization-for-tensor-completion-with-arbitrary-sampling)  
+1. [MESA: A Training-Free Multi-Exemplar Deep Framework for Restoring Ancient Inscription Textures](/202604/22/2604.17390v2-mesa-a-training-free-multi-exemplar-deep-framework-for-restoring-ancient-inscription-textures)  
+   标签：评分：9.0/10、query:q3
+   evidence：无需训练的缺失或损坏图像区域修复
+2. [IR-Flow: Bridging Discriminative and Generative Image Restoration via Rectified Flow](/202604/22/2604.19680v1-ir-flow-bridging-discriminative-and-generative-image-restoration-via-rectified-flow)  
+   标签：评分：9.0/10、query:q4
+   evidence：通过修正流实现的生成式图像修复
+3. [Generative Texture Filtering](/202604/22/2604.19039v1-generative-texture-filtering)  
+   标签：评分：8.0/10、query:profile-1
+   evidence：利用无标签数据集进行纹理去除和结构保留的生成式方法
+4. [LoViF 2026 Challenge on Real-World All-in-One Image Restoration: Methods and Results](/202604/22/2604.19445v1-lovif-2026-challenge-on-real-world-all-in-one-image-restoration-methods-and-results)  
+   标签：评分：8.0/10、query:profile-1
+   evidence：全能图像修复挑战赛综述
+5. [CreatiParser: Generative Image Parsing of Raster Graphic Designs into Editable Layers](/202604/22/2604.19632v1-creatiparser-generative-image-parsing-of-raster-graphic-designs-into-editable-layers)  
    标签：评分：8.0/10、query:q1
-   evidence：用于恢复以任意方式采样的条目的张量补全
-2. [MESA: A Training-Free Multi-Exemplar Deep Framework for Restoring Ancient Inscription Textures](/202604/21/2604.17390v1-mesa-a-training-free-multi-exemplar-deep-framework-for-restoring-ancient-inscription-textures)  
-   标签：评分：8.0/10、query:q3
-   evidence：无需训练的缺失区域图像级修复
+   evidence：涉及图像补全的平面设计解析生成框架
 
 ### 速读区论文标签
-1. [Dehaze-then-Splat: Generative Dehazing with Physics-Informed 3D Gaussian Splatting for Smoke-Free Novel View Synthesis](/202604/21/2604.13589v2-dehaze-then-splat-generative-dehazing-with-physics-informed-3d-gaussian-splatting-for-smoke-free-novel-view-synthesis)  
-   标签：评分：7.0/10、query:q4
-   evidence：生成式去雾与3D修复
-2. [Frequency-Decomposed INR for NIR-Assisted Low-Light RGB Image Denoising](/202604/21/2604.16800v1-frequency-decomposed-inr-for-nir-assisted-low-light-rgb-image-denoising)  
-   标签：评分：7.0/10、query:q7
-   evidence：基于频率解耦隐式神经表示的低光图像修复
-3. [CFSR: Geometry-Conditioned Shadow Removal via Physical Disentanglement](/202604/21/2604.18032v1-cfsr-geometry-conditioned-shadow-removal-via-physical-disentanglement)  
+1. [EfficientPENet: Real-Time Depth Completion from Sparse LiDAR via Lightweight Multi-Modal Fusion](/202604/22/2604.18790v1-efficientpenet-real-time-depth-completion-from-sparse-lidar-via-lightweight-multi-modal-fusion)  
+   标签：评分：7.0/10、query:q1
+   evidence：基于稀疏测量值的深度补全
+2. [Framelet-Based Blind Image Restoration with Minimax Concave Regularization](/202604/22/2604.19314v1-framelet-based-blind-image-restoration-with-minimax-concave-regularization)  
    标签：评分：7.0/10、query:q3
-   evidence：物理约束的图像修复与阴影去除
-4. [Style-Decoupled Adaptive Routing Network for Underwater Image Enhancement](/202604/21/2604.12257v1-style-decoupled-adaptive-routing-network-for-underwater-image-enhancement)  
+   evidence：使用正则化进行盲图像修复和去模糊
+3. [Allo{SR}$^2$: Rectifying One-Step Super-Resolution to Stay Real via Allomorphic Generative Flows](/202604/22/2604.19238v1-allosr2-rectifying-one-step-super-resolution-to-stay-real-via-allomorphic-generative-flows)  
    标签：评分：6.0/10、query:q7
-   evidence：用于图像修复的自适应增强框架
-5. [UniMesh: Unifying 3D Mesh Understanding and Generation](/202604/21/2604.17472v1-unimesh-unifying-3d-mesh-understanding-and-generation)  
-   标签：评分：6.0/10、query:q4
-   evidence：使用扩散模型进行3D生成、合成和补全
-6. [Coevolving Representations in Joint Image-Feature Diffusion](/202604/21/2604.17492v1-coevolving-representations-in-joint-image-feature-diffusion)  
-   标签：评分：6.0/10、query:q4
-   evidence：用于图像合成的生成模型与扩散模型
-7. [Edit Fidelity Field: Semantics-Aware Region Isolation for Training-Free Scene Text Editing](/202604/21/2604.17500v1-edit-fidelity-field-semantics-aware-region-isolation-for-training-free-scene-text-editing)  
-   标签：评分：6.0/10、query:q1
-   evidence：无需训练的场景文本编辑与区域隔离
+   evidence：利用生成先验进行图像修复与超分辨率
 
 
 <div class="dpr-home-promo-card">

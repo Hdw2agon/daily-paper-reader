@@ -6,46 +6,43 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-04-22
-- 运行时间：2026-04-22 20:07:53 UTC
+- 最新运行日期：2026-04-23
+- 运行时间：2026-04-23 20:38:46 UTC
 - 运行状态：成功
-- 本次总论文数：8
-- 精读区：5
-- 速读区：3
+- 本次总论文数：7
+- 精读区：2
+- 速读区：5
 
 ### 今日简报（AI）
-今日精选 8 篇前沿论文，重点聚焦古籍纹理修复与生成式图像恢复技术的跨越式突破。
-推荐关注无需训练的古碑文修复框架 MESA，以及通过修正流（Rectified Flow）统一判别与生成式修复的 IR-Flow。
-建议优先研读两篇 9 分佳作，探索深度学习在文物数字化保护与高质量影像重建中的最新应用。
-- 详情：[/202604/22/README](/202604/22/README)
+今日精选 7 篇视觉前沿论文，重点攻克半监督流匹配融合成像与基于 MoE 的交互式人脸解耦编辑。
+推荐深入研读 MD-Face 的无标签表征学习，以及 CVPR2026 阴影去除冠军方案中的语义几何引导思路。
+建议普通读者从 3D 线框重建或秒级高斯泼溅补全插件入手，感受生成式深度估计与底层视觉修复的实用魅力。
+- 详情：[/202604/23/README](/202604/23/README)
 
 ### 精读区论文标签
-1. [MESA: A Training-Free Multi-Exemplar Deep Framework for Restoring Ancient Inscription Textures](/202604/22/2604.17390v2-mesa-a-training-free-multi-exemplar-deep-framework-for-restoring-ancient-inscription-textures)  
-   标签：评分：9.0/10、query:q3
-   evidence：无需训练的缺失或损坏图像区域修复
-2. [IR-Flow: Bridging Discriminative and Generative Image Restoration via Rectified Flow](/202604/22/2604.19680v1-ir-flow-bridging-discriminative-and-generative-image-restoration-via-rectified-flow)  
-   标签：评分：9.0/10、query:q4
-   evidence：通过修正流实现的生成式图像修复
-3. [Generative Texture Filtering](/202604/22/2604.19039v1-generative-texture-filtering)  
+1. [Semi-Supervised Flow Matching for Mosaiced and Panchromatic Fusion Imaging](/202604/23/2604.20128v1-semi-supervised-flow-matching-for-mosaiced-and-panchromatic-fusion-imaging)  
    标签：评分：8.0/10、query:profile-1
-   evidence：利用无标签数据集进行纹理去除和结构保留的生成式方法
-4. [LoViF 2026 Challenge on Real-World All-in-One Image Restoration: Methods and Results](/202604/22/2604.19445v1-lovif-2026-challenge-on-real-world-all-in-one-image-restoration-methods-and-results)  
-   标签：评分：8.0/10、query:profile-1
-   evidence：全能图像修复挑战赛综述
-5. [CreatiParser: Generative Image Parsing of Raster Graphic Designs into Editable Layers](/202604/22/2604.19632v1-creatiparser-generative-image-parsing-of-raster-graphic-designs-into-editable-layers)  
-   标签：评分：8.0/10、query:q1
-   evidence：涉及图像补全的平面设计解析生成框架
+   evidence：用于图像融合与修复的半监督流匹配
+2. [MD-Face: MoE-Enhanced Label-Free Disentangled Representation for Interactive Facial Attribute Editing](/202604/23/2604.20317v1-md-face-moe-enhanced-label-free-disentangled-representation-for-interactive-facial-attribute-editing)  
+   标签：评分：8.0/10、query:q3
+   evidence：用于编辑的无标签解耦表示
 
 ### 速读区论文标签
-1. [EfficientPENet: Real-Time Depth Completion from Sparse LiDAR via Lightweight Multi-Modal Fusion](/202604/22/2604.18790v1-efficientpenet-real-time-depth-completion-from-sparse-lidar-via-lightweight-multi-modal-fusion)  
+1. [Reconstruction of a 3D wireframe from a single line drawing via generative depth estimation](/202604/23/2604.13549v1-reconstruction-of-a-3d-wireframe-from-a-single-line-drawing-via-generative-depth-estimation)  
+   标签：评分：7.0/10、query:q4
+   evidence：用于重建的生成式深度估计和掩码
+2. [Winner of CVPR2026 NTIRE Challenge on Image Shadow Removal: Semantic and Geometric Guidance for Shadow Removal via Cascaded Refinement](/202604/23/2604.16177v2-winner-of-cvpr2026-ntire-challenge-on-image-shadow-removal-semantic-and-geometric-guidance-for-shadow-removal-via-cascaded-refinement)  
+   标签：评分：7.0/10、query:q5
+   evidence：CVPR挑战赛图像阴影去除与修复冠军
+3. [GSCompleter: A Distillation-Free Plugin for Metric-Aware 3D Gaussian Splatting Completion in Seconds](/202604/23/2604.20155v1-gscompleter-a-distillation-free-plugin-for-metric-aware-3d-gaussian-splatting-completion-in-seconds)  
    标签：评分：7.0/10、query:q1
-   evidence：基于稀疏测量值的深度补全
-2. [Framelet-Based Blind Image Restoration with Minimax Concave Regularization](/202604/22/2604.19314v1-framelet-based-blind-image-restoration-with-minimax-concave-regularization)  
-   标签：评分：7.0/10、query:q3
-   evidence：使用正则化进行盲图像修复和去模糊
-3. [Allo{SR}$^2$: Rectifying One-Step Super-Resolution to Stay Real via Allomorphic Generative Flows](/202604/22/2604.19238v1-allosr2-rectifying-one-step-super-resolution-to-stay-real-via-allomorphic-generative-flows)  
+   evidence：3D高斯泼溅补全与场景合成
+4. [Rethinking Where to Edit: Task-Aware Localization for Instruction-Based Image Editing](/202604/23/2604.20258v1-rethinking-where-to-edit-task-aware-localization-for-instruction-based-image-editing)  
+   标签：评分：6.0/10、query:q3
+   evidence：无需训练的图像编辑与定位
+5. [Self-supervised pretraining for an iterative image size agnostic vision transformer](/202604/23/2604.20392v1-self-supervised-pretraining-for-an-iterative-image-size-agnostic-vision-transformer)  
    标签：评分：6.0/10、query:q7
-   evidence：利用生成先验进行图像修复与超分辨率
+   evidence：视觉 Transformer 的自监督预训练
 
 
 <div class="dpr-home-promo-card">

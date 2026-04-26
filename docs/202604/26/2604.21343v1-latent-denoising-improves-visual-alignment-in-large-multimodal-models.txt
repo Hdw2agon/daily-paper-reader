@@ -1,0 +1,1277 @@
+Title: Latent Denoising Improves Visual Alignment in Large Multimodal Models
+
+URL Source: https://arxiv.org/pdf/2604.21343v1
+
+Published Time: Fri, 24 Apr 2026 00:35:04 GMT
+
+Number of Pages: 19
+
+Markdown Content:
+# Latent Denoising Improves Visual Alignment in Large Multimodal Models 
+
+## Dhruv Parikh ∗
+
+University of Southern California Los Angeles, CA, USA dhruvash@usc.edu 
+
+## Jacob Fein-Ashley ∗
+
+University of Southern California Los Angeles, CA, USA feinashl@usc.edu 
+
+## Rajgopal Kannan 
+
+DEVCOM ARL Army Research Office USA rajgopal.kannan.civ@army.mil 
+
+## Viktor Prasanna 
+
+University of Southern California Los Angeles, CA, USA prasanna@usc.edu 
+
+Abstract 
+
+Large Multimodal Models (LMMs) such as LLaVA are typically trained with an autoregressive language modeling objective, pro-viding only indirect supervision to visual tokens. This often yields weak internal visual representations and brittle behavior under distribution shift. Inspired by recent progress on latent denois-ing for learning high-quality visual tokenizers, we show that the same principle provides an effective form of visual supervision for improving internal visual feature alignment and multimodal understanding in LMMs. We propose a latent denoising frame-work that corrupts projected visual tokens using a saliency-aware mixture of masking and Gaussian noising. The LMM is trained to denoise these corrupted tokens by recovering clean teacher patch features from hidden states at a selected intermediate LLM layer using a decoder. To prevent representation collapse, our frame-work also preserves the teacher’s intra-image similarity structure and applies intra-image contrastive patch distillation. During in-ference, corruption and auxiliary heads are disabled, introducing no additional inference-time overhead. Across a broad suite of standard multimodal benchmarks, our method consistently im-proves visual understanding and reasoning over strong baselines, and yields clear gains on compositional robustness benchmarks (e.g., NaturalBench). Moreover, under ImageNet-C-style non-adversarial common corruptions applied to benchmark images, our method maintains higher accuracy and exhibits reduced degradation at both moderate and severe corruption levels. Our code is available at https://github.com/dhruvashp/latent-denoising-for-lmms. 
+
+CCS Concepts 
+
+• Computing methodologies → Computer vision ; Machine learning .
+
+Keywords 
+
+large multimodal models, visual alignment, latent denoising, visual supervision, corruption robustness 
+
+1 Introduction 
+
+Large Language Models (LLMs), spanning proprietary systems such as GPT 5.4, Gemini 3.1 Pro, and Claude 4.6 Opus [ 2, 26 , 62 ], as well 
+
+> ∗Equal contribution.
+
+as open-source models such as Llama 4, DeepSeek-V2, and Qwen3-Next [ 17 , 58 , 66 ], have rapidly become the backbone of modern AI systems and applications. Building on this progress, Large Multi-modal Models (LMMs) have emerged as a dominant paradigm for jointly reasoning over language and visual content. A large class of open-source LMMs follows a simple yet powerful recipe: pairing a pretrained LLM with a strong vision encoder through a lightweight projector and performing multimodal instruction tuning, as exem-plified by LLaVA [ 47 –49 ] and its successors such as Qwen-VL and InternVL [ 4– 6, 11 –13 , 81 ]. In parallel, another line of work explores models trained natively in a multimodal fashion through large-scale joint pretraining across vision and language, including proprietary systems such as GPT-4o and Gemini [ 61 , 73 ] as well as open-source models such as Kosmos-2, Molmo, and Transfusion [ 14 , 64 , 75 ]. Such LMMs have demonstrated strong capabilities across a wide range of complex visual understanding and multimodal reasoning tasks, including visual question answering and compositional vi-sual reasoning [ 3, 27 , 34 ], document and scene text understanding [ 57 , 60 , 70 ], chart and infographic reasoning [ 54 , 56 , 59 ], multi-modal knowledge-intensive reasoning and large-scale multimodal evaluation benchmarks [ 42 , 50 , 88 ], and real-world visual reasoning under noisy or unconstrained imagery [7, 41, 84]. Despite these advances, recent studies increasingly show that modern LMMs remain imperfect visual reasoners. Under cross-modal conflict, they can place disproportionate trust in textual inputs and follow misleading language cues over grounded visual evidence [ 18 ]. They also remain prone to object hallucination and image-context reasoning failures, even when prompted on seem-ingly simple visual facts [ 28 , 46 ]. Complementary analyses of their internal behavior further reveal that visual evidence is often weakly utilized: LMMs can exhibit visual attention sink effects, rapidly di-minishing contribution of visual tokens with depth, and highly sparse visual grounding behavior concentrated in only a few atten-tion heads [ 9, 37 , 38 ]. More broadly, recent work on multimodal representation analysis suggests that these models continue to suf-fer from imperfect cross-modal alignment and incomplete modality integration within the LLM pathway [ 33 , 55 ]. Collectively, these findings suggest that, despite strong task-level performance, cur-rent LMM training still provides insufficient direct supervision to internal visual representations, leaving them vulnerable to text-dominant behaviors and brittle multimodal reasoning.  
+
+> arXiv:2604.21343v1 [cs.CV] 23 Apr 2026 Conference’17, July 2017, Washington, DC, USA Dhruv Parikh, Jacob Fein-Ashley, Rajgopal Kannan, and Viktor Prasanna
+
+Recent work has begun to address this limitation more directly. Some approaches first strengthen the visual backbone itself, for example by post-training vision encoders for better locality or aligning CLIP-like features to stronger vision-centric representa-tions, thereby improving the visual inputs supplied to downstream LMMs while remaining largely external to end-to-end multimodal instruction tuning [ 15 , 25 ]. Others inject explicit supervision into the multimodal stack by guiding projector outputs or internal vi-sual tokens using refined shallow-layer embeddings, patch-level alignment, or alignment to one or more vision foundation mod-els [ 36 , 72 , 82 , 87 ]. A third line introduces reconstructive visual supervision through latent reconstruction, masked image model-ing, or diffusion-based objectives [ 44 , 71 , 80 ]. Collectively, these studies make clear that direct visual supervision matters (Figure 1); however, existing approaches remain fragmented across backbone refinement, feature alignment, and reconstructive supervision, and often rely on specialized teachers, auxiliary generators, or narrowly scoped supervision objectives. As a result, a more unified and effi-cient mechanism for refining internal visual representations within LMMs remains underexplored. Motivated by this gap, we draw inspiration from a recent line of work suggesting that high-quality visual latent spaces need not be specific to either understanding or generation. On the genera-tion side, semantically rich representation spaces have been shown to support strong diffusion-based image synthesis through rep-resentation autoencoders, while more recent unified multimodal pretraining results suggest that a shared visual representation can simultaneously benefit visual understanding and generation within a single model [ 75 , 76 , 93 ]. In parallel, recent work on visual to-kenizers shows that latent denoising —recovering clean latent tar-gets from corrupted latent inputs, e.g., under masking or Gaussian perturbations—can substantially improve the quality of learned visual tokens for downstream generation [ 85 ]. These developments motivate a simple question for large multimodal models: if latent denoising improves the quality of visual token spaces for generation, can it also serve as an effective form of supervision for the internal visual features used for multimodal understanding? 
+
+Guided by this perspective, we propose a training-time latent de-noising framework for large multimodal models (Figure 2). Rather than relying on target-text supervision alone to shape visual rep-resentations, our method perturbs projected image tokens using a saliency-aware mixture of masking and Gaussian noising [ 85 ], and trains the model to recover aligned teacher patch features from these corrupted tokens. The supervision is applied to an internal LMM layer, following recent observations that intermediate layers often preserve stronger visual signal than the final layer [ 87 ], and is complemented by structure-preserving and discriminative objec-tives that retain intra-image geometry and patch specificity [ 25 , 82 ]. Importantly, all auxiliary corruption and supervision are used only during training, so inference remains identical to the underlying LMM with no additional overhead. We evaluate the proposed framework across three widely used open-source LMM variants spanning distinct vision encoders and model families, using 18 multimodal benchmarks covering vi-sual question answering, OCR- and document-centric understand-ing, chart and structured visual reasoning, general multimodal reasoning, and robustness-oriented settings targeting real-world low-quality imagery and compositional consistency. Beyond stan-dard evaluation, we adapt the common-corruptions paradigm of Hendrycks and Dietterich [ 30 ] to LMM assessment, introducing a deterministic, non-adversarial corruption protocol that applies noise, blur, weather, and digital corruptions—with multiple subtypes sampled within each family—directly to the evaluation images of these benchmark datasets [ 35 ]. Across these settings, the proposed framework consistently improves multimodal understanding, rea-soning, and robustness over strong baselines, while maintaining higher accuracy and reduced degradation under corrupted-input evaluation. Our contributions are threefold: 
+
+• We introduce a training-time latent denoising framework for LMM instruction tuning that uses saliency-guided masking and Gaussian noising, teacher-guided feature recovery, & structure-preserving objectives to refine internal visual representations. 
+
+• We develop a practical common-corruption evaluation protocol for LMMs, inspired by the ImageNet-C benchmark [ 30 ] and re-lated visual robustness work in VQA [ 35 ], enabling systematic non-adversarial evaluation under noise, blur, weather, and digital corruptions applied directly to benchmark evaluation images. 
+
+• We show that latent denoising consistently improves multimodal understanding, reasoning, and robustness across architectures, including under corrupted-input stress tests, while introducing no additional inference overhead. 
+
+2 Related Works 
+
+Large multimodal models. The dominant open-source LMM par-adigm pairs a pretrained LLM with a vision encoder through a light-weight connector, followed by multimodal instruction tuning [ 1, 4 –6 , 11 – 13 , 16 , 24 , 45 , 47 –49 , 81 , 86 , 94 ]. These models build on pre-trained vision backbones such as CLIP and SigLIP [ 20 , 67 , 77 , 90 ], while natively multimodal systems explore joint pretraining across modalities [ 14 , 61 , 64 , 73 , 75 ]. Our work targets the open-source instruction-tuned setting where internal visual representation qual-ity remains a central challenge. 
+
+Visual supervision in LMMs. Recent work introduces direct vi-sual supervision during LMM training through three broad strate-gies: backbone refinement via encoder-level alignment to stronger vision models [ 15 , 25 ]; feature alignment within the multimodal stack through projector refinement, patch-level supervision, or guidance from vision foundation models [ 36 , 72 , 82 , 87 ]; and re-constructive supervision through latent reconstruction, masked modeling, or diffusion-based objectives [ 44 , 71 , 80 ]. Our work casts visual supervision as generalized latent denoising , unifying continu-ous and discrete corruption with relational and contrastive losses. 
+
+Denoising for visual representations. Corruption-and-recovery has long driven visual representation learning, from denoising autoencoders and masked image modeling [ 29 , 79 ] to diffusion-based generative models [ 31 , 68 ]. Recent tokenizer work shows that combining masking and Gaussian corruption in latent space yields stronger visual tokenizers [ 85 ], while unified multimodal models demonstrate that strong visual latent spaces benefit both understanding and generation [ 22 , 65 , 75 , 76 , 78 , 89 , 93 ]. We bring this latent denoising principle into multimodal instruction tuning for visual understanding. Latent Denoising Improves Visual Alignment in Large Multimodal Models Conference’17, July 2017, Washington, DC, USA Vision Encoder     
+
+> Connector Tokenizer
+> Instruction
+> LLM
+> ℒlang Visual Supervision
+> Query Token
+> Answer Token
+> Vision Token
+> Vision Encoder
+> Connector Tokenizer
+> Instruction
+> LLM
+> ℒlang
+> Teacher VFM
+> Align
+> Vision Encoder
+> Connector Tokenizer
+> Instruction
+> LLM
+> Latent Projector
+> VAE Encoder
+> Diffusion Model
+> 𝜖 𝑡
+> Condition
+> MSE
+> DM Training
+> Latent Prediction
+> Vision Encoder
+> Connector
+> Tokenizer
+> Instruction
+> LLM
+> Decoder
+> Teacher VFM
+> Latent Deconstruction
+> Saliency Scores
+> Latent Denoising
+> Noisy Token
+> Masked Token
+> ℒlang
+> a. Standard LMM Training b. Visual Representation Alignment c. Reconstructive LMM Training d. Latent Denoising for LMMs (Ours)
+
+Figure 1: Comparison of visual supervision paradigms for LMMs. (a) Standard training: language loss only; visual tokens indirectly constrained. (b) Representation alignment: features aligned to external teachers [ 36 , 72 , 82 , 87 ]. (c) Reconstructive supervision: latent or diffusion-style reconstruction [ 44 , 71 , 80 ]. (d) Ours : saliency-guided corruption of projected visual tokens via Gaussian noising and masking, with recovery of clean teacher targets from intermediate hidden states. Corruption evaluation. The ImageNet-C common-corruptions paradigm [ 30 ] has recently extended to multimodal settings through VQA robustness benchmarks [ 35 ] and broader LMM robustness studies [ 43 ], alongside adversarial robustness work [ 74 , 92 ]. We adapt this non-adversarial corruption paradigm into a deterministic evaluation protocol for LMMs. 
+
+3 Method 3.1 Setup and Motivation 
+
+Large multimodal models. Following the dominant recipe in open-source large multimodal models [ 1 , 13 , 16 , 45 , 49 , 81 ], we con-sider a decoder-only LMM built from three components: a frozen vision encoder 𝐸 𝝓 , a vision–language projector 𝑃 𝝍 , and an autore-gressive language model 𝐿 𝜽 . Given an input image X ∈ R𝐻 ×𝑊 ×3,the vision encoder produces a sequence of 𝑆 patch-level visual features V = 𝐸 𝝓 (X) = [v1, . . . , v𝑆 ], where v𝑖 ∈ R𝑑 𝑣 , which are mapped into the language-model embedding space through the projector Z = 𝑃 𝝍 (V) = [z1, . . . , z𝑆 ], where z𝑖 ∈ R𝑑 ℎ . Let 
+
+Q = [q1, . . . , q𝑀 ] ∈ R𝑀 ×𝑑 ℎ denote the tokenized user-query embed-dings obtained from the LMM’s text embedding layer. The LMM then processes the multimodal sequence [Z; Q] and autoregres-sively models the target answer sequence A = [a1, . . . , a𝑇 ] as 
+
+𝑝 𝚯 (A | Z, Q) =
+
+> 𝑇
+
+Ö
+
+> 𝑡 =1
+
+𝑝 𝚯 (a𝑡 | a<𝑡 , Z, Q) , (1) where 𝚯 = {𝝓 , 𝝍 , 𝜽 }. In practice, 𝐸 𝝓 is typically a pretrained vision foundation model such as a CLIP- or SigLIP-style encoder [ 67 , 77 ,90 ], while 𝑃 𝝍 may be instantiated as an MLP projector, a Q-Former, or a related cross-modal connector [16, 45, 49]. 
+
+Standard LMM training. Most LMMs are trained in two stages [47 –49 ]. In the first stage, often referred to as projector pretraining, the connector 𝑃 𝝍 is optimized on image–text pairs while the vision encoder and language model remain frozen. In the second stage, multimodal instruction-tuning data is used to adapt the multimodal model for visual instruction following, typically with the vision encoder still frozen and the projector and language model trainable. In both stages, optimization is driven by standard teacher-forced autoregressive supervision on the target answer tokens. For nota-tional simplicity, we write the multimodal training input as [Z; U],where U = [u1, . . . , u𝑈 ] denotes the tokenized text sequence con-taining the user instruction and target assistant response. Note that real training samples may be multi-turn. The standard language modeling loss is 
+
+Llang = −∑︁  
+
+> 𝑡 ∈ T asst
+
+log 𝑝 𝚯 (u𝑡 | u<𝑡 , Z) , (2) where Tasst indexes the assistant positions in the training sequence, i.e., the target answer tokens to be predicted. Under this standard recipe, the trainable parameters are typically {𝝍 , 𝜽 }, while the vi-sual backbone 𝝓 remains frozen. As a result, internal visual rep-resentations are supervised only indirectly through the final text-generation objective, motivating more direct visual supervision during multimodal instruction tuning. 
+
+Latent denoising as supervision. We draw inspiration from recent work suggesting that latent denoising provides a general mech-anism for learning high-quality visual representations, and that improvements in visual representation quality can benefit both understanding and generation [ 75 , 76 , 85 , 93 ]. Latent denoising consists of applying a corruption or deconstruction process to clean latent variables and then learning to recover aligned clean targets from the corrupted latent inputs. Such corruption may take the form of discrete information removal, as in masking-based objec-tives, continuous stochastic perturbation, as in Gaussian denoising, or a combination of both [ 29 , 31 , 85 ]. Formally, given clean latent visual tokens Z, we define corrupted latent tokens by sampling from a corruption distribution 
+
+˜Z ∼ 𝑞 ( ˜Z | Z), equivalently ˜Z = 𝑓 C (Z), (3) where 𝑞 ( ˜Z | Z) denotes a latent corruption distribution and 𝑓 C
+
+its corresponding corruption operator. To provide clean recovery targets, we further define frozen teacher features Y = 𝐹 𝜻 (X) =
+
+[y1, . . . , y𝑆 ], where y𝑖 ∈ R𝑑 𝑡 and 𝐹 𝜻 is instantiated in our exper-iments using the same frozen visual backbone as the front-end encoder. Rather than supervising only the final generated text, our method treats projected image tokens as a latent space, corrupts a subset of these tokens, and trains the LMM to recover aligned clean Conference’17, July 2017, Washington, DC, USA Dhruv Parikh, Jacob Fein-Ashley, Rajgopal Kannan, and Viktor Prasanna 
+
+teacher features from an internal hidden layer. This reframes visual supervision in LMMs as a latent corruption-and-recovery problem (Figure 2), which is the central perspective of our method. 
+
+3.2 Latent Corruption & Recovery for LMMs 
+
+Gaussian noising. Given projected visual tokens Z = [z1, . . . , z𝑆 ],we first define a soft deconstruction process that perturbs a subset of tokens through Gaussian noising. Let N ⊆ { 1, . . . , 𝑆 } denote the set of indices selected for Gaussian corruption, with |N | = 𝐾 𝑁 .For each 𝑖 ∈ N , we sample a token-specific corruption strength 
+
+𝜏 𝑖 ∼ Unif (0, 𝜏 max ) and Gaussian noise 𝝐 𝑖 ∼ N ( 0, 𝜎 2I), and define the corrupted token as 
+
+˜z gauss  
+
+> 𝑖
+
+= (1 − 𝜏 𝑖 )z𝑖 + 𝜏 𝑖 𝝐 𝑖 , 𝑖 ∈ N . (4) This operation preserves a controllable portion of the original visual signal while forcing the LMM to recover aligned clean features from a degraded latent input. For noised tokens, we additionally provide a lightweight noise-conditioning signal indicating the magnitude of the applied corruption. 
+
+Masking. In parallel, we define hard deconstruction process via masking. Let M ⊆ { 1, . . . , 𝑆 } \ N denote the set of indices selected for masking, with |M| = 𝐾 𝑀 . For each 𝑖 ∈ M , the projected visual token is replaced with a learnable mask embedding emask ∈ R𝑑 ℎ :
+
+˜z mask  
+
+> 𝑖
+
+= emask , 𝑖 ∈ M . (5) Masking removes token-level visual information entirely, creating a more severe recovery problem than Gaussian noising. In our frame-work, masking therefore plays role of hard latent deconstruction, complementing the softer continuous perturbation in Eq. (4). 
+
+Joint latent deconstruction. We combine the two deconstruction modes above into a single corruption process over the projected visual sequence. We write the joint corrupted sequence as 
+
+˜z𝑖 =
+
+
+
+(1 − 𝜏 𝑖 )z𝑖 + 𝜏 𝑖 𝝐 𝑖 , 𝑖 ∈ N ,
+
+emask , 𝑖 ∈ M ,
+
+z𝑖 , otherwise ,
+
+(6) and denote the full corrupted-token set by C = N ∪ M . The sets 
+
+N and M are selected through a saliency-guided strategy derived from the frozen visual encoder: visually salient patches are pref-erentially assigned to Gaussian noising, while less salient patches are preferentially assigned to masking. Intuitively, this produces a more balanced latent denoising problem. Because the LMM remains a standard decoder-only model with causal attention, it cannot rely on future visual positions to reconstruct heavily corrupted salient content. We therefore apply soft corruption to high-saliency to-kens and reserve hard masking for lower-saliency tokens, typically with 𝐾 𝑁 > 𝐾 𝑀 , so that the recovery task remains challenging but tractable. A practical advantage of this design is that it requires no modification to the causal masking structure of the underly-ing LMM, making the method naturally compatible with standard decoder-only backbones. 
+
+Recovering aligned visual targets. The corrupted visual sequence 
+
+˜Z = [˜z1, . . . , ˜z𝑆 ] is concatenated with the tokenized query embed-dings and processed by the LMM in the standard autoregressive manner. To recover clean aligned targets, we extract visual hidden states from a selected internal layer ℓ𝑠 of the language model. Let 
+
+h(ℓ𝑠 ) 
+
+> 𝑖
+
+∈ R𝑑 ℎ denote the hidden state at the 𝑖 -th visual token position. We then attach a lightweight decoder 𝐷 𝝌 : R𝑑 ℎ → R𝑑 𝑡 and decode only the corrupted-token positions: 
+
+ˆy𝑖 = 𝐷 𝝌 
+
+
+
+h(ℓ𝑠 )
+
+> 𝑖
+
+
+
+, 𝑖 ∈ C . (7) In practice, we apply this decoding from an intermediate layer of the LMM rather than the final layer, motivated by recent evidence that visual signal is often strongest in the middle of the network and progressively diluted at greater depths [ 9 , 72 , 87 ]. This choice leaves the final next-token prediction pathway unchanged while encouraging the LMM to maintain stronger and better-aligned internal visual features, thereby improving visual alignment for downstream multimodal reasoning. 
+
+3.3 Training Objective 
+
+Reconstruction loss. Given decoded predictions ˆy𝑖 = 𝐷 𝝌 (h(ℓ𝑠 ) 
+
+> 𝑖
+
+)
+
+for corrupted token positions 𝑖 ∈ C , we first impose a normalized reconstruction loss that aligns each prediction with its clean teacher target y𝑖 :
+
+Lrec = 1
+
+|C| ∑︁ 𝑖 ∈ C 
+
+∥norm ( ˆy𝑖 ) − norm (y𝑖 )∥ 22 , (8) where norm (a) = a/∥ a∥2. This gives direct patch-level supervi-sion to the internal visual representations used by the LMM, while making the alignment invariant to feature scale [72, 80, 87]. 
+
+Relational alignment loss. Pointwise recovery alone does not guarantee that decoded features preserve the teacher’s global visual structure. We therefore align the pairwise similarity geometry of decoded and teacher features on the corrupted-token set C. Let 
+
+S𝑇 𝑖 𝑗 = cos (y𝑖 , y𝑗 ), S𝑆 𝑖 𝑗 = cos ( ˆy𝑖 , ˆy𝑗 ), 𝑖, 𝑗 ∈ C , (9) denote the teacher and student similarity matrices. We then minimize a row-wise KL divergence between the corresponding temperature-scaled similarity distributions: 
+
+Lrel = 1
+
+|C| ∑︁ 𝑖 ∈ C 
+
+KL 
+
+
+
+softmax (S𝑇 𝑖 : /𝜏 𝑟 ) ∥ softmax (S𝑆 𝑖 :/𝜏 𝑟 )
+
+
+
+. (10) This encourages the recovered visual features to remain globally consistent with the teacher representation rather than only match-ing it pointwise [25, 63]. 
+
+Contrastive loss. Even with pointwise and relational alignment, decoded features may still become weakly discriminative or collapse toward overly similar representations. To encourage patch-level distinctiveness, we add an intra-image contrastive loss: 
+
+Lcon = − 1
+
+|C| ∑︁ 𝑖 ∈ C 
+
+log exp (cos ( ˆy𝑖 , y𝑖 )/ 𝜏 𝑐 )
+
+Í𝑗 ∈ C exp  cos ( ˆy𝑖 , y𝑗 )/ 𝜏 𝑐 
+
+ . (11) Here, each decoded corrupted token is treated as a positive pair with its own teacher target and as a negative pair against the remaining corrupted-token targets in the same image. This complements the relational loss by explicitly discouraging degenerate solutions and sharpening patch-level discrimination [10, 82]. Latent Denoising Improves Visual Alignment in Large Multimodal Models Conference’17, July 2017, Washington, DC, USA Vision Encoder                  
+
+> VFM Teacher
+> Connector
+> Attention Map
+> Saliency
+> 𝐘
+> Image 𝐗
+> 𝐙
+> 1−𝝉 +𝝉
+> 𝝐
+> 𝐞 mask
+> Noise
+> Mask
+> Identity
+> Latent Deconstruction ෩𝒁
+> Instruction: The dog is sitting on the ground Tokenizer
+> 𝑙 1𝑙 2𝑙 𝑠 𝑙 𝐿
+> Decoder
+> 𝐇 𝑙 𝑠
+> ℒlang
+> ෠𝐘
+> Latent Denoising ℒrec ,ℒrel ,ℒcon on 𝐘 ,෠𝐘
+> Large Language Model
+> Text Token
+> Vision Token
+> Gaussian Noise
+> Learnable Mask Token
+
+Figure 2: Overview of latent denoising. Projected visual tokens Z are corrupted via saliency-guided Gaussian noising and masking to yield ˜Z. The LMM processes corrupted tokens alongside the instruction, and a lightweight decoder recovers clean teacher targets ˆY from an intermediate hidden layer. Training combines language modeling with reconstruction, relational, and contrastive denoising losses. All corruption and auxiliary decoding are training-only; inference is unchanged. 
+
+Overall objective. The final training objective combines the stan-dard language modeling loss in Eq. (2) with the three visual super-vision terms: 
+
+L = Llang + 𝜆 rec Lrec + 𝜆 rel Lrel + 𝜆 con Lcon . (12) All auxiliary losses are computed only on corrupted visual tokens. At inference time, corruption is disabled and the auxiliary decoder is inactive, so the model reduces to the original LMM forward pass with no additional runtime overhead. 
+
+4 Experiments 
+
+We evaluate the proposed method (Section 3) across three LMM ar-chitectures spanning different vision encoders, language backbones, and training regimes. Our evaluation covers standard multimodal understanding benchmarks, robustness-oriented benchmarks, and a systematic corruption evaluation protocol. We further conduct ab-lation studies to analyze contributions of individual design choices. 
+
+4.1 Setup 
+
+We instantiate latent denoising on three architectures: LLaVA-1.5 [ 47 , 49 ] with CLIP ViT-L/14@336 [ 67 ] and with SigLIP-SO400M/14@384 [ 90 ], both paired with Vicuna-7B-v1.5; and Qwen-2.5-VL-7B-Instruct [ 6 ], post-tuned on LLaVA-665K. LLaVA variants follow standard two stage recipe (stage 1: projector pretraining on 558K, stage 2: instruction tuning on 665K with latent denoising enabled under a warmup–hold–decay schedule). Ablations use LoRA [ 32 ] ( 𝑟 =128 , 𝛼 =256 ). Full training details in Sec. E. We evaluate on 18 benchmarks spanning visual QA [ 27 , 34 ], hallucination [ 28 , 46 ], general reasoning [ 8, 23 , 50 , 88 ], science and math [ 52 , 53 ], text understanding [ 51 , 70 ], charts and diagrams [39, 54], and robustness [7, 41, 83, 84]. 
+
+4.2 Corruption Evaluation Protocol 
+
+We adapt the ImageNet-C paradigm [ 30 , 35 ] into a determin-istic corruption protocol for LMMs, applying corruptions from four families—noise, blur, weather, and digital—at severity levels 3 and 5. For each image, a corruption subtype is deterministically selected via a seeded hash, ensuring reproducibility. Crucially, our training-time corruption operates in the projected latent space , while evaluation-time corruption is applied to input images —the two are independent, testing whether improved internal representations transfer to robustness under input-level distribution shifts. 
+
+Research Questions. Our experiments are organized around four core questions: (i) Does latent denoising improve multimodal un-derstanding across architectures? (Sec. 4.3) (ii) Does it improve robustness under corrupted visual inputs? (Sec. 4.4) (iii) Does it pro-duce measurably better internal visual representations? (Sec. 4.5) 
+
+(iv) How do individual design choices contribute to the overall framework? (Sec. 4.6) 
+
+4.3 Main Results 
+
+Table 1 presents clean-evaluation results across three LMM architec-tures: LLaVA with CLIP ViT-L/14@336 (our primary setting), LLaVA with SigLIP-SO400M/14@384, and Qwen-2.5-VL-7B-Instruct. For each architecture, we compare a matched baseline trained under identical conditions without latent denoising. 
+
+Consistent improvement across architectures. Latent denois-ing yields positive improvements on the large majority of bench-marks across all three architectures: 15 out of 18 for LLaVA+CLIP, 18 out of 18 for LLaVA+SigLIP, and 17 out of 18 for Qwen-2.5-VL. Notably, the method improves a strong, already-instruction-tuned Qwen model that was not trained from scratch with our framework, demonstrating that latent denoising can refine visual representa-tions even during post-tuning of mature models. 
+
+Largest gains on visual reasoning and grounding. The most substantial improvements appear on benchmarks that demand fine-grained visual reasoning. GQA, which tests compositional spatial reasoning, improves by +1.6, +2.2, and +4.4 across the three architec-tures. MMStar, which requires holistic multimodal understanding, improves by +3.1, +1.9, and +1.2. NaturalBench group accuracy, a strict compositional consistency metric, improves by +2.4, +0.9, and +2.2. These gains are consistent with our hypothesis that train-ing the LMM to recover aligned visual features from corrupted latent inputs strengthens the internal visual representations used for downstream reasoning. 
+
+Robustness benchmarks benefit broadly. Even without any corruption applied at evaluation time, robustness-oriented bench-marks that feature naturally challenging imagery show clear im-provements. VizWiz (+0.8 to +3.4 across architectures), Q-Bench (+0.9 to +2.0), and RealWorldQA (+1.1 to +4.2 on SigLIP and Qwen) Conference’17, July 2017, Washington, DC, USA Dhruv Parikh, Jacob Fein-Ashley, Rajgopal Kannan, and Viktor Prasanna 
+
+Table 1: Main results across three LMM architectures. B = Baseline, LD = Latent Denoising (ours). Best in each pair is bolded. NaturalBench reports G ACC .
+
+LLaVA+CLIP LLaVA+SigLIP Qwen-2.5-VL 
+
+B LD Δ B LD Δ B LD Δ
+
+> VQA
+
+VQAv2 76.7 77.3 +0.6 76.3 78.6 +2.3 82.2 83.4 +1.2 GQA 61.9 63.5 +1.6 62.1 64.3 +2.2 60.2 64.6 +4.4 
+
+> Hall.
+
+POPE 87.0 87.7 +0.7 85.4 87.2 +1.8 87.2 88.1 +0.9 HallBench 27.6 29.6 +2.0 28.3 30.7 +2.4 52.9 54.7 +1.8 
+
+> General
+
+MME 1879 1846 -33 1708 1733 +25 2279 2265 -15 MMBench 64.0 65.7 +1.7 64.5 68.7 +4.2 83.1 84.5 +1.4 MMStar 33.7 36.8 +3.1 36.9 38.8 +1.9 61.3 62.5 +1.2 MMMU 36.1 36.2 +0.1 34.6 36.1 +1.5 50.4 52.3 +1.9 
+
+> Sci.
+
+SQA-IMG 69.5 69.2 -0.3 70.6 72.4 +1.8 87.3 88.5 +1.2 MathVista 25.6 27.6 +2.0 26.4 29.0 +2.6 68.2 70.3 +2.1 
+
+> Text
+
+TextVQA 46.1 46.7 +0.6 49.6 54.1 +4.5 81.8 83.7 +1.9 OCRBench 31.4 32.1 +0.7 32.2 34.8 +2.6 82.3 84.2 +1.9 
+
+> Chart
+
+ChartQA 18.1 18.3 +0.2 15.9 16.9 +1.0 83.0 85.4 +2.4 AI2D 55.5 57.2 +1.7 54.8 57.1 +2.3 83.9 85.4 +1.5 
+
+> Robust.
+
+NatBench 13.3 15.7 +2.4 14.8 15.7 +0.9 31.3 33.5 +2.2 RWQA 56.1 56.1 0.0 53.0 54.1 +1.1 68.7 72.9 +4.2 VizWiz 54.0 54.8 +0.8 54.4 57.8 +3.4 68.9 70.9 +2.0 Q-Bench 58.7 59.6 +0.9 57.4 59.1 +1.7 73.9 75.9 +2.0 
+
+all benefit, suggesting that stronger internal visual representations translate to better handling of low-quality visual inputs. 
+
+MME as an outlier. The combined MME score (perception + cogni-tion) is the only metric that shows a consistent slight decline on two of three architectures (LLaVA+CLIP: −32 .7, Qwen: −14 .6), while im-proving on SigLIP (+24.4). We note that MME uses a binary yes/no format with perception subtasks that emphasize existence, count, and position; such coarse judgments may be less sensitive to the fine-grained visual alignment improvements that latent denoising provides. 
+
+4.4 Corruption Robustness 
+
+We now evaluate whether the improved visual representations pro-duced by latent denoising translate to robustness under corrupted visual inputs. Following the protocol described in Sec. 4.2, we ap-ply four corruption families—noise, blur, weather, and digital—at severity levels 3 and 5 to the images of each evaluation benchmark, and compare baseline and latent denoising models under identical corrupted conditions. 
+
+Corruption results. Tables 2 and 3 report severity-5 results. La-tent denoising improves all four corruption families on all 11 benchmarks for both architectures. Notably, MME—which declines slightly under clean evaluation—turns positive under all corruption conditions, suggesting benefit under degraded visual inputs. 
+
+Degradation under increasing severity. Figure 3 shows per-formance trajectories from clean to severity 3 to severity 5 on LLaVA+CLIP and Qwen-2.5-VL. On both architectures, models trained with latent denoising show consistently smaller drops from clean to corrupted performance, with the gap between baseline and our method widening as corruption severity increases. For exam-ple, on GQA under severity-5 noise (LLaVA+CLIP), the baseline drops from 61.9 to 57.4 ( −4.5), while our model drops from 63.5 
+
+Table 2: Corruption robustness at severity 5 (LLaVA+CLIP). B = Baseline, LD = Latent Denoising (ours).      
+
+> Noise Blur Weather Digital
+> BLD
+
+Δ B LD Δ B LD Δ B LD Δ                                                                                                                                    
+
+> VQAv2 69.4 71.1 +1.7 67.8 69.3 +1.5 71.4 73.3 +1.9 70.9 73.0 +2.1 GQA 57.4 60.4 +3.0 56.4 59.7 +3.3 59.0 62.0 +3.0 58.4 61.6 +3.2 POPE 80.7 82.8 +2.1 77.8 80.2 +2.4 82.5 84.7 +2.2 81.8 83.9 +2.1 MME 1712 1728 +16 1678 1699 +21 1679 1705 +26 1702 1729 +28 MMB 54.2 56.3 +2.1 53.5 55.3 +1.8 57.3 60.2 +2.9 56.7 58.7 +2.0 MMStar 29.5 35.3 +5.8 30.8 36.1 +5.3 32.5 36.8 +4.3 30.6 35.8 +5.2 MMMU 35.5 37.3 +1.8 34.6 35.5 +0.9 33.6 36.7 +3.1 35.2 36.9 +1.7 SQA 68.2 69.0 +0.8 67.8 69.4 +1.6 67.6 68.9 +1.3 68.1 69.5 +1.4 TxtVQA 35.0 36.5 +1.5 24.8 26.5 +1.7 38.1 40.3 +2.2 37.5 38.7 +1.2 OCR 15.8 17.7 +1.9 12.5 14.2 +1.7 26.1 28.5 +2.4 18.9 21.2 +2.3 Chart 13.2 15.3 +2.1 12.4 13.8 +1.4 14.8 16.4 +1.6 14.1 15.6 +1.5
+
+Table 3: Corruption robustness at severity 5 (Qwen-2.5-VL). B = Baseline, LD = Latent Denoising (ours).      
+
+> Noise Blur Weather Digital
+> BLD
+
+Δ B LD Δ B LD Δ B LD Δ                                                                                                                                    
+
+> VQAv2 58.8 60.6 +1.8 65.7 67.6 +1.9 73.3 75.4 +2.1 69.9 72.4 +2.5 GQA 47.3 53.7 +6.4 51.1 57.9 +6.8 54.7 62.3 +7.6 52.6 61.0 +8.4 POPE 72.9 75.1 +2.2 75.7 79.0 +3.3 81.5 84.3 +2.8 77.5 80.4 +2.9 MME 1785 1807 +22 1754 1778 +25 2079 2094 +15 2023 2054 +31 MMB 54.7 57.7 +3.0 60.2 62.5 +2.3 69.1 71.1 +2.0 63.5 67.4 +3.9 MMStar 44.8 47.6 +2.8 42.0 42.7 +0.7 53.6 56.7 +3.1 50.3 51.8 +1.5 MMMU 45.5 50.0 +4.5 43.7 46.7 +3.0 47.1 51.0 +3.9 46.4 48.7 +2.3 SQA 77.3 78.8 +1.5 77.4 80.0 +2.6 81.5 83.6 +2.1 81.7 84.2 +2.5 TxtVQA 34.1 36.5 +2.4 33.9 35.9 +2.0 70.9 73.0 +2.1 58.9 60.5 +1.6 OCR 31.7 33.7 +2.0 19.9 22.3 +2.4 68.6 71.8 +3.2 47.0 50.1 +3.1 Chart 23.4 26.1 +2.7 22.7 24.6 +1.9 62.9 66.0 +3.1 45.2 48.1 +2.9
+
+to 60.4 ( −3.1), a meaningfully smaller degradation. On MMStar, the baseline drops by −4.2 while our model drops by only −1.5,and our corrupted performance (35.3) exceeds the baseline’s clean 
+
+performance (33.7). 
+
+Cross-architecture consistency. Figure 4 confirms that the ro-bustness benefit generalizes: latent denoising outperforms the base-line on every architecture–corruption combination at severity 5, with particularly pronounced gains on Qwen-2.5-VL. 
+
+4.5 Analyzing Visual Feature Alignment 
+
+Beyond task-level evaluation, we analyze whether latent denoising produces measurably better internal visual representations within the LLM. We extract mean-pooled visual hidden states from every layer of the 32-layer Vicuna backbone on a 5,000-image subset of ImageNet-1K validation, using the LLaVA+CLIP baseline and latent denoising models. 
+
+CKA with reference models. We compute linear centered kernel alignment (CKA) [ 40 ] between each LLM layer and two frozen reference models: the same CLIP ViT-L/14 encoder used as the LMM’s vision backbone, and DINOv2 ViT-L/14, a self-supervised vision model. Figure 5(a) shows both: latent denoising maintains higher CKA with CLIP at early-to-mid layers (layers 0–15, +0.02 to +0.04) and dramatically improves final-layer alignment (+0.11 at layer 31), indicating that the LLM better preserves the visual information it receives from the encoder. CKA with DINOv2 reveals an even stronger effect: improvements of +0.08 to +0.13 at layers 0–15, peaking at +0.13 at layer 9. Since the denoising target is CLIP (not DINOv2), this cross-model alignment suggests that the Latent Denoising Improves Visual Alignment in Large Multimodal Models Conference’17, July 2017, Washington, DC, USA Clean Sev. 3 Sev. 5 
+
+55 
+
+60 
+
+65 
+
+70 
+
+75 
+
+80 
+
+85 
+
+> Solid = Ours
+> Dashed = Baseline
+
+LLaVA+CLIP: VQA & Reasoning   
+
+> VQAv2
+> GQA
+> MMBench
+> POPE
+> Clean Sev. 3 Sev. 5
+
+15 
+
+20 
+
+25 
+
+30 
+
+35 
+
+40 
+
+45 
+
+> Solid = Ours
+> Dashed = Baseline
+
+LLaVA+CLIP: Knowledge & OCR   
+
+> MMStar
+> MMMU
+> TextVQA
+> OCRBench
+> ChartQA
+> Clean Sev. 3 Sev. 5
+
+50 
+
+55 
+
+60 
+
+65 
+
+70 
+
+75 
+
+80 
+
+85 
+
+> Solid = Ours
+> Dashed = Baseline
+
+Qwen-2.5-VL: VQA & Reasoning   
+
+> VQAv2
+> GQA
+> MMBench
+> POPE
+> Clean Sev. 3 Sev. 5
+
+40 
+
+50 
+
+60 
+
+70 
+
+80 
+
+> Solid = Ours
+> Dashed = Baseline
+
+Qwen-2.5-VL: Knowledge & OCR 
+
+> MMStar
+> MMMU
+> TextVQA
+> OCRBench
+> ChartQA
+
+Figure 3: Performance degradation under increasing corrup-tion severity. Clean → sev. 3 → sev. 5 for baseline (dashed) and latent denoising (solid) on LLaVA+CLIP (top) and Qwen-2.5-VL (bottom). The gap widens at higher severity, indicating reduced degradation. Noise Blur Weather Digital  
+
+> 30
+> 35
+> 40
+> 45
+> 50
+> 55
+> 60
+> 65
+> 70
+> Avg Score (normalized to 100)
+> 49.4
+> 47.3
+> 51.7
+> 50.6
+> 48.7
+> 46.4
+> 51.3
+> 50.1
+> 53.1 53.0
+> 70.0
+> 63.4
+> Severity-5 Corruption: Baseline (faded) vs Latent Denoising (solid)
+> LLaVA+CLIP
+> LLaVA+SigLIP
+> Qwen-2.5-VL
+
+Figure 4: Average normalized performance under severity-5 corruption. Baseline (faded) vs. latent denoising (solid) across all 11 benchmarks (MME normalized to 100). All three ar-chitectures show consistent improvements across all four corruption families. 
+
+denoising objective discovers structural improvements in the visual representation that generalize beyond the specific teacher. 
+
+kNN classification. Following standard practice for evaluating internal visual representations [ 21 , 67 ], we assess semantic discrim-inability via 𝑘 -nearest-neighbor classification ( 𝑘 =20 , cosine simi-larity, 5-fold cross-validation) on ImageNet-1K validation images. Figure 5(b) shows top-1 accuracy per layer. The baseline exhibits a characteristic mid-network dip: features become progressively less discriminative from layers 5–13, recovering only at deeper layers as language-oriented representations emerge. Latent denoising elimi-nates this collapse. The largest gains occur at layers 10–15, centered on the supervised layer (layer 16), where our model improves by up to +3.8% absolute. Critically, these gains persist through the 0 5 10 15 20 25 30                   
+
+> LLM Layer
+> 0.2
+> 0.3
+> 0.4
+> 0.5
+> 0.6
+> 0.7
+> 0.8
+> 0.9
+> CKA Similarity
+> (a) CKA with Vision Foundation Models
+> Baseline vs CLIP
+> Ours vs CLIP
+> Baseline vs DINOv2
+> Ours vs DINOv2
+> 0510 15 20 25 30
+> LLM Layer
+> 16
+> 18
+> 20
+> 22
+> 24
+> 26
+> Top-1 Accuracy (%)
+> (b) kNN Classification (k=20)
+> Baseline
+> Ours
+> 0510 15 20 25 30
+> LLM Layer
+> 1000
+> 1200
+> 1400
+> 1600
+> 1800
+> Effective Rank
+> (c) Effective Rank
+> Baseline
+> Ours
+> 0510 15 20 25 30
+> LLM Layer
+> −2
+> 0
+> 2
+> 4
+> 6
+> 8
+> 10
+> 12
+> Delta (Ours - Baseline)
+> (d) Improvement Over Baseline
+> Δ kNN Top-1 (%)
+> Δ CKA-DINOv2 (×100)
+
+Figure 5: Internal visual feature analysis across LLM layers (LLaVA+CLIP, 5K ImageNet val). (a) CKA with CLIP and DI-NOv2. (b) 𝑘 -NN accuracy. (c) Effective rank. (d) Improvement over baseline. Dashed line marks the supervised layer 15. 10 20 30 40 50                     
+
+> Component
+> 10 −2
+> Normalized SV
+> Layer 0
+> Baseline
+> Ours
+> 10 20 30 40 50
+> Component
+> 10 −2
+> Layer 3
+> Baseline
+> Ours
+> 10 20 30 40 50
+> Component
+> 10 −2
+> Layer 6
+> Baseline
+> Ours
+> 10 20 30 40 50
+> Component
+> 10 −2
+> Normalized SV
+> Layer 9
+> Baseline
+> Ours
+> 10 20 30 40 50
+> Component
+> 10 −2
+> Layer 12
+> Baseline
+> Ours
+> 10 20 30 40 50
+> Component
+> 10 −2
+> Layer 15
+> Baseline
+> Ours
+
+Figure 6: Singular value spectrum at selected LLM layers. Nor-malized singular value decay for visual features at layers 0, 3, 6, 9, 12, and 15. Latent denoising produces slower spectral decay at mid-layers, indicating higher intrinsic dimensional-ity and more expressive visual representations. 
+
+final layer (+2.4%), demonstrating that the supervision propagates beyond its direct point of application. The singular value spec-trum (Figure 6) corroborates this: latent denoising produces slower spectral decay at mid-layers, indicating higher intrinsic dimension-ality [69] and more expressive visual features. 
+
+Cross-attention visualization. Figure 7 shows cross-attention heatmaps from layer 15 on GQA examples. Latent denoising pro-duces more spatially focused attention on question-relevant regions, with higher average entropy (5.77 vs. 5.49) indicating engagement of multiple relevant patches rather than collapse onto attention sinks. 
+
+4.6 Properties of Latent Denoising & Ablations 
+
+We ablate key design choices using LoRA fine-tuning on the CLIP+Vicuna configuration (see Sec. 4.1). All ablation results are normalized relative to the full latent denoising model to isolate the effect of each design choice. 
+
+Loss components. Figure 8 compares the full three-loss objective against variants using subsets of losses and random (non-saliency) token selection, normalized to the LoRA baseline. The full model Conference’17, July 2017, Washington, DC, USA Dhruv Parikh, Jacob Fein-Ashley, Rajgopal Kannan, and Viktor Prasanna Original Baseline Latent Denoising (Ours)   
+
+> Q: Is the cake on a platter? |GT: no
+
+Q: Is the cake on a platter? | GT: no Original Baseline Latent Denoising (Ours)   
+
+> Q: Is the surfer that looks wet wearing a wetsuit? |GT: yes
+
+Q: Is the surfer that looks wet wearing a wetsuit? | GT: yes 
+
+Figure 7: Cross-attention heatmaps on GQA (layer 15). Each row shows, left to right: original image, baseline attention, and latent denoising attention. Our model produces more spatially grounded attention on question-relevant regions (cake/platter, wetsuit). Average attention entropy: ours 5.77 vs. baseline 5.49. GQA            
+
+> POPE
+> MME
+> ChartQA
+> MMBench
+> TextVQA
+> MMStar
+> OCR
+> MMMU
+> SQA-IMG
+> 94
+> 96
+> 98
+> 100
+> 102
+> 104
+> 106
+> Score (BL=100)
+> Standard Benchmarks
+> RealWorldQA
+> QBench
+> VizWiz
+> NatB-G
+> 90
+> 92
+> 94
+> 96
+> 98
+> 100
+> 102
+> 104
+> Score (BL=100)
+> Robustness Benchmarks
+> 97 98 99 100 101 102 103
+> Avg (BL=100)
+> Baseline
+> Full LD
+> Rec Only
+> Rec+Rel
+> Rec+Con
+> Random Sel.
+> 100.0
+> 102.3
+> 99.4
+> 98.5
+> 98.8
+> 97.9
+> Overall Average
+> Baseline Full LD Rec Only Rec+Rel Rec+Con Random Sel.
+
+Figure 8: Loss component ablation (Baseline = 100). Full latent denoising with all three losses and saliency-guided selection achieves the best overall performance. Removing any loss or switching to random selection reduces gains. 
+
+(all three losses with saliency-guided selection) achieves the highest overall performance. Removing any single loss component reduces performance, with the contrastive loss ( Lcon ) and relational loss (Lrel ) contributing most to MME and robustness benchmarks, re-spectively. Random token selection substantially degrades MME perception (1388.9 vs. 1489.3), confirming that saliency-guided cor-ruption selection is important for preserving perceptual capabilities. 
+
+Corruption rates. Table 4 reports effect of varying the noise 𝜌 𝑁 
+
+and mask rate 𝜌 𝑀 . The default configuration ( 𝜌 𝑁 =0.10 , 𝜌 𝑀 =0.02 )is near-optimal. Removing either corruption modality degrades performance: noise-only (no mask) drops most on MMBench and TextVQA, while mask-only (no noise) shows weaker performance on SQA-IMG and MMStar. The combination of both Gaussian nois-ing and masking consistently yields the best results, confirming that the two corruption modes provide complementary supervi-sory signals—continuous perturbation and discrete information removal—that together produce stronger latent denoising objective. 
+
+Supervision layer. Figure 9 shows the effect of varying the su-pervision layer across layers 8 (25% depth), 16 (50%), and 32 (100%). Layer 16 (the default, corresponding to the mid-point of the 32-layer Vicuna backbone) achieves the best performance across nearly all 
+
+Table 4: Corruption rate ablation. Default: 𝜌 𝑁 =0.10 , 𝜌 𝑀 =0.02 .All scores normalized to full latent denoising = 100. 
+
+high noise high mask no mask no noise (𝜌 𝑁 =0.20 ) (𝜌 𝑀 =0.05 ) (𝜌 𝑀 =0) (𝜌 𝑁 =0)GQA 98.8 99.2 98.4 99.5 POPE 99.3 99.7 98.9 99.5 MME 97.7 97.4 97.5 99.5 ChartQA 92.9 94.6 95.1 98.4 MMBench 98.2 99.1 97.1 99.5 TextVQA 98.5 97.9 96.4 99.4 MMStar 99.2 93.1 94.7 95.0 OCRBench 97.5 97.5 97.2 98.5 MMMU 98.3 99.2 93.2 98.0 SQA-IMG 98.1 97.8 97.8 97.7 RWQA 94.0 95.1 96.5 95.1 QBench 98.2 96.4 95.9 99.5 VizWiz 95.6 96.4 98.6 96.3 NatBench-G 89.1 89.1 90.4 98.1 8 (25%) 16 (50%) 32 (100%)     
+
+> Supervision Layer
+> 92
+> 94
+> 96
+> 98
+> 100
+> Score (Full LD=100)
+> Standard Benchmarks
+> GQA
+> POPE
+> MME
+> ChartQA
+> MMBench
+> TextVQA
+> MMStar
+> OCRBench
+> MMMU
+> SQA-IMG
+> 8 (25%) 16 (50%) 32 (100%)
+> Supervision Layer
+> 90
+> 92
+> 94
+> 96
+> 98
+> 100
+> Score (Full LD=100)
+> Robustness Benchmarks
+> RealWorldQA
+> QBench
+> VizWiz
+> NatBench-G
+> 8 (25%) 16 (50%) 32 (100%)
+> Supervision Layer
+> 96
+> 97
+> 98
+> 99
+> 100
+> 101
+> Avg Score (Full LD=100)
+> 97.5
+> 100.0
+> 96.9
+> Overall Average
+
+Figure 9: Supervision layer ablation (Full LD = 100). Mid-layer supervision (layer 16, 50% depth) achieves the best perfor-mance across both standard and robustness benchmarks. 
+
+benchmarks, consistent with prior observations that visual infor-mation is strongest in the middle layers of LLMs and progressively diluted at greater depth [ 9, 72 , 87 ]. Both early and late supervi-sion still improve over the baseline, indicating that the method is not brittle to layer choice, though mid-layer supervision provides the best balance between preserving visual signal and allowing sufficient downstream processing. 
+
+Noise conditioning. Removing the noise-level embedding ( 𝜏 -embed) degrades performance across all benchmarks, with the largest drops on OCRBench ( −1.4) and robustness metrics ( −1.5 to 
+
+−2.2), confirming that providing the model with an explicit signal of corruption magnitude is beneficial. Increasing the number of conditioning bins from 8 to 16 yields no improvement, suggesting that coarse discretization is sufficient. 
+
+Gaussian noise parameters. Figure 10 shows sweeps over 𝜏 max 
+
+(interpolation strength) and 𝜎 (noise variance). Both parameters exhibit an inverted-U pattern: the default values ( 𝜏 max = 0.15 , 𝜎 =
+
+1.0) are near-optimal, with both insufficient and excessive noise being detrimental. Too little noise ( 𝜏 max =0.07 ) provides too weak a denoising signal for the model to learn meaningful recovery, while too much ( 𝜏 max =0.30 ) overwhelms the recovery task. Notably, the method tolerates a 4× range in both 𝜎 and 𝜏 max without catastrophic failure. We expect that scaling to larger training datasets may shift the optimal noise level upward, as more data would support learning from stronger corruption signals. 
+
+5 Conclusion 
+
+We introduced a training-time latent denoising framework for LMMs that applies saliency-guided corruption to projected visual tokens and recovers aligned teacher features from intermediate Latent Denoising Improves Visual Alignment in Large Multimodal Models Conference’17, July 2017, Washington, DC, USA 0.10 0.15 0.20 0.25 0.30                              
+
+> _max
+> 92
+> 94
+> 96
+> 98
+> 100
+> Score (Full LD=100)
+> sweep: Standard Benchmarks
+> GQA
+> POPE
+> MME
+> ChartQA
+> MMBench
+> TextVQA
+> MMStar
+> OCRBench
+> MMMU
+> SQA-IMG
+> 0.10 0.15 0.20 0.25 0.30
+> _max
+> 84
+> 86
+> 88
+> 90
+> 92
+> 94
+> 96
+> 98
+> 100
+> Score (Full LD=100)
+> sweep: Robustness Benchmarks
+> RealWorldQA
+> QBench
+> VizWiz
+> NatBench-G
+> 0.10 0.15 0.20 0.25 0.30
+> _max
+> 95
+> 96
+> 97
+> 98
+> 99
+> 100
+> 101
+> Avg Score (Full LD=100)
+> 96.1
+> 100.0
+> 96.8
+> _max sweep: Overall Avg
+> 0.6 0.8 1.0 1.2 1.4 1.6 1.8 2.0
+> 92
+> 94
+> 96
+> 98
+> 100
+> Score (Full LD=100)
+> sweep: Standard Benchmarks
+> GQA
+> POPE
+> MME
+> ChartQA
+> MMBench
+> TextVQA
+> MMStar
+> OCRBench
+> MMMU
+> SQA-IMG
+> 0.6 0.8 1.0 1.2 1.4 1.6 1.8 2.0
+> 82.5
+> 85.0
+> 87.5
+> 90.0
+> 92.5
+> 95.0
+> 97.5
+> 100.0
+> Score (Full LD=100)
+> sweep: Robustness Benchmarks
+> RealWorldQA
+> QBench
+> VizWiz
+> NatBench-G
+> 0.6 0.8 1.0 1.2 1.4 1.6 1.8 2.0
+> 95
+> 96
+> 97
+> 98
+> 99
+> 100
+> 101
+> Avg Score (Full LD=100)
+> 96.5
+> 100.0
+> 97.0
+> sweep: Overall Avg
+
+Figure 10: Gaussian parameter sweeps (Full LD = 100). Top: 
+
+𝜏 max sweep. Bottom: 𝜎 sweep. Both show inverted-U patterns with default values near-optimal. 
+
+hidden states, with no inference overhead. Across three architec-tures, 18 benchmarks, and a systematic corruption protocol, the method consistently improves visual understanding, robustness, and internal feature quality. A natural next step is understanding how latent denoising composes with complementary visual super-vision paradigms [ 71 , 72 , 80 , 87 ] as training data and model capacity scale. 
+
+References 
+
+[1] Jean-Baptiste Alayrac, Jeff Donahue, Pauline Luc, Antoine Miech, Iain Barr, Yana Hasson, Karel Lenc, Arthur Mensch, Katherine Millican, Malcolm Reynolds, et al .2022. Flamingo: a visual language model for few-shot learning. Advances in neural information processing systems 35 (2022), 23716–23736. [2] Anthropic. 2026. Claude Opus 4.6. https://www.anthropic.com/news/claude-opus-4-6 [3] Stanislaw Antol, Aishwarya Agrawal, Jiasen Lu, Margaret Mitchell, Dhruv Batra, C Lawrence Zitnick, and Devi Parikh. 2015. Vqa: Visual question answering. In 
+
+Proceedings of the IEEE international conference on computer vision . 2425–2433. [4] Jinze Bai, Shuai Bai, Yunfei Chu, Zeyu Cui, Kai Dang, Xiaodong Deng, Yang Fan, Wenbin Ge, Yu Han, Fei Huang, et al . 2023. Qwen technical report. arXiv preprint arXiv:2309.16609 (2023). [5] Shuai Bai, Yuxuan Cai, Ruizhe Chen, Keqin Chen, Xionghui Chen, Zesen Cheng, Lianghao Deng, Wei Ding, Chang Gao, Chunjiang Ge, et al . 2025. Qwen3-vl technical report. arXiv preprint arXiv:2511.21631 (2025). [6] Shuai Bai, Keqin Chen, Xuejing Liu, Jialin Wang, Wenbin Ge, Sibo Song, Kai Dang, Peng Wang, Shijie Wang, Jun Tang, Humen Zhong, Yuanzhi Zhu, Mingkun Yang, Zhaohai Li, Jianqiang Wan, Pengfei Wang, Wei Ding, Zheren Fu, Yiheng Xu, Jiabo Ye, Xi Zhang, Tianbao Xie, Zesen Cheng, Hang Zhang, Zhibo Yang, Haiyang Xu, and Junyang Lin. 2025. Qwen2.5-VL Technical Report. arXiv:2502.13923 [cs.CV] https://arxiv.org/abs/2502.13923 [7] Jeffrey P Bigham, Chandrika Jayant, Hanjie Ji, et al . 2010. Vizwiz: nearly real-time answers to visual questions. In Proceedings of the 23nd annual ACM symposium on User interface software and technology . 333–342. [8] Lin Chen, Jinsong Li, Xiaoyi Dong, et al . 2024. Are we on the right way for eval-uating large vision-language models? Advances in Neural Information Processing Systems 37 (2024), 27056–27087. [9] Liang Chen, Haozhe Zhao, Tianyu Liu, Shuai Bai, Junyang Lin, Chang Zhou, and Baobao Chang. 2024. An image is worth 1/2 tokens after layer 2: Plug-and-play inference acceleration for large vision-language models. In European Conference on Computer Vision . Springer, 19–35. [10] Ting Chen, Simon Kornblith, Mohammad Norouzi, and Geoffrey Hinton. 2020. A simple framework for contrastive learning of visual representations. In Interna-tional conference on machine learning . PmLR, 1597–1607. [11] Zhe Chen, Weiyun Wang, Yue Cao, Yangzhou Liu, Zhangwei Gao, Erfei Cui, Jinguo Zhu, Shenglong Ye, Hao Tian, Zhaoyang Liu, et al . 2024. Expanding performance boundaries of open-source multimodal models with model, data, and test-time scaling. arXiv preprint arXiv:2412.05271 (2024). [12] Zhe Chen, Weiyun Wang, Hao Tian, Shenglong Ye, Zhangwei Gao, Erfei Cui, Wenwen Tong, Kongzhi Hu, Jiapeng Luo, Zheng Ma, et al . 2024. How Far Are We to GPT-4V? Closing the Gap to Commercial Multimodal Models with Open-Source Suites. arXiv preprint arXiv:2404.16821 (2024). [13] Zhe Chen, Jiannan Wu, Wenhai Wang, Weijie Su, Guo Chen, Sen Xing, Muyan Zhong, Qinglong Zhang, Xizhou Zhu, Lewei Lu, et al . 2024. Internvl: Scaling up vision foundation models and aligning for generic visual-linguistic tasks. In 
+
+Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition .24185–24198. [14] Christopher Clark, Jieyu Zhang, Zixian Ma, Jae Sung Park, Mohammadreza Salehi, Rohun Tripathi, Sangho Lee, Zhongzheng Ren, Chris Dongjoo Kim, Yinuo Yang, et al . 2026. Molmo2: Open Weights and Data for Vision-Language Models with Video Understanding and Grounding. arXiv preprint arXiv:2601.10611 (2026). [15] Ian Covert, Tony Sun, James Zou, and Tatsunori Hashimoto. 2024. Locality alignment improves vision-language models. arXiv preprint arXiv:2410.11087 
+
+(2024). [16] Wenliang Dai, Junnan Li, Dongxu Li, Anthony Tiong, Junqi Zhao, Weisheng Wang, Boyang Li, Pascale N Fung, and Steven Hoi. 2023. Instructblip: Towards general-purpose vision-language models with instruction tuning. Advances in neural information processing systems 36 (2023), 49250–49267. [17] DeepSeek-AI. 2024. DeepSeek-V2. https://github.com/deepseek-ai/DeepSeek-V2 [18] Ailin Deng, Tri Cao, Zhirui Chen, and Bryan Hooi. 2025. Words or vision: Do vision-language models have blind faith in text?. In Proceedings of the Computer Vision and Pattern Recognition Conference . 3867–3876. [19] Anxhelo Diko, Danilo Avola, Marco Cascio, and Luigi Cinque. 2024. ReViT: En-hancing vision transformers feature diversity with attention residual connections. 
+
+Pattern Recognition 156 (2024), 110853. [20] Alexey Dosovitskiy, Lucas Beyer, Alexander Kolesnikov, et al . 2020. An image is worth 16x16 words: Transformers for image recognition at scale. arXiv preprint arXiv:2010.11929 (2020). [21] Alexey Dosovitskiy, Lucas Beyer, Alexander Kolesnikov, et al . 2021. An image is worth 16x16 words: Transformers for image recognition at scale. In Int. Conf. Learn. Represent. 
+
+[22] Patrick Esser, Robin Rombach, and Bjorn Ommer. 2021. Taming transformers for high-resolution image synthesis. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition . 12873–12883. [23] Chaoyou Fu, Peixian Chen, Yunhang Shen, et al . 2023. Mme: A comprehensive evaluation benchmark for multimodal large language models. arXiv preprint arXiv:2306.13394 (2023). [24] Peng Gao, Jiaming Han, Renrui Zhang, Ziyi Lin, Shijie Geng, Aojun Zhou, Wei Zhang, Pan Lu, Conghui He, Xiangyu Yue, et al . 2023. Llama-adapter v2: Parameter-efficient visual instruction model. arXiv preprint arXiv:2304.15010 
+
+(2023). [25] Shizhan Gong, Yankai Jiang, Qi Dou, and Farzan Farnia. 2025. Kernel-based unsupervised embedding alignment for enhanced visual representation in vision-language models. arXiv preprint arXiv:2506.02557 (2025). [26] Google. 2026. Gemini 3.1 Pro. https://ai.google.dev/gemini-api/docs/models/ gemini-3.1-pro-preview [27] Yash Goyal, Tejas Khot, Douglas Summers-Stay, Dhruv Batra, and Devi Parikh. 2017. Making the v in vqa matter: Elevating the role of image understanding in visual question answering. In Proceedings of the IEEE conference on computer vision and pattern recognition . 6904–6913. [28] Tianrui Guan, Fuxiao Liu, Xiyang Wu, Ruiqi Xian, Zongxia Li, Xiaoyu Liu, Xijun Wang, Lichang Chen, Furong Huang, Yaser Yacoob, et al . 2024. Hallusionbench: an advanced diagnostic suite for entangled language hallucination and visual illusion in large vision-language models. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition . 14375–14385. [29] Kaiming He, Xinlei Chen, Saining Xie, Yanghao Li, Piotr Dollár, and Ross Girshick. 2022. Masked autoencoders are scalable vision learners. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition . 16000–16009. [30] Dan Hendrycks and Thomas Dietterich. 2019. Benchmarking neural net-work robustness to common corruptions and perturbations. arXiv preprint arXiv:1903.12261 (2019). [31] Jonathan Ho, Ajay Jain, and Pieter Abbeel. 2020. Denoising diffusion probabilistic models. Advances in neural information processing systems 33 (2020), 6840–6851. [32] Edward J Hu, Yelong Shen, Phillip Wallis, Zeyuan Allen-Zhu, Yuanzhi Li, Shean Wang, Liang Wang, Weizhu Chen, et al . 2022. Lora: Low-rank adaptation of large language models. Iclr 1, 2 (2022), 3. [33] Qidong Huang, Xiaoyi Dong, Pan Zhang, Yuhang Zang, Yuhang Cao, Jiaqi Wang, Weiming Zhang, and Nenghai Yu. 2025. Deciphering Cross-Modal Alignment in Large Vision-Language Models via Modality Integration Rate. In Proceedings of the IEEE/CVF International Conference on Computer Vision . 218–227. [34] Drew A Hudson and Christopher D Manning. 2019. Gqa: A new dataset for real-world visual reasoning and compositional question answering. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition . 6700–6709. [35] Farhan Ishmam, Ishmam Tashdeed, Talukder Asir Saadat, Hamjajul Ashmafee, Abu Raihan Mostofa Kamal, and Azam Hossain. 2025. Visual robustness bench-mark for visual question answering (vqa). In Proceedings of the Winter Conference on Applications of Computer Vision . 6623–6633. [36] Jiachen Jiang, Jinxin Zhou, Bo Peng, Xia Ning, and Zhihui Zhu. 2025. Analyz-ing fine-grained alignment and enhancing vision understanding in multimodal language models. arXiv preprint arXiv:2505.17316 (2025). [37] Seil Kang, Jinyeong Kim, Junhyeok Kim, and Seong Jae Hwang. 2025. See what you are told: Visual attention sink in large multimodal models. arXiv preprint arXiv:2503.03321 (2025). [38] Seil Kang, Jinyeong Kim, Junhyeok Kim, and Seong Jae Hwang. 2025. Your large vision-language model only needs a few attention heads for visual grounding. In Conference’17, July 2017, Washington, DC, USA Dhruv Parikh, Jacob Fein-Ashley, Rajgopal Kannan, and Viktor Prasanna 
+
+Proceedings of the Computer Vision and Pattern Recognition Conference . 9339–9350. [39] Aniruddha Kembhavi, Mike Salvato, Eric Kolve, Minjoon Seo, Hannaneh Ha-jishirzi, and Ali Farhadi. 2016. A diagram is worth a dozen images. In European conference on computer vision . Springer, 235–251. [40] Simon Kornblith, Mohammad Norouzi, Honglak Lee, and Geoffrey Hinton. 2019. Similarity of neural network representations revisited. In Int. Conf. Mach. Learn. 
+
+[41] Baiqi Li, Zhiqiu Lin, Wenxuan Peng, Jean de Dieu Nyandwi, Daniel Jiang, Zixian Ma, Simran Khanuja, Ranjay Krishna, Graham Neubig, and Deva Ramanan. 2024. Naturalbench: Evaluating vision-language models on natural adversarial samples. 
+
+Advances in Neural Information Processing Systems 37 (2024), 17044–17068. [42] Bohao Li, Rui Wang, Guangzhi Wang, Yuying Ge, Yixiao Ge, and Ying Shan. 2023. Seed-bench: Benchmarking multimodal llms with generative comprehension. 
+
+arXiv preprint arXiv:2307.16125 (2023). [43] Chunyi Li, Jianbo Zhang, Zicheng Zhang, Haoning Wu, Yuan Tian, Wei Sun, Guo Lu, Xiongkuo Min, Xiaohong Liu, Weisi Lin, et al . 2025. R-bench: Are your large multimodal model robust to real-world corruptions? IEEE Journal of Selected Topics in Signal Processing (2025). [44] Hengzhuang Li, Xinsong Zhang, Qiming Peng, Bin Luo, Han Hu, Dengyang Jiang, Han-Jia Ye, Teng Zhang, and Hai Jin. 2025. Unleashing the Intrinsic Visual Representation Capability of Multimodal Large Language Models. arXiv preprint arXiv:2512.06281 (2025). [45] Junnan Li, Dongxu Li, Silvio Savarese, and Steven Hoi. 2023. Blip-2: Bootstrapping language-image pre-training with frozen image encoders and large language models. In International conference on machine learning . PMLR, 19730–19742. [46] Yifan Li, Yifan Du, Kun Zhou, Jinpeng Wang, Wayne Xin Zhao, and Ji-Rong Wen. 2023. Evaluating object hallucination in large vision-language models. In Proceedings of the 2023 conference on empirical methods in natural language processing . 292–305. [47] Haotian Liu, Chunyuan Li, Yuheng Li, and Yong Jae Lee. 2023. Improved Baselines with Visual Instruction Tuning. [48] Haotian Liu, Chunyuan Li, Yuheng Li, Bo Li, Yuanhan Zhang, Sheng Shen, and Yong Jae Lee. 2024. Llavanext: Improved reasoning, ocr, and world knowledge. [49] Haotian Liu, Chunyuan Li, Qingyang Wu, and Yong Jae Lee. 2023. Visual in-struction tuning. Advances in neural information processing systems 36 (2023), 34892–34916. [50] Yuan Liu, Haodong Duan, Yuanhan Zhang, et al . 2024. Mmbench: Is your multi-modal model an all-around player?. In European conference on computer vision .Springer, 216–233. [51] Yuliang Liu, Zhang Li, Mingxin Huang, Biao Yang, Wenwen Yu, Chunyuan Li, Xu-Cheng Yin, Cheng-Lin Liu, Lianwen Jin, and Xiang Bai. 2024. Ocrbench: on the hidden mystery of ocr in large multimodal models. Science China Information Sciences 67, 12 (2024), 220102. [52] Pan Lu, Hritik Bansal, Tony Xia, Jiacheng Liu, Chunyuan Li, Hannaneh Hajishirzi, Hao Cheng, Kai-Wei Chang, Michel Galley, and Jianfeng Gao. 2023. MathVista: Evaluating mathematical reasoning of foundation models in visual contexts. 
+
+arXiv preprint arXiv:2310.02255 (2023). [53] Pan Lu, Swaroop Mishra, Tanglin Xia, Liang Qiu, Kai-Wei Chang, Song-Chun Zhu, Oyvind Tafjord, Peter Clark, and Ashwin Kalyan. 2022. Learn to explain: Multi-modal reasoning via thought chains for science question answering. Advances in neural information processing systems 35 (2022), 2507–2521. [54] Ahmed Masry, Xuan Long Do, Jia Qing Tan, Shafiq Joty, and Enamul Hoque. 2022. Chartqa: A benchmark for question answering about charts with visual and logical reasoning. In Findings of the association for computational linguistics: ACL 2022 . 2263–2279. [55] Ahmed Masry, Juan A Rodriguez, Tianyu Zhang, Suyuchen Wang, Chao Wang, Aarash Feizi, Akshay Kalkunte Suresh, Abhay Puri, Xiangru Jian, Pierre-André Noël, et al . 2025. Alignvlm: Bridging vision and language latent spaces for multimodal understanding. In Second Workshop on Representational Alignment at ICLR 2025 .[56] Minesh Mathew, Viraj Bagal, Rubèn Tito, Dimosthenis Karatzas, Ernest Valveny, and CV Jawahar. 2022. Infographicvqa. In Proceedings of the IEEE/CVF Winter Conference on Applications of Computer Vision . 1697–1706. [57] Minesh Mathew, Dimosthenis Karatzas, and CV Jawahar. 2021. Docvqa: A dataset for vqa on document images. In Proceedings of the IEEE/CVF winter conference on applications of computer vision . 2200–2209. [58] Meta. 2025. Llama 4. https://www.llama.com/models/llama-4/ [59] Nitesh Methani, Pritha Ganguly, Mitesh M Khapra, and Pratyush Kumar. 2020. Plotqa: Reasoning over scientific plots. In Proceedings of the ieee/cvf winter con-ference on applications of computer vision . 1527–1536. [60] Anand Mishra, Shashank Shekhar, Ajeet Kumar Singh, and Anirban Chakraborty. 2019. Ocr-vqa: Visual question answering by reading text in images. In 2019 international conference on document analysis and recognition (ICDAR) . IEEE, 947–952. [61] OpenAI. 2024. GPT-4o. https://openai.com/index/hello-gpt-4o/ [62] OpenAI. 2026. GPT-5.4. https://openai.com/index/introducing-gpt-5-4/ [63] Wonpyo Park, Dongju Kim, Yan Lu, and Minsu Cho. 2019. Relational knowledge distillation. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition . 3967–3976. [64] Zhiliang Peng, Wenhui Wang, Li Dong, Yaru Hao, Shaohan Huang, Shuming Ma, and Furu Wei. 2023. Kosmos-2: Grounding multimodal large language models to the world. arXiv preprint arXiv:2306.14824 (2023). [65] Liao Qu, Huichao Zhang, Yiheng Liu, Xu Wang, Yi Jiang, Yiming Gao, Hu Ye, Daniel K. Du, Zehuan Yuan, and Xinglong Wu. 2025. TokenFlow: Unified Image Tokenizer for Multimodal Understanding and Generation. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) . 2545– 2555. [66] Qwen Team. 2025. Qwen3-Next. https://qwen.ai/blog?id= 4074cca80393150c248e508aa62983f9cb7d27cd&from=research.latest-advancements-list [67] Alec Radford, Jong Wook Kim, Chris Hallacy, Aditya Ramesh, Gabriel Goh, Sandhini Agarwal, Girish Sastry, Amanda Askell, Pamela Mishkin, Jack Clark, et al . 2021. Learning transferable visual models from natural language supervision. In International conference on machine learning . PmLR, 8748–8763. [68] Robin Rombach, Andreas Blattmann, Dominik Lorenz, Patrick Esser, and Björn Ommer. 2022. High-resolution image synthesis with latent diffusion models. In 
+
+Proceedings of the IEEE/CVF conference on computer vision and pattern recognition .10684–10695. [69] Olivier Roy and Martin Vetterli. 2007. The effective rank: A measure of effective dimensionality. European Signal Processing Conference (2007). [70] Amanpreet Singh, Vivek Natarajan, Meet Shah, Yu Jiang, Xinlei Chen, Dhruv Batra, Devi Parikh, and Marcus Rohrbach. 2019. Towards VQA Models That Can Read. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) .[71] Zhen Sun, Yunhang Shen, Jie Li, Xing Sun, Pingyang Dai, Liujuan Cao, and Rongrong Ji. 2025. DS-VLM: Diffusion Supervision Vision Language Model. In 
+
+Forty-second International Conference on Machine Learning .[72] Jianting Tang, Yubo Wang, Haoyu Cao, and Linli Xu. 2025. BASIC: Boosting Visual Alignment with Intrinsic Refined Embeddings in Multimodal Large Language Models. In Proceedings of the IEEE/CVF International Conference on Computer Vision . 20582–20592. [73] Gemini Team, Rohan Anil, Sebastian Borgeaud, Jean-Baptiste Alayrac, Jiahui Yu, Radu Soricut, Johan Schalkwyk, Andrew M Dai, Anja Hauth, Katie Millican, et al . 2023. Gemini: a family of highly capable multimodal models. arXiv preprint arXiv:2312.11805 (2023). [74] Baoshun Tong, Hanjiang Lai, Yan Pan, and Jian Yin. 2025. On the zero-shot adversarial robustness of vision-language models: A truly zero-shot and training-free approach. In Proceedings of the Computer Vision and Pattern Recognition Conference . 19921–19930. [75] Shengbang Tong, David Fan, John Nguyen, et al . 2026. Beyond Language Mod-eling: An Exploration of Multimodal Pretraining. arXiv:2603.03276 [cs.CV] https://arxiv.org/abs/2603.03276 [76] Shengbang Tong, Boyang Zheng, Ziteng Wang, Bingda Tang, Nanye Ma, Ellis Brown, Jihan Yang, Rob Fergus, Yann LeCun, and Saining Xie. 2026. Scaling Text-to-Image Diffusion Transformers with Representation Autoencoders. arXiv preprint arXiv:2601.16208 (2026). [77] Michael Tschannen, Alexey Gritsenko, Xiao Wang, Muhammad Ferjad Naeem, Ibrahim Alabdulmohsin, Nikhil Parthasarathy, Talfan Evans, Lucas Beyer, Ye Xia, Basil Mustafa, et al . 2025. Siglip 2: Multilingual vision-language encoders with improved semantic understanding, localization, and dense features. arXiv preprint arXiv:2502.14786 (2025). [78] Aaron Van Den Oord, Oriol Vinyals, et al . 2017. Neural discrete representation learning. Advances in neural information processing systems 30 (2017). [79] Pascal Vincent, Hugo Larochelle, Yoshua Bengio, and Pierre-Antoine Manzagol. 2008. Extracting and composing robust features with denoising autoencoders. In 
+
+Proceedings of the 25th international conference on Machine learning . 1096–1103. [80] Haochen Wang, Anlin Zheng, Yucheng Zhao, Tiancai Wang, Zheng Ge, Xiangyu Zhang, and Zhaoxiang Zhang. 2024. Reconstructive visual instruction tuning. 
+
+arXiv preprint arXiv:2410.09575 (2024). [81] Peng Wang, Shuai Bai, Sinan Tan, Shijie Wang, Zhihao Fan, Jinze Bai, Keqin Chen, Xuejing Liu, Jialin Wang, Wenbin Ge, et al . 2024. Qwen2-vl: Enhancing vision-language model’s perception of the world at any resolution. arXiv preprint arXiv:2409.12191 (2024). [82] Yunnan Wang, Fan Lu, Kecheng Zheng, Ziyuan Huang, Ziqiang Li, Wenjun Zeng, and Xin Jin. 2025. Vision-Centric Activation and Coordination for Multimodal Large Language Models. arXiv preprint arXiv:2510.14349 (2025). [83] Haoning Wu, Zicheng Zhang, Erli Zhang, et al . 2023. Q-bench: A benchmark for general-purpose foundation models on low-level vision. arXiv preprint arXiv:2309.14181 (2023). [84] xAI. 2024. RealWorldQA. https://huggingface.co/datasets/nirajandhakal/ realworldqa [85] Jiawei Yang, Tianhong Li, Lijie Fan, Yonglong Tian, and Yue Wang. 2025. Latent denoising makes good visual tokenizers. arXiv preprint arXiv:2507.15856 (2025). [86] Qinghao Ye, Haiyang Xu, Guohai Xu, Jiabo Ye, Ming Yan, Yiyang Zhou, Junyang Wang, Anwen Hu, Pengcheng Shi, Yaya Shi, et al . 2023. mplug-owl: Modular-ization empowers large language models with multimodality. arXiv preprint arXiv:2304.14178 (2023). Latent Denoising Improves Visual Alignment in Large Multimodal Models Conference’17, July 2017, Washington, DC, USA 
+
+[87] Heeji Yoon, Jaewoo Jung, Junwan Kim, et al . 2025. Visual representation align-ment for multimodal large language models. arXiv preprint arXiv:2509.07979 
+
+(2025). [88] Xiang Yue, Yuansheng Ni, Kai Zhang, et al . 2024. Mmmu: A massive multi-discipline multimodal understanding and reasoning benchmark for expert agi. In 
+
+Proceedings of the IEEE/CVF conference on computer vision and pattern recognition .9556–9567. [89] Kaiwen Zha, Lijun Yu, Alireza Fathi, David A Ross, Cordelia Schmid, Dina Katabi, and Xiuye Gu. 2025. Language-guided image tokenization for generation. In 
+
+Proceedings of the Computer Vision and Pattern Recognition Conference . 15713– 15722. [90] Xiaohua Zhai, Basil Mustafa, Alexander Kolesnikov, and Lucas Beyer. 2023. Sig-moid loss for language image pre-training. In Proceedings of the IEEE/CVF inter-national conference on computer vision . 11975–11986. [91] Kaichen Zhang, Bo Li, Peiyuan Zhang, Fanyi Pu, Joshua Adrian Cahyono, Kairui Hu, Shuai Liu, Yuanhan Zhang, Jingkang Yang, Chunyuan Li, and Ziwei Liu. 2024. LMMs-Eval: Reality Check on the Evaluation of Large Multimodal Models. arXiv:2407.12772 [cs.CL] https://arxiv.org/abs/2407.12772 [92] Yunqing Zhao, Tianyu Pang, Chao Du, Xiao Yang, Chongxuan Li, Ngai-Man Man Cheung, and Min Lin. 2023. On evaluating adversarial robustness of large vision-language models. Advances in Neural Information Processing Systems 36 (2023), 54111–54138. [93] Boyang Zheng, Nanye Ma, Shengbang Tong, and Saining Xie. 2025. Diffusion transformers with representation autoencoders. arXiv preprint arXiv:2510.11690 
+
+(2025). [94] Deyao Zhu, Jun Chen, Xiaoqian Shen, Xiang Li, and Mohamed Elhoseiny. 2023. Minigpt-4: Enhancing vision-language understanding with advanced large lan-guage models. arXiv preprint arXiv:2304.10592 (2023). Conference’17, July 2017, Washington, DC, USA Dhruv Parikh, Jacob Fein-Ashley, Rajgopal Kannan, and Viktor Prasanna 
+
+A Extended Related Works A.1 Large Multimodal Models 
+
+The rapid progress of large language models has directly driven the development of large multimodal models (LMMs), with a dom-inant paradigm centered on augmenting a pretrained LLM with a visual backbone and a lightweight cross-modal connector. Rep-resentative early systems such as Flamingo, BLIP-2, InstructBLIP, MiniGPT-4, mPLUG-Owl, and LLaMA-Adapter V2 established the now-common recipe of combining a strong vision encoder with a large language model through connectors such as MLP projectors or Q-Former-style modules, followed by multimodal adaptation and instruction tuning [ 1, 16 , 24 , 45 , 86 , 94 ]. This design pattern has since become widespread across open-source LMM families, including LLaVA, Qwen-VL, and InternVL, with variations in visual encoders, connector design, data curation, and multi-stage training strategies [ 4–6 , 11 –13 , 47 –49 , 81 ]. In practice, these models typically build on pretrained vision backbones such as ViT-based encoders, CLIP, and SigLIP-style vision-language encoders, while adapting the vision–language interface and language backbone through staged multimodal training [ 20 , 67 , 77 , 90 ]. In parallel, another line of work explores models trained more natively in a multimodal fashion through large-scale joint pretraining across modalities, including proprietary systems such as Gemini and GPT-4o and open-source or open-weight models such as Kosmos-2, Molmo, and Transfu-sion [ 14 , 61 , 64 , 73 , 75 ]. Our work is situated in the open-source instruction-tuned LMM setting, where improving the quality of internal visual representations during multimodal training remains a central challenge. 
+
+A.2 Visual Supervision in LMMs 
+
+A growing body of work has sought to improve the visual capabil-ities of LMMs by introducing more direct supervision over their visual representations. One line of work strengthens the visual backbone itself, for example by improving locality or aligning CLIP-like features to stronger vision-centric representations before they are consumed by downstream LMMs [ 15 , 25 ]. While effective, these methods primarily refine the visual encoder or its feature space out-side the full multimodal instruction-tuning process. A second line of work injects supervision more directly into the multimodal stack by refining projector outputs or internal visual tokens using shallow-layer embeddings, patch-level alignment, or guidance from one or more vision foundation models [ 36 , 72 , 82 , 87 ]. These approaches more explicitly target visual alignment within the LMM, but are largely formulated as clean feature alignment or token refinement objectives. A third line introduces reconstructive or generative su-pervision through latent reconstruction, masked image modeling, or diffusion-based objectives [ 44 , 71 , 80 ]. Compared with these methods, our work is motivated by a different perspective: rather than treating visual supervision purely as backbone refinement, direct feature alignment, or generative reconstruction, we cast it as generalized latent denoising for internal visual representations during multimodal instruction tuning. 
+
+A.3 Denoising for Visual Representation Learning 
+
+Corruption-and-recovery objectives have long served as a foun-dational principle for visual representation learning. Early denois-ing autoencoders learned useful representations by reconstructing clean signals from corrupted inputs, while later masked image modeling methods showed that masking-based recovery can scale effectively to high-capacity vision transformers [ 29 , 79 ]. In parallel, modern diffusion-based generative models have made Gaussian denoising the dominant paradigm for high-fidelity image synthesis, and recent work has further extended this perspective to semanti-cally meaningful latent spaces through diffusion autoencoders and related latent generative frameworks [ 31 , 68 ]. Most closely related to our motivation, recent tokenizer work argues that combining masking and Gaussian corruption in latent space yields stronger visual tokenizers for downstream generation, suggesting denois-ing as a general design principle rather than a generation-specific trick [ 85 ]. Our work is inspired by this broader view, but departs from prior denoising-based visual learning in a key way: we bring generalized latent denoising into multimodal instruction tuning, using it to directly supervise internal visual features inside large multimodal models for visual understanding. 
+
+A.4 Understanding–Generation Bridge 
+
+Recent work increasingly suggests that visual understanding and visual generation should not be viewed as entirely separate ob-jectives, but rather as two perspectives on learning strong visual representations, as reflected in unified mixed-modal models, joint multimodal pretraining frameworks, and unified visual tokenizer de-signs [ 65 , 75 ]. In generation, a long line of work has shown that the quality of latent spaces and visual tokenizers critically determines downstream synthesis quality, from discrete visual tokenization and masked token modeling to modern latent diffusion and repre-sentation autoencoders [ 22 , 68 , 76 , 78 , 93 ]. More recent multimodal pretraining and unified multimodal modeling work further strength-ens this connection by showing that semantically meaningful visual representations can simultaneously benefit understanding and gen-eration within shared training pipelines [ 75 ]. In parallel, recent tokenizer work shows that the quality of visual latents is a primary determinant of downstream generation quality, and that latent de-noising in particular can provide an especially effective mechanism for improving visual tokenizers [ 65 , 76 , 85 , 89 , 93 ]. Our work is motivated by this broader bridge: while principles from visual un-derstanding are increasingly used to improve visual generation, the reverse direction remains underexplored in large multimodal models. 
+
+A.5 Corruption Evaluation in LMMs 
+
+Robustness to corrupted visual inputs has been studied extensively in vision, where the common-corruptions paradigm established by ImageNet-C provides a standardized, non-adversarial benchmark across noise, blur, weather, and digital distortions [ 30 ]. More re-cently, this perspective has begun to extend to multimodal settings. In particular, recent work introduces large-scale visual robustness Latent Denoising Improves Visual Alignment in Large Multimodal Models Conference’17, July 2017, Washington, DC, USA 
+
+evaluation for visual question answering under realistic corrup-tions [ 35 ], while other studies benchmark the real-world robust-ness of large multimodal models under broader image degradation pipelines and user-capture distortions [ 43 ]. In parallel, a distinct line of work studies adversarial robustness in vision-language mod-els, focusing on worst-case perturbations, prompt-based defenses, or adversarially motivated adaptation strategies [ 74 , 92 ]. Our work is aligned with the common-corruptions tradition rather than the adversarial setting: we adapt the ImageNet-C-style corruption par-adigm into a deterministic, family-structured evaluation protocol for LMMs, enabling systematic assessment under non-adversarial corruptions across a broad range of multimodal benchmarks. 
+
+B Additional Method Details 
+
+We provide supplementary details for the latent denoising frame-work introduced in Sec. 3, focusing on saliency extraction, asymmet-ric sampling, noise conditioning, model-specific implementation choices, and the full training algorithm in Algorithm 1. 
+
+B.1 Saliency Extraction and Asymmetric Sampling 
+
+Our corruption policy is guided by patch saliency derived from the frozen visual encoder. For ViT-style encoders with a classification token, we use the class-to-patch attention from the same encoder layer used to extract the visual features: 
+
+𝑠 𝑖 = 1
+
+𝐻 
+
+> 𝐻
+
+∑︁ 
+
+> ℎ=1
+
+A(ℓ ) 
+
+> ℎ, cls →𝑖
+
+, (13) where A(ℓ ) ∈ R𝐻 × ( 𝑆 +1) × ( 𝑆 +1) denotes the multi-head attention matrix at encoder layer ℓ. For encoders without a class token, we instead use the average attention received by patch 𝑖 :
+
+𝑠 𝑖 = 1
+
+𝐻𝑆 
+
+> 𝐻
+
+∑︁ 
+
+> ℎ=1
+> 𝑆
+
+∑︁ 
+
+> 𝑗 =1
+
+A(ℓ ) 
+
+> ℎ,𝑗 →𝑖
+
+, (14) with A(ℓ ) ∈ R𝐻 ×𝑆 ×𝑆 . In architectures where class-token attention is not exposed in the same form, we use an encoder-native saliency surrogate computed directly from the visual features. Given saliency scores {𝑠 𝑖 }𝑆 𝑖 =1, we sample two disjoint patch sets: a noised set N of size 𝐾 𝑁 = ⌊𝜌 𝑁 𝑆 ⌋ and a masked set M of size 
+
+𝐾 𝑀 = ⌊𝜌 𝑀 𝑆 ⌋. High-saliency patches are preferentially assigned to 
+
+N using 
+
+pN (𝑖 ) = exp (𝑠 𝑖 /𝜏 𝑠 )
+
+Í𝑆 𝑘 =1 exp (𝑠 𝑘 /𝜏 𝑠 ) , (15) whereas lower-saliency patches are preferentially assigned to M
+
+via the complementary distribution 
+
+pM (𝑖 ) = exp (− 𝑠 𝑖 /𝜏 𝑠 )
+
+Í𝑘 ∉N exp (− 𝑠 𝑘 /𝜏 𝑠 ) , 𝑖 ∉ N . (16) Sampling is performed without replacement, first for N and then for M from the remaining patch set. This asymmetric strategy softens corruption on visually important regions while reserving hard masking for less salient content. 
+
+B.2 Noise Conditioning and Auxiliary Loss Details 
+
+For continuously noised tokens, we further add a learned noise-level embedding. Each sampled corruption level 𝜏 𝑖 is discretized into one of 𝐵 bins, 
+
+𝑏 𝑖 =
+
+ 𝜏 𝑖 
+
+𝜏 max 
+
+𝐵 
+
+
+
+, 𝑏 𝑖 ∈ { 0, . . . , 𝐵 − 1}, (17) and a learned embedding e𝜏 (𝑏 𝑖 ) ∈ R𝑑 ℎ is added to the corrupted token representation for 𝑖 ∈ N . Masked and clean tokens do not receive this conditioning. In practice, this embedding provides the model with an explicit signal of corruption magnitude while pre-serving the same inference path as the base LMM. All auxiliary losses are computed only on corrupted tokens. The reconstruction term in Eq. (8) uses L2-normalized predictions and targets, making it equivalent (up to a constant factor) to cosine distance rather than raw MSE. The relational term in Eq. (10) uses the teacher similarity distribution as the reference and minimizes a 
+
+KL (teacher ∥ student ) divergence. The contrastive term in Eq. (11) is an asymmetric student-to-teacher InfoNCE objective with nega-tives drawn from other corrupted patches within the same image. 
+
+B.3 Model-Specific Implementation Notes 
+
+Our framework is instantiated across both LLaVA-style and Qwen-style LMMs, with minor architecture-specific differences. 
+
+Teacher feature space. In LLaVA-style models, the visual features used for projection, the teacher targets, and the saliency signal are all extracted from the same penultimate layer of the frozen visual encoder, following the standard design used in LLaVA-like models. The decoder therefore maps from the LMM hidden space back to the pre-projector visual feature space. In Qwen-style models, by contrast, we do not use the raw final-layer ViT features before the visual merger. In practice, we found these features to be highly degenerate and nearly collinear across patches, making them un-suitable as reconstruction targets. Instead, we use the post-merger visual features directly as teacher targets, which yields a much more informative representation space for latent denoising. This choice is consistent with prior observations that deeper transformer features can become over-globalized or collapse in diversity, and that visual signal often weakens substantially at greater depth [9, 19]. 
+
+Saliency source. In CLIP- and SigLIP-based LLaVA variants, saliency is derived from visual attention patterns. In Qwen-style models, we instead use a feature-space saliency surrogate com-puted directly from the post-merger visual representations, which is better aligned with the visual space actually consumed by the language model. 
+
+Visual token layout. LLaVA-style models use a fixed set of pro-jected image tokens inserted into the language sequence, whereas Qwen-style models naturally accommodate variable numbers of image tokens per image. Despite these implementation differences, the conceptual method remains unchanged: saliency-guided cor-ruption is applied in the LMM visual-token space, and auxiliary supervision is imposed on internal visual hidden states. Conference’17, July 2017, Washington, DC, USA Dhruv Parikh, Jacob Fein-Ashley, Rajgopal Kannan, and Viktor Prasanna 
+
+Algorithm 1 Latent Denoising for Internal Visual Features 
+
+Require: image X, frozen vision encoder 𝐸 𝝓 , frozen teacher 𝐹 𝜻 ,projector 𝑃 𝝍 , LMM 𝐿 𝜽 , decoder 𝐷 𝝌 
+
+Require: corruption rates (𝜌 𝑁 , 𝜌 𝑀 ), corruption parameters 
+
+(𝜎, 𝜏 max ), temperatures (𝜏 𝑠 , 𝜏 𝑟 , 𝜏 𝑐 ), loss weights (𝜆 rec , 𝜆 rel , 𝜆 con )
+
+1: Extract visual features V = 𝐸 𝝓 (X) and detached teacher targets 
+
+Y = 𝐹 𝜻 (X)
+
+2: Compute patch saliency scores {𝑠 𝑖 }𝑆 𝑖 =1 from the frozen visual encoder 
+
+3: Sample a high-saliency noised set N and a low-saliency masked set M
+
+4: Project visual features into the LMM embedding space: z𝑖 =
+
+𝑃 𝝍 (v𝑖 )
+
+5: for 𝑖 = 1, . . . , 𝑆 do 
+
+6: if 𝑖 ∈ M then 
+
+7: ˜z𝑖 ← emask 
+
+8: else if 𝑖 ∈ N then 
+
+9: Sample 𝜏 𝑖 ∼ Unif (0, 𝜏 max ) and 𝝐 𝑖 ∼ N ( 0, 𝜎 2I)
+
+10: ˜z𝑖 ← ( 1 − 𝜏 𝑖 )z𝑖 + 𝜏 𝑖 𝝐 𝑖 
+
+11: Add noise-level embedding e𝜏 (𝑏 𝑖 )
+
+12: else 
+
+13: ˜z𝑖 ← z𝑖 
+
+14: end if 
+
+15: end for 
+
+16: Run the LMM on the corrupted visual tokens and text tokens 
+
+17: Extract visual hidden states from the selected supervision layer 
+
+ℓ𝑠 
+
+18: Decode corrupted-token states: ˆy𝑖 = 𝐷 𝝌 (h(ℓ𝑠 ) 
+
+> 𝑖
+
+) for 𝑖 ∈ C =
+
+N ∪ M 
+
+19: Compute Lrec , Lrel , and Lcon on the corrupted-token set 
+
+20: Combine with the language modeling loss to obtain the final objective 
+
+Table 5: Severity 3, LLaVA+CLIP. B = Baseline, LD = Latent Denoising. 
+
+Noise Blur Weather Digital 
+
+B LD Δ B LD Δ B LD Δ B LD Δ
+
+VQAv2 74.3 75.4 +1.1 71.2 72.3 +1.1 73.7 75.0 +1.3 75.8 76.9 +1.1 GQA 60.2 62.4 +2.2 59.1 60.7 +1.6 60.1 62.3 +2.2 61.4 63.5 +2.1 POPE 84.2 85.7 +1.5 81.8 83.4 +1.6 84.0 85.8 +1.8 85.5 87.1 +1.6 MME 1767 1783 +17 1811 1825 +13 1798 1809 +12 1815 1826 +12 MMB 61.5 63.1 +1.6 58.3 59.5 +1.2 61.0 63.0 +2.0 63.1 64.1 +1.0 MMStar 33.5 37.3 +3.8 32.1 36.0 +3.9 33.1 37.8 +4.7 33.9 36.7 +2.8 MMMU 35.1 37.6 +2.5 35.1 36.4 +1.3 35.6 37.0 +1.4 35.0 36.7 +1.7 SQA 68.9 69.3 +0.4 69.3 70.1 +0.8 67.7 68.5 +0.8 69.3 69.8 +0.5 TxtVQA 42.0 43.1 +1.1 31.4 32.4 +1.0 41.0 42.1 +1.1 44.0 45.2 +1.2 OCR 25.0 26.1 +1.1 17.0 18.4 +1.4 29.0 30.0 +1.0 26.9 28.2 +1.3 Chart 16.0 17.0 +1.0 13.2 14.0 +0.8 16.8 17.4 +0.6 16.5 17.3 +0.8 
+
+C Additional Corruption Results 
+
+The main paper reports per-corruption-type results at severity 5 for LLaVA+CLIP (Table 2) and Qwen-2.5-VL (Table 3). Here we provide the remaining tables to complete the evaluation across all architectures and severity levels. 
+
+LLaVA+CLIP, severity 3 (Table 5). Latent denoising improves on all 11 benchmarks across all four corruption types at the moderate severity level, with the same directional patterns as severity 5. 
+
+Table 6: Severity 3, LLaVA+SigLIP. 
+
+Noise Blur Weather Digital 
+
+B LD Δ B LD Δ B LD Δ B LD Δ
+
+VQAv2 73.3 74.5 +1.2 69.8 71.2 +1.4 72.6 73.9 +1.3 74.5 76.2 +1.7 GQA 59.5 61.5 +2.0 57.8 60.4 +2.6 60.0 62.0 +2.0 60.9 62.8 +1.9 POPE 83.8 85.3 +1.5 80.7 82.4 +1.7 84.3 85.6 +1.3 85.1 86.4 +1.3 MME 1677 1694 +17 1646 1666 +21 1699 1715 +16 1681 1701 +20 MMB 60.9 63.2 +2.3 55.3 58.1 +2.8 62.0 63.7 +1.7 63.4 66.1 +2.7 MMStar 34.0 36.1 +2.1 32.5 33.1 +0.6 35.2 37.4 +2.2 34.9 36.7 +1.8 MMMU 33.8 35.9 +2.1 33.0 34.8 +1.8 34.1 36.0 +1.9 34.2 35.9 +1.7 SQA 69.6 70.0 +0.4 69.0 70.0 +1.0 68.4 69.4 +1.0 70.5 71.0 +0.5 TxtVQA 43.6 45.7 +2.1 32.3 34.2 +1.9 43.1 44.7 +1.6 46.9 48.7 +1.8 OCR 26.4 27.9 +1.5 19.1 20.4 +1.3 29.3 30.8 +1.5 28.5 30.3 +1.8 Chart 14.8 16.2 +1.4 13.0 14.5 +1.5 15.2 16.6 +1.4 14.9 16.0 +1.1 
+
+Table 7: Severity 5, LLaVA+SigLIP. 
+
+Noise Blur Weather Digital 
+
+B LD Δ B LD Δ B LD Δ B LD Δ
+
+VQAv2 66.9 69.1 +2.2 65.6 68.5 +2.9 69.9 72.4 +2.5 69.5 71.7 +2.2 GQA 55.7 58.5 +2.8 56.0 58.9 +2.9 57.9 60.8 +2.9 57.5 60.1 +2.6 POPE 78.4 81.5 +3.1 77.6 80.4 +2.8 82.4 85.0 +2.6 79.9 82.6 +2.7 MME 1597 1625 +27 1523 1562 +38 1623 1640 +18 1631 1659 +28 MMB 52.2 55.3 +3.1 50.3 53.1 +2.8 54.9 58.1 +3.2 55.5 58.3 +2.8 MMStar 30.0 32.8 +2.8 31.1 32.8 +1.7 32.0 35.3 +3.3 32.2 34.5 +2.3 MMMU 32.6 35.3 +2.7 31.8 33.4 +1.6 32.5 35.4 +2.9 32.6 35.1 +2.5 SQA 67.7 69.7 +2.0 67.0 69.7 +2.7 67.6 69.5 +1.9 68.4 69.8 +1.4 TxtVQA 35.9 38.6 +2.7 24.4 27.3 +2.9 40.6 43.1 +2.5 37.5 40.0 +2.5 OCR 18.6 21.7 +3.1 13.3 15.9 +2.6 26.6 29.6 +3.0 21.5 24.4 +2.9 Chart 12.6 15.1 +2.5 12.2 14.7 +2.5 14.1 16.8 +2.7 13.2 15.4 +2.2 
+
+Table 8: Severity 3, Qwen-2.5-VL. 
+
+Noise Blur Weather Digital 
+
+B LD Δ B LD Δ B LD Δ B LD Δ
+
+VQAv2 73.5 74.7 +1.2 71.5 73.0 +1.5 76.2 77.6 +1.4 77.8 79.0 +1.2 GQA 55.8 62.0 +6.2 54.5 61.0 +6.5 58.2 64.2 +6.0 59.0 64.8 +5.8 POPE 81.2 83.0 +1.8 79.5 81.8 +2.3 84.3 86.2 +1.9 83.2 85.4 +2.2 MME 2218 2233 +15 2121 2148 +28 2311 2326 +15 2285 2309 +23 MMB 72.9 74.7 +1.8 68.3 70.6 +2.3 75.8 77.3 +1.5 77.2 79.5 +2.3 MMStar 54.5 56.1 +1.6 51.0 52.4 +1.4 56.8 58.7 +1.9 56.5 57.6 +1.1 MMMU 48.7 51.2 +2.5 46.2 48.8 +2.6 49.5 51.8 +2.3 49.0 51.4 +2.4 SQA 83.3 84.4 +1.1 81.2 82.8 +1.6 84.8 85.5 +0.7 85.6 86.8 +1.2 TxtVQA 62.0 63.2 +1.2 48.5 50.1 +1.6 72.4 74.5 +2.1 72.8 74.2 +1.4 OCR 60.1 61.5 +1.4 42.8 44.6 +1.8 70.2 72.4 +2.2 62.5 64.0 +1.5 Chart 64.0 67.6 +3.6 48.5 50.3 +1.8 72.1 75.3 +3.2 66.8 69.0 +2.2 
+
+LLaVA+SigLIP, severity 3 (Table 6) and severity 5 (Table 7). The SigLIP variant shows the same consistent improvement pattern, confirming cross-encoder generalization of the corruption robust-ness benefit. 
+
+Qwen-2.5-VL, severity 3 (Table 8). GQA shows the largest gains (+5.8 to +6.5), consistent with the severity 5 pattern in the main paper. 
+
+D Full Ablation Tables 
+
+We provide the complete ablation results across all benchmarks, complementing the plots and selected results in the main paper. All ablations use LoRA fine-tuning on the CLIP+Vicuna configuration. 
+
+Loss components (Table 9). The full latent denoising objective outperforms the baseline across nearly all benchmarks. Removing any single loss or switching to random token selection consistently reduces performance. “Rand.” uses all three losses but with random (non-saliency) token selection. Latent Denoising Improves Visual Alignment in Large Multimodal Models Conference’17, July 2017, Washington, DC, USA 
+
+Table 9: Loss component ablation. 𝑟 =Lrec , 𝑒 =Lrel , 𝑐 =Lcon . BL = no auxiliary losses. Best bold.   
+
+> BL LD
+
+𝑟 𝑟 +𝑒 𝑟 +𝑐 Rand. VQAv2 77.3 78.1 77.1 77.1 77.0 77.0 GQA 63.3 64.2 63.3 62.9 63.3 63.0 POPE 87.5 88.4 87.4 87.9 87.5 87.9 MME 1747 1786 1696 1747 1722 1668 MMB 64.9 65.8 64.8 65.3 64.3 65.0 TxtVQA 47.1 47.8 46.7 47.0 46.7 46.9 MMStar 34.5 36.1 34.9 34.6 33.7 33.5 OCR 31.9 32.6 31.0 30.9 30.6 30.5 MMMU 34.6 35.4 34.0 32.9 33.8 33.1 SQA 69.8 69.5 71.0 69.2 70.7 69.4 Chart 17.2 18.4 18.0 18.0 18.0 17.2 RWQA 56.2 56.8 56.5 55.0 56.1 55.4 QBench 59.2 60.4 60.1 59.4 58.8 57.5 VizWiz 55.6 56.2 50.2 51.8 54.1 55.7 NatB-Q 41.4 41.8 40.1 38.1 39.9 38.5 NatB-I 46.4 46.9 45.3 44.0 45.7 44.3 NatB-G 14.9 15.6 15.0 13.7 13.9 13.6 
+
+Table 10: Student layer ablation. Default: layer 16 (50%).                                             
+
+> Layer 8 (25%) Layer 16 (50%) Layer 32 (100%) GQA 63.7 64.2 63.6 POPE 87.1 88.4 87.5 MME 1779 1786 1781 Chart 17.8 18.4 17.2 MMB 65.1 65.8 64.8 TextVQA 46.9 47.8 46.3 MMStar 35.1 36.1 34.1 OCR 32.1 32.6 32.3 MMMU 32.4 35.4 34.7 SQA 68.6 69.5 68.6 RWQA 56.5 56.8 53.6 QBench 58.5 60.4 57.9 VizWiz 55.9 56.2 55.3 NatB-G 14.4 15.6 14.2
+
+Table 11: Noise conditioning ablation. Default: 8 bins with 
+
+𝜏 -embed.                                             
+
+> No Embed Default (8) 16 Bins GQA 63.5 64.2 63.5 POPE 87.7 88.4 87.7 MME 1741 1786 1723 Chart 17.6 18.4 17.2 MMB 64.8 65.8 64.6 TextVQA 46.8 47.8 46.8 MMStar 34.7 36.1 34.8 OCR 31.2 32.6 32.2 MMMU 34.3 35.4 33.8 SQA 68.6 69.5 67.7 RWQA 55.3 56.8 55.1 QBench 58.3 60.4 58.1 VizWiz 54.3 56.2 55.4 NatB-G 13.4 15.6 13.6
+
+Supervision layer (Table 10). Layer 16 (50% depth, default) achieves the best performance. Both early (layer 8) and late (layer 32) supervision still improve over the baseline. 
+
+Noise conditioning (Table 11). Removing the noise-level embed-ding degrades performance across all benchmarks. Increasing bins from 8 to 16 provides no benefit. 
+
+Gaussian noise parameters (Table 12). Both 𝜏 max and 𝜎 exhibit inverted-U patterns with default values near-optimal. The method tolerates a 4× range in both parameters without catastrophic degra-dation. 
+
+E Training Details and Hyperparameters 
+
+LLaVA with CLIP and SigLIP. We follow the standard LLaVA-1.5 two-stage recipe [ 47 ]. Stage 1 (projector pretraining): MLP projector 
+
+Table 12: Gaussian parameter ablation. Default: 𝜏 max = 0.15 ,
+
+𝜎 =1.0.
+
+𝜏 max =.07 𝜏 max =.30 𝜎 =0.5 𝜎 =2.0                                                        
+
+> GQA 63.7 63.7 63.3 63.8 POPE 87.6 87.8 88.0 87.9 MME 1736 1768 1763 1756 Chart 17.5 17.4 17.6 18.1 MMB 63.3 65.4 65.2 64.1 TextVQA 46.7 47.1 47.0 46.8 MMStar 33.4 34.6 34.8 34.9 OCR 31.9 32.2 31.7 32.2 MMMU 33.9 32.9 32.9 33.1 SQA 68.3 69.2 67.8 68.5 RWQA 53.2 53.6 54.7 56.0 QBench 59.0 58.9 57.1 59.3 VizWiz 55.8 54.2 55.2 55.8 NatB-G 13.3 13.9 13.7 13.0
+
+Table 13: Latent denoising hyperparameters.   
+
+> Parameter Description Value
+
+𝜌 𝑁 Noise rate 0.10 
+
+𝜌 𝑀 Mask rate 0.02 
+
+𝜎 Noise variance 1.0 
+
+𝜏 max Max interpolation strength 0.15 
+
+𝜏 𝑠 Saliency temperature 0.07 
+
+𝜏 𝑟 Relational temperature 0.10 
+
+𝜏 𝑐 Contrastive temperature 0.07 
+
+𝐵 Noise conditioning bins 8
+
+𝜆 rec Reconstruction loss weight 0.10 
+
+𝜆 rel Relational loss weight 0.025 
+
+𝜆 con Contrastive loss weight 0.025     
+
+> WHD Schedule
+> Warmup 5% Hold 75% Decay 20% Supervision layer 16 (50% depth)
+
+trained on LLaVA-558K with vision encoder and LLM frozen, learn-ing rate 1×10 −3, cosine schedule, warmup ratio 0.03, effective batch size 128 (per-device 4 × gradient accumulation 4 × 8 GPUs), 1 epoch, DeepSpeed ZeRO-2. Latent denoising is disabled in stage 1. Stage 2 (instruction tuning): projector and full LLM unfrozen on LLaVA-mix-665K, learning rate 2×10 −5, cosine schedule, same batch size, 1 epoch, DeepSpeed ZeRO-2. The CLIP variant uses ViT-L/14@336 (576 patches, 1024-dim); the SigLIP variant uses SO400M/14@384 (729 patches, 1152-dim). Both use Vicuna-7B-v1.5 as the language backbone. Matched baselines are trained with identical settings but latent denoising disabled. 
+
+Qwen-2.5-VL. We post-tune the publicly released Qwen-2.5-VL-7B-Instruct checkpoint on LLaVA-mix-665K for 1 epoch with latent denoising enabled. Learning rate 2×10 −5, cosine schedule, effective batch size 128, DeepSpeed ZeRO-2. The visual merger output fea-tures serve as both teacher targets and saliency source, as described in Sec. B.3. 
+
+Latent denoising parameters. Table 13 lists all latent denoising hyperparameters, shared across architectures unless noted. The decoder is a two-layer MLP with GELU activation, mapping from 
+
+𝑑 ℎ to 𝑑 𝑡 .
+
+LoRA ablations. All ablation experiments use LoRA [ 32 ] with rank 𝑟 = 128 , 𝛼 = 256 , dropout 0.05 , applied to all linear layers in the LLM. The projector, decoder, and auxiliary embeddings (mask, noise-level) remain fully trainable. Learning rate 2×10 −4 for LoRA parameters, 2 × 10 −5 for the projector. All other settings match stage 2. Conference’17, July 2017, Washington, DC, USA Dhruv Parikh, Jacob Fein-Ashley, Rajgopal Kannan, and Viktor Prasanna 
+
+Table 14: Comparison with visual supervision methods for LMMs. VFM = vision foundation model.                                  
+
+> Method Supervision Type Teacher Training Overhead
+> LocalAlign [15] Backbone alignment DINO/SAM Encoder fine-tuning KernelCLIP [25] Kernel alignment DINOv2 Encoder fine-tuning BASIC [72] Embedding alignment Self (LLM) Minimal FineGrained [36] Patch-level alignment External VFM Projector head ViRAL [87] Feature regularization DINOv2 (frozen) Frozen VFM forward pass VaCo [82] Multi-VFM coordination Multiple VFMs Multiple VFM forward passes ROSS [80] Diffusion reconstruction Encoder Diffusion head LaVER [44] Masked reconstruction EMA copy of LLM Full model EMA DS-VLM [71] Diffusion reconstruction Encoder Diffusion head
+> Ours Latent denoising Backbone encoder Lightweight MLP decoder
+
+Evaluation. All evaluations use lmms-eval [91 ] with batch size 1 and greedy decoding. Corruption evaluation follows the protocol in Sec. 4.2. 
+
+WHD schedule details. The warmup–hold–decay (WHD) sched-ule linearly increases corruption rates and auxiliary loss weights from zero during an initial warmup phase (5% of training), holds them at target values for the majority of training (75%), and linearly decays them back to zero in the final phase (20%). This prevents auxiliary losses from interfering with the critical early optimization steps of the language model and ensures clean convergence at the end of training. 
+
+Corruption evaluation protocol details. Within each corrup-tion family, specific subtypes are: noise (Gaussian, shot, impulse, speckle), blur (defocus, glass, motion, zoom, Gaussian), weather 
+
+(snow, frost, fog, brightness, spatter), and digital (contrast, elastic, pixelate, JPEG, saturate). For each image, a single subtype is deter-ministically selected using a seeded hash of the image identifier, ensuring reproducibility and one-to-one correspondence across models evaluated on the same benchmark. We evaluate at severity levels 3 (moderate) and 5 (severe) on the standard 1–5 ImageNet-C scale. 
+
+F Comparison with Previous Works 
+
+Table 14 provides a qualitative comparison of our method with re-cent approaches that introduce visual supervision during LMM training, spanning backbone refinement [ 15 , 25 ], feature align-ment [ 36 , 72 , 82 , 87 ], and reconstructive supervision [ 44 , 71 , 80 ] (see Sec. 2). Direct quantitative comparison is difficult as these methods use different evaluation protocols, benchmark subsets, and training configurations. Our method is lightweight by design: the teacher signal comes from the same frozen vision encoder already used as the LMM’s backbone, requiring no additional external model at training time. The auxiliary decoder is a two-layer MLP, substantially cheaper than the diffusion heads used by ROSS and DS-VLM or the full-model EMA required by LaVER. In contrast, ViRAL and VaCo re-quire forward passes through one or more frozen vision foundation models (e.g., DINOv2, SAM) at every training step. While an exter-nal teacher VFM could in principle be used, our framework achieves strong results using only the backbone encoder, keeping the method self-contained. Baseline Latent Denoising (Ours) 
+
+Figure 11: t-SNE at layer 15 (supervised layer). Latent denois-ing produces tighter class clusters. Baseline Latent Denoising (Ours) 
+
+Figure 12: t-SNE at layer 24. Cluster structure is maintained at deeper layers. Baseline Latent Denoising (Ours) 
+
+Figure 13: t-SNE at layer 31 (final layer). Latent denoising preserves discriminative structure even at the output layer. 
+
+G Additional Visual Feature Analysis 
+
+t-SNE visualizations. Figures 11–13 show t-SNE visualizations of mean-pooled visual features from 20 ImageNet classes (50 images each) at layers 15, 24, and 31. At all depths, latent denoising produces tighter, more separated class clusters, consistent with the kNN classification improvements reported in the main paper. 
+
+Additional cross-attention heatmaps. Figures 14–16 show ad-ditional cross-attention visualizations from layer 16 on GQA ex-amples, where our method consistently produces more spatially grounded attention over question-relevant regions. Latent Denoising Improves Visual Alignment in Large Multimodal Models Conference’17, July 2017, Washington, DC, USA Original Baseline Latent Denoising (Ours)   
+
+> Q: What kind of device is on top of the desk? |GT: keyboard
+
+Q: What kind of device is on top of the desk? | GT: keyboard Original Baseline Latent Denoising (Ours)   
+
+> Q: Who is standing at the table? |GT: woman
+
+Q: Who is standing at the table? | GT: woman Original Baseline Latent Denoising (Ours)   
+
+> Q: Is the person to the right of the cup wearing jeans? |GT: yes
+
+Q: Is the person to the right of the cup wearing jeans? | GT: yes Original Baseline Latent Denoising (Ours)   
+
+> Q: Does the sweater look open and blue? |GT: yes
+
+Q: Does the sweater look open and blue? | GT: yes 
+
+Figure 14: Additional cross-attention heatmaps (1/3). Layer 16, GQA. Each row: original, baseline, latent denoising. Conference’17, July 2017, Washington, DC, USA Dhruv Parikh, Jacob Fein-Ashley, Rajgopal Kannan, and Viktor Prasanna Original Baseline Latent Denoising (Ours)   
+
+> Q: On which side of the picture is the leather bag? |GT: right
+
+Q: On which side of the picture is the leather bag? | GT: right Original Baseline Latent Denoising (Ours)   
+
+> Q: What is the name of the cooking utensil that is hang from the hook? |GT: pan
+
+Q: What is the cooking utensil hanging from the hook? | GT: pan Original Baseline Latent Denoising (Ours)   
+
+> Q: Are the plates on top of an ottoman? |GT: no
+
+Q: Are the plates on top of an ottoman? | GT: no Original Baseline Latent Denoising (Ours)   
+
+> Q: How does that car look like, orange or maybe white? |GT: white
+
+Q: How does that car look, orange or maybe white? | GT: white 
+
+Figure 15: Additional cross-attention heatmaps (2/3). Layer 16, GQA. Latent Denoising Improves Visual Alignment in Large Multimodal Models Conference’17, July 2017, Washington, DC, USA Original Baseline Latent Denoising (Ours)   
+
+> Q: What color is the dirt? |GT: red
+
+Q: What color is the dirt? | GT: red Original Baseline Latent Denoising (Ours)   
+
+> Q: How is the clothing item that is pink called? |GT: tank top
+
+Q: How is the clothing item that is pink called? | GT: tank top Original Baseline Latent Denoising (Ours)   
+
+> Q: Is the field soft and snowy? |GT: no
+
+Q: Is the field soft and snowy? | GT: no Original Baseline Latent Denoising (Ours)   
+
+> Q: Is the ground blue or brown? |GT: brown
+
+Q: Is the ground blue or brown? | GT: brown 
+
+Figure 16: Additional cross-attention heatmaps (3/3). Layer 16, GQA.

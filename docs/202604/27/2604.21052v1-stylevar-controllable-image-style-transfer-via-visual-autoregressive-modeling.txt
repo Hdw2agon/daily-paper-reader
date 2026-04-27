@@ -1,0 +1,515 @@
+Title: StyleVAR: Controllable Image Style Transfer via Visual Autoregressive Modeling
+
+URL Source: https://arxiv.org/pdf/2604.21052v1
+
+Published Time: Fri, 24 Apr 2026 00:17:56 GMT
+
+Number of Pages: 15
+
+Markdown Content:
+# StyleVAR: Controllable Image Style Transfer via Visual Autoregressive Modeling *Liqi Jing Dingming Zhang Peinian Li Lichen Zhu Duke University 
+
+liqi.jing@duke.edu 
+
+> April 21, 2026
+
+Code github.com/Senfier-LiqiJing/StyleVAR 
+
+Weights huggingface.co/Senfier-LiqiJing/StyleVAR 
+
+Abstract This project studies reference-based image style transfer: given a content image and a style image, the goal is to generate an output that preserves the structural semantics of the content while adopting the artistic texture of the style. We build on the Visual Autoregressive Modeling (VAR) framework and formulate style transfer as conditional discrete sequence modeling in a learned latent space. Images are decomposed into multi-scale representations and tokenized into discrete codes by a VQ-VAE; a transformer then autoregressively models the distribution of target tokens conditioned on style and content tokens. To inject style and content information, we introduce a blended cross-attention mechanism in which the evolving target representation attends to its own history, while style and content features act as queries that decide which aspects of this history to emphasize. A scale-dependent blending coefficient controls the relative influence of style and content at each stage, encouraging the synthesized representation to align with both the content structure and the style texture without breaking the autoregressive continuity of VAR. We train StyleVAR in two stages from a pretrained VAR checkpoint: supervised fine-tuning on a large triplet dataset of content–style–target images, followed by reinforcement fine-tuning with Group Relative Policy Optimization (GRPO) against a DreamSim-based perceptual reward, with per-action normalization weighting to rebalance credit across VAR’s multi-scale hierarchy. Across three benchmarks spanning in-, near-, and out-of-distribution regimes, StyleVAR consistently outperforms an AdaIN baseline on Style Loss, Content Loss, LPIPS, SSIM, DreamSim, and CLIP similarity, and the GRPO stage yields further gains over the SFT checkpoint, most notably on the reward-aligned perceptual metrics. Qualitatively, the method transfers texture while maintaining semantic structure, especially for landscapes and architectural scenes, while a generalization gap on internet images and difficulty with human faces highlight the need for better content diversity and stronger structural priors. 
+
+# 1 Introduction 
+
+Reference-based image style transfer aims to generate an image that keeps what is in a content image while changing how it looks according to a style image. Concretely, the spatial layout and object semantics of the content image should be preserved, while colors, textures, and local patterns follow the chosen style. This setting is useful in artistic creation, visual prototyping, and controllable data augmentation, 
+
+> *Independent work completed at Duke University.
+
+1 
+
+> arXiv:2604.21052v1 [cs.CV] 22 Apr 2026 StyleVAR – Controllable Image Style Transfer via VAR 2
+
+where users wish to restyle an existing scene without altering its high-level meaning. Achieving this objective requires a model that can respect content geometry and semantics while still expressing strong and diverse stylistic effects. Balancing content preservation and style strength is challenging. If the model focuses too much on content, stylization becomes weak and the output resembles a slightly modified version of the original image. If the model overemphasizes style, it may distort object shapes or introduce artifacts that break semantic coherence. Styles also vary widely: some primarily change global tone, while others rely on fine-grained textures and patterns. A robust method must therefore provide a principled way to combine information from the content and style images, so that the resulting image is structurally faithful yet stylistically rich. Earlier style transfer frameworks based on feed-forward CNNs and GANs showed that it is possible to learn powerful style priors, but they often come with practical limitations: models may need to be trained or adapted for specific styles, and training can be unstable or sensitive to dataset design. More recently, diffusion-based approaches have become the dominant backbone for high-quality image generation and have been adapted to style transfer as well. However, diffusion models typically require many iterative denoising steps, leading to slow sampling and high computational cost, and they often depend on additional guidance mechanisms or prompt-like controls that are not always ideal when we focus purely on image-to-image style transfer. These factors motivate exploring alternative formulations that retain strong generative capacity while offering better efficiency and more direct conditioning on content and style images. In this project, we adopt the Visual Autoregressive Modeling (VAR) framework and cast style transfer as conditional discrete sequence modeling in a multi-scale latent space. Each image is decomposed into a hierarchy of feature maps and tokenized into discrete codes by a VQ-VAE encoder. The style image and content image are represented as sequences of tokens across scales, and the target image is generated scale by scale, with each set of target tokens conditioned on the history of previously generated tokens as well as the corresponding style and content tokens. This formulation explicitly encodes the intuition that the target should be consistent with its own past while being guided by both content structure and style appearance. We train the resulting StyleVAR model in two stages. A supervised fine-tuning (SFT) stage optimizes a token-level cross-entropy loss on paired triplets and teaches the model to reproduce plausible stylizations, but leaves a gap between token-level supervision and the perceptual quality of the decoded image. We therefore add a second reinforcement fine-tuning stage based on Group Relative Policy Optimization (GRPO), using a DreamSim-based perceptual reward and per-action normalization weighting to counter the scale imbalance inherent to VAR’s multi-scale hierarchy. Experiments across in-, near-, and out-of-distribution benchmarks show that StyleVAR substantially improves over an AdaIN baseline and that GRPO further sharpens the style/content trade-off learned during SFT. 
+
+# 2 Related Works 
+
+2.1 Visual Autoregressive Modeling 
+
+Autoregressive (AR) modeling has been the cornerstone of large language models, where text is generated sequentially, token by token, in raster-scan order. Extending this paradigm to images, however, is nontrivial: a single image contains tens of thousands of pixels or latent tokens, and the ordering used for text—left-to-right, top-to-bottom—does not respect the two-dimensional and multi-scale nature of visual content. Applying next-token AR directly to images therefore yields slow sampling, poor scaling StyleVAR – Controllable Image Style Transfer via VAR 3
+
+behavior, and image quality that consistently trails behind diffusion models. Visual Autoregressive Modeling (VAR) [ 1] reformulates image generation as next-scale prediction 
+
+rather than next-token prediction. Instead of flattening an image into a single long token sequence, VAR first encodes it with a multi-scale VQ-VAE into a hierarchy of token maps of increasing resolutions (e.g., 1×1, 2×2, . . . , 16 ×16 ). A transformer then autoregressively predicts these token maps from coarse to fine, with all tokens within a given scale generated in parallel. This design aligns the generative order with the natural coarse-to-fine structure of visual perception: global layout is decided first at low resolutions, while local texture and detail are refined at higher resolutions. The practical benefits of this formulation are substantial. On the ImageNet 256 ×256 benchmark, VAR improves Fréchet Inception Distance (FID) from 18.65 to 1.73 over a conventional AR baseline, raises Inception Score from 80.4 to 350.2, and achieves roughly 20 × faster inference, surpassing diffusion transformers such as DiT in image quality, data efficiency, and scalability. VAR also exhibits scaling laws reminiscent of those observed in large language models, making it an attractive backbone for conditional visual generation. Our StyleVAR architecture is built directly on top of VAR, preserving its multi-scale token hierarchy and coarse-to-fine autoregressive process while augmenting the transformer with a blended cross-attention module that injects style and content conditions at each scale. 
+
+2.2 Group Relative Policy Optimization 
+
+Reinforcement learning from human or verifiable feedback has become a standard tool for aligning large generative models with downstream objectives that are difficult to express as differentiable losses. The dominant algorithm in this space has historically been Proximal Policy Optimization (PPO), which stabilizes on-policy updates through a clipped surrogate objective and relies on a learned value network (critic) to estimate advantages. In the context of large models, however, maintaining a separate critic of comparable capacity to the policy doubles the memory footprint and introduces additional training instability, since the critic itself must be kept calibrated throughout training. Group Relative Policy Optimization (GRPO), proposed in DeepSeek-R1 [ 7], removes the critic entirely. For each prompt, GRPO samples a group of G candidate completions from the current policy, scores them with a reward function, and computes each trajectory’s advantage by standardizing its reward against the mean and standard deviation of its group: 
+
+A(i) = R(i) − mean jR( j)
+
+std jR( j) .
+
+The group mean thus serves as a per-prompt baseline, eliminating the need for a learned value function while preserving variance reduction properties. The policy is then updated with a PPO-style clipped surrogate and a KL penalty toward a reference policy to prevent excessive drift. DeepSeek-R1 demon-strated that this simple formulation, combined with rule-based verifiable rewards, is sufficient to elicit sophisticated chain-of-thought reasoning in language models purely through RL, without supervised reasoning traces. GRPO is especially attractive for visual generation, where candidate outputs can be scored by perceptual reward models and multiple stylizations of the same content–style pair are all plausibly valid. Group sampling naturally exploits this output diversity to construct informative advantages. We therefore adopt GRPO as the foundation of our reinforcement fine-tuning stage; its critic-free design is particularly beneficial given the already large memory footprint of VAR’s multi-scale transformer. StyleVAR – Controllable Image Style Transfer via VAR 4
+
+2.3 Credit Assignment for VAR 
+
+Although GRPO transfers cleanly in spirit to visual autoregressive models, a direct application is suboptimal because VAR generation is structurally unlike language generation. In a language model, each step produces a single token over a fixed action space, so uniform credit assignment across the sequence is a reasonable default. In VAR, by contrast, each generation step produces a full token map whose size grows quadratically with the scale index: in the StyleVAR backbone, the scales range from a single token at 1×1 to 256 tokens at 16 ×16 , yielding a 256 × imbalance in token count across steps. Sun et al. [ 8 ] characterize this as an asynchronous policy conflict : different generation steps correspond to heterogeneous decision structures, and naively averaging the GRPO loss over all tokens lets the finest scales dominate the gradient even though the coarsest scales govern global layout and semantics. To address this, VAR RL Done Right [8 ] proposes three synergistic components on top of GRPO for VAR. First, a Value-as-Middle-Return (VMR) intermediate reward decomposes the long-horizon RL problem at a middle timestep, providing denser and lower-variance feedback to early-stage generation. Second, Per-Action Normalization Weighting (PANW) reweights the per-token loss by an inverse power of the scale’s spatial resolution, normalizing the total gradient contribution of each scale and rebalancing credit across the multi-scale hierarchy; the authors find that a decay exponent of α ∈ [0.6, 0.8] is optimal. Third, a Mask Propagation mechanism, inspired by Reward Feedback Learning, traces task-relevant spatial regions backward through the generation hierarchy and gates both intermediate rewards and gradients, focusing updates on causally relevant tokens. Among these, PANW is directly applicable to any GRPO-style optimization of a multi-scale VAR model and is agnostic to the specific reward or task. We adopt PANW in our framework to restore meaningful gradient flow to the coarse scales that carry the structural decisions most critical for style transfer, while leaving scale-specific intermediate rewards and spatial masking to future work. 
+
+# 3 StyleVAR: Architecture and Optimization 
+
+3.1 Blended Cross-Attention Autoregressive Modeling 
+
+Formulation. In the context of our style transfer task, the objective is to predict a target image that preserves the structural semantics of a content image xc while adopting the artistic texture of a style image xs. Adopting the framework of Visual Autoregressive Modeling (VAR), we decompose images into multi-scale representations. Each scale’s feature map is tokenized into discrete tokens. Formally, the style image tokens are denoted as S = {s1, s2, . . . , sK } = E (xs), and the content image tokens as 
+
+C = {c1, c2, . . . , cK } = E (xc), where K represents the total number of scales and E (·) denotes the VQ-VAE tokenization process. The generation of the target image, denoted as R = {r1, r2, . . . , rK }, proceeds in a scale-wise autore-gressive manner. Consequently, the autoregressive likelihood for StyleVAR is formulated as: 
+
+P(x | xs, xc) = 
+
+> K
+
+# ∏
+
+> k=1
+
+P(rk | r<k, sk, ck) (1) where rk denotes the target features at the k-th scale, and r<k = r1: k−1 represents the history of generated target features prior to the k-th scale. Crucially, this formulation implies that the generation of the current scale is conditioned not only on the target’s own history but also on the corresponding scale-specific features from the style and content conditions. StyleVAR – Controllable Image Style Transfer via VAR 5
+
+Model Structure. Figure 1 illustrates the architecture of StyleVAR. Building upon the VAR backbone, we introduce a Blended Cross-Attention mechanism to inject style and content information into the target image generation process. Within each transformer block, the feature update process is expressed as: 
+
+hnew = h +
+
+h
+
+α · Attn (Q = sk, K = h,V = h) + ( 1 − α) · Attn (Q = ck, K = h,V = h)
+
+i
+
+(2) where h represents the input target features at stage k (or the output of the preceding transformer block). The term αk is a heuristic hyperparameter governing the blending ratio between style and content information. Through this mechanism, h passes through the transformer blocks and is iteratively updated via the injection of blended attention, ensuring the synthesized features align with both the content structure and style texture.  
+
+> Figure 1: Structure of StyleVAR Transformers.
+
+3.2 Training and Inference 
+
+Inference. The inference process begins by initializing the start token at the first scale using content features extracted via a ResNet-18 backbone, which are projected to the embedding dimension via an MLP. A critical component of the inference logic is the progressive accumulation of features. Unlike the generated target, the style and content features are fully observable; therefore, we pre-calculate their multi-scale ground truth tokens via VQ-VAE decomposition and accumulate them prior to inference. For the target image generation, we maintain a cumulative feature map, denoted as ˆf . At each step, the generated tokens rk are quantized and added to ˆf in a residual manner. To serve as the input for the subsequent scale k + 1, ˆf is downsampled to the appropriate resolution. This downsampled map acts as the “next-scale input,” ensuring that the autoregressive generation maintains structural coherence across resolutions. StyleVAR – Controllable Image Style Transfer via VAR 6
+
+Training. During the training phase, we employ a teacher-forcing strategy. The model concatenates the start token with the ground truth tokens of the target image across all other scales. Following the vanilla VAR paradigm, the model predicts the logits for stages 1 to K in parallel. We then calculate the Cross-Entropy loss between the predicted logits and the ground truth codebook indices. Note that, similar to inference, the input to the model at any stage k is the accumulation of ground truth features from all preceding scales ( 1 to k − 1), ensuring the model learns to refine coarse-grained features into fine-grained details.  
+
+> Algorithm 1 : StyleVAR Training
+
+Inputs: target image x, style image xs, content image xc;
+
+Inputs: VQ-VAE Encoder E , Codebook Z;
+
+Inputs: Transformer Tθ (parameters θ ); 
+
+// 1. Multi-scale Token Decomposition (Ground Truth)  
+
+> 1
+
+R = {r1, . . . , rK } ← VQVAE_Encoding (x); 
+
+> 2
+
+S = {s1, . . . , sK } ← VQVAE_Encoding (xs); 
+
+> 3
+
+C = {c1, . . . , cK } ← VQVAE_Encoding (xc);
+
+// 2. Initialize Start Token  
+
+> 4
+
+rstart ← MLP (ResNet (xc)) ;
+
+// 3. Parallel Prediction (Teacher Forcing)  
+
+> 5
+
+Rinput ← [rstart , r2, . . . , rK ] ; // concatenate start token  
+
+> 6
+
+L1: K ← Tθ (Rinput , S,C) ; // Predict logits for all scales // 4. Optimization  
+
+> 7
+
+L ← CrossEntropy (L1: K , R); 
+
+> 8
+
+θ ← θ − η∇θ L ;
+
+Return: Optimized parameters θ ;
+
+3.3 Discussion: Rationale for Attention Configuration 
+
+Assignment of Query, Key, and Value. A critical design decision in StyleVAR is the assignment of the target image features to the Key ( K) and Value ( V ) roles, while assigning the style/content features to the Query ( Q) role. This configuration diverges from standard cross-attention mechanisms where the target usually acts as the Query to retrieve information from the condition ( K,V ). 
+
+Preserving Autoregressive Continuity. The efficacy of the vanilla VAR architecture hinges on its “next-scale prediction” paradigm. To generate the token map at stage k, the model requires a comprehensive aggregation of the entire history of generated tokens, r<k = r1: k−1, rather than solely relying on the immediate predecessor rk−1. By designating the target feature history as K and V , we ensure that the attention mechanism explicitly aggregates information from the target’s own past. In this setup, the style and content features (as Q) act as a “search query”, determining which parts of the target’s history are most relevant to emphasize for the current generation step. 
+
+Contrast with Alternative Configurations. Conversely, if we were to assign the target features to Q
+
+and the style/content to K and V , the model would primarily attend to the external conditions ( s and c) to construct the next scale. While this maximizes information injection, it risks disrupting the autoregressive consistency fundamental to VAR. The model might rely too heavily on the static conditions and neglect the structural continuity required to evolve rk−1 into rk.StyleVAR – Controllable Image Style Transfer via VAR 7
+
+Algorithm 2 : StyleVAR Inference (Autoregressive) 
+
+Inputs: style image xs, content image xc;
+
+Inputs: Trained Transformer Tθ , VQ-VAE Decoder D;
+
+Inputs: Hyperparameters: steps K, resolutions (hk, wk)Kk=1;
+
+// 1. Prepare Conditions  
+
+> 1
+
+S ← VQVAE_Encoding (xs); 
+
+> 2
+
+C ← VQVAE_Encoding (xc);
+
+// 2. Initialization  
+
+> 3
+
+rinput ← MLP (ResNet (xc)) ; 
+
+> 4
+
+ˆf ← 0 ; // Initialize cumulative feature map // 3. Stage-wise Generation  
+
+> 5
+
+for k = 1 to K do  
+
+> 6
+
+Logits k ← Tθ (rinput , sk, ck); 
+
+> 7
+
+rk ∼ Sample (Logits k) ; // Top-k/Top-p sampling  
+
+> 8
+
+zk ← lookup (Z, rk);
+
+// Accumulate residual to max resolution  
+
+> 9
+
+ˆf ← ˆf + interpolate (zk, hK , wK );
+
+// Prepare input for next scale  
+
+> 10
+
+if k < K then  
+
+> 11
+
+rinput ← interpolate ( ˆf , hk+1, wk+1);
+
+// 4. Image Reconstruction  
+
+> 12
+
+ˆx ← D( ˆf );
+
+Return: Generated image ˆ x;StyleVAR – Controllable Image Style Transfer via VAR 8
+
+Theoretical Viability. It is worth noting that by setting V as the target features, the output of the attention block becomes a linear combination of the target’s own history. While this does not directly “copy” pixels from the style image, the style-guided re-weighting (via the Q × KT score) is theoretically sufficient to modulate the generative trajectory, effectively steering the autoregressive process to adopt the desired stylistic characteristics while maintaining the structural integrity of the target. 
+
+3.4 GRPO-based Reinforcement Fine-tuning 
+
+Motivation. The supervised training described in Section 1 optimizes a token-level cross-entropy loss against ground-truth codebook indices. While effective at teaching the model to reproduce training triplets, this objective leaves a gap between token-level supervision and the perceptual quality of the decoded image: predicting a slightly different codebook index at a fine scale may yield a nearly identical stylization, and conversely, being “correct” in token space does not guarantee perceptual fidelity to the target. Moreover, natural quality metrics for style transfer are applied to the decoded image and must pass through the non-differentiable VQ-VAE sampling step, making them unavailable as direct losses during SFT. To bridge this gap, we introduce a second-stage reinforcement fine-tuning phase based on Group Relative Policy Optimization (GRPO). Reinforcement learning allows direct optimization of a perceptual reward computed on the decoded image, without requiring differentiability through the sampling trajectory. We choose GRPO over standard actor–critic formulations because it replaces the learned value function with a group-relative baseline: for each (content, style) condition, a group of trajectories is sampled, and each trajectory’s advantage is computed relative to the group mean. This is particularly well suited to our setting — style transfer admits many plausible stylizations for a given pair, and group sampling naturally exploits this diversity while avoiding the memory overhead of a separate critic network. 
+
+Reward Design. We use DreamSim [ 9] between the generated image and the paired target image as the reward signal: 
+
+R( ˆx, x) = −λ · DreamSim ( ˆx, x), (3) where ˆx is the decoded generation, x is the ground-truth target, and λ is a scaling constant. DreamSim is a perceptual similarity metric calibrated against human judgments of mid-level image similarity. Compared to pixel-wise metrics or LPIPS — which are dominated by low-level feature statistics — and Gram-based style losses — which capture only texture statistics and disregard semantic content — DreamSim characterizes non-pixel-level image similarity, reflecting how close two images appear to a human observer in overall layout, content, and appearance. This makes it a more holistic training signal for a task in which both content preservation and stylistic alignment matter. 
+
+GRPO Formulation. We cast the multi-scale autoregressive generation as a sequential decision process. At the k-th scale, the state sk consists of the accumulated target history r<k together with the scale-specific condition features sk and ck, and the action ak is the set of discrete tokens produced at that scale. A trajectory a = {a1, . . . , aK } therefore spans all K scales and is sampled autoregressively from the policy 
+
+πθ .For each training triplet (xc, xs, x), we draw G trajectories {a(i)}Gi=1 from the rollout policy πθold and decode each one to an image ˆ x(i). The group-relative advantage for trajectory i is 
+
+A(i) = R(i) − mean j
+
+ R( j)
+
+std j
+
+ R( j) + εstd 
+
+, (4) StyleVAR – Controllable Image Style Transfer via VAR 9
+
+which normalizes each trajectory’s reward against its peers and removes the need for a learned value baseline. Following PPO-style clipped optimization, we define the per-token importance ratio 
+
+ρ(i) 
+
+> t
+
+= πθ
+
+ a(i) 
+
+> t
+
+| s(i)
+
+> t
+
+
+
+πθold 
+
+ a(i) 
+
+> t
+
+| s(i)
+
+> t
+
+ , (5) and the clipped surrogate 
+
+L PG  
+
+> t,i
+
+= − min 
+
+
+
+ρ(i) 
+
+> t
+
+A(i), clip (ρ(i) 
+
+> t
+
+, 1 − ε, 1 + ε) A(i)
+
+. (6) To prevent the policy from drifting too far from a reference policy πref , we add a per-token KL penalty estimated via Schulman’s unbiased, non-negative k3 estimator: 
+
+L KL  
+
+> t,i
+
+= exp   log πref − log πθ
+
+ −   log πref − log πθ
+
+ − 1. (7) 
+
+Scale-Aware Credit Assignment. A naive GRPO implementation averages the per-token losses uni-formly over the trajectory. This is problematic for VAR: the sequence length is dominated by the finest scales, with our 10 scales ranging from 1×1 (1 token) to 16 ×16 (256 tokens), a 256-fold imbalance. Under uniform averaging, the 16 ×16 scale alone would contribute 256 times more gradient than the 1×1scale, yet coarse scales carry the global layout and semantic decisions that matter most for content preser-vation in style transfer. Gradient mass is therefore systematically misallocated toward high-frequency details. To rebalance credit across scales, we adopt Per-Action Normalization Weighting (PANW) [ 8]. Each token at a scale of spatial resolution hk × wk is weighted by 
+
+wt = 1
+
+Z (hk · wk)−α , (8) where α ∈ [0.6, 0.8] controls the strength of the rebalancing and Z normalizes the weights to sum to one across the trajectory. We use α = 0.7 . Table 1 lists the resulting per-token weights; coarse scales receive roughly 60 × the per-token weight of the finest scale, which compensates for length imbalance and restores meaningful gradient at the scales that govern structure and layout.                                   
+
+> Table 1: Per-token PANW weights across the 10 VAR scales ( α=0.7). Scale denotes the spatial side length. Scale ( hk=wk)123456810 13 16 # Tokens 14916 25 36 64 100 169 256
+> wt(×10 −2)3.37 1.28 0.72 0.48 0.35 0.27 0.18 0.13 0.09 0.07
+
+The final GRPO objective is a PANW-weighted sum of the policy and KL terms over all tokens of all trajectories in the group: 
+
+LGRPO = 1
+
+G
+
+> G
+
+# ∑
+
+> i=1
+> L
+
+# ∑
+
+> t=1
+
+wt
+
+
+
+L PG  
+
+> t,i
+
++ β L KL 
+
+> t,i
+
+
+
+, (9) where L is the total number of tokens in a trajectory (here L = 680 across the 10 scales) and β is the KL coefficient. 
+
+Iterative Reference Update. We initialize the reference policy πref with the SFT model. In a standard reinforcement fine-tuning (RFT) pipeline, this reference is held fixed throughout RL training, so the StyleVAR – Controllable Image Style Transfer via VAR 10 
+
+KL term anchors the policy to the SFT distribution. As the policy improves, however, a static reference increasingly penalizes precisely the improvements we wish to keep. We therefore adopt an iterative variant: whenever the running average reward surpasses the reference’s baseline by a meaningful margin, we replace the reference with the current policy, πref ← πθ , and continue optimization against this improved anchor. This promotes our procedure from a single-shot RFT to iterative GRPO, enabling the policy to make sustained progress across many updates without being continually pulled back toward the original SFT distribution. 
+
+Algorithm 3 : StyleVAR GRPO Fine-tuning 
+
+Inputs: SFT-trained policy πθ ; triplet dataset D;
+
+Inputs: group size G; clip ratio ε; KL coefficient β ; PANW exponent α;
+
+Inputs: reward R( ˆx, x) = −λ · DreamSim ( ˆx, x); update margin δ ;
+
+// 1. Initialize reference policy with SFT weights  
+
+> 1
+
+πref ← πθ ; ¯Rref ← − ∞; 
+
+> 2
+
+for each training step do  
+
+> 3
+
+Sample triplet (xc, xs, x) ∼ D; 
+
+> 4
+
+πθold ← πθ ; // snapshot for on-policy ratio // 2. Group rollout  
+
+> 5
+
+for i = 1 to G do  
+
+> 6
+
+a(i) ∼ πθold (· | xc, xs); 
+
+> 7
+
+ˆx(i) ← VAE_Decode (a(i)); 
+
+> 8
+
+R(i) ← R( ˆx(i), x);
+
+// 3. Group-relative advantage  
+
+> 9
+
+A(i) ←  R(i) − mean jR( j)/ std jR( j) + εstd 
+
+;
+
+// 4. Teacher-forced log-probabilities on the sampled tokens  
+
+> 10
+
+Compute log πθ (a(i)), log πθold (a(i)), log πref (a(i));
+
+// 5. PANW weights and GRPO loss  
+
+> 11
+
+wt ← (hk · wk)−α /Z for token t at scale k; 
+
+> 12
+
+Compute LGRPO ; 
+
+> 13
+
+θ ← θ − η ∇θ LGRPO ;
+
+// 6. Iterative reference update  
+
+> 14
+
+if Rrecent > ¯Rref + δ then  
+
+> 15
+
+πref ← πθ ; ¯Rref ← Rrecent ;
+
+Return: Fine-tuned policy πθ ;
+
+# 4 Experiments 
+
+4.1 Implementation Details 
+
+Our training proceeds in two stages: (1) supervised fine-tuning (SFT) of StyleVAR on paired style-transfer data, and (2) reinforcement-learning refinement via Group Relative Policy Optimization (GRPO) using a learned perceptual reward. 
+
+Stage 1: Supervised Fine-Tuning. We initialized the weights of StyleVAR using the pre-trained vanilla VAR model. To adapt the architecture for style transfer, we froze the VQ-VAE component StyleVAR – Controllable Image Style Transfer via VAR 11 
+
+while fine-tuning the full 600M parameters of the transformer. Since StyleVAR utilizes a dual-stream input (target features and content/style condition features), the original projection layers of the vanilla VAR—responsible for mapping image features to Query, Key, and Value (QKV)—were duplicated to initialize the distinct projection layers for both the target and the condition streams. The Feed-Forward Networks (FFN) were initialized with the original VAR parameters. We fine-tuned the model for a total of 10 epochs. The learning rate was scheduled at 5 × 10 −4 for the first 6 epochs and decayed to 1 × 10 −4
+
+for the final 4 epochs. Batchsize is set to be 128 with gradient accumulation. Training was conducted on one NVIDIA 4090 (48GB) GPUs. 
+
+Stage 2: GRPO Reinforcement Learning. After SFT, we further refine the policy on the same paired corpus by optimizing the PANW-weighted GRPO objective of Section 3. Because the transformer is large (∼600M) and RL updates are noisy, we adopt LoRA adapters (rank r=256 , scaling α/r=2 ) on every attention ( W target  
+
+> Q
+
+,W cond  
+
+> QKV
+
+,Wproj ) and FFN ( Wfc1 ,Wfc2 ) linear layer, yielding 131M trainable parameters (18.2% of the backbone). The reference policy πref is realized in place by disabling the LoRA path in a forward pass over the same model, requiring no additional memory. For each content-style pair, we sample 
+
+G=16 autoregressive rollouts with top-k=900 and top-p=0.96 . The remaining GRPO hyperparameters are set to clip ratio ε=0.2, KL coefficient β =0.1, PANW exponent γ=0.7, and reward scaling λ =5.0. The iterative reference update of Section 3.4 is instantiated as a peak-triggered iterative merge on the LoRA adapter: when the reward EMA exceeds the last-merge baseline by at least τgain =0.05 and sustains this for τpatience =50 steps (after a minimum cool-down of 300 steps), the LoRA delta is baked into the base weights and a fresh zero-initialized adapter is attached, resetting the KL reference. An emergency merge (shorter 50-step cool-down) is triggered whenever the raw KL exceeds 2.0 to prevent policy divergence. We train with AdamW (lr = 1 × 10 −5, weight decay = 0.01 , (β1, β2)=( 0.9, 0.95 )), gradient clipping 1.0 , and full FP32 precision (mixed precision was found to cause log πθ drift between rollout and update). GRPO training is carried out on a single NVIDIA 4090 (48GB) GPU with a physical batch size of 16 content-style pairs and G=16 serial rollouts per pair. 
+
+Datasets. Both training stages use a concatenation of two paired style-transfer datasets: • OmniStyle-150K [2 ]: 143,992 (content, style, target) triplets covering a broad distribution of artistic styles over natural content. • ImagePulse [4 ]: 137,886 additional (content, style, target) triplets that enrich the stylization diversity and content domain coverage. The two corpora are merged into a single 267,710-sample training set (95%/5% train/val split). During SFT, we apply rotation and brightness perturbations to content images and random cropping to style images, forcing the network to learn fine-grained structural and textural details. GRPO rollouts are performed without augmentation to keep the content/style conditioning signal deterministic across the 
+
+G samples in a group, which is necessary for the Z-score advantage to isolate policy variance from input variance. For out-of-distribution evaluation we additionally construct random (COCO, WikiArt) content-style pairs that break the semantic correlation between the content and style images intentionally present in the paired datasets. 
+
+4.2 Results 
+
+Quantitative Analysis. We evaluate both StyleVAR checkpoints—the SFT model and the further GRPO-refined model—against the AdaIN baseline on three complementary benchmarks spanning in-StyleVAR – Controllable Image Style Transfer via VAR 12 
+
+distribution, near-distribution, and out-of-distribution regimes: (i) the OmniStyle-150K [ 2] held-out split (in-domain), (ii) the ImagePulse-StyleTransfer benchmark [ 4 ] (near-domain), and (iii) a cross-dataset pairing of content images from MS-COCO [ 5] with style images from WikiArt [ 6 ] (out-of-domain). For each benchmark we report six perceptual and structural metrics—Style Loss, Content Loss, LPIPS, SSIM, DreamSim [9], and CLIP similarity—together with the per-sample inference cost. Table 2 summarizes the results. Both StyleVAR variants consistently outperform AdaIN on every quality-oriented metric across all three datasets, with the largest gains on SSIM (up to +0.26 on Om-niStyle) and LPIPS (up to −0.28 on OmniStyle), indicating that the autoregressive multi-scale formulation preserves content structure far more faithfully than channel-wise feature statistics matching. The GRPO stage further improves over the SFT checkpoint on the majority of metrics on every dataset—most notably DreamSim and CLIP similarity, the two signals aligned with the reinforcement reward—confirming that reward-guided fine-tuning sharpens the style/content trade-off learned during SFT without destabilizing the policy. As expected, AdaIN retains a roughly two-orders-of-magnitude advantage in inference cost, reflecting the inherent gap between a single feed-forward normalization pass and a 10-scale autoregressive sampling procedure; closing this gap through distillation or parallel decoding is left to future work. 
+
+Table 2: Cross-model and cross-dataset evaluation. We compare our StyleVAR under supervised fine-tuning (SFT) and GRPO reinforcement fine-tuning against the AdaIN baseline on the OmniStyle-150K, ImagePulse, and COCO +WikiArt benchmarks. Arrows indicate whether higher ( ↑) or lower ( ↓) is better. Best result within each dataset is in bold ; second best is underlined . Inference time is measured as seconds per generated sample on a single NVIDIA A100 (40GB).                                                                  
+
+> Dataset Method Style Loss
+> ↓
+> Content Loss
+> ↓
+> LPIPS
+> ↓
+> SSIM
+> ↑
+> DreamSim
+> ↓
+> CLIP Sim
+> ↑
+> Infer (s)
+> ↓
+> OmniStyle AdaIN (baseline) 0.0625 198.3449 0.7506 0.1421 0.6522 0.6555 0.0079
+> StyleVAR (SFT) 0.0468 116.3569 0.4743 0.3975 0.2276 0.8704 0.4031 StyleVAR (GRPO) 0.0466 114.5686 0.4656 0.4024 0.2164 0.8740 0.4031 ImagePulse AdaIN (baseline) 0.0735 223.4699 0.7802 0.1574 0.6958 0.5651 0.0029
+> StyleVAR (SFT) 0.0452 180.7923 0.5618 0.4282 0.3168 0.7903 0.4031 StyleVAR (GRPO) 0.0387 182.0954 0.5572 0.4320 0.2979 0.8000 0.4031 COCO +WikiArt AdaIN (baseline) 0.0282 171.0877 0.7688 0.1985 0.7536 0.5319 0.0027
+> StyleVAR (SFT) 0.0206 160.1233 0.7398 0.2713 0.6986 0.5308 0.4031 StyleVAR (GRPO) 0.0199 157.5109 0.7286 0.2677 0.6793 0.5335 0.4031
+
+Qualitative Analysis. To visually assess the model’s performance, we generated samples using the validation set. Figure 4 shows representative content–style–output triplets. The model successfully transfers color palettes and texture patterns while preserving the spatial layout and semantic content of the input scene. 
+
+4.3 Limitations and Discussion 
+
+Despite strong performance in the training and validation sets, our qualitative evaluation revealed a generalization gap when testing unseen images collected from the internet. This indicates a degree of overfitting to the training distribution. Upon further analysis of the OmniStyle-150K dataset, we identified a data imbalance: while the dataset contains about 150k triplets, these are generated from a limited pool of approximately 1,800 unique content images. Given StyleVAR’s capacity (600M parameters), the model likely memorized the structural priors of this limited content set rather than learning a generalized representation of content structure. StyleVAR – Controllable Image Style Transfer via VAR 13 
+
+Figure 2: Loss and accuracy of training set across iterations. 
+
+Figure 3: GRPO Reward-EMA across iterations. StyleVAR – Controllable Image Style Transfer via VAR 14 
+
+Furthermore, we observed a performance disparity between different semantic domains. The model excels at stylizing landscapes and architectural scenes but struggles with human faces. This is likely due to two factors: • Complexity. Facial topology is significantly more complex and sensitive to structural deformation than natural scenes (e.g., mountains or buildings). • Perceptual Sensitivity. Human visual perception is acutely sensitive to structural anomalies in facial features.  
+
+> Figure 4: The generated images demonstrate that the model successfully transfers texture while maintaining the semantic structure of the content.
+
+# 5 Conclusion 
+
+In this project, we presented StyleVAR, a framework that adapts Visual Autoregressive Modeling (VAR) to address the challenges of balancing content preservation and style intensity in reference-based image StyleVAR – Controllable Image Style Transfer via VAR 15 
+
+style transfer. By formulating the task as conditional discrete sequence modeling within a multi-scale latent space, we introduced a Blended Cross-Attention mechanism where style and content features function as Queries to selectively emphasize relevant aspects of the target’s autoregressive history. On top of the supervised-fine-tuning stage, we further introduced a GRPO-based reinforcement fine-tuning stage that directly optimizes a DreamSim perceptual reward on the decoded image, with per-action normalization weighting to rebalance credit across VAR’s scales. Experimental results demonstrate that StyleVAR generates stylistically rich and structurally coherent images, consistently outperforming the AdaIN baseline across all quality-oriented metrics on three in-, near-, and out-of-distribution benchmarks, and that the GRPO stage yields further gains over the SFT checkpoint on the majority of metrics—most notably the reward-aligned DreamSim and CLIP similarity. However, while the model excels in landscape and architectural scenes, qualitative analysis reveals a generalization gap on unseen internet images and difficulties with human faces, attributing these limitations to the lack of content diversity in the training dataset. 
+
+# References 
+
+[1] Tian, K., Jiang, Y., Yuan, Z., Peng, B., & Wang, L. (2024). Visual Autoregressive Modeling: Scalable Image Generation via Next-Scale Prediction. In Advances in Neural Information Processing Systems 37 (NeurIPS 2024) .[2] Wang, Y., Liu, R., Lin, J., Liu, F., Yi, Z., Wang, Y., & Ma, R. (2025). OmniStyle: Filtering High Quality Style Transfer Data at Scale. In IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) .[3] Zhang, Y., Huang, N., Tang, F., Huang, H., Ma, C., Dong, W., & Xu, C. (2023). Inversion-Based Style Transfer with Diffusion Models. In IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pp. 10077–10086. [4] DiffSynth-Studio. ImagePulse-StyleTransfer [Dataset]. ModelScope. https://www. modelscope.cn/datasets/DiffSynth-Studio/ImagePulse-StyleTransfer 
+
+[5] Lin, T. Y., Maire, M., Belongie, S., Hays, J., Perona, P., Ramanan, D., . . . & Zitnick, C. L. (2014). Microsoft COCO: Common Objects in Context. In European Conference on Computer Vision , pp. 740–755. Springer. [6] WikiArt. (n.d.). WikiArt: Visual Art Encyclopedia. https://www.wikiart.org/ 
+
+[7] DeepSeek-AI, Guo, D., Yang, D., Zhang, H., Song, J., Zhang, R., Xu, R., Zhu, Q., Ma, S., Wang, P., Bi, X., et al. (2025). DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning. arXiv preprint arXiv:2501.12948 .[8] Sun, S., Qu, L., Zhang, H., Liu, Y., Song, Y., Li, X., Wang, X., Jiang, Y., Du, D. K., Wu, X., & Jia, J. (2026). VAR RL Done Right: Tackling Asynchronous Policy Conflicts in Visual Autoregressive Generation. arXiv preprint arXiv:2601.02256 .[9] Fu, S., Tamir, N., Sundaram, S., Chai, L., Zhang, R., Dekel, T., & Isola, P. (2023). DreamSim: Learning New Dimensions of Human Visual Similarity Using Synthetic Data. In Advances in Neural Information Processing Systems 36 (NeurIPS 2023) .

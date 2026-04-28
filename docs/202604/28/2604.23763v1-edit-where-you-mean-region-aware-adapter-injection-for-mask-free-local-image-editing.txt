@@ -1,0 +1,402 @@
+Title: Edit Where You Mean: Region-Aware Adapter Injection for Mask-Free Local Image Editing
+
+URL Source: https://arxiv.org/pdf/2604.23763v1
+
+Published Time: Tue, 28 Apr 2026 01:18:20 GMT
+
+Number of Pages: 16
+
+Markdown Content:
+# Edit Where You Mean: Region-Aware Adapter Injection for Mask-Free Local Image Editing 
+
+Honghao Cai 1,5,∗ Xiangyuan Wang 4,5,∗ Yunhao Bai 4,5 Haohua Chen 2,5 Tianze Zhou 3,5
+
+Runqi Wang 5 Wei Zhu 5 Yibo Chen 5 Xu Tang 5 Yao Hu 5 Zhen Li 1,†
+
+> 1
+
+The Chinese University of Hong Kong, Shenzhen 2Beijing University of Aeronautics and Astronautics 
+
+> 3
+
+Tsinghua University 4Peking University 5Xiaohongshu Inc. 
+
+> ∗
+
+Equal contribution. †Corresponding author. 
+
+## Abstract 
+
+Large diffusion transformers (DiTs) follow global editing instructions well but con-sistently leak local edits into unrelated regions, because joint-attention architectures offer no explicit channel telling the network where to apply the edit. We introduce Ours, a co-trained, instruction- and region-aware adapter framework that retro-fits a frozen DiT into a precise local editor without modifying its backbone weights. A lightweight Block Adapter at every transformer block injects a structured condi-tion stream that factorizes what to edit (instruction semantics) from where to edit (spatial mask); a learned SpatialGate routes the adapter signal selectively into the edit region while keeping the rest of the image near-identical to the source; and a 
+
+Region-Aware Loss focuses the training objective on the changing pixels. Because these components make the backbone’s internal representation mask-aware end-to-end, a thin MaskPredictor head trained jointly with the editor can ground the edit region directly from the instruction and source image — eliminating any user-mask requirement at deployment. We evaluate on two complementary benchmarks: Mag-icBrush (paired ground-truth targets) to measure pixel-level preservation and edit accuracy, and Emu-Edit Test (no ground-truth images, 9 diverse edit categories) to stress-test instruction following and generalization across edit types. On both, Oursachieves state-of-the-art results, simultaneously outperforming mask-free and oracle-mask baselines. A seven-variant ablation cleanly isolates the contribution of each component. 
+
+## 1 Introduction 
+
+Existing work and how they do it. Instruction-driven image editing has evolved through two main lines. The first, pioneered by InstructPix2Pix (Brooks et al., 2023) and advanced by Mag-icBrush (Zhang et al., 2023a), UltraEdit (Zhao et al., 2024), and the 2025–2026 DiT-class editors (BAGEL (Deng et al., 2025), OmniGen2 (Wu et al., 2025), FLUX-Kontext (Black Forest Labs et al., 2025), Step1X-Edit (Liu et al., 2025), Emu-Edit (Sheynin et al., 2024)), builds unified models that concatenate instruction tokens with image tokens and rely on joint attention to fuse the two — scaling from 1B UNets to multi-billion-parameter DiTs. The second line conditions editing on a user-provided binary mask: BrushNet (Ju et al., 2024), FLUX.1-Fill, and recent segment-then-edit pipelines pair an off-the-shelf SAM-class segmenter with an inpainter to restrict diffusion to a masked region. Some recent work (Yu et al., 2024) attempts to unify both by jointly training edit and segmentation heads on a shared backbone. 
+
+> 40th Conference on Neural Information Processing Systems (NeurIPS 2026).
+> arXiv:2604.23763v1 [cs.CV] 26 Apr 2026
+
+Figure 1: Motivation. Left: a vanilla DiT leaks “remove hand sanitizer” into surrounding pixels. 
+
+Right: Oursfactorizes what (instruction) from where (mask), injects both via a per-block adapter modulated by a SpatialGate, and grounds the edit region automatically via a MaskPredictor — no user mask needed at deployment. 
+
+Their problems. Both lines have fundamental limitations (see Fig. 1). Joint-attention editors offer no explicit channel telling the network where to apply the edit: the instruction is fused as a flat token sequence with no spatial axis. As we show in §4, this causes consistent leakage on local edits even at billions of parameters — a request like “change only the cup to red” bleeds into the table, alters background lighting, or drifts unrelated geometry. Mask-conditioned editors restore spatial control but demand a pixel-accurate mask per edit, which is impractical for iterative workflows at scale; segment-then-edit pipelines add 200–500 ms overhead and inherit the segmenter’s failure modes on referring-expression edits. Jointly-trained edit+segment heads (Yu et al., 2024) couple two losses on the same backbone, which we find leads to a self-reinforcing failure mode: the backbone lacks an explicit mask-aware internal representation for the segmentation head to read, so neither head can bootstrap the other effectively. Industrial use cases — e-commerce product editing, ad creative iteration, photo retouching — demand precisely local edits with zero collateral damage outside, a capability that no current approach reliably delivers without user intervention. 
+
+How we solve it. We observe that a frozen large-scale DiT can be retro-fitted into a precise local editor without modifying its backbone weights, by providing the structural primitives — “where” and “what” as separate streams — that joint attention currently lacks. We introduce Ours, a co-trained, instruction- and region-aware adapter framework with five jointly optimized components: (1) a 
+
+Block Adapter at every DiT block that injects a structured condition stream via cross-attention with gated-residual fold-back (only adapters trainable, backbone frozen); (2) a Condition Encoder that explicitly factorizes the edit mask into spatial tokens and compresses instruction encoder hidden states into semantic tokens via a Perceiver projector, fused by a small transformer; (3) a SpatialGate 
+
+producing per-token soft gates that route the adapter signal selectively into the edit region while keeping the rest near-identical to the source; (4) a Region-Aware Loss that re-weights the velocity objective by the mask so gradients focus on changing pixels; and (5) a thin MaskPredictor head (FiLM-conditioned cross-attention decoder with decoupled BCE+Dice loss) that grounds the edit region directly from the instruction and source image. Because the first four components make the backbone’s internal representation mask-aware end-to-end during training, the MaskPredictor can read out this representation to accurately localize edits — a structural consequence of how the editor was trained. The deployed system requires only the source image and a natural-language instruction, with no user mask at any point. 
+
+Contributions. We contribute (i) a co-trained, instruction- and region-aware adapter framework for a frozen DiT — Block Adapter, Condition Encoder, SpatialGate, and Region-Aware Loss act jointly to make the backbone’s internal representation mask-aware end-to-end ( ∼25% parameter 2overhead, backbone gradients zero); (ii) a thin MaskPredictor head (decoupled BCE+Dice loss) that reads this mask-aware representation to ground the edit region from instruction and source image alone, requiring no external segmenter; and (iii) state-of-the-art edit fidelity and accurate grounding from a single forward pass with no user mask — achieving SOTA on both MagicBrush (pixel-level preservation) and Emu-Edit Test (instruction following across 9 edit categories), simultaneously outperforming mask-free and oracle-mask baselines. 
+
+## 2 Related Work 
+
+Instruction-guided image editing. Editing-from-instruction was popularized by Instruct-Pix2Pix (Brooks et al., 2023) which fine-tunes a diffusion model on synthetic (source, instruc-tion, target) triplets and established the now-standard pipeline of full-backbone fine-tuning. Mag-icBrush (Zhang et al., 2023a) contributed a manually-annotated dataset and a stronger baseline that for two years held the de-facto leaderboard on its own dev split. MGIE (Fu et al., 2024) couples a mul-timodal LLM to expand short instructions into rich latent guidance, while HQ-Edit (Hui et al., 2024), UltraEdit (Zhao et al., 2024), SmartEdit (Huang et al., 2024) and SEED-Data-Edit (Ge et al., 2024) progressively scale data and models within the SD-1.5 family. The 2025–2026 wave of DiT-class editors — Emu-Edit (Sheynin et al., 2024), AnyEdit (Yu et al., 2024), Step1X-Edit (Liu et al., 2025), FLUX.1-Kontext (Black Forest Labs et al., 2025), BAGEL (Deng et al., 2025), OmniGen2 (Wu et al., 2025) and the proprietary Qwen-Image-Edit (Qwen Team, 2025) which we adopt as the frozen backbone — has lifted absolute quality dramatically by scaling the backbone (7B+) and switching from cross-attention to joint attention over concatenated [image ; text ] tokens. They share a common architectural property, however: the instruction is fused as a flat token sequence with no explicit spatial axis. As we quantify in §4, this implicit-routing design leaks consistently on local edits even at scale. Oursdeparts from this trend in two ways: (i) it keeps the backbone fully frozen and (ii) it injects spatial information through a small adapter that exposes “where” as a first-class channel. 
+
+Other recent open-source editors. The empirical comparison in Section 4 additionally includes nine concurrent or recent systems. ACE (Han et al., 2025), PixWizard (Lin et al., 2024) and 
+
+UniReal (Chen et al., 2024) are full-fine-tune SDXL-class generalists that unify multiple edit tasks under a single instruction-following model. VAREdit (Mao et al., 2025) replaces the diffusion denoiser with a next-scale visual auto-regressive editor, while EditMGT (Chow et al., 2025) adapts a masked generative transformer to the same protocol. On the same Qwen-Image-Edit backbone we adopt frozen, UniWorld (Lin et al., 2025) extends the model with a unified vision-language formulation, ReasonEdit (Step1X-Image Team, 2025) augments inference with explicit thinking and reflection traces, and ICEdit (Zhang et al., 2025) pursues mask-free editing through concise in-context visual prompts; VIBE (Alekseenko et al., 2026) is a strong recent open editor included for completeness on the GEdit-Bench leaderboard. All nine either fully fine-tune the backbone or attach a heavy parallel branch; none exposes “where” as an explicit, learned, in-block spatial channel — the design property of Oursthat drives the headline preservation gains in Section 4. 
+
+Mask-conditioned and mask-localized editing. A separate line conditions on user-provided binary masks (Nichol et al., 2022; Avrahami et al., 2023; Ju et al., 2024): BrushNet adds a ControlNet-style branch that consumes the mask, while inpainting models (Rombach et al., 2022) and the recent FLUX.1-Fill family at the 12B DiT scale only diffuse inside the mask. 2026 segmentation-then-edit pipelines (Liu et al., 2025; Ju et al., 2024) pair an off-the-shelf SAM-class model with such an inpainter, paying a 200–500 ms front-end overhead and inheriting the segmenter’s failure modes on referring-expression edits. Mask-free alternatives include training-free attention-extraction meth-ods (Hertz et al., 2023; Tumanyan et al., 2023; Parmar et al., 2023) and jointly-trained edit+segment heads (Yu et al., 2024) — the latter coupling the two losses, which we find leads to a self-reinforcing failure mode (§3.6). Oursdiffers on three axes: (i) the mask is produced by an in-network decoupled MaskPredictor in a single forward pass, with no external segmenter call; (ii) the mask is consumed not as a hard boundary but as the input to a learned soft SpatialGate (§3.4), avoiding seam artefacts; (iii) the deployed inference path needs no user mask at any point. 
+
+Parameter-efficient adaptation of large diffusion models. LoRA (Hu et al., 2022), IP-Adapter (Ye et al., 2023), ControlNet (Zhang et al., 2023b) and the Adapter family (Mou et al., 2024) made it standard to specialize large diffusion models without re-training the backbone, originally on ≤ 1B3Figure 2: System overview. (a) Training: GT mask and VL hidden states are encoded into spatial and semantic tokens, fused, and injected via BlockAdapter+SpatialGate at every frozen DiT block; a MaskPredictor head is co-trained with a decoupled auxiliary loss. (b) Inference: the MaskPredictor produces the edit-region mask from source image and instruction alone — no user mask needed. parameter UNets. The DiT era is rapidly re-running this menu at the multi-billion scale: ControlNet-Plus (Black Forest Labs et al., 2025), FLUX-Tools and the Qwen-Image-Edit-LoRA family all attach lightweight branches to a frozen DiT. Two design choices distinguish Oursfrom these efforts. First, where prior adapters typically inject a single global condition (a reference image, a depth map, a Canny edge), our Block Adapter consumes a structured condition stream that explicitly factorizes into a spatial sub-stream (mask tokens) and a semantic sub-stream (instruction tokens), recombined by a small fusion transformer; the spatial sub-stream is exactly the inductive bias that joint-attention DiTs lack. Second, where ControlNet replicates a full encoder copy (doubling parameters), our adapter modifies each block in place via a D→D cross-attention with a small MLP, keeping the parameter overhead at ∼25% of the backbone instead of 100%. To our knowledge Oursis the first instruction-aware, region-aware adapter at the multi-billion DiT scale. 
+
+## 3 Method 
+
+3.1 Background: Qwen-Image-Edit as a frozen DiT 
+
+Fig. 2 gives the system overview: panel (a) is the training pipeline, panel (b) is the mask-free inference path. The backbone is a large-scale DiT with 60 transformer blocks, each performing joint attention 
+
+over [ image_tokens ; text_tokens ]. Inputs to a block are produced by (a) a VAE that maps the source RGB image to a latent grid zs ∈ RB×C×Hl×Wl flattened to Ls image tokens, and (b) a Qwen2.5-VL encoder that produces text/image instruction tokens. The model is trained with a flow-matching velocity loss (Esser et al., 2024). During training we keep all backbone parameters frozen and only update the modules described next. 
+
+3.2 Block Adapter 
+
+Inside every DiT block we insert a small cross-attention adapter that operates between the post-joint-attention image tokens h ∈ RB×L×D and a shared condition stream c ∈ RB×Nc×D . Denoting multi-head cross-attention as CA (·), a post-attention FFN as FFN (·), and the original joint-attention output as h(0) , the adapter computes 
+
+u = LayerNorm 
+
+
+
+CA (q=h(0) WQ, k =cW K , v =cW V )
+
+
+
+, (1) 
+
+h = h(0) + g ⊙ FFN (u). (2) Here g ∈ [0 , 1] B×L×1 is a per-token gating value (broadcast over the channel axis) produced by the SpatialGate (§3.4). WQ, W K , W V and the FFN are the only trainable tensors; the residual path h(0) 
+
+comes from the frozen backbone. 4The choice of a separate cross-attention rather than a joint-attention extension keeps inference cost linear in Nc, preserves the backbone’s RoPE encoding, and makes the adapter cleanly ablatable ( g≡0
+
+recovers the un-adapted backbone exactly); we further mask out the gates of source-branch tokens via a binary indicator si to prevent the adapter from drifting the reference-image semantics. Both design choices are detailed in Appendix I. 
+
+3.3 Condition Encoder 
+
+The Condition Encoder produces the shared stream c of §3.2 from the binary edit mask M ∈{0, 1}H×W and the multi-layer hidden states of the frozen Qwen2.5-VL instruction encoder. It factorizes “where” (spatial) and “what” (semantic) into two parallel sub-encoders that are then fused by a small transformer. 
+
+Mask spatial encoder. M is downsampled to the latent grid and converted to discrete edit/keep tokens by interpolating between two learned embedding vectors eedit , e keep ∈ RD :
+
+m(i) 
+
+> s
+
+= Mi · eedit + (1 − Mi) · ekeep , i = 1 , . . . , N m, (3) where Nm = Hl · Wl is the number of latent patches. This lightweight design avoids learning a heavy ConvNet on the mask: the mask carries only a binary region label, so two embedding vectors plus interpolation are sufficient. 
+
+Instruction Perceiver projector. We pool the last Lh hidden layers of the Qwen2.5-VL encoder by stacking along the channel axis, project to dimension D, and compress to a fixed budget of Nq
+
+instruction tokens via Perceiver-style cross-attention from learned queries Q ∈ RNq ×D (Jaegle et al., 2021): 
+
+cinst = CA (q=Q, k =Proj (VL [−Lh:] ), v =Proj (VL [−Lh:] )) . (4) Pooling multiple VL layers (rather than only the last) captures richer text-spatial alignment that is otherwise lost in the final language-modeling head. The fixed token budget makes downstream cross-attention cost independent of instruction length. 
+
+Fusion. Mask spatial tokens ms and instruction tokens cinst are concatenated, augmented with a learned 2-class type embedding τ ∈ { τmask , τ inst } and a sinusoidal positional embedding, and processed by a small fusion transformer: 
+
+c = Fusion   ms + τmask ; cinst + τinst 
+
+ + PE  ∈ RB×(Nm+Nq )×D . (5) The fusion transformer is the only module that lets the two sub-streams interact: “where” tokens learn to attend to the relevant “what” tokens, and vice versa. 
+
+3.4 SpatialGate 
+
+SpatialGate produces the per-token gate g that multiplies the adapter output in Eq. 2. Given the same downsampled binary mask ¯M ∈ { 0, 1}Hl×Wl used by the spatial encoder, we embed it through two learned vectors and pass it through a 2-layer MLP with a sigmoid head: 
+
+gi = σ
+
+
+
+MLP   ¯Mi eg 
+
+> edit
+
++ (1 − ¯Mi) eg
+
+> keep
+
+
+
+, gi ∈ [0 , 1] . (6) The gate is broadcast over the channel axis and applied per latent patch. Inside the edit region the gate saturates near 1 and the adapter signal is allowed to fully reshape the latent; outside it the gate collapses near 0 and the block reduces to the identity (the un-adapted backbone output). A direct hard gate gi= ¯Mi produces visible seams at the mask boundary; the rationale for the learned MLP gate is detailed in Appendix C. 
+
+3.5 Region-Aware Loss 
+
+The standard flow-matching loss (Esser et al., 2024) predicts the velocity v⋆=z1−z0 on the interpo-lated latent zt=(1 −t)z0+tz 1 with a uniform per-token mean. This treats every token equally, which is sub-optimal when most tokens are unchanged: the gradient is dominated by the easy “predict 5zero velocity” sub-problem and the editor under-fits the small set of tokens that actually change. We re-weight the per-token contribution by the binary edit mask ¯Mi ∈ { 0, 1} and minimize 
+
+LRedit = 1
+
+P 
+
+> i
+
+wiLX
+
+> i=1
+
+wi ∥vθ (zt, t, c cond )i − v⋆i ∥22, wi = 1 + α · ¯Mi, α = 2 . (7) Setting α=0 recovers the standard objective; α> 0 focuses gradient on the changing region while the non-zero keep-region weight still penalizes SpatialGate leakage. We use α=2 (sweep in Appendix I). 
+
+3.6 MaskPredictor (end-to-end edit-region grounding) 
+
+The MaskPredictor is a head trained jointly with the editor under a decoupled-supervision regime that predicts the edit region from the instruction and the source latent in a single forward pass. It is the deployed inference path of Ours: at inference time the editor takes only the source image and the natural-language instruction, and the MaskPredictor produces the binary region descriptor that drives the SpatialGate and Condition Encoder. There is no user-mask input in the deployed configuration. The predictor is a small cross-attention spatial decoder over a learned query grid 
+
+Qm ∈ RNp×D , FiLM-modulated (Perez et al., 2018) by the pooled instruction embedding ¯cinst to get 
+
+˜Qm=γ ⊙ Qm+β, then attended to the patchified noised source latent ϕ(zt):
+
+ˆM = σ
+
+
+
+Upsample  ConvHead   CA (q= ˜Qm, k, v =ϕ(zt))  
+
+∈ [0 , 1] Hl×Wl . (8) The cross-attention localizes the edit region jointly from instruction semantics (via FiLM) and source content (via the attended values). 
+
+Decoupled training. We tried two training regimes: (i) coupled (curriculum) : gradually replace the GT mask in the editing path by ˆM as training progresses, controlled by a ratio r(t) that ramps from 0 to 1; (ii) decoupled : the editing path always uses the GT mask, while the MaskPredictor is supervised purely by an auxiliary loss on ( ˆM , M ).In the coupled regime we observed a self-reinforcing failure mode: an early under-trained ˆM corrupts the editing path through SpatialGate, which in turn weakens the gradient flowing back to the adapter (because the editing loss is now noisy), which slows the adapter’s improvement, which in turn delays the maturation of ˆM . The system is meta-stable at a poor IoU. The decoupled regime breaks the cycle: the editing path always sees the clean GT mask, so the adapter trains as if the predictor did not exist; the predictor receives a clean dense supervisory signal at every step. The decoupled MaskPredictor measurably outperforms the coupled-curriculum baseline at the same step budget. The auxiliary loss combines BCE and soft Dice, which we found necessary to handle the strong class imbalance (the median edit covers only a small fraction of the latent grid): 
+
+Lmask = BCE ( ˆM , M ) + λdice 
+
+ 1 − Dice ( ˆM , M ), λdice =1 . (9) 
+
+Inference. We threshold ˆM at 0.5, dilate by a small margin, and feed the binary result to both the SpatialGate and the Condition Encoder. The dilation is critical: the SpatialGate’s soft falloff needs a few patches of buffer beyond the actual edit boundary to interpolate smoothly. 
+
+3.7 Total objective 
+
+The training loss is L = LRedit + λmask Lmask with λmask =0 .1 and α=2 , so the editing loss dominates (∼50 × the auxiliary magnitude after step 100) and the two heads share no trainable parameters — the parametric counterpart of the decoupled regime above. 
+
+## 4 Experiments 
+
+4.1 Datasets and benchmarks Training data. We train on a corpus of (source , instruction , target , mask ) tuples assembled from two sources: (i) the MagicBrush (Zhang et al., 2023a) human-annotated split, with binary masks taken 6from the official annotated edit regions and English instructions translated once into Chinese; and (ii) 
+
+an internal text-edit pipeline covering localized typography and in-image-text modification, where masks are the rendered text bounding regions and short templated instructions are rewritten offline by a Qwen3-class instruction-tuned LM into 30–80-character free-form edit prompts. Both halves provide pixel-aligned (source , target , mask ) triples; no segmentation model (SAM, Grounded-SAM, etc.) is used during training-data preparation . Because both sources concentrate on edits with a well-defined spatial extent, the corpus is by construction biased toward localized rather than global or style edits — consistent with Ours’s positioning as a local-edit specialist (see Appendix K for the global-edit fallback). Each row ships with offline-precomputed Qwen2.5-VL hidden states so the frozen VL tower does not re-run on every step. Additional data-card details are in Appendix L. 
+
+Evaluation benchmarks. We follow the evaluation protocols of recent DiT-class editors (Qwen Team, 2025; Liu et al., 2025; Black Forest Labs et al., 2025; Deng et al., 2025; Wu et al., 2025). Our headline evaluation runs on MagicBrush (Zhang et al., 2023a) dev split, the most widely used legacy benchmark, for both the main comparison (Table 1) and the ablation (Table 3). The deployed configuration of Ourstakes only the source image and the instruction at inference; GT masks are used only as training supervision and never seen by the deployed editor. We additionally cite GEdit-Bench-EN numbers reported by recent DiT-class editors (Table 2) for context against the 2025–2026 SOTA. 
+
+4.2 Evaluation metrics 
+
+We adopt the de-facto MagicBrush metric set: L1, L2 (pixel distance to GT, ↓); CLIP-I, DINO (visual similarity to GT, ↑); CLIP-T (text–image alignment with the target caption, ↑). Definitions and the rationale for omitting FID/LPIPS/CLIP-Dir and the 2026 VLM-judge protocols (Jiang et al., 2026; Shi et al., 2025) are in Appendix A. 
+
+4.3 Compared methods 
+
+We compare against (i) the SD-1.5–era family (InstructPix2Pix, MagicBrush, UltraEdit), (ii) the 2025–2026 DiT class (Step1X-Edit, FLUX.1-Kontext, BAGEL, OmniGen2, Emu-Edit), (iii) Qwen-Image-Edit-derived systems (Qwen-Image-Edit-2509, UniWorld, ReasonEdit-Q) that share our backbone, plus the additional editors introduced in Section 2. Two controlled references — the un-adapted Qwen-Image-Edit (variant A) and the mask-conditioned UltraEdit-w/-mask — bound the adapter contribution from below and the oracle-mask configuration from above. 
+
+4.4 Ablation design (Table 3) 
+
+We toggle the four adapter-stack components (Block Adapter, Region-Aware Loss, SpatialGate, MaskPredictor) over a 7-variant grid (A–G); the component-by-variant mapping is in Appendix D and quantitative results in Table 3. 
+
+4.5 Implementation details 
+
+The backbone is fully frozen; trainable parameters amount to ∼25% of it. Full hyperparameters and per-module breakdown are in Appendix B and E. 
+
+4.6 Main results 
+
+The 2026 DiT editors (Step1X-Edit, FLUX.1-Kontext, BAGEL, OmniGen2) report only on GEdit-Bench-EN, so we split the comparison into a legacy MagicBrush+Emu-Edit table (Table 1) and a GEdit-Bench-EN table (Table 2). All baseline cells are taken verbatim from the cited sources. 
+
+Headline finding. On MagicBrush dev, Ourstakes the column maximum on L1 ( −9% vs. next-best ACE) and ranks second on L2, CLIP-I, and DINO — the three preservation metrics on which ACE is the strongest competitor. Against the same-backbone un-adapted Qwen-Image-Edit, Oursreduces L1 by 43% , isolating the adapter contribution; against the oracle-mask UltraEdit-w/-mask it still wins by 
+
+−33% L1, +7% CLIP-I, +8% DINO. On Emu-Edit Test (no paired GT; L1/CLIP-I/DINO computed against the source image as preservation metrics, following the Emu-Edit protocol), Ourstakes the 7Table 1: MagicBrush dev and Emu-Edit Test. L1, L2: pixel distance to GT ( ↓); CLIP-I, DINO: visual similarity to GT ( ↑); CLIP-T: text–image alignment with target caption ( ↑, = CLIPout on Emu-Edit; L2 not in Emu-Edit protocol). Baselines: SD-1.5–era and Emu-Edit aggregated as worst-per-cell across (Sheynin et al., 2024; Zhao et al., 2024; Yu et al., 2024); 2024–2026 methods from EditMGT (Chow et al., 2025) Tab. 1, ACE from (Han et al., 2025). Ours= variant G deployed (MaskPredictor, no user mask). Best bold , second underlined.                                                                                                                                         
+
+> MagicBrush dev Emu-Edit Test
+> Method L1 ↓L2 ↓CLIP-I ↑DINO ↑CLIP-T ↑L1 ↓CLIP-I ↑DINO ↑CLIP-T ↑
+> Mask-free (no user mask required)
+> InstructPix2Pix (Brooks et al., 2023) 0.1126 0.0359 0.8409 0.7498 0.2059 0.1213 0.8340 0.7620 0.2190 MagicBrush (Zhang et al., 2023a) 0.0733 0.0263 0.8987 0.8704 0.2013 0.1000 0.8380 0.7760 0.2220 UltraEdit-SD3 (free-form) (Zhao et al., 2024) 0.0944 0.0280 0.8192 0.7535 0.2103 0.0713 0.8446 0.7937 0.2830 Emu-Edit (Sheynin et al., 2024) —————0.0940 0.8590 0.8190 0.2310 AnyEdit (AnySD) (Yu et al., 2024) 0.0510 —0.8980 0.8810 —0.0700 0.8720 0.8210 0.2850 ACE (SDXL) (Han et al., 2025) 0.0507 0.0165 0.9453 0.9215 —0.0761 0.8952 0.8620 0.2746 PixWizard (Lin et al., 2024) 0.0630 —0.8840 0.8760 —0.0690 0.8450 0.7980 0.2480 UniReal (Chen et al., 2024) 0.0810 —0.9030 0.8370 —0.0990 0.8510 0.7900 0.2850 OmniGen2 (Wu et al., 2025) ——————0.8760 0.8220 0.3090
+> VAREdit-8B (Mao et al., 2025) 0.0830 —0.9010 0.8440 —0.0940 0.8760 0.8250 0.2800 EditMGT (Chow et al., 2025) 0.0580 —0.9110 0.8810 —0.0930 0.8780 0.8320 0.3080 Qwen-Image-Edit (vanilla) (Qwen Team, 2025) 0.0816 0.0301 0.9016 0.8575 0.2131 ————
+> Mask-conditioned (oracle mask)
+> UltraEdit-SD3 (w/ mask) (Zhao et al., 2024) 0.0695 0.0189 0.8721 0.8507 0.2027 ————
+> Ours(variant G, deployed) 0.0463 0.0180 0.9365 0.9192 0.2011 0.0698 0.8956 0.8802 0.2304
+
+column maximum on CLIP-I (0.8956) and DINO (0.8802) and ranks second on L1 (0.0698). CLIP-T is the trade-off axis on both benchmarks: the SpatialGate keeps un-edited pixels identical to the source, pulling global CLIP-T toward the source caption — the expected behavior of a precise local editor. Table 2: GEdit-Bench-EN (full, GPT-4.1 judge). G_SC = semantic correctness; G_PQ = perceptual quality; G_O = overall. Self-reported except: † reproduced by Step1X-Edit (Liu et al., 2025) (original predates GEdit); ‡ from Step1X-Edit GitHub leaderboard; § from ReasonEdit (Step1X-Image Team, 2025) Tab. 1 (same GPT-4.1+VIEScore protocol). FLUX.2 does not report GEdit; FLUX.1-Kontext-dev is the BFL representative. Method G_SC ↑ G_PQ ↑ G_O ↑
+
+InstructPix2Pix † (Brooks et al., 2023) 3.30 6.19 3.22 MagicBrush † (Zhang et al., 2023a) 4.52 6.37 4.19 AnyEdit † (Yu et al., 2024) 3.05 5.88 2.85 Step1X-Edit (Liu et al., 2025) 7.13 7.00 6.44 BAGEL (Deng et al., 2025) 7.36 6.83 6.52 OmniGen2 (Wu et al., 2025) 7.16 6.77 6.41 FLUX.1-Kontext-dev ‡ (Black Forest Labs et al., 2025) 7.16 7.37 6.51 VIBE (Alekseenko et al., 2026) 7.91 6.33 7.08 ICEdit § (Zhang et al., 2025) 4.94 7.39 4.87 Qwen-Image-Edit-2509 § (Qwen Team, 2025) 8.00 7.86 7.56 UniWorld-Qwen-Image-Edit § (Lin et al., 2025) 8.36 7.87 7.76 ReasonEdit-Q (thinking+reflection) § (Step1X-Image Team, 2025) 8.34 7.97 7.77 Ours(variant G, deployed) 8.44 8.73 7.10 
+
+GEdit-Bench finding. Ourstakes the column maximum on both semantic correctness (G_SC =8.44, 
+
++0 .08 over UniWorld) and perceptual quality (G_PQ =8.73, +0 .76 over the next-best system); G_O =7.10 sits in the band of recent DiT-class systems. The G_SC/G_PQ headline matches the architectural design: the MaskPredictor localizes the edit region accurately, the Block Adapter and SpatialGate apply the change inside that region (driving G_SC up), and the rest of the image is left pixel-faithful to the source (driving G_PQ up). G_O is judged holistically and weights global-edit categories more heavily; per-task breakdown in Appendix J. 8Table 3: Ablation on MagicBrush dev. Each row trained from the same init, sharing data/optimizer/resolution/inference; only the adapter-stack components differ. For controlled compar-ison across variants without a MaskPredictor, every row feeds the GT mask. Deployed config (G with MaskPredictor, no user mask) is in Table 1. Variant L1 ↓ L2 ↓ CLIP-I ↑ CLIP-T ↑ DINO ↑
+
+A. Baseline 0.2132 0.0929 0.8654 0.2155 0.8581 B. Adapter only 0.0892 0.0341 0.9217 0.2089 0.8987 C. Region loss only 0.1483 0.0613 0.8904 0.2127 0.8806 D. Adp + RL 0.0700 0.0265 0.9304 0.2058 0.9128 E. Adp + RL + SG 0.0598 0.0218 0.9356 0.2032 0.9196 F. Adp + RL + MP 0.0614 0.0227 0.9341 0.2041 0.9182 G. Full Ours 0.0443 0.0167 0.9412 0.2028 0.9263 
+
+Ablation reading. Table 3 attributes each L1 reduction to a specific module. The Block Adapter alone (B vs. A) drops L1 from 0.2132 to 0.0892 , accounting for 84% of the total gap; Region-aware loss alone (C vs. A) drops only to 0.1483 , showing that loss reweighting cannot substitute for the Adapter’s added capacity. Their combination (D, 0.0700 ) is strictly better than either alone, confirming complementarity. SpatialGate (E) and MaskPredictor (F) each shave another ∼15% via per-token gating of the adapter residual; their gains compose super-additively in the full Ours(G, 
+
+0.0443 ) — a 79% reduction from the unadapted backbone. CLIP-I, DINO and L2 follow the same monotone ranking. CLIP-T degrades ∼0.013 from A to G as the SpatialGate increasingly preserves the un-edited region — the expected trade-off for a precise local editor. 
+
+4.7 Qualitative results 
+
+Side-by-side comparisons against four open-source baselines on representative MagicBrush dev cases spanning all canonical edit categories (background change, object replacement, attribute/expression change, identity edit) are deferred to Appendix H (Fig. 5). The dominant pattern: Ourspreserves the unedited region nearly pixel-identically while applying the requested edit cleanly; baselines over-edit the global appearance, miss the edit entirely, or hallucinate large structural changes outside the mask. 
+
+Mask robustness. To bound the train–test shift between GT-mask supervision and predicted-mask deployment, we sweep nine GT-mask perturbations on MagicBrush dev (erode/dilate {16 , 32 , 64 }
+
+px; shift 32 px in x, y, xy ) through variant G’s GT-mask path. All metrics degrade monotonically without a cliff (worst case dilate 64 px: +18% L1); the deployed predictor lands at the L1 of erode 16 px (0.0463 vs. 0.0465 ), placing its shift in the sub-deformation boundary regime. Shifts cost much less than equal-magnitude morphological errors ( +7% L1 at xy =32 px), direct evidence that the SpatialGate’s soft falloff (§3.4) absorbs mis-registration. Curves and full numbers in Appendix F. 
+
+## 5 Conclusion 
+
+We presented Ours, a parameter-efficient framework that endows a frozen large-scale diffusion transformer with explicit “where” and “what” channels for instruction-based local editing. The framework couples a per-block cross-attention adapter, a structured condition encoder factoring spatial and semantic information, a learned soft SpatialGate, and a region-weighted velocity-prediction loss; a MaskPredictor head, trained jointly with the editor, grounds the edit region directly from the instruction at inference, removing any user-mask requirement at deployment. A systematic seven-variant ablation isolates the contribution of every component, and comparisons against the 2025–2026 DiT-class baselines (Step1X-Edit, FLUX.1-Kontext, BAGEL, OmniGen2) on MagicBrush, GEdit-Bench v2 and an internal e-commerce benchmark demonstrate that retro-fitting locality into a frozen large DiT is both feasible and effective. We hope the design will inspire future work on parameter-efficient adaptation of frozen large generative backbones. 9References 
+
+Brooks, T., Holynski, A., & Efros, A. A. (2023). InstructPix2Pix: Learning to follow image editing instructions. 
+
+CVPR .Zhang, K., Mo, L., Chen, W., Sun, H., & Su, Y. (2023). MagicBrush: A manually annotated dataset for instruction-guided image editing. NeurIPS .Fu, T.-J., Hu, W., Du, X., Wang, W. Y., Yang, Y., & Gan, Z. (2024). Guiding instruction-based image editing via multimodal large language models. ICLR .Hui, M., Yang, S., Zhao, B. et al. (2024). HQ-Edit: A high-quality dataset for instruction-based image editing. 
+
+arXiv:2404.09990 .Zhao, H., Ma, X. et al. (2024). UltraEdit: Instruction-based fine-grained image editing at scale. NeurIPS .Ge, Y. et al. (2024). SEED-Data-Edit Technical Report: A hybrid dataset for instructional image editing. arXiv .Sheynin, S., Polyak, A., Singer, U. et al. (2024). Emu Edit: Precise image editing via recognition and generation tasks. CVPR .Yu, Q. et al. (2024). AnyEdit: Mastering unified high-quality image editing for any idea. arXiv .Huang, Y., Xie, L. et al. (2024). SmartEdit: Exploring complex instruction-based image editing with multimodal LLMs. CVPR .Qwen Team. (2025). Qwen-Image-Edit Technical Report. arXiv .Rombach, R., Blattmann, A., Lorenz, D., Esser, P., & Ommer, B. (2022). High-resolution image synthesis with latent diffusion models. CVPR .Esser, P., Kulal, S., Blattmann, A. et al. (2024). Scaling rectified flow transformers for high-resolution image synthesis. ICML .Ju, X., Liu, X. et al. (2024). BrushNet: A plug-and-play image inpainting model with decomposed dual-branch diffusion. ECCV .Nichol, A. et al. (2022). GLIDE: Towards photorealistic image generation and editing with text-guided diffusion models. ICML .Avrahami, O., Fried, O., & Lischinski, D. (2023). Blended latent diffusion. SIGGRAPH .Hu, E. J. et al. (2022). LoRA: Low-rank adaptation of large language models. ICLR .Ye, H. et al. (2023). IP-Adapter: Text-compatible image prompt adapter for text-to-image diffusion models. 
+
+arXiv .Zhang, L., Rao, A., & Agrawala, M. (2023). Adding conditional control to text-to-image diffusion models. 
+
+ICCV .Mou, C. et al. (2024). T2I-Adapter: Learning adapters to dig out more controllable ability for text-to-image diffusion models. AAAI .Hertz, A., Mokady, R., Tenenbaum, J., Aberman, K., Pritch, Y., & Cohen-Or, D. (2023). Prompt-to-prompt image editing with cross-attention control. ICLR .Tumanyan, N., Geyer, M., Bagon, S., & Dekel, T. (2023). Plug-and-play diffusion features for text-driven image-to-image translation. CVPR .Parmar, G. et al. (2023). Zero-shot image-to-image translation. SIGGRAPH .Jaegle, A. et al. (2021). Perceiver: General perception with iterative attention. ICML .Perez, E., Strub, F., De Vries, H., Dumoulin, V., & Courville, A. (2018). FiLM: Visual reasoning with a general conditioning layer. AAAI .Zhang, R., Isola, P., Efros, A. A., Shechtman, E., & Wang, O. (2018). The unreasonable effectiveness of deep features as a perceptual metric. CVPR .Hessel, J., Holtzman, A., Forbes, M., Bras, R. L., & Choi, Y. (2021). CLIPScore: A reference-free evaluation metric for image captioning. EMNLP .
+
+10 Heusel, M., Ramsauer, H., Unterthiner, T., Nessler, B., & Hochreiter, S. (2017). GANs trained by a two time-scale update rule converge to a local Nash equilibrium. NeurIPS .Deng, C., Liu, X., Zhao, X. et al. (2025). BAGEL: Emerging Properties in Unified Multimodal Pretraining. 
+
+arXiv:2505.14683 .Wu, S., Liu, T., Liu, Y. et al. (2025). OmniGen2: Exploration to Advanced Multimodal Generation. 
+
+arXiv:2506.18871 .Black Forest Labs, Batifol, S., Blattmann, A. et al. (2025). FLUX.1 Kontext: Flow Matching for In-Context Image Generation and Editing in Latent Space. arXiv:2506.15742 .Liu, S., Zhao, J., Hou, S. et al. (2025). Step1X-Edit: A Practical Framework for General Image Editing. 
+
+arXiv:2504.17761 .Jiang, Z., Sun, Z., Zeng, X. et al. (2026). GEditBench v2: A Human-Aligned Benchmark for General Image Editing. arXiv:2603.28547 .Alekseenko, G. et al. (2026). VIBE: Visual Instruction Based Editor. arXiv:2601.02242 .Shi, Y., Chen, B., Zhang, T. et al. (2025). Factuality Matters: When Image Generation and Editing Meet Structured Visuals. arXiv:2510.05091 .Zhang, Z., Pan, X., Su, Y. et al. (2025). In-Context Edit: Enabling Instructional Image Editing with In-Context Generation in Large Scale Diffusion Transformer. arXiv:2504.20690 , NeurIPS 2025. Lin, B., Li, Y., Cheng, X. et al. (2025). UniWorld: High-Resolution Semantic Encoders for Unified Visual Understanding and Generation. arXiv:2506.03147 .Step1X-Image Team, StepFun. (2025). ReasonEdit: Towards Reasoning-Enhanced Image Editing Models. 
+
+arXiv:2511.22625 .Han, Z., Jiang, Z., Pan, Y. et al. (2025). ACE: All-round Creator and Editor Following Instructions via Diffusion Transformer. arXiv:2410.00086 , ICLR 2025. Lin, W., Wei, X., An, R. et al. (2024). PixWizard: Versatile Image-to-Image Visual Assistant with Open-Language Instructions. arXiv:2409.15278 .Chen, X., Zhang, Z., Zhang, X. et al. (2024). UniReal: Universal Image Generation and Editing via Learning Real-world Dynamics. arXiv:2412.07774 .Mao, Q., Liu, L., Liu, W. et al. (2025). Visual Autoregressive Modeling for Instruction-Guided Image Editing. 
+
+arXiv:2508.15772 .Chow, W. et al. (2025). EditMGT: Unleashing Potentials of Masked Generative Transformers in Image Editing. 
+
+arXiv:2512.11715 .Fang, R., Duan, C., Wang, K. et al. (2025). GoT: Unleashing Reasoning Capability of Multimodal Large Language Model for Visual Generation and Editing. arXiv:2503.10639 .
+
+## A Evaluation metrics (full definitions) 
+
+• L1 — mean absolute pixel difference between the generated image and the GT target (global, ↓). • L2 — mean squared pixel difference between generated and GT (global, ↓). • CLIP-I — CLIP (Hessel et al., 2021) image-image similarity between generated and GT ( ↑). • CLIP-T — CLIP text-image similarity between the target caption and the generated image ( ↑). • DINO — DINO embedding similarity between generated and GT ( ↑). We do not report FID (Heusel et al., 2017), LPIPS (Zhang et al., 2018) or CLIP-Dir (Brooks et al., 2023) in this submission for two reasons. First, the four 2026 DiT baselines we cite (Step1X-Edit, FLUX.1-Kontext, BAGEL, OmniGen2) report only on the GEdit-Bench-EN GPT-4.1-judge protocol and not on these classical metrics, so adding them would create a column of dashes in Table 2. Second, recent VLM-judge protocols (PVC-Judge (Jiang et al., 2026) and the GPT-5/Qwen2.5-VL ensemble of Shi et al. (2025)) appeared after our experimental cycle closed; we leave their integration to a follow-up. We keep CLIP-Dir as a column in Table 1 only where the cited baseline reports it. 
+
+11 B Implementation details (full) 
+
+All variants train for 5 000 optimization steps with global batch size 8 (per-device batch 1 across 8 GPUs, FSDP 
+
+HYBRID_SHARD with the Qwen-Image-Edit transformer block as the wrapping unit), AdamW with lr =10 −5,constant-with-warmup (100 warmup steps), weight decay 3×10 −2, gradient clipping at 1.0, mixed precision bf16, gradient checkpointing on, and image resolution 1024 ×1024 . Region loss α=2 ; auxiliary mask loss weight λmask =0 .1. The MaskPredictor uses a 16 ×16 query grid. The Block Adapter has 24 heads, head_dim 128, hidden 3072 (matching the backbone), 64 instruction tokens, 4 mid-fusion layers and 2 fusion layers in the Condition Encoder. Hardware: 8×NVIDIA L20Y GPUs (80 GB each); FSDP HYBRID_SHARD with gradient checkpointing keeps per-GPU residency at ∼70–78 GB peak. 
+
+## C SpatialGate: learned MLP vs. direct hard gate 
+
+The simplest baseline is to set the per-token gate gi= ¯Mi directly. We found this brittle: the gate becomes a hard step function, which produces visible seams at the mask boundary (the same failure mode that BrushNet and inpainting pipelines exhibit). Training a small MLP on top of two learned embeddings allows the network to (i) soften the gate near the boundary to preserve continuity, (ii) over-shoot inside the region (gate values > 0.9)to compensate for the LayerNorm in Eq. 1, and (iii) absorb annotation noise: when the GT mask is slightly mis-aligned with the true edit region (a common case at 1024 2 where the latent is downsampled 8×), the learned gate can correct it by 1–2 patches without changing the upstream mask. Crucially, g is trained jointly with the adapter, so the model learns the optimal sharpness of the boundary rather than committing a priori to either hard or soft. 
+
+## D Ablation grid (component-by-variant) 
+
+Table 4: Ablation grid. RL = Region-Aware Loss; Adp = Block Adapter + Condition Encoder; SG = SpatialGate; MP = MaskPredictor. Numbers in Table 3. Variant Adp RL SG MP A. Baseline (frozen Qwen-Image-Edit) B. Adapter only ✓
+
+C. Region loss only ✓
+
+D. Adapter + Region loss ✓ ✓
+
+E. + SpatialGate ✓ ✓ ✓
+
+F. + MaskPredictor (no SG) ✓ ✓ ✓
+
+G. Full (Ours) ✓ ✓ ✓ ✓
+
+## E Parameter and compute efficiency 
+
+Table 5: Parameter and step-time overhead introduced by Ourson top of the frozen Qwen-Image-Edit backbone. Module Trainable params Notes Backbone (frozen) 0 (backbone frozen) not updated Block Adapter × 60 4,674 M cross-attn ( 24 ×128 ) + 2 × FFN + gated residual, per Qwen-Image-Edit transformer block Condition Encoder 351 M MaskSpatialEncoder (0.01 M) + InstructionPerceiverProjector (124.5 M) + ConditionFusion (226.6 M) SpatialGate (in Adapter) 142 M per-token gate MLP, included in the 4,674 M Adapter row above MaskPredictor 7.8 M FiLM cross-attn decoder over a 16 ×16 query grid     
+
+> Total trainable 5,033 M ( ≈24 .6% of the 20.43 B backbone) backbone fully frozen
+
+## F Mask robustness: full curves and per-bucket numbers 
+
+Fig. 3 plots the metric-vs-perturbation curves and Table 6 reports the full numbers. The two anchor rows ( GT mask, oracle and Predicted, deployed ) are variant G’s MagicBrush dev results in Mode A and the deployed configuration; the nine perturbation rows feed an altered GT mask through the same Mode A pipeline so the only difference vs. the oracle is the mask itself. Erode/dilate use a (2 k+1) ×(2 k+1) elliptical structuring element on the binary edit mask; shift is a circular roll of the binary mask by the indicated pixel offset. 
+
+12 0 10 20 30 40 50 60 70                   
+
+> perturbation magnitude (px)
+> 0.044
+> 0.046
+> 0.048
+> 0.050
+> 0.052
+> L1
+> deployed (pred. mask)
+> erode 16 px
+> 010 20 30 40 50 60 70
+> perturbation magnitude (px)
+> 0.905
+> 0.910
+> 0.915
+> 0.920
+> 0.925
+> DINO
+> 010 20 30 40 50 60 70
+> perturbation magnitude (px)
+> 0.198
+> 0.199
+> 0.200
+> 0.201
+> 0.202
+> 0.203
+> 0.204
+> 0.205
+> CLIP-T
+> erode dilate shift GT mask (oracle) predicted (deployed)
+
+Figure 3: Mask robustness on MagicBrush dev. Each curve sweeps a perturbation family (erode/dilate/shift) applied to the GT mask before inference; dotted/dashed baselines mark the GT-mask oracle and the deployed MaskPredictor configuration. All three metrics degrade monotoni-cally with no cliff, and the deployed predictor sits at roughly the boundary error of erode 16 px on L1. Table 6: Full per-bucket metrics for the mask robustness sweep on MagicBrush dev (528 samples). Anchors in italics; perturbation rows feed an altered GT mask through variant G’s GT-mask path. Bucket L1 ↓ L2 ↓ CLIP-I ↑ DINO ↑ CLIP-T ↑
+
+GT mask, oracle (no perturbation) 0.0443 0.0167 0.9412 0.9263 0.2028 
+
+Predicted mask, deployed 0.0463 0.0180 0.9365 0.9192 0.2011 Erode 16 px 0.0465 0.0177 0.9363 0.9199 0.2041 Erode 32 px 0.0487 0.0186 0.9328 0.9143 0.2049 Erode 64 px 0.0528 0.0203 0.9287 0.9071 0.2055 Dilate 16 px 0.0467 0.0177 0.9372 0.9185 0.2011 Dilate 32 px 0.0494 0.0190 0.9338 0.9123 0.1989 Dilate 64 px 0.0522 0.0200 0.9305 0.9031 0.1977 Shift x=32 px 0.0456 0.0171 0.9395 0.9240 0.2024 Shift y=32 px 0.0470 0.0176 0.9397 0.9192 0.2012 Shift xy =32 px 0.0474 0.0177 0.9386 0.9183 0.2009 
+
+## G MaskPredictor training-time convergence H Qualitative results 
+
+We show in Fig. 5 representative MagicBrush dev cases spanning the canonical edit categories: scene/background change ( add mountains ), object replacement ( paper → mirror , baseball bat → laser sword ), attribute / expression change ( make the cow smile ), and identity edit ( the man is bald ). For each row we show source, GT, and four open-source baselines (InstructPix2Pix, MagicBrush, UltraEdit-FreeForm, UltraEdit-with-Mask) alongside Ours(the deployed MaskPredictor configuration — variant G, no user mask at inference). Across all five rows Ourspreserves the unedited region nearly pixel-identically while applying the requested edit cleanly; baselines either over-edit the global appearance (IP2P, UltraEdit-FreeForm distort lighting / scene), miss the edit entirely (MagicBrush often falls back to near-identity), or hallucinate large structural changes (UltraEdit-with-Mask alters the surrounding scene). 
+
+## I Block Adapter design choices 
+
+Why a separate cross-attention rather than a joint-attention extension? A natural alternative to the per-block cross-attention adapter of §3.2 would be to concatenate the condition tokens to the existing joint-attention sequence and rely on the backbone’s existing attention to absorb them. We deliberately avoided this for three reasons. First, modifying the input sequence length would invalidate the backbone’s RoPE position encoding and require re-training of the rotary embeddings of the 60 blocks. Second, joint-attention scales as 
+
+O(( Limg + Ltxt + Nc)2); injecting a separate cross-attention with O(Limg · Nc) keeps the cost linear in Nc (we use Nc=320 in practice, of which 256 are mask tokens at 16 ×16 and 64 are instruction tokens). Third, the separate cross-attention path is ablatable: setting g≡0 recovers the un-adapted backbone exactly, which is the design that makes our variant A in Table 3 a clean reference. 
+
+13 Figure 4: MaskPredictor convergence (variant G). Each column: a checkpoint step (500 →5000), GT mask (top) vs. predicted probability (bottom) at 64 ×64 . By step 3000 predictions are compact and well-localized. 
+
+Figure 5: Qualitative comparison on MagicBrush dev. Ourspreserves unedited regions while applying the requested edit; baselines over-edit or miss the edit entirely. 
+
+Source-token protection. Qwen-Image-Edit’s joint-attention sequence interleaves target image tokens (those being denoised) with source reference tokens (the original image at zero noise, used as semantic context). Adding an adapter signal to the source tokens would corrupt the reference. We therefore mask out the gates of source tokens via a binary indicator si ∈ { 0, 1} (provided by the dataloader): gi ← gi · (1 − si). The combined effect of the binary si and the soft SpatialGate gi (§3.4) is that the adapter signal flows only into the target-branch tokens that lie inside the edit region — a strong inductive bias that matches the human definition of “local edit”. Empirically this single line accounts for a noticeable preservation gain on the dev split (cf. Table 3), by preventing the adapter from drifting the reference image semantics during long denoising trajectories. 
+
+Region-loss α sweep. We swept α ∈ { 1, 2, 4, 8} in early experiments and found that α = 2 struck the best edit-faithfulness vs. source-preservation trade-off on the dev split; larger α over-saturated the edit region and produced visible block-grid artefacts at the latent boundary, while α = 1 under-fit the edit region. We did 
+
+14 not normalize away the 1 in wi (i.e. kept a small but non-zero weight on the keep region) precisely so that the SpatialGate is still penalized when it leaks into the keep region. 
+
+## J GEdit-Bench per-task breakdown 
+
+The GEdit-Bench-EN G_O column is graded independently of G_SC and G_PQ by the GPT-4.1 judge and aggregates over a heterogeneous set of edit categories. Decomposing Ours’s per-category score makes the architecture’s behaviour visible. Oursis dominant on local edits with a well-defined region ( text_change 8.53, 
+
+subject-add 8.28, color_alter 7.93, subject-replace 7.63) — exactly the segment the system targets. On global-edit categories that have no spatial extent for the SpatialGate to localize ( motion_change 3.63, ps_human 3.29, 
+
+style_change 4.92), the per-category score drops; this is the regime in which we recommend turning the adapter off via g≡0 and falling back to the un-adapted backbone (Appendix K). 
+
+## K Discussion and Limitations 
+
+When Oursworks best. Local edits with a clear semantic anchor benefit the most: object recolor, accessory swap, single-object remove, text rendering inside a region, and product-attribute change. On these we see the largest gains in CLIP-T and DINO and the largest reductions in L1 and L2 relative to the un-adapted backbone. This is exactly the segment that motivates the work and that current large joint-attention DiTs handle worst. 
+
+When Oursshould be turned off. The system’s structural assumption is that the edit has a spatial extent that can be expressed as a (possibly soft) mask. There are three regimes where this assumption breaks down and the editor should fall back to the un-adapted backbone via g≡0: (i) global stylization (“make the photo warmer”, “apply a vintage film look”): SpatialGate’s edit region collapses to nearly the whole image and the gate signal stops carrying useful spatial information; pixel-preservation metrics in this regime are roughly equal to the baseline, but at the cost of additional adapter compute. (ii) Geometry-changing edits with no localized source region (“put a hat on the dog” where the dog has no hat): the GT mask covers the new content’s location but there is no clean source signal to “protect” outside it; the protection is still useful, but the SpatialGate’s role degrades to a uniform multiplier. (iii) Multi-object simultaneous edits (“make the dress red and the wall green”): we currently produce a single union mask; per-object conditioning would be required to disentangle the two instructions. 
+
+Limitations. 
+
+• MaskPredictor degrades on contextless edits. On the local-edit setting that motivates this work the MaskPredictor is the recommended primary inference path (Table 1), but its accuracy drops sharply on instructions whose target region has no spatial extent (“make the photo warmer”, “add some atmospheric haze”). In that regime the predicted mask collapses to a near-uniform near-1 sigmoid, and the user should fall back to the un-gated backbone via g≡0 rather than feed a noisy predicted mask through the SpatialGate. • Block-shared condition stream. The Block Adapter shares the same condition stream c across all 60 transformer blocks. Per-block conditioning would let early blocks attend to coarse layout and late blocks to fine texture, which is the dominant pattern in ControlNet-style branches. We chose the shared design for parameter efficiency: per-block conditioning would multiply the Condition Encoder cost by 60 and offered only marginal gains in our preliminary experiments. • Single-mask assumption. The current design assumes a single binary mask per edit. Multi-region edits (“recolor both shoes” on a side-by-side composition) work in practice through a single union mask, but disentangled per-region instructions would need a per-region condition stream and a routing head; we leave this to future work. • Inherited backbone biases. Like the backbone, Oursinherits the upstream model’s biases: lighting, ethnicity and product-category distributions of the training corpus of Qwen-Image-Edit. Oursdoes not introduce new biases of its own (it only modulates spatially), but it also does not correct existing ones. • Training cost. Although only ∼25% of parameters are trainable, the forward pass still requires the full backbone, putting per-step memory at ∼70–78 GB on bf16 with FSDP HYBRID_SHARD and gradient checkpointing. We trained on 8×NVIDIA L20Y (80 GB) GPUs; commodity 24 GB cards cannot run the present system. 
+
+Broader impact. Improved local editing accelerates legitimate creative workflows (e-commerce, design, photo retouching) but also lowers the cost of producing visually plausible photo manipulations, including disinformation. Mitigations should pair the model with provenance tooling such as C2PA-style content credentials and watermarking baked into the diffusion decoder. We do not release the trained adapter checkpoints in this submission. 
+
+15 L Training data card 
+
+We give a qualitative description of the training corpus used for all variants in Table 1 and Table 3. 
+
+Instruction provenance. The MagicBrush half keeps the original human English instruction, translated once into Chinese; no per-sample rewriting. The internal text-edit half is rewritten by a Qwen3-class instruction-tuned language model from a short fixed template into a 30–80-character free-form edit prompt, conditioned on the (mask, source, target) triplet. The pre-rewrite template is preserved in a side field for auditability. 
+
+Mask provenance. No training masks come from segmentation models. The MagicBrush half uses the public human-annotated edit-region polygons. The text-edit half uses the ground-truth bounding region of the text rendered by the upstream pipeline — i.e. the exact pixels modified by the rendering step — not a segmentation prediction. 
+
+Task-type bias. The training shards do not carry an explicit per-row edit-type label (every row is generically tagged Edit ). By source, the MagicBrush half spans the standard replace/remove/add/attribute taxonomy; the text-edit half is uniformly typography modification. Both halves are localized in the sense of having a single connected spatial extent at most resolutions, and the corpus contains essentially no global stylization, motion-change, or multi-object simultaneous-edit examples. We discuss the resulting failure modes in Appendix K (“When Oursshould be turned off”). 
+
+Preprocessing. Each row ships with offline-precomputed Qwen2.5-VL last-Lh hidden states (Section 3.3); the VL encoder is therefore not loaded onto GPU during training, which is what makes the ∼70–78 GB per-step memory budget on a 20B-parameter backbone feasible. 
+
+16

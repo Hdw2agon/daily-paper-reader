@@ -6,29 +6,44 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-04-29
-- 运行时间：2026-04-29 20:29:04 UTC
+- 最新运行日期：2026-04-30
+- 运行时间：2026-04-30 20:54:48 UTC
 - 运行状态：成功
-- 本次总论文数：2
-- 精读区：0
-- 速读区：2
+- 本次总论文数：8
+- 精读区：1
+- 速读区：7
 
 ### 今日简报（AI）
-今日聚焦扩散模型在工业质检与图像超分领域的落地应用。
-重点关注通过少样本缺陷合成加速新品质检，以及利用 GramSR 视觉特征调节优化超分辨率效果。
-推荐关注扩散模型在解决工业样本稀缺与提升图像重建精度上的实战潜力。
-- 详情：[/202604/29/README](/202604/29/README)
+今日精选 8 篇论文，重点聚焦遥感影像阴影统一处理框架 SARU 及复杂场景下的姿态估计。
+- 详情：[/202604/30/README](/202604/30/README)
 
 ### 精读区论文标签
-- 本次无精读推荐。
+1. [SARU: A Shadow-Aware and Removal Unified Framework for Remote Sensing Images with New Benchmarks](/202604/30/2604.25432v1-saru-a-shadow-aware-and-removal-unified-framework-for-remote-sensing-images-with-new-benchmarks)  
+   标签：评分：8.0/10、query:q3
+   evidence：无需成对图像训练的阴影去除
 
 ### 速读区论文标签
-1. [Accelerating New Product Introduction for Visual Quality Inspection via Few-Shot Diffusion-Based Defect Synthesis](/202604/29/2604.22850v1-accelerating-new-product-introduction-for-visual-quality-inspection-via-few-shot-diffusion-based-defect-synthesis)  
+1. [Geometry-Conditioned Diffusion for Occlusion-Robust In-Bed Pose Estimation](/202604/30/2604.23651v1-geometry-conditioned-diffusion-for-occlusion-robust-in-bed-pose-estimation)  
+   标签：评分：7.0/10、query:q4
+   evidence：用于遮挡下内容补全的生成式建模
+2. [Self-DACE++: Robust Low-Light Enhancement via Efficient Adaptive Curve Estimation](/202604/30/2604.25367v1-self-dace-robust-low-light-enhancement-via-efficient-adaptive-curve-estimation)  
+   标签：评分：7.0/10、query:q3
+   evidence：用于低光照图像修复的无监督框架
+3. [Sapiens2](/202604/30/2604.21681v1-sapiens2)  
+   标签：评分：6.0/10、query:q7
+   evidence：用于自监督预训练的掩码图像重建
+4. [Light 'em Up: Enabling Few-Shot Low-Light 3D Gaussian Splatting with Multi-Scale Explicit Retinex Illumination Decoupling](/202604/30/2604.24053v1-light-em-up-enabling-few-shot-low-light-3d-gaussian-splatting-with-multi-scale-explicit-retinex-illumination-decoupling)  
+   标签：评分：6.0/10、query:q3
+   evidence：用于低光照图像修复的无监督方法
+5. [VibeToken: Scaling 1D Image Tokenizers and Autoregressive Models for Dynamic Resolution Generations](/202604/30/2604.24885v1-vibetoken-scaling-1d-image-tokenizers-and-autoregressive-models-for-dynamic-resolution-generations)  
    标签：评分：6.0/10、query:q4
-   evidence：用于缺陷合成和无缝视觉融合的生成式框架
-2. [GramSR: Visual Feature Conditioning for Diffusion-Based Super-Resolution](/202604/29/2604.25457v1-gramsr-visual-feature-conditioning-for-diffusion-based-super-resolution)  
+   evidence：用于图像合成和自回归生成的生成模型
+6. [ResetEdit: Precise Text-guided Editing of Generated Image via Resettable Starting Latent](/202604/30/2604.25128v1-resetedit-precise-text-guided-editing-of-generated-image-via-resettable-starting-latent)  
    标签：评分：6.0/10、query:q4
-   evidence：基于扩散的超分辨率与生成先验
+   evidence：用于局部区域编辑和修改的生成式扩散模型
+7. [Refinement via Regeneration: Enlarging Modification Space Boosts Image Refinement in Unified Multimodal Models](/202604/30/2604.25636v1-refinement-via-regeneration-enlarging-modification-space-boosts-image-refinement-in-unified-multimodal-models)  
+   标签：评分：6.0/10、query:q4
+   evidence：生成模型中的图像细化与修改
 
 
 <div class="dpr-home-promo-card">

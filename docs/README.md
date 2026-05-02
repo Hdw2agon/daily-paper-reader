@@ -6,38 +6,35 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-05-01
-- 运行时间：2026-05-01 20:36:27 UTC
+- 最新运行日期：2026-05-02
+- 运行时间：2026-05-02 20:04:16 UTC
 - 运行状态：成功
-- 本次总论文数：5
-- 精读区：1
+- 本次总论文数：4
+- 精读区：0
 - 速读区：4
 
 ### 今日简报（AI）
-- 今日共生成 5 篇推荐（精读 1 篇，速读 4 篇）
-- 精读：《Self-DACE++: Robust Low-Light Enhancement via Efficient Adaptive Curve Estimation》（8.0/10）
-- 速读：《Edit Where You Mean: Region-Aware Adapter Injection for Mask-Free Local Image Editing》（7.0/10）, 《ShredBench: Evaluating the Semantic Reasoning Capabilities of Multimodal LLMs in Document Reconstruction》（7.0/10）, 《Diffusion-OAMP for Joint Image Compression and Wireless Transmission》（7.0/10）
-- 这些结果覆盖了当下较热的方向，建议先看精读区论文的关键问题与方法。
-- 详情：[/202605/01/README](/202605/01/README)
+今日聚焦扩散模型在超分辨率、遥感感知及人脸替换领域的实战突破。
+重点推荐单步扩散实现真实世界超分的新架构，以及边缘云协作下的遥感图像结构感知重建方案。
+建议关注扩散模型如何通过跨注意力与流形桥接技术，在保持身份一致性的同时提升修复效率。
+- 详情：[/202605/02/README](/202605/02/README)
 
 ### 精读区论文标签
-1. [Self-DACE++: Robust Low-Light Enhancement via Efficient Adaptive Curve Estimation](/202605/01/2604.25367v2-self-dace-robust-low-light-enhancement-via-efficient-adaptive-curve-estimation)  
-   标签：评分：8.0/10、query:profile-1
-   evidence：无监督且轻量级的图像增强框架
+- 本次无精读推荐。
 
 ### 速读区论文标签
-1. [Edit Where You Mean: Region-Aware Adapter Injection for Mask-Free Local Image Editing](/202605/01/2604.23763v2-edit-where-you-mean-region-aware-adapter-injection-for-mask-free-local-image-editing)  
+1. [Bridging Restoration and Generation Manifolds in One-Step Diffusion for Real-World Super-Resolution](/202605/02/2604.24136v1-bridging-restoration-and-generation-manifolds-in-one-step-diffusion-for-real-world-super-resolution)  
    标签：评分：7.0/10、query:q4
-   evidence：使用扩散Transformer进行无掩码局部图像编辑
-2. [ShredBench: Evaluating the Semantic Reasoning Capabilities of Multimodal LLMs in Document Reconstruction](/202605/01/2604.23813v1-shredbench-evaluating-the-semantic-reasoning-capabilities-of-multimodal-llms-in-document-reconstruction)  
-   标签：评分：7.0/10、query:q1
-   evidence：碎纸片段的内容修复与文档重建
-3. [Diffusion-OAMP for Joint Image Compression and Wireless Transmission](/202605/01/2604.27952v1-diffusion-oamp-for-joint-image-compression-and-wireless-transmission)  
-   标签：评分：7.0/10、query:q3
-   evidence：使用预训练扩散先验的无需训练重建框架
-4. [3D-ReGen: A Unified 3D Geometry Regeneration Framework](/202605/01/2604.28134v1-3d-regen-a-unified-3d-geometry-regeneration-framework)  
-   标签：评分：6.0/10、query:profile-1
-   evidence：自监督3D几何再生与重建
+   evidence：在扩散模型中桥接修复与生成流形
+2. [Edge-Cloud Collaborative Reconstruction via Structure-Aware Latent Diffusion for Downstream Remote Sensing Perception](/202605/02/2604.25319v1-edge-cloud-collaborative-reconstruction-via-structure-aware-latent-diffusion-for-downstream-remote-sensing-perception)  
+   标签：评分：7.0/10、query:q4
+   evidence：用于图像重建的生成式扩散模型
+3. [CA-IDD: Cross-Attention Guided Identity-Conditional Diffusion for Identity-Consistent Face Swapping](/202605/02/2604.24493v1-ca-idd-cross-attention-guided-identity-conditional-diffusion-for-identity-consistent-face-swapping)  
+   标签：评分：6.0/10、query:q4
+   evidence：基于扩散的人脸交换与合成
+4. [Reconstruction by Generation: 3D Multi-Object Scene Reconstruction from Sparse Observations](/202605/02/2604.27106v1-reconstruction-by-generation-3d-multi-object-scene-reconstruction-from-sparse-observations)  
+   标签：评分：6.0/10、query:q1
+   evidence：从稀疏观测中重建场景并处理遮挡
 
 
 <div class="dpr-home-promo-card">

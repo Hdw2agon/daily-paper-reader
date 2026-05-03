@@ -1,0 +1,387 @@
+Title: Point-MF: One-step Point Cloud Generation from a Single Image via Mean Flows
+
+URL Source: https://arxiv.org/pdf/2604.24586v1
+
+Published Time: Tue, 28 Apr 2026 02:21:30 GMT
+
+Number of Pages: 28
+
+Markdown Content:
+# Point-MF: One-step Point Cloud Generation from a Single Image via Mean Flows 
+
+Yuta Baba 1 and Keiji Yanai 1
+
+The University of Electro-Communications 1-5-1 Chofugaoka, Chofu-shi, Tokyo 182-8585, Japan 
+
+baba-y@mm.inf.uec.ac.jp yanai@cs.uec.ac.jp 
+
+Abstract. Single-image point cloud reconstruction must infer complete 3D geometry, including occluded parts, from a single RGB image. While diffusion-based reconstructors achieve high accuracy, they typically re-quire many denoising iterations, resulting in slow and expensive infer-ence. We propose Point-MF, a Mean-Flow-based framework for low-NFE single-image point cloud reconstruction that couples a Mean-Flow-compatible architecture with an auxiliary loss. Specifically, Point-MF operates directly in point-cloud space to learn the mean velocity field and enables one-step reconstruction with a single network function eval-uation (1-NFE), without relying on VAE-based latent representations. To make Mean Flow effective under large interval jumps, Point-MF em-ploys a Diffusion Transformer tailored to the Mean-Flow setting, condi-tioned on frozen DINOv3 image features via a lightweight token adapter and equipped with explicit interval/time conditioning. Moreover, we in-troduce Denoised Space Anchor, a set-distance auxiliary loss on the denoised-space estimate xθ induced by the predicted velocity field, to stabilize large-step generation and reduce outliers and density artifacts. On ShapeNet-R2N2 and Pix3D, Point-MF strikes a strong balance be-tween reconstruction quality and inference speed compared to multi-step diffusion baselines and competitive feedforward models, while generating high-quality point clouds with millisecond-level latency. 
+
+Keywords: Point Cloud · 3D object reconstruction · Mean Flows 
+
+# 1 Introduction 
+
+Single-image point cloud reconstruction is an inherently ill-posed problem, as it requires estimating a complete 3D shape, including invisible regions, from only the visible content in a single image. Because of the ambiguity in the observa-tion, the problem admits multiple plausible solutions. This task is important for applications such as improved spatial understanding and visual presentation in AR/VR, as well as environmental perception in robotics, including grasp-ing and navigation, where low-latency inference is highly desirable in practical deployments. Point clouds are also useful as an intermediate representation for 3D recon-struction, since they require relatively little preprocessing and allow flexible con-trol over output resolution [3,18,22,29,67]. For example, by assigning each point   
+
+> arXiv:2604.24586v1 [cs.CV] 27 Apr 2026 2Y. Baba and K. Yanai
+> Fig. 1: Comparison of single-image point cloud reconstruction methods. Representative diffusion-model-based methods (a) often rely on camera poses during both training and inference, as well as many iterative sampling steps. In contrast, Point-MF (b) does not require camera poses during training or inference, directly predicts the mean velocity field without a VAE, and enables single-step reconstruction with 1-NFE.
+
+additional attributes such as scale, rotation, opacity, and color, a point cloud can be directly extended to the primitive representation used in 3D Gaussian Splatting [25], making it well suited for downstream rendering and novel-view synthesis. Existing 3D reconstruction methods can be broadly categorized into feed-forward based approaches [2, 8, 17, 19, 30, 47, 63, 64] and diffusion-model-based approaches [6, 7, 20, 23, 28, 34, 35, 37, 42, 43, 49, 66, 69]. The former directly regress a 3D representation from an input image and therefore enable fast inference; for point cloud reconstruction, RGB2point [30] is a particularly strong practi-cal baseline. However, because these methods treat the mapping from image to 3D shape in an almost deterministic manner, they often struggle to represent multiple valid solutions for invisible regions, and may produce overly smoothed reconstructions on the back side or in occluded parts. In contrast, diffusion-based methods can better model uncertainty through probabilistic generation, making them more suitable for hallucinating invisible geometry and representing mul-timodal predictions. Their main drawback, however, is the high inference cost caused by iterative sampling, i.e., repeated network function evaluations (NFEs) (Fig. 1-(a)). Mean Flow [11] aims to reduce the number of NFEs by directly predicting the interval-averaged update, i.e., the mean velocity field, derived from Flow Matching [33]. However, its main empirical validation has been conducted in la-tent spaces obtained by pretrained VAEs. Generation in a latent space depends on the reconstruction quality of the VAE and additionally requires training the autoencoder itself. In the case of point clouds, latent autoencoding often relies on complex encoder–decoder architectures that combine neighborhood-based point operations [9,41,52,65] or sparse 3D convolutions [14,69,72,74], which increases implementation and optimization complexity. In practice, such dynamic opera-tions are also difficult to export to edge-device-oriented formats such as ONNX and CoreML. To address these issues, we propose Point-MF , a low-NFE method for single-image point cloud reconstruction that formulates the generation process directly in point cloud space based on Mean Flow, without relying on VAE-based latent Point-MF 3
+
+representations (Fig. 1-(b)). In low-step generation over point cloud space, large interval jumps can easily cause deviations from the underlying shape manifold and produce outliers. To mitigate this issue, we introduce an auxiliary loss based on a set distance defined on the implied denoised estimate xθ , rather than on the velocity fields, thereby stabilizing generation in data space. We validate the proposed method on both synthetic and real-world datasets, demonstrating its effectiveness for point cloud reconstruction from single images. Our contributions are summarized as follows: 
+
+– We introduce, to the best of our knowledge for the first time, a Mean-Flow-based low-NFE generation framework for single-image point cloud recon-struction, and propose Point-MF , a latent-free conditional point cloud gen-eration method. 
+
+– To suppress shape deviations that are prone to occur in few-step generation, we introduce an auxiliary set-distance-based loss on the denoised estimate 
+
+xθ , which directly promotes geometric consistency in data space. 
+
+– Through experiments on ShapeNet-R2N2 and Pix3D, we show that the pro-posed pose-free method effectively balances reconstruction quality and in-ference efficiency, compared with existing feedforward methods and iterative diffusion-based approaches. 
+
+# 2 Related Work 
+
+3D Reconstruction from Images. Image-based 3D reconstruction has ex-plored a wide range of representations, including meshes, voxels, point clouds, implicit fields, and, more recently, Gaussian Splatting [8, 25, 44, 46, 47, 50, 62, 63]. These representations offer different trade-offs in geometric expressiveness, ren-dering convenience, memory efficiency, and computational cost. For single-image reconstruction, prior work has studied voxel-based methods such as 3D-R2N2 [8], mesh deformation methods [47, 63], and implicit-function-based methods [44, 50]. Point clouds, by contrast, require little preprocessing, allow flexible control over resolution, and are well suited to generative modeling, making them attractive for single-image conditional reconstruction. Represen-tative examples include reprojection-based methods [21] and RGB2point [30], which directly generate point clouds using an ImageNet-pretrained ViT and achieve fast inference without explicit pose estimation. More recently, diffusion-based probabilistic generation has also been intro-duced to point cloud generation and reconstruction. Representative methods include point cloud diffusion generation, which underlies PC 2 [40], DiT-3D [45], Point-E [49] for text- or image-conditioned 3D generation, and LION [69], which performs diffusion in a hierarchical VAE latent space. For single-image recon-struction, PC 2 [43] uses projection-conditioned point cloud diffusion, while BDM [66] improves reconstruction via Bayesian diffusion inference. However, these meth-ods rely on iterative sampling and therefore require large NFEs at inference time, leading to latency. In contrast, our method performs Mean-Flow-based low-NFE 4 Y. Baba and K. Yanai 
+
+generation directly in point cloud space, without a VAE or explicit camera pose estimation, enabling latent-free one-step conditional reconstruction. 
+
+Diffusion and Flow-based Models. Diffusion and flow-based generative mod-els view the mapping from a prior distribution to a data distribution as a stochas-tic trajectory learned by a neural network [15,24,33,36,56,59,60]. They formulate generation as an ODE or SDE and learn the trajectory by regressing quantities such as velocity fields, score functions, or noise predictions. At inference time, samples are generated by numerically integrating the learned field with solvers such as Euler or Heun, yielding high quality at the cost of repeated updates. Recent work has also considered auxiliary perceptual losses on the recon-structed clean output x0. For example, Consistency Models and related meth-ods [57, 58] report the effectiveness of learned perceptual metrics, while Bring Metric Functions into Diffusion Models [1] applies LPIPS [71] to an x0-prediction branch to incorporate perceptual supervision into diffusion training. In the flow-based setting, Improving the Training of Rectified Flows [32] uses LPIPS-Huber to improve few-step generation quality. We adopt this clean-output supervision principle for point clouds by anchoring a denoised estimate to the ground-truth point set with a set-distance loss, thereby enforcing geometric consistency di-rectly in point space. 
+
+Few-step Generative Models. Standard diffusion and flow-based models were originally developed under the assumption of multi-step numerical inte-gration. More recently, methods that explicitly incorporate fast trajectory solv-ing into training have emerged. In this paper, we collectively refer to them as few-step generative models [10, 11, 13, 26, 38, 57, 58, 73]. Their common goal is low-NFE generation, especially in 1-step or 2-step settings, by directly learning large temporal updates. Representative examples include Consistency Models, which learn direct map-pings from intermediate times to terminal samples [13, 38, 57, 58]; Consistency Trajectory Models, which learn trajectories between arbitrary time pairs [26]; Shortcut Models, which exploit the relationship between two time points and their midpoint [10]; and IMM, which accelerates generation via moment match-ing across time steps [73]. Mean Flow [11] parameterizes the average velocity field between two time points and has inspired several improvements [12,31,39,70]. Notably, Pixel Mean Flows (pMF) [39] shows that naive u-prediction can fail in high-dimensional latent-free pixel space, motivating a decoupling between the network’s prediction target and the MeanFlow loss. A similar challenge can arise for point clouds: an 
+
+N -point set lies in R3N , and direct velocity prediction may be difficult in low-step regimes. We therefore adopt the Mean-Flow perspective for point-space conditional reconstruction and stabilize one-step generation by anchoring the denoised estimate with a geometry-aware set-distance loss (DSA). Point-MF 5
+
+# 3 Preliminaries 
+
+Flow Matching. Flow Matching (FM) [33] is a framework for learning trans-port from a prior distribution to a data distribution as a continuous-time velocity field. Let x ∼ pdata denote a data sample and ϵ ∼ pprior a noise sample, e.g., from a standard Gaussian. The state at time t ∈ [0 , 1] is defined by the linear interpolation xt = (1 − t)x + tϵ . Its time derivative is then dx t 
+
+> dt
+
+= ϵ − x, and thus, for fixed (x, ϵ ), the conditional velocity field is given by vc(xt, t ) = ϵ − x.FM trains a neural network vθ to regress this target by minimizing 
+
+LFM (θ) = Et,x,ϵ 
+
+h
+
+∥vθ (xt, t ) − (ϵ − x)∥22
+
+i
+
+. (1) Since the same xt can generally be induced by multiple pairs (x, ϵ ), the well-defined regression target is not the conditional velocity itself, but the marginal velocity field obtained by conditioning only on xt:
+
+v(xt, t ) := E [vc(xt, t ) | xt] = E [ϵ − x | xt] . (2) Accordingly, vθ learns, at each time t, the velocity field that transports samples from the prior distribution toward the data distribution. At inference time, generation is performed by numerically solving the ODE  
+
+> dx t
+> dt
+
+= vθ (xt, t ). Starting from an initial sample ϵ ∼ pprior , the dynamics are integrated backward from t = 1 to t = 0 to obtain the final sample x.               
+
+> Fig. 2: Illustration of Mean Flow in image generation. Using the mean velocity field u(xt, r, t ), ob-tained by integrating the Flow Matching velocity field v(xt, t ), en-ables a large jump over the interval
+> [t, r ]. Here, tis closer to the noise side and ris closer to the data side.
+
+Mean Flow. In contrast to Flow Match-ing, which learns the instantaneous velocity field v(xt, t ), Mean Flow (MF) [11] directly learns the mean velocity field between two time points. This formulation is designed to enable low-NFE generation by allowing the model to make large temporal jumps in a sin-gle update or in only a few function evalua-tions. For 0 ≤ r < t ≤ 1, the mean velocity field over the interval [r, t ] is defined as 
+
+u(xt, r, t ) := 1
+
+t − r
+
+Z tr
+
+v(xτ , τ ) dτ (3) From this definition, the state update across the interval [r, t ] is written as 
+
+xr = xt − (t − r) u(xt, r, t ). (4) Therefore, if u(xt, r, t ) can be directly approx-imated, large temporal jumps can be realized with only one or a few NFEs. On the other hand, directly evaluating the integral in Eq. (3) during training is generally intractable. MF therefore differentiates the expression with respect 6 Y. Baba and K. Yanai 
+
+to t and uses the Mean Flow identity , which relates the instantaneous and mean velocity fields: 
+
+u(xt, r, t ) = v(xt, t ) − (t − r) ddt u(xt, r, t ). (5) Furthermore, the total derivative can be written as 
+
+ddt u(xt, r, t ) = ∂xu(xt, r, t ) v(xt, t ) + ∂tu(xt, r, t ) := JVP( u; v), (6) where JVP( u; v) can be computed as the Jacobian–vector product (JVP) be-tween the Jacobian [∂xu, ∂ r u, ∂ tu] and the tangent vector [v, 0, 1] .MF parameterizes the mean velocity field with a neural network uθ (xt, r, t ).In the original formulation, to construct a trainable target, the marginal velocity field v(xt, t ) is approximated by the observable conditional velocity ϵ − x, and the true u inside the JVP term is replaced by the network prediction uθ , yielding 
+
+utgt := ( ϵ − x) − (t − r) JVP( uθ ; ϵ − x). (7) Then, using sg( ·) to denote stop-gradient, MF minimizes 
+
+LMF (θ) = Et,r,x,ϵ 
+
+h
+
+∥uθ (xt, r, t ) − sg( utgt )∥22
+
+i
+
+. (8) To leverage Mean Flow for single-image conditional point cloud reconstruction, we employ a conditional variant that incorporates classifier-free guidance (CFG). For brevity, we present only the final objective in the main paper; the full deriva-tion from the conditional form of Eq. (3) is provided in Supplementary Sec. A. 
+
+LMF -CFG (θ) = E
+
+h
+
+∥uθ (xt, r, t | c) − sg( utgt )∥22
+
+i
+
+. (9) 
+
+# 4 Method 
+
+In this section, we describe the proposed method. We first present the network architecture for single-image conditional point cloud generation, including image conditioning, the Diffusion Transformer design, and the injection of temporal and conditional information. An overview of the architecture is shown in Fig. 3. We then describe the loss design used to stabilize Mean Flow training and improve geometric consistency in data space. 
+
+4.1 Architecture Image Conditioning with DINOv3. In single-image conditioning, robust visual representations must be extracted from the input image and injected into the point cloud generator. To this end, we use DINOv3 [55], the latest model in the DINO family [4], which provides strong generalization through self-supervised pretraining. The DINO encoder is kept frozen and is used to extract a global feature (pooled vector) zimg ∈ RD and patch-sequence features (context tokens) Zctx ∈ RM ×D . Here, zimg corresponds to the class token. It is linearly projected to obtain eimg ∈ RH , which is added to the AdaLN conditioning vector. Point-MF 7
+
+Fig. 3: Overview of Point-MF. Given a single input image, a frozen DINOv3 encoder extracts a global feature and a sequence of patch features. The global feature is com-bined with the time embedding t and interval-length embedding dt = t − r, and is used to condition the DiT through AdaLN-Zero. The patch features are refined by a lightweight Post-MHSA Adapter and then used as the context for Cross-Attention. The DiT predicts the mean velocity field uθ (xt, r, t | c) and generates a point cloud in a single step. 
+
+Fig. 4: Structure of a DiT block. Point tokens are updated sequen-tially by Self-Attention, Cross-Attention, and an FFN. In each branch, RMS-normalized features are modulated in an AdaLN-Zero manner using scale, shift, and gate parameters generated from the conditioning vector obtained by summing et(t), edt (dt ), and eimg .The image context Zctx is fed into Cross-Attention. 
+
+Meanwhile, Zctx is passed through an adapter and then projected to dimension H so that it can be used as the context for Cross-Attention. The core of our model is a stack of L Dif-fusion Transformer (DiT) blocks (Fig. 4). The DiT used in this work is based on the sparse point-cloud generation DiT of Lan et al . [29], and is modified to better suit the Mean Flow setting. 
+
+Diffusion Transformer Architecture. Each block consists of (i) Self-Attention, which models interactions within the point cloud, (ii) Cross-Attention, which aligns point fea-tures with image conditions, and (iii) an MLP for nonlinear transformation. By allowing each point to attend to all other points, Self-Attention captures not only local geometry but also global structure, such as symmetry and inter-part relationships. In single-image conditional point cloud generation, however, the model must also infer invisible regions and remain consistent with visible image cues such as object contours. We therefore use Cross-Attention to update point features while referencing image patch fea-tures. 8 Y. Baba and K. Yanai 
+
+A point cloud is an unordered set, and thus the ordering of points carries no semantic meaning. Following Nichol et al . [49], we do not introduce index-dependent positional embeddings. As a result, blocks composed of Self-Attention and point-wise MLPs preserve permutation equivariance, allowing the model to predict an appropriate velocity field for each point. 
+
+Time and Image Condition. In diffusion and Flow Matching models, the same network must behave differently depending on the time step. In our set-ting, in addition to the current time t, the update interval length dt = t − r is also explicitly provided as input. Specifically, both t and dt are embedded using sinusoidal embeddings followed by two-layer MLPs, following DiT [51], yield-ing et(t), e dt (dt ) ∈ RH . Providing dt as a separate input is important because Mean Flow estimates the interval-averaged velocity field u(xt, r, t ) rather than an instantaneous velocity. For the image condition, we use an image embedding eimg ∈ RH obtained by projecting the global DINOv3 feature (pooled vector) to dimension H with LayerNorm and a linear layer. The conditioning vector shared across all DiT blocks is then defined as 
+
+c = et(t) + edt (dt ) + eimg . (10) Each DiT block applies AdaLN-Zero-style modulation [51] to RMS-normalized features using shift, scale, and gate parameters generated from c. Since the linear layers producing these modulation parameters are zero-initialized, the contribution of each residual branch is small at the beginning of training, which improves optimization stability even in deep Transformers. 
+
+Post-MHSA Adapter. Frozen DINOv3 features provide strong generaliza-tion, but they are not necessarily optimized for point cloud generation as-is. We therefore introduce a lightweight Post-MHSA Adapter for the image patch features fed into Cross-Attention. Let Zctx ∈ RM ×D denote the patch-sequence features extracted by DI-NOv3. We first project them to the DiT hidden dimension H to obtain Zbase =
+
+ϕin (Zctx ). Next, Zbase is mapped to a higher-dimensional feature space HMHSA ,where token interactions are computed only once: 
+
+Z(ℓ)adapt = Zbase + ψℓ(MHSA( ϕMHSA (Zbase ))) . (11) Here, ϕMHSA is a projection from H to HMHSA , and ψℓ is a layer-specific two-layer MLP that projects the MHSA output back to H for the ℓ-th DiT block. In other words, the adapter computes token interactions once on the image-conditioning side in a higher-dimensional space, and then lightly re-projects the result for each layer to serve as the Cross-Attention context. This design adapts the conditioning representation to point cloud genera-tion while avoiding the cost increase of inserting MHSA into every DiT block. Moreover, the residual connection preserves the useful semantic information in pretrained DINO features and adds only the necessary task-specific correction, which is also expected to improve robustness to image variations caused by view-point and projection conditions. Point-MF 9                 
+
+> Fig. 5: Conceptual illustration of Denoised Space Anchor (DSA). Mean Flow performs a large temporal update from the state xtat time tusing the mean velocity field
+> uθ(xt, r, t |c). However, the reconstructed point cloud xθ(xt, r, t |c)obtained by ex-trapolating this prediction to time 0may deviate from the data space. To address this issue, we impose an auxiliary set-distance-based loss between the reconstructed point cloud and the ground-truth point cloud xGT 0, thereby directly promoting geometric consistency in the denoised space.
+
+4.2 Loss Function Denoised Space Anchor. Because Mean Flow performs large temporal up-dates using an interval-averaged velocity field, small errors in the predicted ve-locity can be amplified into large position errors, especially near the data side (r ≈ 0). Moreover, since a point cloud is an unordered set, regressing only velocity vectors does not necessarily guarantee accurate surface alignment or consistent point density in the final reconstruction. As illustrated in Fig. 5, we explicitly construct a reconstructed point cloud from the predicted mean velocity field and directly optimize its geometric con-sistency in data space. Specifically, starting from the Mean Flow update in Eq. 4 and setting r = 0 , we obtain a denoised-space extrapolation: 
+
+xθ (xt, r, t | c) = xt − t u θ (xt, r, t | c). (12) This can be interpreted as a projection of the Mean Flow prediction into the denoised space. We then introduce an auxiliary set-distance-based loss, termed 
+
+Denoised Space Anchor (DSA) , to encourage xθ to match the ground-truth point cloud xGT 0 .Since point clouds are unordered, we adopt Adaptive Probabilistic Matching Loss (APML) [54] as the set distance. APML is an optimal-transport-based loss that provides a soft one-to-one correspondence between the predicted and ground-truth point clouds, promoting more stable global shape alignment than Chamfer Distance while remaining more efficient than exact EMD. 
+
+LDSA = LAPML 
+
+ xθ (xt, r, t | c), x GT 0
+
+ (13) 10 Y. Baba and K. Yanai 
+
+DSA does not replace the velocity-field supervision itself; rather, it pulls the clean point cloud induced by the predicted velocity field back toward geomet-rically consistent shapes. This helps suppress outliers and density imbalance that are prone to arise from velocity prediction alone. Furthermore, to impose stronger geometric regularization near the data side, we introduce 
+
+λ(t) = 1 t̸=r
+
+λbase 
+
+max( t, τ ) . (14) Here, τ is a lower bound that prevents the weight from becoming excessively large as t → 0, and 1 t̸=r is an indicator function that is zero when r = t.To absorb the scale difference between the main loss and the auxiliary loss, we introduce a mini-batch-based scaling coefficient s, and define the final training objective as 
+
+Ltotal = LMF -CFG + s λ (t) LDSA , where s = E[LMF -CFG ]detach 
+
+E[LDSA ]detach + δ . (15) With this design, our method preserves the mean-velocity learning mecha-nism of Mean Flow while directly enforcing geometric consistency on the clean-data side in point cloud space. 
+
+# 5 Experiments 
+
+In this section, we describe the experiments conducted to evaluate the proposed method. Since the goal of this work is to generate point clouds with high geo-metric consistency under low-NFE sampling, we evaluate not only reconstruction quality metrics (CD/EMD/F-Score) but also inference time and VRAM usage. 
+
+Datasets. We evaluate single-image conditional point cloud generation on ShapeNet [5] and Pix3D [61]. For ShapeNet, we follow the ShapeNet-R2N2 split with 13 cat-egories used in prior work [8, 48]. A target point cloud x0 is sampled from each 3D model, and all point clouds are centered at the origin for stable training and evaluation. For Pix3D, which contains real images paired with object shapes, we follow the split of Xu et al . [66]. 
+
+Metrics. We evaluate reconstruction quality using L1 Chamfer Distance (CD) and Earth Mover’s Distance (EMD) between a generated point cloud ˆX and a ground-truth point cloud X with the same number of points. EMD is computed from a Euclidean cost matrix with Hungarian matching. Since CD is efficient but less sensitive to density imbalance due to its many-to-one nature, we use CD and EMD as complementary measures of geometric accuracy and global correspondence consistency. All methods are evaluated with 1024 points on ShapeNet-R2N2 and 2048 points on Pix3D. F-Score is evaluated with a threshold of 1% of the longest side of the bounding box, after upsampling point clouds to 8192 points using Point-MF 11 
+
+Table 1: Comparison of CD and EMD on ShapeNet-R2N2. BDM [66] additionally runs the prior model for 20 steps at inference, resulting in 256 + 20 = 276 NFEs.                                                                                      
+
+> CD ×100 ↓EMD ×100 ↓
+> Method Car Chair Air Mean Car Chair Air Mean Self-Sup. [48] 5.48 10.91 7.11 7.11 4.95 14.93 11.07 10.31 DIFFER [27] 6.35 9.78 5.67 7.27 6.03 16.21 9.90 10.71 ULSP [21] 5.40 9.72 5.91 7.01 4.78 10.18 7.66 7.54 RGB2point [30] 4.22 5.43 2.70 4.33 5.63 9.53 6.86 7.83 PC 2(256-NFE) [43] 4.95 5.60 3.37 4.84 4.69 5.36 4.27 4.84 BDM (276-NFE) [66] 5.12 5.02 3.12 4.64 4.25 4.53 3.92 4.28 Ours (1-NFE) 4.22 4.29 2.76 3.92 3.82 4.29 3.04 3.82
+> w/o PMA 4.58 4.29 3.01 4.12 4.02 4.62 3.54 4.13 w/o DSA 5.21 6.16 3.71 5.23 4.89 6.08 4.12 5.16
+> Bold indicates the best result, and underline indicates the second best (excluding ablations).
+
+RepKPU [53]. To ensure fair comparison, all compared methods are trained under the same dataset setting in our experiments. To assess the practicality of low-NFE generation, we also compare inference time and peak VRAM usage. Inference is performed on a single NVIDIA RTX A4000 GPU; after warm-up, each method is run 100 times on the same input, and the mean and standard deviation are reported. Peak VRAM is measured per end-to-end inference pass in GiB. We compare against PC 2 [43], BDM [66], and RGB2point [30], with the number of output points unified to 2048. 
+
+Implementation Details. Training was conducted on 8 NVIDIA RTX A6000 GPUs. Each sample consisted of a point cloud with N = 2048 points and an RGB image of size 224 × 224 . Pretraining was used only for the image feature extractor (DINOv3), while all other modules were trained from scratch. The DiT backbone used hidden dimension D = 512 , L = 12 blocks, and h = 8 attention heads, and DINOv3 (ViT-B) was used for image conditioning. The PMA used to process DINO patch tokens was applied only once, with internal dimension 1024 and 4 attention heads. The DSA weight was set to λbase = 0 .5. Optimization was performed using AdamW with a learning rate of 1.0 × 10 −4, a batch size of 128, and a total of 120,000 training steps, including 10,000 warm-up steps. The CFG-based velocity composition used during training is captured by the objective in Eq. (9), while the remaining detailed hyperparameter settings are provided in Supplementary Sec. B. At inference time, we fix r = 0 and perform a single Mean Flow jump from 
+
+t = 1 to r = 0 . Concretely, by instantiating Eq. (4) with (t, r ) = (1 , 0) , we obtain 
+
+x0 = ϵ − (1 − 0) uθ (x1, 0, 1 | c), i.e., a single reverse-time update using the mean velocity field (NFE = 1 ). 
+
+Quantitative Results. Table 1 reports CD and EMD results on ShapeNet-R2N2, and Table 2 shows the F-Score comparison. Results on Pix3D are reported in Table 3. As shown in Table 1, Point-MF outperforms diffusion-based methods that re-quire multi-step sampling, despite using only 1-NFE. RGB2point is trained with 12 Y. Baba and K. Yanai 
+
+Table 2: Comparison of F-Score at threshold 1% on ShapeNet-R2N2.                                     
+
+> Category LegoFormer [68] PC 2[43] BDM [66] RGB2point [30] Ours airplane 0.215 0.473 0.512 0.583 0.591
+> car 0.220 0.301 0.311 0.339 0.338 chair 0.217 0.202 0.238 0.195 0.249
+> sofa 0.260 0.177 0.211 0.194 0.239 table 0.305 0.238 0.268 0.268 0.309
+> Average 0.246 0.271 0.299 0.303 0.333
+
+Table 3: Comparison of CD and EMD on the Pix3D dataset.                                                             
+
+> CD ×100 ↓EMD ×100 ↓
+> Method Chair Sofa Table Mean Chair Sofa Table Mean PC 2[43] (256-NFE) 7.07 5.87 11.39 7.82 7.13 6.14 10.72 7.75 BDM [66] (276-NFE) 6.62 5.55 8.35 7.12 7.05 4.98 8.79 7.12 RGB2point [30] 6.62 5.40 9.70 7.06 9.34 7.11 12.69 9.59 Ours (1-NFE) 6.48 5.02 8.20 6.53 6.74 5.06 7.94 6.61
+> w/o PMA 7.58 5.58 8.45 7.28 7.23 5.52 8.34 7.06 w/o DSA 8.82 6.58 10.1 8.58 8.88 7.02 9.76 8.62
+
+CD as its objective, which gives it an advantage on the CD metric because the training objective is aligned with the evaluation criterion. However, compared with probabilistic generation methods such as PC 2, BDM, and Point-MF, it per-forms worse in terms of EMD. Point-MF also achieves the best overall F-Score, outperforming prior methods on average, as shown in Table 2. On the real-world Pix3D dataset as well (Table 3), Point-MF achieves the best overall performance 
+
+Table 4: Inference time and peak VRAM usage (RTX A4000, single GPU). 
+
+Method Time [ms/sample] VRAM [GiB] PC 2 (256-NFE) 22000 ± 200 1.730 BDM (276-NFE) 28000 ± 200 1.970 RGB2point 28.39 ± 2.18 0.818 Ours (1-NFE) 63.45 ± 0.25 1.282 
+
+with only 1-NFE. Table 4 reports the runtime com-parison. Despite being a probabilis-tic generative model, Point-MF runs within the same order of magnitude as feedforward methods, while be-ing substantially faster than diffusion-based approaches. 
+
+Qualitative Results. We conduct qualitative evaluation on both ShapeNet-R2N2 (Fig. 6) and Pix3D (Fig. 7) to visually assess shape fidelity and point-density distribution in the generated point clouds. Overall, Point-MF produces point configurations that preserve shape consistency while reducing density im-balance. This tendency is also consistent with the quantitative results in Ta-
+
+Fig. 6: Qualitative results on ShapeNet. Point-MF 13  
+
+> Fig. 7: Qualitative results on Pix3D.
+
+ble 1, where Point-MF achieves consistently strong EMD scores. In contrast, RGB2point, which directly minimizes Chamfer Distance, often yields sharp out-lines due to strong attraction of points toward the surface, but can exhibit local density imbalance or concentration of points around particular parts. On Pix3D, Point-MF is able to reconstruct challenging structures such as the underside of tables and complex chair legs, which are often missed by PC 2 and RGB2point. Additional qualitative comparisons on the remaining ShapeNet-R2N2 categories and Pix3D, including randomly selected examples and failure cases, are provided in Supplementary Sec. D. 
+
+5.1 Ablations 
+
+Ablation results in Tables 1 and 3 already confirm the effectiveness of each pro-posed component via the w/o variants. Here, we further analyze the behavior of DSA on Pix3D by varying its weight. While the qualitative results above use 
+
+λbase = 0 .5, we additionally evaluate λbase ∈ { 0.3, 0.8, 1.1} in terms of CD and EMD (Table 5). A clear trade-off is observed with respect to λbase (Table 5). With λbase = 1 .1, the mean CD achieves the best value (6.46), suggesting that the reconstructed points are pulled more aggressively toward the vicinity of the ground-truth surface. However, the mean EMD degrades to 6.97, which is worse than 6.61 achieved by λbase = 0 .5. This indicates that overly strong DSA may over-constrain the clean-data side and interfere with Mean Flow learning: while it can be beneficial for the nearest-neighbor-based CD, it is not necessarily opti-mal for EMD, which emphasizes global one-to-one correspondence. In contrast, 
+
+λbase = 0 .3 results in worse mean CD/EMD (6.99/7.40), suggesting that the geo-metric constraint becomes insufficient to suppress outliers and density imbalance that are prone to occur in few-step updates (Table 5). Finally, removing DSA entirely further degrades performance, highlighting the importance of denoised-space supervision for stable few-step reconstruction; additional ablations on the set distance and qualitative analyses are provided in Supplementary Sec. C. 14 Y. Baba and K. Yanai 
+
+Table 5: Ablation on λbase (Pix3D).                                                        
+
+> CD ×100 ↓EMD ×100 ↓
+> Method Chair Sofa Table Mean Chair Sofa Table Mean
+> λbase = 1 .16.28 5.02 8.31 6.46 7.02 5.23 8.71 6.97
+> λbase = 0 .86.33 5.10 8.26 6.49 6.69 5.43 8.10 6.71
+> λbase = 0 .56.48 5.02 8.20 6.53 6.74 5.06 7.94 6.61
+> λbase = 0 .37.15 5.55 8.18 6.99 7.74 5.78 8.39 7.40 w/o DSA 8.82 6.58 10.1 8.58 8.88 7.02 9.76 8.62
+
+5.2 Limitations 
+
+While the proposed method achieves a favorable balance between reconstruction quality and inference efficiency, several limitations remain. First, the main objective LMF -CFG requires a Jacobian–vector product (JVP) to form self-consistent targets from the Mean Flow identity, which increases training-time computation and memory. Reducing this overhead will be impor-tant for scaling. Second, our method operates directly in point cloud space without a com-pressed latent representation. Although this avoids encoder/decoder complexity, the cost grows with the number of output points; thus, substantially denser gen-eration is not fully addressed, and high-resolution evaluation currently relies on external upsampling (e.g., RepKPU [53]). Third, experiments are limited to object-level single-image reconstruction on ShapeNet-R2N2 and Pix3D. Further validation is needed for broader categories, severe occlusions, and complex real-world backgrounds. These limitations suggest directions toward more scalable and more general single-image 3D reconstruction. 
+
+# 6 Conclusion and Discussion 
+
+This paper aims to generate point clouds with high geometric consistency under low-NFE sampling. To the best of our knowledge, we are the first to apply Mean Flow-based mean-velocity regression to single-image conditional point cloud gen-eration, and we propose a pose-free DiT architecture together with Denoised Space Anchor (DSA) , which promotes geometric consistency in the denoised space. On ShapeNet-R2N2, the proposed method outperforms prior approaches in terms of CD, EMD, and F-Score, demonstrating improved coverage and density consistency of the reconstructed point clouds. We also observe strong perfor-mance on the real-world Pix3D dataset. Moreover, runtime comparisons show that our method achieves substantially faster inference than diffusion-based base-lines, confirming the practical utility of low-NFE generation. Overall, our results highlight the effectiveness of Mean Flow for 3D reconstruction. For future work, it is promising to incorporate inference-time variable guid-ance scales as proposed in Improved Mean Flows [12], as well as transformations that define the main objective directly on xθ (xt, r, t | c), as suggested by Pixel Mean Flow [39]. Point-MF 15 
+
+# References 
+
+1. An, J., Yang, Z., Wang, J., Li, L., Liu, Z., Wang, L., Luo, J.: Bring metric functions into diffusion models. In: Proc. of the International Joint Conference on Artificial Intelligence. pp. 578–586 (2024) 4 2. Boss, M., Huang, Z., Vasishta, A., Jampani, V.: Sf3d: Stable fast 3d mesh recon-struction with uv-unwrapping and illumination disentanglement. In: Proc. of the IEEE/CVF Conference on Computer Vision and Pattern Recognition. pp. 16240– 16250 (2025) 2 3. Boulch, A., Marlet, R.: Poco: Point convolution for surface reconstruction. In: Proc. of the IEEE/CVF Conference on Computer Vision and Pattern Recognition. pp. 6302–6314 (2022) 1 4. Caron, M., Touvron, H., Misra, I., Jégou, H., Mairal, J., Bojanowski, P., Joulin, A.: Emerging properties in self-supervised vision transformers. In: Proc. of the IEEE/CVF International Conference on Computer Vision. pp. 9650–9660 (2021) 65. Chang, A.X., Funkhouser, T., Guibas, L., Hanrahan, P., Huang, Q., Li, Z., Savarese, S., Savva, M., Song, S., Su, H., Xiao, J., Yi, L., Yu, F.: ShapeNet: An Information-Rich 3D Model Repository. arXiv:1512.03012 (2015) 10 6. Chen, H., Gu, J., Chen, A., Tian, W., Tu, Z., Liu, L., Su, H.: Single-stage diffusion nerf: A unified approach to 3d generation and reconstruction. In: Proc. of the IEEE/CVF Conference on Computer Vision and Pattern Recognition. pp. 2416– 2425 (2023) 2 7. Chou, G., Bahat, Y., Heide, F.: Diffusion-sdf: Conditional generative modeling of signed distance functions. In: Proc. of the IEEE/CVF International Conference on Computer Vision. pp. 2262–2272 (2023) 2 8. Choy, C.B., Xu, D., Gwak, J., Chen, K., Savarese, S.: 3d-r2n2: A unified approach for single and multi-view 3d object reconstruction. In: Proc. of the European Con-ference on Computer Vision. pp. 628–644 (2016) 2, 3, 10 9. Du, B., Hu, W., Liao, R.: Multi-scale latent point consistency models for 3d shape generation. In: arXiv preprint arXiv:2412.19413 (2024) 2 10. Frans, K., Hafner, D., Levine, S., Abbeel, P.: One step diffusion via shortcut models. In: Proc. of the International Conference on Learning Representations (2025) 4 11. Geng, Z., Deng, M., Bai, X., Kolter, J.Z., He, K.: Mean flows for one-step generative modeling. In: Advances in Neural Information Processing Systems. vol. 38 (2025) 2, 4, 5, 20, 21 12. Geng, Z., Lu, Y., Wu, Z., Shechtman, E., Kolter, J.Z., He, K.: Improved mean flows: On the challenges of fastforward generative models. arXiv preprint arXiv:2512.02012 (2025) 4, 14 13. Geng, Z., Pokle, A., Luo, W., Lin, J., Kolter, J.Z.: Consistency models made easy. In: Proc. of the International Conference on Learning Representations (2025) 4 14. Graham, B.: Sparse 3d convolutional neural networks. In: Proc. of the British Machine Vision Conference. pp. 150–1 (2015) 2 15. Ho, J., Jain, A., Abbeel, P.: Denoising diffusion probabilistic models. Advances in Neural Information Processing Systems 33 , 6840–6851 (2020) 4 16. Ho, J., Salimans, T.: Classifier-free diffusion guidance. In: NeurIPS 2021 Workshop on Deep Generative Models and Downstream Applications (2021) 20 17. Hong, Y., Zhang, K., Gu, J., Bi, S., Zhou, Y., Liu, D., Liu, F., Sunkavalli, K., Bui, T., Tan, H.: Lrm: Large reconstruction model for single image to 3d. In: Proc. of the International Conference on Learning Representations (2024) 2 16 Y. Baba and K. Yanai 18. Huang, Z., Boss, M., Vasishta, A., Rehg, J.M., Jampani, V.: Spar3d: Stable point-aware reconstruction of 3d objects from single images. In: Proc. of the IEEE/CVF Conference on Computer Vision and Pattern Recognition. pp. 16860–16870 (2025) 119. Huang, Z., Jampani, V., Thai, A., Li, Y., Stojanov, S., Rehg, J.M.: Shapeclipper: Scalable 3d shape learning from single-view images via geometric and clip-based consistency. In: Proc. of the IEEE/CVF Conference on Computer Vision and Pat-tern Recognition. pp. 12912–12922 (2023) 2 20. Huang, Z., Johnson, J., Debnath, S., Rehg, J.M., Wu, C.Y.: Pointinfinity: Resolution-invariant point diffusion models. In: Proc. of the IEEE/CVF Inter-national Conference on Computer Vision. pp. 10050–10060 (2024) 2 21. Insafutdinov, E., Dosovitskiy, A.: Unsupervised learning of shape and pose with differentiable point clouds. In: Advances in Neural Information Processing Systems. vol. 31 (2018) 3, 11 22. Jignasu, A., Balu, A., Sarkar, S., Hegde, C., Ganapathysubramanian, B., Krish-namurthy, A.: Sdfconnect: Neural implicit surface reconstruction of a sparse point cloud with topological constraints. In: Proc. of the IEEE/CVF Conference on Com-puter Vision and Pattern Recognition Workshops. pp. 5271–5279 (2024) 1 23. Jun, H., Nichol, A.: Shap-e: Generating conditional 3d implicit functions. arXiv preprint arXiv:2305.02463 (2023) 2 24. Karras, T., Aittala, M., Aila, T., Laine, S.: Elucidating the design space of diffusion-based generative models. In: Advances in Neural Information Processing Systems. vol. 35, pp. 26565–26577 (2022) 4 25. Kerbl, B., Kopanas, G., Leimkühler, T., Drettakis, G., et al.: 3d gaussian splatting for real-time radiance field rendering. ACM Transactions on Graphics 42 (4), 139–1 (2023) 2, 3 26. Kim, D., Lai, C.H., Liao, W.H., Murata, N., Takida, Y., Uesaka, T., He, Y., Mit-sufuji, Y., Ermon, S.: Consistency trajectory models: Learning probability flow ode trajectory of diffusion. In: Proc. of the International Conference on Learning Representations (2024) 4 27. L Navaneet, K., Mandikal, P., Jampani, V., Babu, V.: Differ: Moving beyond 3d reconstruction with differentiable feature rendering. In: Proc. of the IEEE/CVF Conference on Computer Vision and Pattern Recognition Workshops (2019) 11 28. Lan, Y., Hong, F., Yang, S., Zhou, S., Meng, X., Dai, B., Pan, X., Loy, C.C.: ln3diff: Scalable latent neural fields diffusion for speedy 3d generation. In: Proc. of the European Conference on Computer Vision. pp. 112–130. Springer (2024) 2 29. Lan, Y., Zhou, S., Lyu, Z., Hong, F., Yang, S., Dai, B., Pan, X., Loy, C.C.: Gaus-sianAnything: Interactive point cloud latent diffusion for 3D generation. In: Proc. of the International Conference on Learning Representations (2025) 1, 7 30. Lee, J.J., Benes, B.: Rgb2point: 3d point cloud generation from single rgb im-ages. In: Proc. of the IEEE/CVF Winter Conference on Applications of Computer Vision. pp. 2952–2962 (2025) 2, 3, 11, 12, 23 31. Lee, K., Yu, S., Shin, J.: Decoupled meanflow: Turning flow models into flow maps for accelerated sampling. In: Proc. of the International Conference on Learning Representations (2026) 4 32. Lee, S., Lin, Z., Fanti, G.: Improving the training of rectified flows. Advances in Neural Information Processing Systems 37 , 63082–63109 (2024) 4 33. Lipman, Y., Chen, R.T., Ben-Hamu, H., Nickel, M., Le, M.: Flow matching for generative modeling. In: Proc. of the International Conference on Learning Repre-sentations (2023) 2, 4, 5 Point-MF 17 34. Liu, M., Shi, R., Chen, L., Zhang, Z., Xu, C., Wei, X., Chen, H., Zeng, C., Gu, J., Su, H.: One-2-3-45++: Fast single image to 3d objects with consistent multi-view generation and 3d diffusion. In: Proc. of the IEEE/CVF Conference on Computer Vision and Pattern Recognition. pp. 10072–10083 (2024) 2 35. Liu, R., Wu, R., Van Hoorick, B., Tokmakov, P., Zakharov, S., Vondrick, C.: Zero-1-to-3: Zero-shot one image to 3d object. In: Proceedings of the IEEE/CVF inter-national conference on computer vision. pp. 9298–9309 (2023) 2 36. Liu, X., Gong, C., Liu, Q.: Flow straight and fast: Learning to generate and transfer data with rectified flow. In: Proc. of the International Conference on Learning Representations (2023) 4 37. Liu, Y., Lin, C., Zeng, Z., Long, X., Liu, L., Komura, T., Wang, W.: Syncdreamer: Generating multiview-consistent images from a single-view image. In: Proc. of the International Conference on Learning Representations (2024) 2 38. Lu, C., Song, Y.: Simplifying, stabilizing and scaling continuous-time consistency models. In: Proc. of the International Conference on Learning Representations (2025) 4 39. Lu, Y., Lu, S., Sun, Q., Zhao, H., Jiang, Z., Wang, X., Li, T., Geng, Z., He, K.: One-step latent-free image generation with pixel mean flows. In: arXiv preprint arXiv:2601.22158 (2026) 4, 14 40. Luo, S., Hu, W.: Diffusion probabilistic models for 3d point cloud generation. In: Proc. of the IEEE/CVF Conference on Computer Vision and Pattern Recognition. pp. 2837–2845 (2021) 3 41. Lyu, Z., Wang, J., An, Y., Zhang, Y., Lin, D., Dai, B.: Controllable mesh gen-eration through sparse latent point diffusion models. In: Proc. of the IEEE/CVF Conference on Computer Vision and Pattern Recognition. pp. 271–280 (2023) 2 42. Ma, B., Han, Z., Liu, Y.S., Zwicker, M.: Neural-pull: Learning signed distance functions from point clouds by learning to pull space onto surfaces. In: Proc. of the International Conference on Machine Learning. vol. 139 (2021) 2 43. Melas-Kyriazi, L., Rupprecht, C., Vedaldi, A.: Pc2: Projection-conditioned point cloud diffusion for single-image 3d reconstruction. In: Proc. of the IEEE/CVF Conference on Computer Vision and Pattern Recognition. pp. 12923–12932 (2023) 2, 3, 11, 12, 23 44. Mescheder, L., Oechsle, M., Niemeyer, M., Nowozin, S., Geiger, A.: Occupancy networks: Learning 3d reconstruction in function space. In: Proc. of the IEEE/CVF Conference on Computer Vision and Pattern Recognition. pp. 4460–4470 (2019) 3 45. Mo, S., Xie, E., Chu, R., Hong, L., Niessner, M., Li, Z.: Dit-3d: Exploring plain diffusion transformers for 3d shape generation. Advances in Neural Information Processing Systems 36 , 67960–67971 (2023) 3 46. Mu, Y., Zuo, X., Guo, C., Wang, Y., Lu, J., Wu, X., Xu, S., Dai, P., Yan, Y., Cheng, L.: Gsd: View-guided gaussian splatting diffusion for 3d reconstruction. In: Proc. of the European Conference on Computer Vision. pp. 55–72 (2024) 3 47. Murez, Z., Van As, T., Bartolozzi, J., Sinha, A., Badrinarayanan, V., Rabinovich, A.: Atlas: End-to-end 3d scene reconstruction from posed images. In: Proc. of the European Conference on Computer Vision. pp. 414–431 (2020) 2, 3 48. Navaneet, K., Mathew, A., Kashyap, S., Hung, W.C., Jampani, V., Babu, R.V.: From image collections to point clouds with self-supervised shape and pose net-works. In: Proc. of the IEEE/CVF Conference on Computer Vision and Pattern Recognition. pp. 1132–1140 (2020) 10, 11 49. Nichol, A., Jun, H., Dhariwal, P., Mishkin, P., Chen, M.: Point-e: A system for generating 3d point clouds from complex prompts. arXiv:2212.08751 (2022) 2, 3, 818 Y. Baba and K. Yanai 50. Park, J.J., Florence, P., Straub, J., Newcombe, R., Lovegrove, S.: Deepsdf: Learning continuous signed distance functions for shape representation. In: Proc. of the IEEE/CVF Conference on Computer Vision and Pattern Recognition. pp. 165– 174 (2019) 3 51. Peebles, W., Xie, S.: Scalable diffusion models with transformers. In: Proc. of the IEEE/CVF International Conference on Computer Vision. pp. 4195–4205 (2023) 852. Qi, C.R., Yi, L., Su, H., Guibas, L.J.: Pointnet++: Deep hierarchical feature learn-ing on point sets in a metric space. Advances in Neural Information Processing Systems 30 (2017) 2 53. Rong, Y., Zhou, H., Xia, K., Mei, C., Wang, J., Lu, T.: Repkpu: Point cloud upsampling with kernel point representation and deformation. In: Proc. of the IEEE/CVF Conference on Computer Vision and Pattern Recognition. pp. 21050– 21060 (2024) 11, 14 54. Sharifipour, S., Casado, C.Á., Sabokrou, M., López, M.B.: APML: adaptive prob-abilistic matching loss for robust 3d point cloud reconstruction. In: Advances in Neural Information Processing Systems. vol. 38 (2025) 9 55. Siméoni, O., Vo, H.V., Seitzer, M., Baldassarre, F., Oquab, M., Jose, C., Khalidov, V., Szafraniec, M., Yi, S., Ramamonjisoa, M., et al.: Dinov3. arXiv:2508.10104 (2025) 6 56. Sohl-Dickstein, J., Weiss, E., Maheswaranathan, N., Ganguli, S.: Deep unsuper-vised learning using nonequilibrium thermodynamics. In: Proc. of the International Conference on Machine Learning. pp. 2256–2265 (2015) 4 57. Song, Y., Dhariwal, P.: Improved techniques for training consistency models. In: Proc. of the International Conference on Learning Representations (2024) 4 58. Song, Y., Dhariwal, P., Chen, M., Sutskever, I.: Consistency models. In: Proc. of the International Conference on Machine Learning (2023) 4 59. Song, Y., Ermon, S.: Generative modeling by estimating gradients of the data distribution. Advances in Neural Information Processing Systems 32 (2019) 4 60. Song, Y., Sohl-Dickstein, J., Kingma, D.P., Kumar, A., Ermon, S., Poole, B.: Score-based generative modeling through stochastic differential equations. In: Proc. of the International Conference on Learning Representations (2021) 4 61. Sun, X., Wu, J., Zhang, X., Zhang, Z., Zhang, C., Xue, T., Tenenbaum, J.B., Free-man, W.T.: Pix3d: Dataset and methods for single-image 3d shape modeling. In: Proc. of the IEEE/CVF Conference on Computer Vision and Pattern Recognition. pp. 2974–2983 (2018) 10, 23 62. Thai, A., Stojanov, S., Upadhya, V., Rehg, J.M.: 3d reconstruction of novel object shapes from single images. In: Proc. of the International Conference on 3D Vision. pp. 85–95 (2021) 3 63. Wang, N., Zhang, Y., Li, Z., Fu, Y., Liu, W., Jiang, Y.G.: Pixel2mesh: Generating 3d mesh models from single rgb images. In: Proc. of the European Conference on Computer Vision. pp. 52–67 (2018) 2, 3 64. Wang, Z., Wang, Y., Chen, Y., Xiang, C., Chen, S., Yu, D., Li, C., Su, H., Zhu, J.: Crm: Single image to 3d textured mesh with convolutional reconstruction model. In: Proc. of the European Conference on Computer Vision. pp. 57–74 (2024) 2 65. Wu, W., Qi, Z., Fuxin, L.: Pointconv: Deep convolutional networks on 3d point clouds. In: Proc. of the IEEE/CVF Conference on Computer Vision and Pattern Recognition. pp. 9621–9630 (2019) 2 66. Xu, H., Lei, Y., Chen, Z., Zhang, X., Zhao, Y., Wang, Y., Tu, Z.: Bayesian diffusion models for 3d shape reconstruction. In: Proc. of the IEEE/CVF Conference on Point-MF 19 Computer Vision and Pattern Recognition. pp. 10628–10638 (2024) 2, 3, 10, 11, 12, 23 67. Xu, Q., Xu, Z., Philip, J., Bi, S., Shu, Z., Sunkavalli, K., Neumann, U.: Point-nerf: Point-based neural radiance fields. In: Proc. of the IEEE/CVF Conference on Computer Vision and Pattern Recognition. pp. 5438–5448 (2022) 1 68. Yagubbayli, F., Wang, Y., Tonioni, A., Tombari, F.: Legoformer: Transformers for block-by-block multi-view 3d reconstruction. arXiv:2106.12102 (2021) 12 69. Zeng, X., Vahdat, A., Williams, F., Gojcic, Z., Litany, O., Fidler, S., Kreis, K.: Lion: latent point diffusion models for 3d shape generation. In: Advances in Neural Information Processing Systems. pp. 10021–10039 (2022) 2, 3 70. Zhang, H., Siarohin, A., Menapace, W., Vasilkovsky, M., Tulyakov, S., Qu, Q., Skorokhodov, I.: Alphaflow: Understanding and improving meanflow models. In: Proc. of the International Conference on Learning Representations (2026) 4 71. Zhang, R., Isola, P., Efros, A.A., Shechtman, E., Wang, O.: The unreasonable effectiveness of deep features as a perceptual metric. In: Proc. of the IEEE/CVF Conference on Computer Vision and Pattern Recognition. pp. 586–595 (2018) 4 72. Zhou, C., Zhong, F., Hanji, P., Guo, Z., Fogarty, K., Sztrajman, A., Gao, H., Oztireli, C.: Frepolad: Frequency-rectified point latent diffusion for point cloud generation. In: Proc. of the European Conference on Computer Vision. pp. 434– 453 (2024) 2 73. Zhou, L., Ermon, S., Song, J.: Inductive moment matching. In: Proc. of the Inter-national Conference on Machine Learning (2025) 4 74. Zhu, D., Di, Y., Gavranovic, S., Ilic, S.: Sealion: Semantic part-aware latent point diffusion models for 3d generation. In: Proc. of the IEEE/CVF Conference on Computer Vision and Pattern Recognition. pp. 11789–11798 (2025) 2 20 Y. Baba and K. Yanai 
+
+# Supplementary Material A CFG-Guided Mean Flow 
+
+Derivation of the Training Objective. To strengthen generation consistent with a condition c, Classifier-Free Guidance (CFG) [16] can be incorporated into Mean Flow [11] without increasing the NFE at sampling time. Let v(xt, t | c) denote the conditional instantaneous velocity field and v(xt, t )
+
+the unconditional one. The CFG-guided instantaneous velocity is defined as 
+
+vcfg (xt, t | c) := ω v (xt, t | c) + (1 − ω) v(xt, t ), (S1) where ω is the guidance scale; larger ω places more emphasis on the conditional branch. Averaging this field over an interval 0 ≤ r < t ≤ 1 gives the CFG mean velocity field 
+
+ucfg (xt, r, t | c) := 1
+
+t − r
+
+Z tr
+
+vcfg (xτ , τ | c) dτ. (S2) Multiplying both sides of Eq. (S2) by (t − r) and differentiating with respect to 
+
+t while treating r as a constant ( dr dt = 0 ) yields 
+
+ucfg (xt, r, t | c) = vcfg (xt, t | c) − (t − r) ddt ucfg (xt, r, t | c). (S3) Using the tangent vector ˙xt := dx t 
+
+> dt
+
+, the total derivative can be expanded as 
+
+ddt ucfg (xt, r, t | c) = ˙ xt ∂xucfg (xt, r, t | c) + ∂tucfg (xt, r, t | c). (S4) In the true generation dynamics, the tangent vector is ˙xt = vcfg (xt, t | c)
+
+by Eq. (S1). However, v(xt, t | c) and v(xt, t ) involve marginalization and are not directly observable during training. For the formulation used in this paper, the conditional FM target is denoted by vt := ϵ − x, and is used as a surro-gate supervision signal for the conditional branch. For the unconditional branch, the network output evaluated with condition dropout, uθ (xt, t, t ), is used. Since the mean velocity reduces to the instantaneous velocity in the limit r → t,
+
+ucfg (xt, t, t ) = vcfg (xt, t ) holds. Based on this observation, the approximate CFG instantaneous velocity (approximate tangent vector) is defined as 
+
+˜vt := ω v t + κ u θ (xt, t, t | c) + (1 − ω − κ) uθ (xt, t, t ), (S5) where κ ≥ 0 controls how much of the conditional network output is mixed into 
+
+˜vt; setting κ = 0 recovers the standard CFG-style approximation in Eq. (S1). Replacing the tangent vector ˙xt in Eq. (S3) with ˜vt gives the regression target 
+
+utgt := ˜ vt − (t − r) ddt uθ (xt, r, t | c). (S6) Point-MF 21 
+
+The total derivative can be computed efficiently via a Jacobian–vector product (JVP): 
+
+
+
+uθ , ddt uθ
+
+
+
+= jvp( uθ , (xt, r, t ), (˜ vt, 0, 1)) . (S7) Fixing the target with stop-gradient leads to the training loss 
+
+LMF -CFG (θ) = E
+
+h
+
+∥uθ (xt, r, t | c) − sg( utgt )∥22
+
+i
+
+. (S8) When r = t, (t − r) = 0 and Eq. (S8) reduces to an FM-like one-timepoint regression objective. In practice, mixing cases with r = t and r̸ = t allows the model to learn both the local Flow-Matching-like behavior and large-interval mean-flow updates. Algorithm 1. CFG-Guided Mean Flow: training guidance.        
+
+> # fn(z, t, r, c): function to predict mean velocity u # x: training batch # c: condition batch t, r = sample_t_r() e = randn_like(x) x_t = (1 - t) * x + t * e v_t = e - x # conditional and unconditional one-timepoint predictions u_c = fn(x_t, t, t, c) u_u = fn(x_t, t, t, null) # approximate CFG instantaneous velocity v_tgt = ω* v_t + κ* u_c + (1 -ω-κ) * u_u # main branch uses condition dropout c_drop = dropout_condition(c) # compute du/dt by JVP u, dudt = jvp(fn, (x_t, t, r, c_drop), (v_tgt, 1, 0, 0)) # mean-flow regression target u_tgt = v_tgt - (t - r) * stopgrad(dudt) error = u - stopgrad(u_tgt) loss = AdaptiveL2(error)
+
+Training Pseudocode. Algo-rithm 1 provides the pseudocode for the training procedure. For the final loss, we adopt the adaptive loss weighting shown effective in Mean Flows [11]. Specifically, we define the error as ∆ := uθ (xt, r, t |
+
+c) − sg( utgt ) and the squared er-ror as L := |∆|22, and introduce the weight w := 1/(|∆|22 + c)p
+
+(where p = 1 − γ; c > 0), so that the final loss is given by sg( w) ·
+
+L. This corresponds to implement-ing the general |∆|2γ 
+
+> 2
+
+-type loss as a weighted squared error. While 
+
+p = 0.5 is close to a Pseudo-Huber-style weighting, the original Mean Flows paper compares mul-tiple values of p and reports that 
+
+p = 1 performs particularly well; therefore, we also use p = 1 in this work. In addition, following standard CFG practice, we randomly drop the condition during training so that the network is exposed to both conditional and unconditional inputs. 
+
+# B Additional Implementation Details 
+
+Training was conducted on 8 NVIDIA RTX A6000 GPUs. Each sample consisted of a point cloud with N = 2048 points and an RGB image of size 224 × 224 .Pretraining was used only for the image feature extractor (DINOv3), while all other modules were trained from scratch. The DiT backbone used hidden di-mension D = 512 , L = 12 blocks, and h = 8 attention heads, and DINOv3 22 Y. Baba and K. Yanai 
+
+(ViT-B) was adopted for image conditioning. The PMA used to process DINO patch tokens was applied only once, with internal dimension 1024 and 4 atten-tion heads, and its output projection was zero-initialized. For time sampling, we used a logit-normal distribution whose underlying normal distribution had parameters μ = −0.4 and σ = 1 .0. The Flow Matching and Mean Flow compo-nents were mixed with equal probability. In the Mean Flow branch, t and r were sampled independently and then ordered using a min-max scheme so that t > r .The geometric regularization weight for DSA was set to λbase = 0 .5.The velocity composition used for CFG during training, namely the approxi-mate CFG instantaneous velocity, was defined as in Eq. (S5). In our experiments, we set (ω, κ ) = (1 .0, 0.5) . During training, the label dropout ratio was set to 0.1. We used AdamW for optimization with a learning rate of 1.0 × 10 −4. The learn-ing rate was linearly warmed up for the first 10,000 steps and then kept constant at 1.0×10 −4. The model was trained with a batch size of 128 for a total of 120,000 steps. 
+
+Algorithm 2. 1-step sampling. 
+
+> # fn(x_t, r, t, c): function to predict mean velocity u # c: condition input # x_shape: output shape e = randn(x_shape) x = e - fn(e, 0, 1, c)
+
+At inference time, generation pro-ceeds by integrating the reverse-time dynamics toward t = 0
+
+using the mean velocity field 
+
+uθ (xt, t, r, c ). As shown in the pseudocode in Algorithm 2, we fix 
+
+(t, r ) = (1 , 0) and generate sam-ples with a single network function evaluation (NFE = 1 ). 
+
+Fig. S1: Qualitative comparison for different values of λbase on Pix3D. When λbase =0.8, some fine-grained structures are lost compared with the ground truth, as high-lighted by the red circles. 
+
+# C Additional Ablations 
+
+Qualitative Results for Different λbase . Due to space limitations, the qual-itative results of the ablation on λbase could not be included in the main paper. Point-MF 23 
+
+We therefore present the generated point clouds for different values of λbase in Fig. S1. As shown in Fig. S1, when λbase is too small, the generated point clouds become noticeably noisy. In contrast, with λbase = 0 .8, the surface is more cleanly aligned, but fine-grained details are partially lost compared with the ground truth, as indicated by the red circles in the figure. This observation is consistent with the EMD values reported in Table 5 of the main paper. 
+
+Ablation on the Set Distance Used in DSA. As an additional ablation study, we replace the auxiliary loss used in DSA with L1-Chamfer Distance (CD) and MSE, and evaluate both quantitative and qualitative results on Pix3D [61]. The quantitative results are reported in Table S1, and the qualitative comparison is shown in Fig. S2.  
+
+> Fig. S2: Qualitative comparison of different set distances used in DSA on Pix3D. With Chamfer Distance, some regions exhibit slightly scattered points, as highlighted by the red circles.
+
+As shown in Table S1, APML achieves the best overall performance, whereas MSE performs the worst. We attribute this to the fact that the main objective supervises velocity-field prediction rather than direct point-wise reconstruction; consequently, after mapping predictions into the denoised space, point-to-point correspondences with the ground truth are not explicitly aligned, making MSE unsuitable and potentially detrimental to shape quality. These results suggest that a set-to-set distance, such as Chamfer Distance, is more appropriate for DSA. Moreover, as shown in Fig. S2, Chamfer Distance tends to produce slightly scattered points in some regions, which is likely due to its nearest-neighbor-based matching. 
+
+# D Additional Qualitative Results 
+
+Additional qualitative comparisons on ShapeNet-R2N2 and Pix3D between the proposed method and prior approaches [30, 43, 66] are shown in Figs. S4–S6 24 Y. Baba and K. Yanai 
+
+Table S1: Ablation on the set distance used in DSA on Pix3D.                                            
+
+> CD ×100 ↓EMD ×100 ↓
+> Method Chair Sofa Table Mean Chair Sofa Table Mean
+> APML 6.48 5.02 8.20 6.53 6.74 5.06 7.94 6.61
+> CD 6.36 5.12 8.40 6.54 7.48 5.26 8.53 7.17
+> MSE 11.18 8.63 12.84 10.93 10.1 9.52 10.21 10.93 w/o DSA 8.82 6.58 10.12 8.58 8.88 7.02 9.76 8.62
+
+and Fig. S7, respectively. Due to space limitations, these examples could not be included in the main paper. Note that BDM requires a category-specific prior model, and therefore qualitative results are shown only for the major categories. 
+
+Fig. S3: Failure case. The attached desk highlighted by the red circle in the ground truth is sometimes not reconstructed, depending on the input viewpoint. 
+
+We also present a failure case in Fig. S3. In this example, the attached desk highlighted by the red circle in the ground truth is not reconstructed when it is not visible from the input viewpoint. This reflects a common limitation of single-image reconstruction methods, which must infer occluded structures from incomplete visual evidence. We further note that some prior methods fail to reconstruct this part even when it is visible in the input image. Point-MF 25 
+
+Fig. S4: Qualitative comparison on ShapeNet-R2N2 for the airplane and car categories. 26 Y. Baba and K. Yanai 
+
+Fig. S5: Qualitative comparison on ShapeNet-R2N2 for the chair, sofa, and table cat-egories. Point-MF 27 
+
+Fig. S6: Qualitative comparison on ShapeNet-R2N2 for the display, lamp, and rifle categories. 28 Y. Baba and K. Yanai 
+
+Fig. S7: Additional qualitative comparison on Pix3D.

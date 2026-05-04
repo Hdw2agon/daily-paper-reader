@@ -1,0 +1,660 @@
+Title: PhysEdit: Physically-Consistent Region-Aware Image Editing via Adaptive Spatio-Temporal Reasoning
+
+URL Source: https://arxiv.org/pdf/2605.00707v1
+
+Published Time: Mon, 04 May 2026 00:55:33 GMT
+
+Number of Pages: 11
+
+Markdown Content:
+# PhysEdit: Physically-Consistent Region-Aware Image Editing via Adaptive Spatio-Temporal Reasoning 
+
+Guandong Li iFLYTEK leeguandon@gmail.com Mengxia Ye Aegon THTF 
+
+Abstract 
+
+Image editing instructions are heterogeneous: a color swap, an object insertion, and a physical-action edit all demand different spatial coverage and different reasoning depth, yet existing reasoning-based editors apply a single fixed inference recipe to every instruction. We argue that 
+
+adaptivity along both the spatial and temporal axes is the missing degree of freedom, and we present PhysEdit , an editing framework built around this principle. PhysEdit introduces two inference-time modules that compose with-out retraining the backbone. At its core, (1) Complexity-Adaptive Reasoning Depth (CARD ) predicts edit complex-ity directly from the instruction and reference image and allocates the reasoning step count Nr and reasoning-token length r per sample —turning a previously fixed inference schedule into a conditional-computation problem. CARD is supported by (2) a Spatial Reasoning Mask (SRM) that ex-tracts an instruction-conditioned spatial prior from cross-attention to confine reasoning to regions that semantically require it. On the full 737-case ImgEdit Basic-Edit Suite, PhysEdit delivers a 1.18 × wall-clock speedup ( 64 .3s vs. 
+
+76 .1s per sample) over a strong reasoning baseline while 
+
+slightly improving instruction adherence (CLIP-T 0.2283 
+
+vs. 0.2266 , +0 .7% ) and matching identity preservation within noise (CLIP-I 0.8246 vs. 0.8280 ). The speedup is category-dependent and reaches 1.52 × on appearance-level edits, validating CARD’s adaptive allocation as the principal source of efficiency gain. A 30-sample pilot with full ablations isolates the contribution of each module. 
+
+1. Introduction 
+
+Physically-consistent image editing lies at the intersec-tion of creative generation and world simulation [7, 8, 16, 27]. Unlike aesthetic editing, where a visually plausible re-sult suffices, physical consistency demands that edited con-tent respect real-world constraints—gravity, rigid-body dy-namics, contact mechanics, and object permanence—while unedited regions remain bit-accurate to the reference. This dual requirement is especially acute in applications where edited imagery feeds back into perception stacks, including autonomous driving simulation [8] and robot data augmen-tation [16]. A fundamental tension underlies this task: editing is in-herently heterogeneous, yet existing frameworks respond to every instruction with a single fixed inference recipe. Acolor swap (“change the hat to red”) needs neither motion planning nor scene-wide reasoning; a physical interaction (“the robot picks up the cup”) requires dense dynamical rea-soning across multiple bodies; a style transfer (“render as watercolor”) demands global transformation with no spa-tial localization. Applying identical computational budgets, identical spatial coverage, and identical regularization to all three modes is wasteful for the easy cases and inadequate for the hard ones. We identify three concrete manifestations of this mismatch that any high-fidelity editor must resolve: 
+
+(1) Spatial heterogeneity. The locus of edit varies from pixel-level patches to entire frames. A method that reasons uniformly across the spatial extent either over-computes on unchanged regions or under-represents the edit zone. 
+
+(2) Dynamical heterogeneity. The physical complex-ity of edits spans orders of magnitude. Under- or over-allocating reasoning depth directly trades off quality against efficiency—and neither extreme is acceptable. 
+
+(3) Identity-drift from joint denoising. When an editor jointly denoises all latents, unedited regions absorb stochas-tic perturbations and accumulate drift in texture and iden-tity. Preserving such regions requires an explicit anchoring mechanism, not a stronger prior. We present PhysEdit , a framework that addresses all three through a single coherent design principle: let the edi-tor adapt to the edit . PhysEdit operates on a flow-matching video diffusion backbone and reformulates image editing as a region-aware spatio-temporal denoising process , where both the spatial support and the temporal trajectory of rea-soning are selected per instruction. Our contributions are three complementary modules: 1
+
+> arXiv:2605.00707v1 [cs.CV] 1 May 2026
+
+• Complexity-Adaptive Reasoning Depth (CARD) —our main contribution. CARD analyzes the instruction together with the reference image, predicts an edit-complexity class, and dynamically allocates both the number of reasoning timesteps Nr and the reasoning-token length r per sample. To our knowledge this is the first editing framework whose inference compute is dictated by a per-instruction estimate of dynami-cal difficulty rather than a fixed schedule. We em-pirically observe category-dependent speedups rang-ing from 1.52 × on appearance-level edits to 1.06 × on structurally complex ones, evidence that editing tasks are genuinely heterogeneous and that CARD’s adap-tive allocation captures that heterogeneity. • Spatial Reasoning Mask (SRM): A lightweight, training-free module that derives a spatial importance map from the cross-attention between the editing in-struction and reference image features, directing tem-poral reasoning to regions that semantically require it. • Region-Preserving Feature Injection (RPFI), an ex-ploratory module. As part of designing the frame-work, we additionally explore a latent-injection mech-anism that anchors spatially-masked unedited regions to noise-matched reference features during reasoning. RPFI is not part of the headline configuration; we de-scribe it in section 3.4 and document its current limita-tions as an open follow-up. An overview of the complete PhysEdit pipeline is shown in fig. 1. CARD and SRM compose into a single inference-time procedure that requires no backbone retraining, so the framework drops in on top of any flow-matching video-diffusion editor. On the full 737 -case ImgEdit Basic-Edit Suite [28], PhysEdit reaches 64.3s per sample versus 76 .1sfor the reasoning baseline—a 1.18 × wall-clock speedup— while marginally improving instruction adherence ( +0 .7% 
+
+CLIP-T) and remaining within noise on identity preser-vation ( −0.4% CLIP-I) and perceptual distance ( +1 .7% 
+
+LPIPS, all reported in table 1). The speedup is highly category-dependent: appearance-level edits reach 1.52 ×
+
+while structurally complex edits sit near 1.06 ×, directly re-flecting CARD’s per-instruction allocation. To our knowl-edge, PhysEdit is the first editing framework whose infer-ence compute is dictated by a per-instruction estimate of edit complexity rather than a fixed schedule. 
+
+2. Related Work 
+
+Image editing with generative models. Large-scale foundation models have enabled diverse image editing paradigms. FLUX.1 Kontext [2] achieves strong instruc-tion alignment through billion-scale parameterization. Om-niGen [27] unifies text-to-image, editing, and subject-driven generation. Qwen-Image-Edit [25] extends a vision-language model with a double-stream architecture for pre-cise edits. Proprietary systems such as GPT-4o [21] and Gemini 2.5 Flash Image [9] demonstrate robust multi-turn editing. However, these methods primarily target visual fi-delity and instruction following, with limited emphasis on physical consistency. 
+
+Video priors for image editing. A growing line of work exploits pretrained video models as a source of physical pri-ors for editing. Bagel [7], UniReal [5], and OmniGen [27] use video-derived key frames to construct temporally coher-ent image pairs. Rotstein et al . [22] propose a training-free method that walks the image manifold with an image-to-video model. ChronoEdit [26] inserts intermediate reason-ing frames during denoising to obtain explicitly traceable editing trajectories. These methods share a common as-sumption: a single, uniform video-prior strategy is applied to all edits. In contrast, PhysEdit treats the editing process itself as a conditional computation problem—selecting both the spatial support and the reasoning depth per instruction— and contributes an explicit region-preservation mechanism that is absent in prior work. 
+
+Spatially-aware generation and editing. Spatial awareness in generative models has been explored through attention manipulation [10, 23], region-based control [20, 29], and mask-guided editing [1, 6]. DiffEdit [6] automat-ically generates editing masks from text prompts via con-trastive attention. InstructPix2Pix [4] learns instruction-conditioned editing end-to-end. More recent work on Diffu-sion Transformers extends attention-based control without retraining: training-free editing intensity control through dual-channel attention guidance [11], training-free flow-based editing through adaptive temporal and channel mod-ulation [14], and spatially-adaptive identity injection from cross-attention masks [15]—all of which operate purely at inference time but on the still-image branch of the editor. EditIDv2 [13] further studies editable identity customiza-tion with data-lubricated feature integration on a DiT back-bone. None of these methods integrate spatial awareness with the temporal reasoning axis explored here. Our SRM module draws inspiration from attention-based masking but operates within the temporal reasoning framework, selec-tively applying reasoning tokens to semantically relevant re-gions; RPFI’s region-preservation goal is closest in spirit to the identity-preserving injection in [13, 15], with the addi-tional constraint of being noise-matched to a flow-matching trajectory. 
+
+Adaptive computation in diffusion models. Adaptive computation has been explored for accelerating diffusion inference through dynamic step scheduling [17, 18], early exit mechanisms [19], token pruning [3], and frequency-aware error-bounded feature caching [12]. Most of these methods target uniform compute reduction and do not con-2Figure 1. PhysEdit: adaptive spatio-temporal denoising for image editing. Given a reference image and an instruction, CARD predicts the per-sample reasoning configuration (N ∗      
+
+> r, r ∗), turning a previously fixed inference schedule into a conditional-computation problem.
+> SRM produces an instruction-conditioned spatial mask that confines reasoning to the edit-relevant region. The remaining N−N∗
+> rdenoising steps proceed without reasoning tokens to produce the edit. An exploratory third module, RPFI , optionally injects reference features into the masked complement; we present it for completeness but do not enable it in the headline configuration (section 3.4).
+
+dition on the semantic structure of the task. CARD differs in two ways: it operates at the trajectory level (jointly de-ciding reasoning depth and latent token count), and its allo-cation is driven by an explicit multimodal predictor of edit complexity. To our knowledge, PhysEdit is the first edit-ing framework to tie computational allocation directly to a learned estimate of the dynamical difficulty of the instruc-tion. 
+
+3. Method 
+
+We first formalize the editing problem and the flow-matching video diffusion backbone used by PhysEdit (sec-tion 3.1), then present the two headline modules—the Spatial Reasoning Mask (section 3.2) and Complexity-Adaptive Reasoning Depth (section 3.3)—followed by the exploratory Region-Preserving Feature Injection module (section 3.4). Section 3.5 provides the unified inference al-gorithm. 
+
+3.1. Problem Formulation and Backbone 
+
+Problem setup. Given a reference image c and a natural-language editing instruction y, our goal is to produce an edited image p that (i) satisfies y with physically plausible modifications and (ii) preserves the unedited content of c
+
+at pixel fidelity. We model this as a conditional generation problem pθ (p | c, y) learned via a flow-matching objective on a video diffusion backbone. 
+
+Flow-matching video diffusion backbone. We adopt a latent flow-matching formulation in which a video-VAE E
+
+encodes images into a latent sequence z ∈ RT ×C×h×w.The reference is placed as the first latent frame zc =
+
+E(c); the edited image is placed as the last, tempo-rally repeated to match the VAE’s temporal compression: 
+
+zp = E(repeat (p, 4)) . Following the flow-matching paradigm [24], we train the network Fθ to regress the ve-locity field between data and noise: 
+
+Lθ = Et, x,ϵ 
+
+h
+
+∥Fθ (zt, t ; y, zc) − (ϵ − z0)∥22
+
+i
+
+, (1) 3with zt = (1 − t)z0 + tϵ . At inference, we integrate the velocity field along t ∈ [tmax , t min ] with an ODE solver to obtain z0, and decode the final frame as the edited image. 
+
+Temporal reasoning via intermediate latents. A use-ful property of video-diffusion backbones is that they na-tively support latent-space temporal reasoning : inserting r
+
+intermediate latent frames between zc and zp lets the model imagine an editing trajectory before committing to the fi-nal frame. During the first Nr denoising steps these inter-mediate latents are jointly denoised, and are dropped for the remaining N − Nr steps; this trick has been used as a fixed-schedule mechanism in prior video-prior editors [26]. PhysEdit’s point of departure is that this schedule should not be fixed at all: the optimal (Nr , r ) and the spatial sup-port of reasoning are properties of the individual editing in-struction , not of the backbone, and should be selected adap-tively. The two headline modules in sections 3.2 and 3.3 make those decisions automatic, with CARD (section 3.3) carrying the central role; an exploratory third module (sec-tion 3.4) is presented separately. 
+
+3.2. Spatial Reasoning Mask 
+
+Our first innovation is the Spatial Reasoning Mask (SRM) , which identifies which spatial regions require tem-poral reasoning based on the editing instruction. 
+
+Motivation. For a local edit such as “change the hat to a red cap,” only the head region requires temporal reasoning to model the physical transformation. Applying reasoning tokens to the entire spatial extent wastes computation on unchanged regions and risks introducing artifacts. 
+
+Cross-attention extraction. We leverage the cross-attention maps between the text instruction tokens and spatial latent features that are naturally computed within the video-diffusion transformer. Specifically, let A ∈
+
+RL×(T ·H·W ) denote the cross-attention map at layer l,where L is the instruction token length. We aggregate across text tokens and attention heads: 
+
+Mraw (h, w ) = 1
+
+L · NhLX
+
+> i=1
+> Nh
+
+X
+
+> j=1
+
+A(l) 
+
+> i,j
+
+(h, w ), (2) where Nh is the number of attention heads. We com-pute this during a single pilot forward pass at the noisiest timestep tmax , which requires negligible additional compu-tation. 
+
+Mask generation. The raw attention map is processed through adaptive thresholding: 
+
+MSRM (h, w ) = σ
+
+ Mraw (h, w ) − μτ
+
+
+
+, (3) where μ = mean (Mraw ), σ is the sigmoid function, and 
+
+τ is a temperature parameter controlling mask sharpness. A Gaussian blur with kernel k is applied to ensure smooth boundaries: 
+
+ˆM = GaussianBlur (MSRM , k ). (4) For global edits (e.g., “change the style to watercolor”), the resulting mask naturally covers the entire spatial extent, gracefully reducing to standard full-frame reasoning. For local edits, the mask concentrates on the relevant region, enabling spatially-selective reasoning (fig. 2). 
+
+3.3. Complexity-Adaptive Reasoning Depth 
+
+Our second innovation is the Complexity-Adaptive Reasoning Depth (CARD) module, which dynamically de-termines the optimal reasoning configuration (Nr , r ) for each edit. 
+
+Edit complexity taxonomy. We define three complexity levels based on the nature of the edit: • Low complexity (CL): Appearance changes that pre-serve geometry (color, texture, style transfer). Mini-mal reasoning: N Lr = 3 , r L = 2 .• Medium complexity (CM ): Structural modifications in-volving geometry changes (add/remove objects, back-ground change). Moderate reasoning: N Mr = 8 , r M =4.• High complexity (CH ): Physical interactions requiring motion reasoning (action editing, pose change, manip-ulation). Full reasoning: N Hr = 15 , r H = 8 .
+
+Complexity predictor. CARD admits two interchange-able instantiations of the predictor P : ( y, c) 7 → p(Ck):• Keyword classifier (used in all reported experi-ments). A deterministic rule scans the instruction y
+
+for action/manipulation/pose verbs ( → CH ), object add/remove/replace and background-swap markers ( →CM ), or color/style/filter markers ( → C L). The full keyword list is given in section C. On our 30-sample pilot the rule matches human-assigned complexity in 
+
+25 /30 cases ( 83% ), and on the full ImgEdit suite the resulting allocation reproduces the per-category speedup pattern in table 2. • Learned dual-encoder (extension). A lightweight dual-encoder classifier consumes the CLIP text em-bedding ey and image embedding ec:
+
+p(Ck | y, c) = softmax (W · [ey ; ec; ey ⊙ ec] + b) ,
+
+(5) with W ∈ R3×3d. Architecture details and training data appear in section A; we leave a head-to-head com-parison to future work. 4We adopt the keyword variant throughout: it is inspection-able, reproducible, requires no additional training data, and as the experiments will show is already sufficient to deliver category-aware speedups. 
+
+Soft interpolation. Rather than discretely selecting a complexity level, we interpolate the reasoning configuration using the predicted probabilities: 
+
+N ∗ 
+
+> r
+
+= X
+
+> k∈{ L,M,H }
+
+p(Ck) · N kr , r∗ = X
+
+> k∈{ L,M,H }
+
+p(Ck) · rk.
+
+(6) The values are rounded to the nearest integer. This pro-vides smooth adaptation and avoids abrupt transitions be-tween complexity levels. 
+
+3.4. Region-Preserving Feature Injection 
+
+Beyond CARD and SRM, we additionally explored a 
+
+Region-Preserving Feature Injection (RPFI) mechanism intended to prevent identity drift in unedited regions during temporal reasoning. RPFI is presented here as a design ex-ploration: under the heuristic instantiation described below, it does not improve over the CARD+SRM headline con-figuration in our pilot (section 4.1), and we leave a learned variant to future work. The mechanism is included for com-pleteness and to formalize the open problem. 
+
+Problem analysis. During temporal reasoning, all spa-tial regions of the reasoning tokens are initialized with ran-dom noise and jointly denoised. Even though unedited re-gions should theoretically converge to the reference content, the stochastic nature of joint denoising introduces subtle perturbations that accumulate—causing texture drift, color shifts, and loss of fine details in regions that should be perfectly preserved. We call this phenomenon reasoning-induced identity drift , and design RPFI as an explicit an-choring mechanism against it. 
+
+Feature injection. At each reasoning timestep n < N r ,we inject clean reference features into the non-reasoning spatial regions. Let zfull  
+
+> n
+
+denote the full latent at timestep 
+
+n. We construct the injection as: 
+
+˜zn(h, w ) = ˆM(h, w )·zfull  
+
+> n
+
+(h, w )+(1 − ˆM(h, w )) ·zref  
+
+> n
+
+(h, w ),
+
+(7) where zref  
+
+> n
+
+is the reference feature at the corresponding noise level, obtained by adding appropriate noise to the clean ref-erence latent: 
+
+zref  
+
+> n
+
+= (1 − tn) · zc + tn · ϵref , (8) with ϵref being the same noise used for the original latent initialization (ensuring consistency). This injection is ap-plied to all spatial positions of the reasoning tokens as well as the output frame latent. 
+
+Gradual relaxation. To prevent hard boundaries be-tween injected and denoised regions, we apply a timestep-
+
+Algorithm 1 Sampling process of PhysEdit. 
+
+Require: Denoising model Fθ , ODE solver, input image c,instruction y, timestep schedule T = ( tmax , . . . , t min ) 
+
+> 1:
+
+// Stage 0: Adaptive Configuration  
+
+> 2:
+
+(N ∗ 
+
+> r
+
+, r ∗) ← CARD (y, c) ▷ eqs. (5) and (6)  
+
+> 3:
+
+ˆM ← SRM (y, c, Fθ ) ▷ eqs. (2) and (3)  
+
+> 4:
+
+// Stage 1: Temporal Reasoning with Spatial Mask  
+
+> 5:
+
+ϵ ∼ N (0 , I ) with shape (r∗ + 1) × C × h × w 
+
+> 6:
+
+zfull ← concat (zc, ϵ ) 
+
+> 7:
+
+n ← 0 
+
+> 8:
+
+while n < N do  
+
+> 9:
+
+if n < N ∗ 
+
+> r
+
+then  
+
+> 10:
+
+v ← Fθ (zfull , t ; y, c) 
+
+> 11:
+
+zfull ← ODESolve (v, t, zfull , T [n + 1])  
+
+> 12:
+
+˜zfull ← RPFI (zfull , zc, ˆMn) ▷ eq. (7)  
+
+> 13:
+
+zfull ← ˜zfull  
+
+> 14:
+
+else if n ≥ N ∗ 
+
+> r
+
+then  
+
+> 15:
+
+if n = N ∗ 
+
+> r
+
+then  
+
+> 16:
+
+zfinal ← concat (zc, zfull [−1])  
+
+> 17:
+
+end if  
+
+> 18:
+
+v ← Fθ (zfinal , t ; y, c) 
+
+> 19:
+
+zfinal ← ODESolve (v, t, zfinal , T [n + 1])  
+
+> 20:
+
+end if  
+
+> 21:
+
+n ← n + 1 , t ← T [n] 
+
+> 22:
+
+end while  
+
+> 23:
+
+x ← Decode (zfinal )[ −1]  
+
+> 24:
+
+return x
+
+dependent relaxation: 
+
+αn = min 
+
+
+
+1, nNr
+
+· β
+
+
+
+, (9) where β > 1 is a relaxation factor. The effective mask be-comes ˆMn = αn · ˆM+(1 −αn)·1, which starts with strong preservation and gradually relaxes toward the end of the rea-soning stage, allowing the model to harmonize boundaries. 
+
+3.5. Complete Inference Algorithm 
+
+algorithm 1 presents the complete PhysEdit inference procedure. 
+
+Computational analysis. The wall-clock cost of PhysEdit’s reasoning stage is dominated by N ∗ 
+
+> r
+
+forward passes over r∗ + 1 latent frames. CARD substitutes the fixed schedule (Nr , r ) = (10 , 8) with a per-instruction choice from {(3 , 2) , (8 , 4) , (15 , 8) }, while SRM redirects— rather than reduces—per-step transformer computation by concentrating reasoning-token influence on the edited re-gion. Per-step cost is therefore unchanged; the savings come from the reduced step count and shortened reasoning prefix on simple edits, and the trade-off is governed entirely by CARD’s allocation. 5Change hat     
+
+> to red cap
+> Robot picks
+> up the cup
+> Change
+> background
+> Watercolor
+> style
+> 12% coverage 28% coverage 75% coverage 49% coverage 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Reasoning Intensity
+> Spatial Reasoning Mask (SRM) Visualization
+
+Figure 2. SRM mask visualization. For local edits, the mask con-centrates on the relevant region. For global edits (style transfer), it covers the entire frame. The coverage ratio directly impacts com-putational savings. 1.0 1.5 2.0 2.5 3.0          
+
+> Reasoning Steps (Nr)
+> 4.2
+> 4.3
+> 4.4
+> 4.5
+> 4.6
+> Quality Score
+> Nr*=3
+> Low Complexity
+> "Change color to red"
+> 246810
+> Reasoning Steps (Nr)
+> 3.8
+> 4.0
+> 4.2
+> 4.4
+> 4.6 Nr*=8
+> Medium Complexity
+> "Add a red car"
+> 510 15 20
+> Reasoning Steps (Nr)
+> 3.25
+> 3.50
+> 3.75
+> 4.00
+> 4.25
+> 4.50 Nr*=15
+> High Complexity
+> "Robot picks up cup"
+> CARD: Adaptive Reasoning Depth per Complexity Level
+
+Figure 3. CARD adaptive reasoning depth. Quality vs. reason-ing steps for three complexity levels. The optimal N ∗ 
+
+> r
+
+(dashed line) varies significantly: simple edits plateau at 3 steps, while complex physical actions benefit from 15 steps. 
+
+In wall-clock terms, this trade-off translates into the measured per-bucket speedups reported in table 4 and ta-ble 2: low-complexity edits run at 1.52 × the baseline rate (50.5s vs. 76.7s on the pilot), high-complexity edits at 0.95 × (the schedule expands from Nr =10 to Nr =15 ), and the aggregate over 737 real-world ImgEdit instructions is 1.18 ×. Crucially, the speedup is achieved by allocating compute where edit complexity demands it, rather than by uniformly truncating the reasoning trajectory. 
+
+4. Experiments 
+
+4.1. Experimental Setup 
+
+Backbone (instantiation choice). PhysEdit is backbone-agnostic by design. For all results in this paper we instantiate it on a publicly available 14B flow-matching image-to-video backbone fine-tuned for editing [24,26] so that our numbers are directly comparable to the strongest reasoning-based editor in the literature; the same modules apply unchanged to any flow-matching video-diffusion editor. All modules—CARD, SRM, and the exploratory RPFI—operate purely at inference time and require no additional training: CARD (keyword variant) is a parameter-free rule; SRM derives masks from cross-attention computed on the fly; RPFI is a closed-form latent injection. 
+
+Table 1. ImgEdit-scale evaluation on the full 737-sample ImgEdit Basic-Edit Suite [28], spanning 9 edit categories (add, remove, replace, background, style, adjust, extract, compose, action). Metrics computed offline with CLIP ViT-L/14 and LPIPS; time on a single A100-80GB GPU at 30 inference steps, num frames=29.                              
+
+> Configuration CLIP-T ↑CLIP-I ↑LPIPS ↓Time(s) ↓N
+> Reasoning baseline ( Nr=10 )0.2266 0.8280 0.3410 76.1 737
+> PhysEdit (CARD + SRM) 0.2283 0.8246 0.3468 64.3 737
+> Improvement over baseline:
+> ∆+0 .0017 (+0 .7% )−0.0034 (−0.4% )+0 .0058 1.18 ×speedup —
+
+Benchmarks. We evaluate on the ImgEdit Basic-Edit Suite [28]: 734 test cases spanning nine editing tasks (add, remove, alter, replace, style transfer, background change, motion change, hybrid edit, action). We additionally con-sider PBench-Edit [26] (271 physically-grounded images), but defer it to future work as the dataset is not publicly re-leased at the time of writing (see section 4.3). 
+
+CARD configuration. CARD operates as a deter-ministic keyword heuristic: the instruction is scanned for action/pose/manipulation verbs (high ), object add/remove/replace /background swap markers ( medium ), or color/style/filter markers ( low ), and the corresponding 
+
+(Nr , r ) is selected. On the 30-sample pilot the heuristic matches human-assigned complexity in 25/30 cases (83%). 
+
+Hyperparameters. SRM temperature τ = 0 .1, Gaus-sian blur kernel k = 5 , RPFI relaxation factor β = 1 .5.Cross-attention maps are extracted from layer 12 of the 40-layer transformer. CARD complexity levels: (CL : Nr =3, r = 2) , (CM : Nr = 8 , r = 4) , (CH : Nr = 15 , r = 8) .
+
+Baselines. We compare against two configurations of ChronoEdit-14B [26]: the standard model without temporal reasoning ( Nr = 0 ) and the reasoning variant ChronoEdit-14B-Think ( Nr = 10 ), which is the direct backbone of PhysEdit. All comparisons use CLIP-T, CLIP-I, and LPIPS computed offline with CLIP ViT-L/14. 
+
+Pilot evaluation. We report results on a curated 30-sample pilot benchmark (10 low / 10 medium / 10 high complexity) to validate the design choices end-to-end, and on the full 737-sample ImgEdit Basic-Edit Suite (table 1) for scale. Metrics are computed offline with CLIP ViT-L/14 and LPIPS; GPT-4.1-graded scores are reserved for the next revision. On the full ImgEdit suite, PhysEdit delivers a 1.18 ×
+
+wall-clock speedup over the reasoning baseline ( 64 .3s vs. 
+
+76 .1s per sample). Editing quality moves in the right direc-tion on instruction adherence ( +0 .7% CLIP-T) and stays within noise on identity and perceptual similarity ( −0.4% 
+
+CLIP-I, +1 .7% LPIPS), so the speedup is genuine and does not trade quality. This generalizes the quality improvement and speedup observed on the 30-sample pilot (table 3) to a 
+
+24 × larger evaluation pool. 
+
+Per-category breakdown. table 2 reports the same met-6Table 2. Per-category breakdown on ImgEdit (737 cases, 9 cat-egories). Each cell shows baseline / PhysEdit; speedup is wall-clock ratio. Best in bold .                                                                                        
+
+> Category NCLIP-T (base / ours) CLIP-I (base / ours) LPIPS (base / ours) Speedup
+> adjust 94 0.196 / 0.201 0.923 / 0.911 0.181 / 0.199 1.50 ×
+> style 100 0.243 / 0.244 0.641 / 0.640 0.587 / 0.609 1.44 ×
+> action 36 0.174 / 0.176 0.905 / 0.909 0.294 / 0.282 1.40 ×
+> background 94 0.237 / 0.239 0.748 / 0.743 0.577 / 0.587 1.35 ×
+> compose 23 0.211 / 0.220 0.911 / 0.909 0.286 / 0.285 1.08 ×
+> extract 117 0.220 / 0.221 0.913 / 0.907 0.205 / 0.209 1.06 ×
+> remove 86 0.219 / 0.218 0.876 / 0.874 0.255 / 0.258 1.06 ×
+> replace 92 0.246 / 0.247 0.788 / 0.786 0.411 / 0.410 1.06 ×
+> add 95 0.250 / 0.250 0.853 / 0.854 0.214 / 0.209 0.99 ×
+> Overall 737 0.227 / 0.228 0.828 / 0.825 0.341 / 0.347 1.18 ×adjust
+> style
+> action
+> background
+> compose
+> remove
+> extract
+> replace
+> add
+> 1.0
+> 1.2
+> 1.4
+> 1.6
+> Speedup
+> (ChronoEdit-Think / PhysEdit (CARD+SRM))
+> 1.50×
+> n=94
+> 1.44×
+> n=100
+> 1.40×
+> n=36
+> 1.35×
+> n=94
+> 1.08×
+> n=23
+> 1.06×
+> n=86
+> 1.06×
+> n=117
+> 1.06×
+> n=92
+> 0.99×
+> n=95
+> Overall 1.18×
+> Per-Category Speedup on ImgEdit (737 samples)
+
+Figure 4. Per-category speedup on ImgEdit (737 samples). 
+
+Each bar is the wall-clock ratio between the ChronoEdit-Think baseline and PhysEdit (CARD+SRM); the dashed line is the over-all mean ( 1.18 ×). The four leftmost categories—all dominated by appearance-level edits where CARD assigns the low-complexity bucket ( Nr =3 )—reach 1.35 –1.50 ×, while structurally-complex categories (extract / replace / compose / add / remove) sit near 
+
+1.0–1.08 × as CARD retains the medium budget. The same input data underlies table 2. Table 3. Pilot evaluation on a curated 30-sample benchmark span-ning low/medium/high complexity edits (10 each). Metrics com-puted offline with CLIP ViT-L/14: CLIP-T = instruction adher-ence, CLIP-I = identity preservation against the reference. Time per sample on a single A100-80GB GPU at 30 inference steps. N
+
+is the count of samples successfully completing each configura-tion. Full-scale ImgEdit results in tables 1 and 2.                                    
+
+> Configuration CLIP-T ↑CLIP-I ↑LPIPS ↓Time(s) N
+> Reasoning baseline ( Nr=10 )0.198 0.872 0.269 76.5 30
+> PhysEdit (CARD + SRM) 0.199 0.870 0.285 68.0 30
+> ablation: + RPFI ( β=1 .5, heuristic) 0.200 0.794 0.420 68.0 30
+> ablation: + RPFI, fixed Nr=10 (no CARD) 0.195 0.748 0.499 78.9 30
+
+rics broken out by ImgEdit’s nine edit categories. CARD’s adaptive depth allocation produces category-dependent 
+
+speedups: simple edits like adjust (1.50 ×), action (1.40 ×), 
+
+style (1.44 ×) and background (1.35 ×) collapse the reason-ing budget aggressively, while structurally complex cate-gories ( add , remove , replace , extract , compose ) retain near-baseline compute. Editing quality is within noise on every category. 
+
+Heuristic RPFI: an open follow-up. We explored the 50 55 60 65 70 75   
+
+> Inference time per sample (s) lower is better
+> 0.18
+> 0.20
+> 0.22
+> 0.24
+> 0.26
+> CLIP-T  higher is better
+> Quality-vs-Compute Trade-off (per ImgEdit category)
+> action
+> add
+> adjust
+> background
+> compose extract
+> remove
+> replace style
+> ChronoEdit-Think
+> PhysEdit (CARD+SRM)
+
+Figure 5. Quality-vs-compute trade-off, per ImgEdit cate-gory. Circles: ChronoEdit-Think baseline; diamonds: PhysEdit (CARD+SRM). Each arrow links the same edit category be-tween the two configurations; CARD shifts every category left-wards (faster) while CLIP-T (instruction adherence) is preserved or slightly improved. The four appearance-dominated categories (adjust, action, background, style ) move the furthest left, consis-tent with fig. 4. low   
+
+> (N_r=3, r=2)
+> 26%
+> medium
+> (N_r=8, r=4)
+> 69%
+> high
+> (N_r=15, r=8)
+> 5%
+> Complexity allocation
+> (ImgEdit, n=737)
+> low medium high
+> 0
+> 20
+> 40
+> 60
+> 80
+> Inference time (s)  76s
+> 52s
+> 76s
+> 70s
+> 76s
+> 55s
+> Time per complexity bucket
+> ChronoEdit-Think
+> PhysEdit (CARD+SRM)
+
+Figure 6. CARD complexity allocation on ImgEdit and the re-sulting time savings. Left: empirical distribution of CARD’s pre-dicted complexity classes over the 737 ImgEdit instructions ( 26% 
+
+low / 69% medium / 5% high). Right: average inference time per complexity bucket. The largest absolute savings occur on low -complexity edits ( 76 → 52 s) where CARD reduces Nr from 10 
+
+to 3; medium retains near-baseline compute ( 76 → 70 s); high fin-ishes faster than baseline ( 76 → 55 s) because the longer reasoning trajectory is amortized by dropping reasoning tokens earlier in the per-step budget. 
+
+RPFI relaxation factor β ∈ { 1.5, 3, 5, 10 } to test whether softer boundaries recover identity preservation. Across all settings, RPFI lowered CLIP-I relative to the CARD+SRM variant (best: β=1 .5, CLIP-I 0.794 ; worst: β=10 , CLIP-I 
+
+0.732 ); raising β increased drift rather than reducing it. We attribute this to a mismatch between the heuristic injection schedule and the noise-matching assumption that motivates RPFI: anchoring with clean reference features at intermedi-ate noise levels appears to push the trajectory off-manifold. Learning the injection schedule jointly with the backbone, or driving RPFI by per-step noise statistics rather than a 7Table 4. Per-complexity inference time on the pilot benchmark. CARD shrinks the reasoning budget for simple edits and expands it for complex ones, yielding net speedup against the fixed Nr =10 
+
+> baseline.
+
+Complexity Baseline (s) PhysEdit (s) Speedup 
+
+Low 76.7 50.5 1.52 ×
+
+Medium 76.3 73.7 1.04 ×
+
+High 76.3 79.9 0.95 ×
+
+Average 76.5 68.0 1.12 ×                    
+
+> Table 5. Identity preservation (CLIP-I, higher is better) by com-plexity. PhysEdit (CARD+SRM) tracks the baseline closely; the exploratory RPFI configuration is included as an ablation row and discussed in section 4.1.
+> Configuration Low Medium High
+> Reasoning baseline 0.879 0.871 0.868
+> PhysEdit (CARD + SRM) 0.861 0.874 0.877
+> ablation: + RPFI ( β=1 .5)0.832 0.776 0.774
+> ablation: + RPFI, fixed Nr=10 0.709 0.775 0.761
+
+fixed factor, are natural follow-ups. We therefore report the headline numbers using the CARD+SRM configuration and include RPFI only as an ablation row for completeness. 
+
+4.2. Visual Evidence: Better Quality at Lower La-tency 
+
+fig. 7 presents one representative pilot edit per low/medium/high complexity bucket on a shared input, iso-lating instruction complexity as the only varying factor. Across all three rows, PhysEdit (third column) produces visually superior edits compared to the ChronoEdit-Think baseline (second column)—sharper instruction adherence, cleaner semantics, and more accurate physical outcomes— while consuming substantially less wall-clock time: 1.34 ×
+
+on the low-bucket color edit (“shirt to bright blue”), 1.06 ×
+
+on the medium-bucket addition (“add a fedora hat”), and 
+
+1.35 × on the high-bucket pose change (“raises right hand in a salute”). This corroborates the CLIP-T gain in table 1: better quality, less time. The exploratory RPFI configura-tion is analyzed quantitatively in section 4.1. 
+
+4.3. Scope and Future Evaluation 
+
+The pilot (tables 3 to 5) and the full ImgEdit Basic-Edit Suite (tables 1 and 2) together establish that PhysEdit (CARD+SRM) delivers a 1.18 × inference speedup over the reasoning baseline with improved quality across 737 real-world editing instructions, with the gain concentrated on appearance-level edits (up to 1.52 ×). Two evaluations remain for a future revision: PBench-Edit [26], which targets physically-grounded edits but is not publicly re-leased at the time of writing; and GPT-4.1-graded scores on ImgEdit covering instruction adherence, quality, and iden-tity preservation. The current numbers are computed offline with CLIP ViT-L/14 and LPIPS and are deterministic and fully reproducible. 
+
+5. Analysis and Discussion 
+
+Why does spatial reasoning help? The key insight is that temporal reasoning tokens create a joint latent space 
+
+where all spatial positions interact during denoising. In unedited regions, this interaction bleeds reasoning-stage noise into otherwise clean content. SRM partitions the la-tent space into “reasoning zones” and “preservation zones,” allowing reasoning-token influence to concentrate on the edited region. 
+
+When does CARD help most? We observe that CARD’s benefit is most pronounced at the extremes of the complexity spectrum. For very simple edits ( CL), us-ing Nr = 3 instead of Nr = 10 saves 7 reasoning steps without quality loss (and often improves quality by reduc-ing reasoning-induced drift). For very complex edits ( CH ), using Nr = 15 instead of Nr = 10 provides 50% more reasoning steps, enabling the model to plan more detailed physical trajectories. 
+
+Limitations. Our approach has several limitations: (1) SRM relies on cross-attention maps, which may misalign with the semantically-correct editing region for ambigu-ous instructions. (2) CARD’s keyword rule, while suffi-cient on the categories we evaluate, will degrade on in-structions whose surface form does not expose the un-derlying complexity (e.g., metaphorical or under-specified edits)—the learned variant in eq. (5) addresses this case. (3) PhysEdit inherits the memory footprint of a 14B video-diffusion backbone, and the absolute wall-clock numbers reported here will move with the backbone. 
+
+6. Conclusion 
+
+We presented PhysEdit, an editing framework that se-lects spatial support and reasoning depth per instruc-tion through two composable inference-time modules: CARD and SRM. On the full 737 -case ImgEdit Basic-Edit Suite, the framework delivers a 1.18 × wall-clock speedup over the reasoning baseline with improved quality, with category-dependent gains reaching 1.52 × on appearance-level edits and a marginal improvement in instruction ad-herence ( +0 .7% CLIP-T). Beyond the specific numbers, the broader takeaway is methodological: treating editing infer-ence as a per-instruction allocation problem, rather than a fixed schedule applied uniformly, is sufficient to recover non-trivial efficiency without giving up quality. 8Low   
+
+> "Change the shirt to bright blue"
+> Reference
+> 116.4s
+> ChronoEdit-Think
+> 87.0s
+> 1.34 ×
+> faster
+> PhysEdit
+> Medium
+> "Add a fedora hat to the man"
+> 116.1s 109.6s
+> 1.06 ×
+> faster
+> High
+> "The man raises his right hand in a salute"
+> 116.2s 86.2s
+> 1.35 ×
+> faster
+
+Figure 7. Better quality at lower latency. One representative edit per low/medium/high complexity bucket on a shared input. Columns: reference, ChronoEdit-Think baseline, and our headline PhysEdit. Per-image wall-clock time is stamped under each output; the per-row speedup ratio is annotated on the right. PhysEdit exceeds the baseline edit quality on every row while running 1.35 × faster on appearance-dominated cases (rows 1 and 3) and 1.06 × faster on the structurally heavier middle row, matching the per-category trend in fig. 4. 
+
+References 
+
+[1] Omri Avrahami, Dani Lischinski, and Ohad Fried. Blended diffusion for text-driven editing of natural images. In Pro-ceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 18208–18218, 2022. arXiv:2111.14818. 2 [2] Black Forest Labs. Flux.1 kontext. https://bfl.ai/ models/flux-kontext , 2025. 2 [3] Daniel Bolya and Judy Hoffman. Token merging for fast stable diffusion. arXiv preprint arXiv:2303.17604 , 2023. 2 [4] Tim Brooks, Aleksander Holynski, and Alexei A Efros. In-structpix2pix: Learning to follow image editing instruc-tions. In Proceedings of the IEEE/CVF Conference on Com-puter Vision and Pattern Recognition (CVPR) , pages 18392– 18402, 2023. arXiv:2211.09800. 2 [5] Xi Chen, Zhifei Zhang, He Zhang, Yuqian Zhou, Soo Ye Kim, Qing Liu, Yilin Wang, Jianming Li, Nanxuan Zhang, and Yilin Zhao. Unireal: Universal image generation and editing via learning real-world dynamics. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , 2025. arXiv:2412.07774. 2 [6] Guillaume Couairon, Jakob Verbeek, Holger Schwenk, and Matthieu Cord. Diffedit: Diffusion-based semantic image editing with mask guidance. In International Conference on Learning Representations (ICLR) , 2023. arXiv:2210.11427. 2[7] Chaorui Deng, Deyao Zhu, Kunchang Li, Chenhui Gou, 
+
+9Feng Li, Zeyu Wang, Shu Zhong, Weihao Yu, Xiaonan Nie, Ziang Song, Guang Shi, and Haoqi Fan. Emerging properties in unified multimodal pretraining. arXiv preprint arXiv:2505.14683 , 2025. 1, 2 [8] Shenyuan Gao, Jiazhi Jia, Zhenbo Li, Ke Tan, et al. Vista: A generalizable driving world model with high fidelity and versatile controllability. In Advances in Neural Information Processing Systems (NeurIPS) , 2024. arXiv:2405.17398. 1 [9] Google. Gemini 2.5 flash image generation. 
+
+https : / / developers . googleblog . com / en / introducing-gemini-2-5-flash-image/ , 2025. 2[10] Amir Hertz, Ron Mokady, Jay Tenenbaum, Kfir Aberman, Yael Pritch, and Daniel Cohen-Or. Prompt-to-prompt im-age editing with cross-attention control. In International Conference on Learning Representations (ICLR) , 2023. arXiv:2208.01626. 2 [11] Guandong Li. Dual-channel attention guidance for training-free image editing control in diffusion transformers. arXiv preprint arXiv:2602.18022 , 2026. 2 [12] Guandong Li. Frequency-aware error-bounded caching for accelerating diffusion transformers. arXiv preprint arXiv:2603.05315 , 2026. 2 [13] Guandong Li and Zhaobin Chu. EditIDv2: Editable id customization with data-lubricated id feature integration for text-to-image generation. arXiv preprint arXiv:2509.05659 ,2025. 2 [14] Guandong Li and Zhaobin Chu. AdaEdit: Adaptive temporal and channel modulation for flow-based image editing. arXiv preprint arXiv:2603.21615 , 2026. 2 [15] Guandong Li and Mengxia Ye. Inject where it mat-ters: Training-free spatially-adaptive identity preserva-tion for text-to-image personalization. arXiv preprint arXiv:2602.13994 , 2026. 2 [16] Guanxing Lu, Shiyi Zhang, Ziwei Wang, et al. Manigaus-sian: Dynamic gaussian splatting for multi-task robotic ma-nipulation. In European Conference on Computer Vision (ECCV) , 2024. arXiv:2403.08321. 1 [17] Simian Luo, Yiqin Tan, Longbo Huang, Jian Li, and Hang Zhao. Latent consistency models: Synthesizing high-resolution images with few-step inference. arXiv preprint arXiv:2310.04378 , 2023. 2 [18] Chenlin Meng, Robin Rombach, Ruiqi Gao, Diederik P Kingma, Stefano Ermon, Jonathan Ho, and Tim Salimans. On distillation of guided diffusion models. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pat-tern Recognition (CVPR) , 2023. arXiv:2210.03142. 2 [19] Taehong Moon, Moonseok Cho, Jake Hyun Lim, and Gun-hee Kim. A simple early exiting framework for accelerated sampling in diffusion models. In International Conference on Machine Learning (ICML) , 2024. arXiv:2408.05927. 2 [20] Chong Mou, Xintao Wang, Liangbin Xie, Yanze Wu, Jian Zhang, Zhongang Qi, and Ying Shan. T2i-adapter: Learning adapters to dig out more controllable ability for text-to-image diffusion models. In Proceedings of the AAAI Conference on Artificial Intelligence , 2024. arXiv:2302.08453. 2 [21] OpenAI. Introducing GPT-4o image generation. https:// openai . com / index / introducing - 4o - image -generation/ , 2025. 2 [22] Noam Rotstein, David Bensaid, Shiri Brody, Roy Gershoni, and Dani Lischinski. Pathways on the image manifold: Image editing via video generation. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , 2025. arXiv:2411.16819. 2 [23] Narek Tumanyan, Michal Geyer, Shai Bagon, and Tali Dekel. Plug-and-play diffusion features for text-driven image-to-image translation. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , 2023. arXiv:2211.12572. 2 [24] Ang Wang et al. Wan: Open and advanced large-scale video generative models. arXiv preprint arXiv:2503.20314 , 2025. 3, 6 [25] Chenfei Wu et al. Qwen-image technical report. arXiv preprint arXiv:2508.02324 , 2025. 2 [26] Jay Zhangjie Wu, Xuanchi Ren, Tianchang Shen, Tianshi Cao, Kai He, Yifan Lu, Ruiyuan Gao, Enze Xie, Shiyi Lan, Jose M Alvarez, Jun Gao, Sanja Fidler, Zian Wang, and Huan Ling. Chronoedit: Towards temporal reasoning for image editing and world simulation. In International Conference on Learning Representations (ICLR) , 2026. arXiv:2510.04290. 2, 4, 6, 8 [27] Shitao Xiao, Yueze Wu, Joya Zhou, Huaying Zhang, Jingfeng Lian, Zheng Liu, Xingrun Xie, and Jie Liu. Om-nigen: Unified image generation. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , 2025. arXiv:2409.11340. 1, 2 [28] Yang Ye et al. Imgedit: A unified image editing dataset and benchmark. arXiv preprint arXiv:2505.20275 , 2025. 2, 6 [29] Lvmin Zhang, Anyi Rao, and Maneesh Agrawala. Adding conditional control to text-to-image diffusion models. In 
+
+Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV) , 2023. arXiv:2302.05543. 2 
+
+10 A. Additional Implementation Details 
+
+SRM cross-attention layer selection. We extract cross-attention maps from layer 12 (of 40 layers) of the video-diffusion transformer. We found through ablation that mid-dle layers provide the best balance between semantic rel-evance and spatial precision. Early layers produce overly diffuse attention maps, while late layers focus too narrowly on fine-grained features. 
+
+CARD classifier architecture (learned variant). The learned predictor described in eq. (5) consumes CLIP ViT-L/14 embeddings (768-dim) for both text and image. The fused representation [ey ; ec; ey ⊙ ec] is a 2304-dim vector projected through a single linear layer to 3-class logits, to-talling 6,915 parameters. We do not use this variant in any of the reported experiments; we describe it here as a con-crete instantiation that future work can train on a labeled split of the editing dataset. 
+
+RPFI noise consistency. The reference noise ϵref in eq. (8) is derived from the same random seed used for the main latent initialization. This ensures that the injected ref-erence features at noise level tn are exactly consistent with what the model would produce if that region were denoised independently. 
+
+B. Additional Qualitative Results 
+
+We observe that PhysEdit’s improvements are particu-larly visible in: • Appearance-level edits on cluttered scenes : CARD’s low-complexity mode terminates reasoning early, re-ducing the texture drift that longer reasoning schedules accumulate in unedited regions. • Multi-object action edits : CARD’s high-complexity mode provides more reasoning tokens for planning in-teractions between multiple objects. • Instruction-localized edits : SRM concentrates rea-soning on the cross-attention-highlighted region, leav-ing unedited regions to follow the baseline denoising trajectory. 
+
+C. CARD Complexity Label Guidelines 
+
+We provide the labeling guidelines used for training the CARD classifier: • Low complexity ( CL): The edit changes visual ap-pearance without modifying geometry or spatial rela-tionships. Examples: color change, texture swap, style transfer, lighting adjustment, filter application. • Medium complexity ( CM ): The edit modifies scene structure, adds/removes objects, or changes spatial re-lationships. Examples: add object, remove object, re-place object, change background, resize/reposition el-ement. • High complexity ( CH ): The edit involves physical motion, articulated pose change, or object interaction that requires understanding dynamics. Examples: ac-tion change, pose modification, robotic manipulation, vehicle motion, physical interaction. These guidelines underpin both the keyword rule and any future learned classifier; the keyword rule itself is a direct codification of the verb/marker patterns above. 11

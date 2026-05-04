@@ -1,0 +1,503 @@
+Title: Posterior Augmented Flow Matching
+
+URL Source: https://arxiv.org/pdf/2605.00825v1
+
+Published Time: Mon, 04 May 2026 01:08:01 GMT
+
+Number of Pages: 15
+
+Markdown Content:
+# Posterior Augmented Flow Matching 
+
+George Stoica 1,2,† Sayak Paul 3,♢ Matthew Wallingford 4,♢
+
+Vivek Ramanujan 2 Abhay Nori 2 Winson Han 3
+
+Ali Farhadi 2 Ranjay Krishna 2 Judy Hoffman 15 1Georgia Tech 2University of Washington 3Hugging Face 4Ai2 5UC Irvine 
+
+> †
+
+Correspondence to: gstoica3@gatech.edu ♢Equal Contribution 
+
+## Abstract 
+
+Flow matching (FM) trains a time-dependent vector field that transports samples from a simple prior to a complex data distribution. However, for high-dimensional images, each training sample supervises only a single trajectory and intermedi-ate point, yielding an extremely sparse and high-variance training signal. This under-constrained supervision can cause flow collapse , where the learned dynam-ics memorize specific source–target pairings, mapping diverse inputs to overly similar outputs, failing to generalize. We introduce Posterior-Augmented Flow Matching (PAFM), a theoretically grounded generalization of FM that replaces single-target supervision with an expectation over an approximate posterior of valid target completions for a given intermediate state and condition. PAFM fac-torizes this intractable posterior into (i) the likelihood of the intermediate under a hypothesized endpoint and (ii) the prior probability of that endpoint under the condition, and uses an importance sampling scheme to construct a mixture over multiple candidate targets. We prove that PAFM yields an unbiased estimator of the original FM objective while substantially reducing gradient variance during training by aggregating information from many plausible continuation trajectories per intermediate. Finally, we show that PAFM improves over FM by up to 3.4 FID50K across different model scales (SiT-B/2 and SiT-XL/2), different archi-tectures (SiT and MMDiT), and in both class and text conditioned benchmarks (ImageNet and CC12M), with a negligible increase in the compute overhead. Code: 
+
+https://github.com/gstoica27/PAFM.git .Sparse Flows 
+
+> Supervise over
+> all plausible
+> trajectories
+
+Figure 1: Left : Standard FM provides a sparse, one-to-one supervision signal, pairing each interme-diate point with a single target and yielding a single plausible flow. Right : Our PAFM aggregates supervision over the full posterior of compatible targets, producing a denser, more coherent set of plausible flows from each intermediate. 
+
+## 1 Introduction 
+
+Flow matching (FM) [ 17 , 20 , 31 , 35 ] trains a vector field that transports probability mass from a simple source distribution (e.g., Gaussian noise) to a complex target distribution (e.g., natural images), 
+
+> Preprint.
+> arXiv:2605.00825v1 [cs.CV] 1 May 2026
+
+often conditioned on auxiliary inputs that specify how to flow to generate samples matching the given condition (e.g., “a photo of a dog”) [ 6, 19 ]. Concretely, training a FM model proceeds as follows [ 17 ]: sample a data example and its condition from the target distribution, sample a point from the source distribution, and define a continuous interpolation (trajectory) between them. A random intermediate point along this trajectory is then sampled, and the model is asked to predict the velocity that moves this intermediate toward the target, conditioned on both the intermediate’s location and the condition. Over many such samples, the model learns to approximate a global flow field that, in expectation, carries any source sample to a valid target consistent with the condition. Under idealized assumptions—unlimited data, infinite model capacity, and perfect optimiza-tion—minimizing the FM loss recovers the true underlying vector field, and thus the data distribution, exactly [ 17 , 9]. In practice, however, models are trained on complex, high-dimensional data for a finite number of steps and with bounded capacity. They observe only a vanishingly small subset of all possible trajectories, resulting in sparse supervision of the flow field [15]. This sparsity is inherent in the FM loss: each training sample provides feedback on only a single 
+
+trajectory (the one connecting the chosen source and target) at a given intermediate point [ 17 ]. In high-dimensional spaces, a single intermediate can lie on many plausible trajectories leading to different valid targets under the same condition—for instance, there are countless distinct images consistent with the prompt “a photo of a dog” [ 1]. Yet the model only ever sees one such outcome. Because the probability of revisiting the exact same intermediate state is effectively zero, the gradient at that state is estimated from a single noisy supervision signal. This under-constrained, high-variance training signal can lead to flow collapse [ 25 ], where the learned vector field fails to generalize and instead maps diverse inputs to overly similar or muddled outputs, indicating memorization of specific training pairings rather than learning the true continuous mapping. We propose Posterior-Augmented Flow Matching (PAFM) , a theoretically grounded generalization of the standard FM objective. The key insight is that for any intermediate state and condition, there is not a single “correct” target data point, but rather an entire posterior distribution over valid targets in the data distribution. In other words, there are many plausible ways to complete the flow from the intermediate to a final sample that meets the condition. All such trajectories represent valid training signals for the model . However, these possible flows are not equally likely: some target completions have higher posterior probability than others. Therefore, PAFM trains the model to predict the expected velocity over all these possible continuation trajectories, weighted by their posterior likelihood. In effect, the model learns to follow the average direction toward the full set of outcomes consistent with the condition, instead of being pushed toward only one arbitrarily sampled endpoint. While we cannot directly sample uniformly from the intractable true posterior over continuations, we show that it can be factorized into two simpler distributions that we can approximate: (1) the conditional probability of a given intermediate state if a particular target were the endpoint, and (2) the probability of the conditioning variable given that target. We show that under certain formulations, a sampling algorithm which draws a set of candidate targets for each intermediate and weighs them according to these probabilities forms an approximate posterior mixture. Moreover, by aggregating gradients from multiple possible flows (each weighted by its posterior likelihood) for each intermediate point, PAFM lower-bounds the variance of the flow matching training gradient In addition to our theoretical contributions, we demonstrate the applicability of PAFM in real-world settings and model-architectures. We conduct experiments on the popular class-conditioned ImageNet-1K dataset [ 4 ] across different model scales (SiT-B/2 and SiT-XL/2 [ 19 ]), and on the large-scale text-to-image CC12M [ 28 ] dataset with the MMDiT [ 23 ] model architecture. We investigate several practical strategies for constructing the candidate target set, including FAISS [ 5] k-nearest-neighbor retrieval in the latent space, augmentation of the source image via random crops at varying scales, and resampling from the VAE [ 26 ] moment distribution. PAFM improves flow matching across all settings and selection strategies while incurring only marginal computational overhead, highlighting its seamless integration into modern generation workflows. 
+
+## 2 Related Work 
+
+Continuous-time generative modeling and flow matching. Continuous-time generative models view sampling as integrating an ODE or SDE between a simple source distribution and a complex 2target distribution, covering stochastic interpolants, diffusion models, and flow-based methods [ 3,13 , 30 ]. Flow matching (FM) and conditional flow matching (CFM) train a vector field by matching it to the ground-truth probability current along prescribed interpolants between source and data samples [ 17 , 32 ]. Subsequent work has scaled FM and CFM to large image and video models by carefully designing architectures and interpolants, including interpolant transformers such as SiT [ 19 ]and large-scale rectified-flow-style models [ 18 , 7]. These methods all share the same supervision pattern: each intermediate point along an interpolant is paired with a single target sample, yielding a one-to-one training signal. 
+
+Rectified flows and trajectory shaping. Rectified flows encourage straight trajectories between source and target, enabling near one-step generation and linking flow-based methods to optimal transport formulations [ 18 , 3]. At scale, rectified-flow transformers match or surpass diffusion models on high-resolution text-to-image benchmarks via improved time sampling and architecture design [ 8], while complementary work studies how controlling trajectory curvature can reduce solver error and accelerate sampling [ 16 ]. Our formulation is compatible with these trajectory-shaping ideas: PAFM leaves the interpolant and geometric regularization unchanged and instead modifies how supervision is aggregated over targets. 
+
+Theoretical analyses and improved flow matching objectives. The FM objective enjoys strong asymptotic guarantees: under mild assumptions on vector-field parameterization and sample com-plexity, FM attains near minimax-optimal convergence rates in Wasserstein distance, comparable to diffusion models [ 9]. Follow-up work tightens the link between learned and ideal probability paths, motivating divergence-matching augmentations to CFM [ 14 ] and relating rectified flows to optimal transport via straightening and gradient constraints [ 10 ]. These analyses refine global objectives and path properties but still assume the standard one-target-per-intermediate coupling. 
+
+Failure modes and sparse supervision in flow-based models. In realistic regimes, models are finite-capacity, trained for finite steps, and only observe a sparse subset of source–target trajecto-ries [ 29 ]. Recent empirical and theoretical work has exposed failure modes of flow-based models under these conditions, including degeneracies induced by straight-path objectives and deterministic couplings [ 25 ]. Gradient-variance analyses further show that rectified-flow-style objectives can mem-orize arbitrary pairings in low-stochasticity regimes, even when interpolant lines intersect, leading to ill-defined vector fields at inference [ 25 ]. Our work is complementary: starting from the same observation that supervision is sparse and under-constrained, we replace one-to-one supervision with a posterior expectation over all compatible targets for each intermediate latent. 
+
+## 3 Background: Flow Matching 
+
+We provide a formal overview of conditional flow matching and the flow matching (FM) objective as it pertains to our work. 
+
+Assumptions. Let N (0 , I d) = psource be a source distribution characterized by the standard Gaussian. Similarly, let pdata be the target data distribution with unknown support. Samples drawn from psource are denoted by ϵi, while those from pdata are denoted by (zi, y i) pairs, where zi is a data point and yi is its associated condition. For our purposes, zi represents an image and yi a text conditioning. We may equivalently sample zi ∼ pdata (·| yi) or yi ∼ pdata (·| zi).Flow matching describes the flow between psource and pdata over normalized and reversed time. Let Unif [0 , 1) describe the distribution over this time, and denote its samples by t. Training FM models involves sampling from the source and target distribution (e.g., ϵi and (zi, y i)), defining a trajectory between their respective samples and then further sampling an intermediate point which lies along their flow. Let α(t), β (t) be two time-dependent monotonic functions that define the path between ϵi and zi,such that α(0) = β(1) = 0 and α(1) = β(0) = 1 . For notational simplicity, we refer to point-evaluations at t by αt and βt respectively. Using αt and βt, we sample the intermediate point as 
+
+zit = αtϵi + βtzi. These samples are assumed to lie on a conditional probability path, given by 
+
+zit ∼ pt(·| zi) = N (βtzi, α 2 
+
+> t
+
+Id). Observe that p0(·| zi) = psource and p1(·| zi) = δzi where δzi is the “Dirac delta” distribution. We characterize the flow between ϵi and zi by the time-derivative of αt
+
+and βt respectively: v(zit |zi) = ˙ αtϵi + ˙βtzi. We describe the vector-space over which ϵi, z i, z it are supported, as the “latent-space.” 3The flow matching objective. While α, β can take arbitrary forms, α(t) = t and β(t) = 1 − t
+
+(with ˙α(t) = 1 , ˙β(t) = −1) is the most popular and widely used formulation [ 19 , 35 ]. Thus, we define zit = tϵ i + (1 − t)zi and v(zit |zi) = ϵi − zi respectively. FM involves training a model to produce flows from arbitrary zit to real targets (e.g., zi) based on a condition (e.g., yi). Let fθ (zit |t, y i)
+
+describe this model and let θ be its parameterization. The flow matching objective is finally given by, 
+
+L(F M )(θ) = Et∼U nif [0 ,1) ,(zi,y i)∼pdata (·),z it ∼pt(·| zi)|| fθ (zit |t, y i) − v(zit |zi)|| 2 (1) Thus, FM models learn the expected flows that pass through each intermediate sample towards the entire target distribution, conditioned on each yi. In practice, the formal objective in Eq. 1 is transformed to, 
+
+min L(F M )(θ) = min 1
+
+N
+
+X
+
+> (zi,y i)∼D
+
+|| fθ (zit |t, y i) − v(zit |zi)|| 22 (2) when training flow models, where D is the target dataset. 
+
+Sparse supervision. While Eq. 2 is an unbiased estimator for Eq. 1 and its global minima is the global optimum under flow matching, we immediately observe its inherent risk of sparse supervision. For any given intermediate latent point zit and given condition yi, a model is supervised with only a single target trajectory v(zit |zi). However, in the high-dimensional and complex settings of contemporary generation tasks, zit could validly lie on a multitude of trajectories flowing to different targets { zj }
+
+that all satisfy the same condition yi. By only providing one such target, Eq. 2 gives a high-variance and under-constrained signal over each latent. As a result, models often rely on sparse coverage of the true conditional vector fields within the latent space, leading to collapsed flows when transporting from source to target data [2]. 
+
+## 4 Posterior-Augmented Flow Matching (PAFM) 
+
+The focus of this section is two-fold. First, we show how the problem of sparse supervision can be addressed by reformulating the flow matching objective to enable simultaneous multiple trajectory supervision for training flow models. We coin this new objective Posterior-Augmented Flow Matching (PAFM), and prove that it improves gradient stability over flow matching under the same theoretical assumptions. Second, we show how PAFM can be seamlessly adapted for training rectified flow models. 
+
+4.1 Theoretical Results Reformulating the flow matching objective. We begin by observing that it is theoretically feasible for multiple samples drawn from psource and ptarget to contain paths which flow through the same 
+
+zit . Moreover, the likelihood of sampling these trajectories is given by a posterior-distribution over the same distributions supporting the flow matching objective. Coupling these observations together, we introduce Posterior-Augmented Flow Matching (PAFM) as, 
+
+L(P AF M )(θ) = Et∼U nif [0 ,1) ,y i∼pdata (y),zit ∼pt(·),z j ∼pt(·| zit ,y i)
+
+|| fθ (zit |t, y i) − v(zit |zj )|| 2 (3) where pdata (y) defines the probability distribution over the conditions, pt(·) is a (unknown) probabil-ity distribution over the latent-space conditioned on t, and pt(·| zit , y i) is the posterior distribution of the target data given a fixed latent-point zit and condition yi.Importantly, Equation 3 is mathematically equivalent to the flow matching objective introduced by Equation 1. We demonstrate this in Theorem 1. 
+
+Theorem 1. The Posterior-Augmented Flow Matching objective L(P AF M ) is an unbiased estimator of the standard Flow Matching objective L(F M ). In expectation, the two objectives are identical. 
+
+L(P AF M )(θ) = L(F M )(θ) (4) 
+
+Proof. It suffices to show that the joint probability distributions over which the expectations are taken over are identical. FM ( Equation 1) takes its expectation over the joint probability distribution 4given by p(t) · pdata (z, y ) · pt(zt|z). The PAFM ( Equation 3) takes its expectation over the joint distribution given by p(t) · pt(zt) · pt(z, y |zt). Note that by the flow matching assumptions introduced in Section 3, z ⊥ y|zt. Starting from the distributions for FM, 
+
+p(z, y )pt(zt|z) = p(z, y )p(zt, z, t )
+
+p(z, t ) = p(y|z)p(zt, t |z)p(z)2
+
+p(z)p(t) (5) 
+
+= p(y|z)p(zt, t |z)p(z)
+
+p(t) = p(y, z t, t, z )
+
+p(t) (6) 
+
+= p(z|zt, y, t )p(zt, y, t )
+
+p(t) = pt(z|zt, y )pt(zt)p(y) (7) As the two distributions are identical, so is their expectation over the same loss function || fθ (zt|t, y )−
+
+v(zt|z)|| 2. □
+
+PAFM theoretically reduces gradient variance. Notably, and in contrast to flow matching, Equa-tion 3 enables us to optimize fθ by sampling multiple target points {zj } for every zit , yielding a 
+
+denser supervision signal during training. We now demonstrate that this fact alone provides gradient estimates for the underlying optimal fθ that lower-bound the variance of the gradient estimates from the FM objective. 
+
+Theorem 2. Let ϕ(zj |zit , y i) = || fθ (zit |yi, t ) − v(zit |zj )|| 2 be the per-sample flow match-ing loss. Define its gradient with respect to fθ as g(zj |zit , y i) = ∇f ϕ(zj |zit , y i) =2  fθ (zit |yi, t ) − v(zit |zj ). For a fixed zit , y i, let V ar pt(·| zit ,y i)
+
+g(zj |zit , y i) = Σ g (zit ). The PAFM objective, when optimized using K > 1 samples per zit via Self-Normalized Importance Sampling (SNIS), yields a gradient estimator with variance Σg/ESS (zit ), where ESS (zit ) ≥ 1 is the Kish Effective Sample Size [34]. Proof. First, notice that, 
+
+pt(zj |zit , y i) = pt(zj , z it , y i)
+
+pt(zit , y i) = pt(zit , y i|zj )p(zj )
+
+pt(zit , y i) = pt(zit |zj )pt(yi|zj )p(zj )
+
+pt(zit , y i) (8) 
+
+∝ pt(zit |zj )pt(yi|zj )p(zi) (9) Concretely, the posterior pt(zj |zit , y i) is directly proportional to the individual probabili-ties pt(zit |z)pt(yi|zj )p(zj ) up to a fixed normalizing factor in zit , y i. Let ˆpt(zj |zit , y i) =
+
+pt(zit |zj )pt(yi|zj )p(zj ) be the un-normalized approximation of pt(zj |zit , y i). Now, define a (un-normalized) distribution qt(zj |zit , y i), and sample K ≥ 1 elements from the distribution to obtain 
+
+{zj }Kj=1 ∼ qt(zj |zit , y i). Leveraging self-normalizing importance sampling (SNIS), we define weights αj ,
+
+αj = ˆpt(zj |zit , y i)
+
+qt(zj |zit , y i) = pt(zit |zj )pt(yi|zj )p(zj )
+
+qt(zj |zit , y i) (10) Defining qt(zj |zit , y i) = p(zj ), αj reduces to pt(zit |zj )pt(yi|zj ). Of these, pt(zit |zj ) is sim-ply the conditional probability path, and pt(yi|zj ) is the posterior-distribution of the condi-tion given the target data point. We then obtain the SNIS normalized weights by comput-ing wj = αj/PKk=1 αk . By definition, the SNIS estimator of E{zj ∼pt(·| zit ,y i)}
+
+g(zj |zit , y i) is 
+
+μ(SN IS ) 
+
+> g
+
+(zit |K) = PKj=1 wj g(zj |zit , y i).We further define the Kish effective sample size (ESS) as, ESS (zit ) = hPKj=1 wj
+
+> i2
+
+/PKj=1 w2 
+
+> j
+
+=
+
+> 1
+
+/PKj=1 w2 
+
+> j
+
+Thus, 1 ≤ ESS (zit ) ≤ K. Putting all the pieces together, we obtain, Var 
+
+
+
+μ(SN IS ) 
+
+> g
+
+(zit |K)
+
+
+
+=
+
+> K
+
+X
+
+> j=1
+
+w2 
+
+> j
+
+Var  g(zj |zit , y i) =
+
+> K
+
+X
+
+> j=1
+
+w2 
+
+> j
+
+Σg = Σg
+
+ESS (zit ) (11) 5Now, observe that when K = 1 , the SNIS estimator reduces to the gradient variance of the flow matching objective from Equation 1: 
+
+μ(SN IS ) 
+
+> g
+
+(zit |1) = 
+
+> 1
+
+X
+
+> j=1
+
+wj g(zj |zit , y i) = g(zj |zit , y i) (12) 
+
+= ∇f || fθ (zit |t, y i) − v(zit |zj )|| 2 (13) 
+
+→ Var 
+
+
+
+μ(SN IS ) 
+
+> g
+
+(zit |1) 
+
+
+
+= Σ g (14) Thus, by choosing K ≥ 1, PAFM reduces the variance of each gradient estimate over zit by a factor of ESS (zit ) ≥ 1 compared to flow matching. □
+
+This further highlights an important result: PAFM is a generalization of the flow matching objective, and reduces to it when K = 1 .
+
+4.2 Model Training 
+
+We now translate the formal definition of posterior-augmented flow matching (Equation 3) to a practical training objective for rectified flow models. Posterior-augmented flow matching (PAFM) extends the standard flow matching (FM) objective by introducing three components: (i) a target set 
+
+{zj }Kj=1 providing additional supervision trajectories, (ii) the conditional probability path pt(zit |zj )
+
+capturing how plausible reaching each target is from the current latent and (iii) the condition likelihood 
+
+p(yi|zj ) measuring the compatibility of targets with the input condition. 
+
+Selecting target points {zj }Kj=1 . The choice of candidate target points is where PAFM offers its greatest flexibility, and the optimal strategy may vary across generative settings, data modalities and training regimes. While the theoretical objective (Equation 3) is defined over the true posterior 
+
+pt(zj |zit , y i), it is intractable and any practical approximation must be defined over a finite support set. PAFM is agnostic to how these candidates are sourced: they may be sampled from the target distribution, augmentations of data from the distribution, perturbations of data in the latent space, etc... The importance weights wj then re-weight these candidates according to their posterior likelihoods, shaping the supervision signal toward the posterior distribution. We investigate three proposal methods in Section 5, yet emphasize that PAFM is technically compatible with nearly any strategy. 
+
+Note: we always control {zj }Kj=1 to include zi (i.e., the target data point from which zit is sampled under traditional FM). 
+
+The conditional probability path, pt(zit |zj ). The conditional probability path describes how plausible each target zj is for a given latent-point zit . PAFM uses the exact conditional probability path from the FM assumptions inSection 3. Recall that this is a Gaussian distribution parameterized by N (βtzj , α 2 
+
+> t
+
+Id) where αt = t and βt = 1 − t. The log-likelhood is thus given by, 
+
+log pt(zit |zj ) = − || zit − (1 − t)zj || 2
+
+2t2 + C (15) where C is the normalizing constant. In practice, we compute the un-normalized likelihood 
+
+exp ( −|| zit − (1 − t)zj || 2/2t2).
+
+Note: Substituting zit = tϵ i + (1 − t)zi into Equation 15 and simplifying yields the equivalent formu-lation: exp ( −|| tϵ i + (1 − t)( zi − zj )|| 2/2t2). Because {t, ϵ i, z i} are constant for all zj ∈ { zj }Kj=1 , the sharpness of pt(zit |zj ) largely depends on the distance between each zj and zi.
+
+The condition likelihood, pt(yi|zj ). The condition likelihood depicts how suitable each target zj is for the condition yi. In the case of class-conditioned flow matching, this is a deterministic function ∀t:
+
+pt(yi|zj ) = 
+
+1 if yi = yj
+
+0 otherwise . In the case of continuous-conditioned generation (e.g., text-to-image), this distribution is unknown apriori and must be approximated—forming the second design choice in PAFM. While many viable choices exist, one intuitive strategy for modeling the distribution is employing a vision-language model such as CLIP [24] to compute the alignment of yi and zj .
+
+Note: We use the naive class-conditioned variant for our text-to-image experiments owing to its simplicity, and leave more refined condition likelihood approximations to future work. 
+
+61.5 1.0 0.5 0.0 0.5 1.0 1.5                  
+
+> X Coordinate
+> 1.0
+> 0.5
+> 0.0
+> 0.5
+> 1.0
+> Y Coordinate
+> Target Distribution
+> 1.5 1.0 0.5 0.0 0.5 1.0 1.5
+> X Coordinate
+> 1.0
+> 0.5
+> 0.0
+> 0.5
+> 1.0
+> Y Coordinate
+> Flow Matching Generations
+> 1.5 1.0 0.5 0.0 0.5 1.0 1.5
+> X Coordinate
+> 1.0
+> 0.5
+> 0.0
+> 0.5
+> 1.0
+> Y Coordinate
+> Posterior Augmented Flow Matching Generations
+> 10000 20000 30000 40000 50000
+> Training Step
+> 10 2
+> Mean Squared Error to True Velocity Field
+> Convergence to True Velocity Field
+> FM
+> PAFM
+> PAFM Advantage
+
+Figure 2: Posterior augmented flow matching is more robust than flow matching. We train two rectified flow models to generate two crescent moon distributions (left). Second-left: a model trained with FM generates many points in between the two moons. Second-right: the same model trained with PAFM has far less of an issue. Right: PAFM estimates the true velocity field across t
+
+significantly better. 
+
+The PAFM training objective. With a defined candidate selection strategy for {zj }Kj=1 and chosen 
+
+pt(yi|zj ) distribution, we can train with PAFM using the following general objective, 
+
+min L(P AF M )(θ) = min 1
+
+N
+
+NX
+
+i=1 
+
+KX
+
+j=1 
+
+wj || fθ (zit |t, y i) − v(zit |zj )|| 22 (16) 
+
+△
+
+= min 1
+
+N
+
+NX
+
+i=1 
+
+|| fθ (zit |t, y i) −
+
+KX
+
+j=1 
+
+wj v(zit |zj )|| 22 (17) where wj = pt(zit |zj )pt(yi|zj ), and PKj=1 wj = 1 .
+
+The PAFM batch step. Algorithm 1 illustrates a batch step with PAFM, where navy text denotes additions to the standard FM objective. 
+
+Algorithm 1 Posterior Augmented Flow Matching Batch Step 
+
+1: Input: Model fθ , batch B = {(zi, y i, ϵ i)}ni=1 where (zi, y i) ∼ pdata (·), ϵi ∼ N (0 , Id), learning rate γ. Candidate pool {(zj , y j )}Kj=1 for each i s.t. (zi, y i) ∈ { (zj , y j )}Kj=1 .
+
+2: Output: Updated model parameters θ
+
+3: L(θ) = 0 
+
+4: for i in range( n) do 
+
+5: t ∼ U [0 , 1) , zit = tϵ i + (1 − t)zi
+
+6: for j in range( K) do 
+
+7: v(zit |zj ) = (zit − zj )/t, ˆwj = pt(zit |zj ) p(yi|zj )
+
+8: end for 
+
+9: L(θ) += ∥fθ (zit |t, y i) − PKj=1 ( ˆwj/PKk=1 ˆwk ) v(zit |zj )∥2
+
+10: end for 
+
+11: θ ← θ − γN ∇θ L(θ)
+
+Understanding PAFM with an example. To build intuition for PAFM’s effect on training rectified flow models, we train two four-layer MLP models to generate a simple two-dimensional crescent moon distribution inFigure 2 (left). Under standard FM, the model generates a substantial number of spurious points in the region between the two crescents (second-left), despite training for an extensive period of time (50K steps). This is a consequence of sparse supervision: the model observes few trajectories passing through these intermediate regions, thereby limiting its capability at estimating the true velocity field. However, training the same model with PAFM largely resolves this artifact (second-right), as each intermediate point receives supervision from multiple weighted targets rather than a single trajectory—enabling the model better estimate the true velocity field. The rightmost panel quantifies this gap directly: we plot the mean squared error between the learned velocity and the the analytically computed true velocity field across all denoising steps ( t) over the course of training. Notably, PAFM steadily lowers its velocity field error throughout training, whereas FM exhibits substantial variance in its field estimates across training steps. Moreover, PAFM ultimately converges 7to a substantially more accurate velocity field than FM. We provide additional implementation details in Appendix A. 
+
+## 5 Experiments 
+
+Posterior-augmented flow matching (PAFM) is general and can be applied anywhere flow matching (FM) is used. As described in Section 4.2, a primary design choice when training with PAFM is selecting the candidate target set {zj }Kj=1 for each zi. While many proposal mechanisms are viable, we find that a simple nearest-neighbor retrieval in latent-space consistently improves over FM across class-conditioned (ImageNet-1K [ 4]) and text-to-image (CC12M [ 28 ]) generation, across architectures (SiT [ 19 ] and MMDiT [ 23 ]), and across model scales (SiT-B/2 and SiT-XL/2). We further show that PAFM can empirically reduce the gradient variance during training compared with FM, analyze the computational overhead of training with PAFM and ablate alternative target selection strategies—demonstrating the inherent tailorability of PAFM. 
+
+Setup. We train all our models for 400K iterations with a batch size of 256 on images with 256x256 resolution, and with the REPA loss [ 35 ]. All experiments are conducted on single nodes with 8 H100 GPUs. We evaluate all our models without classifier-free guidance (CFG) [ 12 ] using the ODE sampler with 50 denoising steps, and report Inception Score (IS) [ 27 ], Fréchet Inception Distance (FID) [11], sFID [21], precision and recall over 50 K samples, as is standard. 
+
+5.1 Nearest Neighbor PAFM Results 
+
+Our primary implementation of PAFM forms the target set {zj }Kj=1 by retrieving the K nearest-neighbors of each training example zi in latent-space. Neighbors are extracted once for each zi using FAISS indices [ 5] computed over the train dataset during the data-preprocessing, and training simply loads the precomputed neighbors alongside each zi—introducing no additional online compute. Nearest neighbors allow a healthy effective sample size throughout training, as candidates are geometrically close to zi.Table 1: PAFM improves FM on ImageNet-1K. 
+
+Results on FID50K without CFG and NFE=50 after 400K training iterations. Models are trained with REPA.                                           
+
+> Model Obj. KFID ↓sFID ↓Prec. ↑Rec. ↑
+> SiT-B/2 FM –27.57 11.44 0.57 0.63 PAFM 64 25.45 6.91 0.58 0.64 PAFM 16 24.88 6.81 0.58 0.64 PAFM 825.25 6.90 0.58 0.65
+> PAFM 425.47 6.97 0.58 0.64 SiT-XL/2 FM –11.14 8.25 0.67 0.66
+> PAFM 16 9.85 5.24 0.68 0.65
+
+Class-conditioned generation on ImageNet-1K. 
+
+We restrict the neighbor search to images shar-ing the same class label, computing an indepen-dent FAISS index per class over the image latent encodings. Since all candidates share the same class-label, the condition likelihood pt(yi|zj ) = 1, ∀zj ∈ { zj }Kj=1 . Table 1 shows the results when training SiT-B/2 and SiT-XL/2 models with PAFM compared to FM. Notably, PAFM improves over FM-trained models in nearly all metrics across 
+
+both model scales and all K, highlighting its ef-ficacy. Interestingly, PAFM peaks at K = 16 for SiT-B/2 reflecting a bias-variance tradeoff: too few neighbors limit variance reduction while too many include distance candidates that add noise rather than signal. 
+
+Text-to-image generation on CC12M. Without discrete class labels, we approximate class-conditioning in two stages. First, we encode all images and captions using the SigLIP2 [ 33 ]So400M/14 encoder * and retrieve the M images whose encodings have highest cosine similar-ity to yi. Second, from this shortlist we select the K nearest neighbors to zi in latent space, as in the class-conditioned setting. This ensures candidates are both semantically compatible with the condition and geometrically close in latent space. We use M = 128 and K = 32 in our experiments. Since the candidate set has already been filtered for semantic compatibility with yi, we treat the condition likelihood pt(yi|zj ) as approximately uniform across the set and omit it from the weight computation. Thus, only the conditional path likelihood pt(zit |zj ) determines the relative importance weights— wj . We train MMDiT models on CC12M with PAFM and FM, and evaluate the resultant checkpoints after 400K training iterations on a held-out validation set of 50K examples. Overall, we observe that FM achieves an FID50K of 10.37, compared to 9.45 when using PAFM, illustrating how 
+
+> *https://huggingface.co/google/siglip2-so400m-patch14-384
+
+8PAFM can be utilized to improve flow matching even in dramatically more challenging text-to-image settings. 
+
+5.2 Alternative Target Selection Strategies 
+
+While selecting {zj }Kj=1 via nearest neighbor search is sufficient to consistently improve over flow matching, we emphasize that there may be many viable alternative strategies, depending on the desired application setting. In this section, we ablate two additional selection strategies, finding promising results with each. All models trained in this section are REPA-SiT-B/2 with 256 batch size on ImageNet-1K 256 ×256 resolution for 400K iterations. Table 2: PAFM with random augmentations improves FM. Results on FID50K without CFG and NFE=50 after 400K training iterations. The target set for PAFM is obtained by center crop-ping each training image to an “augmented reso-lution” (”Aug. Res.”) and then randomly resize cropping down to 256x256 resolution K = 5 
+
+times.                                     
+
+> Obj. Aug. Res. FID ↓sFID ↓Prec. ↑Rec. ↑
+> FM 256 ×256 27.57 11.44 0.57 0.63 PAFM
+> 281 ×281 25.03 6.84 0.58 0.65
+> 320 ×320 24.15 6.70 0.59 0.65
+> 384 ×384 25.43 7.13 0.58 0.65
+> 512 ×512 25.44 6.72 0.58 0.64
+
+Augmenting the source image. A natural alter-native to creating the target set for each training image zi by retrieving its nearest neighbors, is by augmenting the training image itself. Depending on the augmentation, resultant images may pro-vide different views (e.g., from random crops), styles (e.g., jitter or applying style transfer meth-ods), or compositions (e.g., horizontal flips, ro-tations) of the original image—increasing the di-versity of the underlying supervision signal. In this first foray, we focus on the effect of sam-pling different spatial views of zi. Specifically, we first center-crop each image to 256 R × 256 R
+
+resolution, where R ≥ 1 is referred to as the “aug-mentation scale” (aug. scale). We then take K − 1
+
+random resize crops down to 256 × 256 resolution, resulting in a target set of K − 1 different “views”, and finish by adding zi to the set. Notably, the augmentation scale controls the spatial diversity of the resulting targets: small factors yield images that are nearly identical to zi, while larger factors produce more varied views. While this strategy rests on the assumption that random crops are plausible samples from the target image distribution, we posit that it is reasonable given its widespread use for training foundation vision models [ 24 , 22 , 33 ]. Table 2 shows results on SiT-B/2 with K = 5 . PAFM improves over FM at every augmentation scale, with 1.25 × substantially lowering FID by 3.42. We compute these augmentations online in our experiments; however they could equally be precomputed and instead directly loaded during training to eliminate this overhead. Table 3: Sampling K times from the VAE im-proves FM. Results on FID50K without CFG and NFE=50 after 400K training iterations. The target set for PAFM is obtained by randomly sam-pling from the training image’s VAE moment K
+
+times (FM always samples once).                  
+
+> Model Obj. KFID ↓sFID ↓Prec. ↑Rec. ↑
+> SiT-B/2 FM -27.57 11.44 0.57 0.63 PAFM 10 25.15 6.95 0.58 0.65
+
+Sampling from the VAE moment distribution. 
+
+All our rectified flow matching models are trained in the latent space of a VAE [ 26 ], where targets are created by first encoding each training image into a multivariate Gaussian distribution (termed “moment”) and then sampling from it—amounting to small random perturbations around the mean encoding. Flow matching (and all our previously described PAFM approaches) sample once from the moment at each step. Thus, a very simple target selection strategy for PAFM is instead sam-pling from this moment K times. While this is the cheapest selection strategy proposed (sampling from the moment requires minimal overhead), the VAE posterior is tightly concentrated. This yields candidates that explore only a small neighborhood in latent space, and can limit their diversity. Table 3 shows that this simple strategy can improve over flow matching when K = 10 . This shows how PAFM can extract gains from even very modest transformations of the underlying target point zi,underscoring its flexibility as a training framework. 
+
+5.3 Analysis PAFM induces negligible computational overhead. We benchmark the computa-tional overhead of training with the nearest neighbor version of PAFM compared to FM using the MMDiT architecture on CC12M over 500 consecutive training iterations. 9Table 4: PAFM marginally increases over-head. Computational overhead comparison be-tween FM and PAFM with K=32 neighbors on CC12M 256 ×256 with MMDiT. Benchmarked on 8 ×H100 GPUs with total batch size of 256.            
+
+> Metric FM PAFM
+> Throughput (samples/sec) 1151 1074 (–6.6%)
+> Peak Memory (GB) 19.11 19.18 (+0.4%)
+> FLOPs/step (GFLOPs) 10773 10773 (+0.0%)
+
+Figure 3: PAFM reduces mini-batch gradi-ent variance over FM. Optimization steps over the same 500 iterations for REPA-SiT-B/2 [ 19 ]models trained with nearest neighbor PAFM with K=16 and FM on ImageNet-1K [ 4]. Full lines show gradient variance at each iteration, while the correspondingly colored dashed lines indicate the mean variance across all iterations. PAFM reduces gradient variance by ∼ 4×.PAFM marginally decreases throughput by 6.6%, only increases peak memory consumption by 0.4% and has no perceived change in GFLOPs. We at-tribute this to the fact that PAFM nearest neighbors can be computed once during data-preprocessing and simply loaded alongside each training exam-ple during training. Thus, PAFM can be nearly as efficient as its flow matching counterpart. 
+
+PAFM reduces gradient variance in prac-tice. Theorem 2 establishes that under—certain sampling conditions—posterior-augmented flow matching (PAFM) lowers the gradient variance at each intermediate point in the latent space, by a factor dependent on the number of additional samples used for supervision compared to flow matching (FM). By lower bounding the FM gradi-ent variance at arbitrary fixed intermediate points, PAFM should further lower bound the variance of the gradients across batches during training, leading to more stable gradient updates. We test this empirically by training two REPA-SiT-B/2 models on ImageNet-1K 256x256 resolution with the FM and nearest neighbor PAFM (K=16) ob-jectives respectively. We measure gradient vari-ance as Tr(Σ g ) = E∥g − ˆg∥2, where Σg is the covariance of the stochastic gradient defined in Theorem 2 and ˆg is the full-batch gradient. At each training iteration, we randomly sample 500 batches (each of size 256), and compute the vari-ance across these mini-batch gradients. Figure 3 compares the gradient variance midway through training at 50,000 steps over the same 500 itera-tions. PAFM achieves lower batch-gradient variance compared to FM at every iteration , and its mean variance is nearly 4× less than that of FM: 0.22 , versus 0.80 . This illustrates how PAFM can reduce gradient variance beyond theoretical settings; it is observed empirically in real-world settings, yielding more stable gradient steps. 
+
+## 6 Conclusion 
+
+We introduce Posterior-Augmented Flow Matching (PAFM), a principled extension of flow matching (FM) that replaces the sparse one-to-one supervision of FM with a posterior-weighted expectation over all plausible trajectories. We show that PAFM is an unbiased estimator of the FM objective that provably lower bounds its gradient variance under certain sampling conditions. PAFM can be flexibly adapted for efficiently training rectified flow models in real-world settings, improving FM performance by up to 3.4 FID50K across class-conditioned and text-to-image benchmarks (ImageNet-1K and CC12M respectively), popular model architectures (SiT and MMDiT), and model scales (SiT-B/2 and SiT-XL/2).—whilst increasing computational overhead by just 6.6%. 
+
+## 7 Acknowledgments 
+
+This work is supported in part by an NSF Graduate Research Fellowship, a Google PhD Fellowship, and NSF awards #2622839 and #2403297. 
+
+## References 
+
+[1] Charu C Aggarwal, Alexander Hinneburg, and Daniel A Keim. On the surprising behavior of distance metrics in high dimensional space. In International conference on database theory. 10 Springer, 2001. 2 [2] Bhavya Agrawalla, Michal Nauman, Khush Agrawal, and Aviral Kumar. floq: Training critics via flow-matching for scaling compute in value-based rl. arXiv, 2025. 4 [3] Michael S Albergo, Nicholas M Boffi, and Eric Vanden-Eijnden. Stochastic interpolants: A unifying framework for flows and diffusions. arXiv, 2023. 3 [4] Jia Deng, Wei Dong, Richard Socher, Li-Jia Li, Kai Li, and Li Fei-Fei. Imagenet: A large-scale hierarchical image database. In 2009 IEEE conference on computer vision and pattern recognition, pages 248–255. Ieee, 2009. 2, 8, 10 [5] Matthijs Douze, Alexandr Guzhva, Chengqi Deng, Jeff Johnson, Gergely Szilvasy, Pierre-Emmanuel Mazaré, Maria Lomeli, Lucas Hosseini, and Hervé Jégou. The faiss library. arXiv, 2024. 2, 8 [6] Patrick Esser, Sumith Kulal, Andreas Blattmann, Rahim Entezari, Jonas Müller, Harry Saini, Yam Levi, Dominik Lorenz, Axel Sauer, Frederic Boesel, Dustin Podell, Tim Dockhorn, Zion English, and Robin Rombach. Scaling rectified flow transformers for high-resolution image synthesis. ICML, 2024. 2 [7] Patrick Esser, Sumith Kulal, Andreas Blattmann, Rahim Entezari, Jonas Müller, et al. Scaling rectified flow transformers for high-resolution image synthesis. In International Conference on Machine Learning, 2024. 3 [8] Patrick Esser, Sumith Kulal, Andreas Blattmann, Rahim Entezari, Jonas Müller, Harry Saini, Yam Levi, Dominik Lorenz, Axel Sauer, Frederic Boesel, Dustin Podell, Tim Dockhorn, Zion English, Kyle Lacey, Alex Goodwin, Yannik Marek, and Robin Rombach. Scaling rectified flow transformers for high-resolution image synthesis, 2024. 3 [9] Kenji Fukumizu, Taiji Suzuki, Noboru Isobe, Kazusato Oko, and Masanori Koyama. Flow matching achieves almost minimax optimal convergence. arXiv, 2024. 2, 3 [10] Johannes Hertrich, Antonin Chambolle, and Julie Delon. On the relation between rectified flows and optimal transport. arXiv, 2025. 3 [11] Martin Heusel, Hubert Ramsauer, Thomas Unterthiner, Bernhard Nessler, and Sepp Hochreiter. Gans trained by a two time-scale update rule converge to a local nash equilibrium. Advances in neural information processing systems, 30, 2017. 8 [12] Jonathan Ho and Tim Salimans. Classifier-free diffusion guidance, 2022. URL https:// arxiv.org/abs/2207.12598 . 8 [13] Jonathan Ho, Ajay Jain, and Pieter Abbeel. Denoising diffusion probabilistic models. In Advances in Neural Information Processing Systems, 2020. 3 [14] Yuhao Huang, Taos Transue, Shih-Hsin Wang, William M. Feldman, Hong Zhang, and Bao Wang. Improving flow matching by aligning flow divergence. In International Conference on Machine Learning, 2025. 3 [15] Yuhao Huang, Taos Transue, Shih-Hsin Wang, William M Feldman, Hong Zhang, and Bao Wang. Improving flow matching by aligning flow divergence. In Forty-second International Conference on Machine Learning , 2025. URL https://openreview.net/forum?id= FeZimuj6SG . 2 [16] Sangyun Lee, Beomsu Kim, and Jong Chul Ye. Minimizing trajectory curvature of ODE-based generative models. In International Conference on Machine Learning, 2023. 3 [17] Yaron Lipman, Ricky T. Q. Chen, Heli Ben-Hamu, Maximilian Nickel, and Matthew Le. Flow matching for generative modeling. In ICLR, 2023. URL https://openreview.net/forum? id=PqvMRDCJT9t . 1, 2, 3 [18] Xingchao Liu, Chengyue Gong, and Qiang Liu. Flow straight and fast: Learning to generate and transfer data with rectified flow. In Advances in Neural Information Processing Systems, 2022. 3 11 [19] Nanye Ma, Mark Goldstein, Michael S. Albergo, Nicholas M. Boffi, Eric Vanden-Eijnden, and Saining Xie. Sit: Exploring flow and diffusion-based generative models with scalable interpolant transformers. In Computer Vision – ECCV 2024: 18th European Conference, Milan, Italy, September 29–October 4, 2024, Proceedings, Part LXXVII , 2024. URL https: //doi.org/10.1007/978-3-031-72980-5_2 . 2, 3, 4, 8, 10 [20] Nanye Ma, Mark Goldstein, Michael S. Albergo, Nicholas M. Boffi, Eric Vanden-Eijnden, and Saining Xie. Sit: Exploring flow and diffusion-based generative models with scalable interpolant transformers, 2024. URL https://arxiv.org/abs/2401.08740 . 1 [21] Charlie Nash, Jacob Menick, Sander Dieleman, and Peter W Battaglia. Generating images with sparse representations. arXiv, 2021. 8 [22] Maxime Oquab, Timothée Darcet, Théo Moutakanni, Huy V. Vo, Marc Szafraniec, Vasil Khalidov, Pierre Fernandez, Daniel HAZIZA, Francisco Massa, Alaaeldin El-Nouby, Mido Assran, Nicolas Ballas, Wojciech Galuba, Russell Howes, Po-Yao Huang, Shang-Wen Li, Ishan Misra, Michael Rabbat, Vasu Sharma, Gabriel Synnaeve, Hu Xu, Herve Jegou, Julien Mairal, Patrick Labatut, Armand Joulin, and Piotr Bojanowski. DINOv2: Learning robust visual features without supervision. TMLR, 2024. 9 [23] William Peebles and Saining Xie. Scalable diffusion models with transformers. In Proceedings of the IEEE/CVF International Conference on Computer Vision , pages 4195–4205, 2023. 2, 8 [24] Alec Radford, Jong Wook Kim, Chris Hallacy, Aditya Ramesh, Gabriel Goh, Sandhini Agarwal, Girish Sastry, Amanda Askell, Pamela Mishkin, Jack Clark, et al. Learning transferable visual models from natural language supervision. In International conference on machine learning, pages 8748–8763. PMLR, 2021. 6, 9 [25] Teodora Reu, Sixtine Dromigny, Michael Bronstein, and Francisco Vargas. Gradient variance reveals failure modes in flow-based generative models. arXiv, 2025. 2, 3 [26] Robin Rombach, Andreas Blattmann, Dominik Lorenz, Patrick Esser, and Björn Ommer. High-resolution image synthesis with latent diffusion models. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition, pages 10684–10695, 2022. 2, 9 [27] Tim Salimans, Ian Goodfellow, Wojciech Zaremba, Vicki Cheung, Alec Radford, and Xi Chen. Improved techniques for training gans. Advances in neural information processing systems, 2016. 8 [28] Piyush Sharma, Nan Ding, Sebastian Goodman, and Radu Soricut. Conceptual captions: A cleaned, hypernymed, image alt-text dataset for automatic image captioning. In Proceedings of ACL, 2018. 2, 8 [29] Jiaming Song, Chenlin Meng, and Stefano Ermon. Denoising diffusion implicit models. arXiv, 2020. 3 [30] Yang Song, Jascha Sohl-Dickstein, Diederik P. Kingma, Abhishek Kumar, Stefano Ermon, and Ben Poole. Score-based generative modeling through stochastic differential equations. In International Conference on Learning Representations, 2021. 3 [31] George Stoica, Vivek Ramanujan, Xiang Fan, Ali Farhadi, Ranjay Krishna, and Judy Hoffman. Contrastive flow matching. ICCV, 2025. 1 [32] Alexander Tong, Kilian Fatras, Nikolay Malkin, Guillaume Huguet, Yanlei Zhang, et al. Im-proving and generalizing flow-based generative models with minibatch optimal transport. Transactions on Machine Learning Research, 2024. 3 [33] Michael Tschannen, Alexey Gritsenko, Xiao Wang, Muhammad Ferjad Naeem, Ibrahim Alab-dulmohsin, Nikhil Parthasarathy, Talfan Evans, Lucas Beyer, Ye Xia, Basil Mustafa, Olivier Hénaff, Jeremiah Harmsen, Andreas Steiner, and Xiaohua Zhai. Siglip 2: Multilingual vision-language encoders with improved semantic understanding, localization, and dense features. arXiv preprint arXiv:2502.14786, 2025. 8, 9 12 [34] H. Wiegand. Kish, l.: Survey sampling. john wiley & sons, inc., new york, london 1965, ix + 643 s., 31 abb., 56 tab., preis 83 s. Biometrische Zeitschrift, 1968. 5 [35] Sihyun Yu, Sangkyung Kwak, Huiwon Jang, Jongheon Jeong, Jonathan Huang, Jinwoo Shin, and Saining Xie. Representation alignment for generation: Training diffusion transformers is easier than you think, 2024. URL https://arxiv.org/abs/2410.06940 . 1, 4, 8 13 Appendix A Crescent Example Implementation Details 
+
+Setting. We construct a two-dimensional crescent moon target distribution, each comprising of 1,000 points. The source distribution is an isotropic Gaussian with a standard deviation of 0.1, intentionally shifted away from the target to make the transport problem non-trivial. 
+
+Model Architecture. We train two models, each with the flow matching (FM) and posterior augmented flow matching (PAFM) objectives respectively. Each model is a 4-layer MLP, with the SiLU activation function after each intermediate layer, and a hidden dimension of 128. We use 32-dimensional sinusoidal time-step embeddings, to illustrate that PAFM extends beyond linear time-steps. The time embedding and data coordinates are concatenated to form the input to the first layer of the network. 
+
+Training. Both models are trained for 50,000 steps with the Adam optimizer at an initial learning rate of 5e-4, with cosine learning rate decay. For PAFM, we compute the posterior weights wj over all 
+
+N =2,000 target data points at each training step. Both models are initialized with the same random seed. 
+
+Sampling. We generate samples using Euler integrations for 300 steps, and generate 5,000 samples for each model. 
+
+Evaluation. We quantify convergence to the true velocity field by analytically computing the marginal velocity field and measuring the mean squared error against each model’s predictions, averaged across denoising time steps t.
+
+## B PAFM improves FM without REPA 
+
+Table B.1: PAFM improves FM on ImageNet-1K without REPA. Results on FID50K without CFG and NFE=50 after 400K training iterations.                           
+
+> Model Obj. KFID ↓sFID ↓Prec. ↑Rec. ↑
+> SiT-B/2 FM –39.98 7.07 0.51 0.64
+> PAFM 64 38.19 6.65 0.52 0.63 PAFM 16 39.03 6.97 0.51 0.63 PAFM 438.80 6.91 0.52 0.63
+
+We train SiT-B/2 models without REPA on ImageNet-1K with 256 batch size for 400K iter-ations. We evaluate all models without classifier-free guidance (CFG), using the ODE sampler for 50 denoising steps, and report FID, sFID, preci-sion and recall, over 50,000 generated samples. Table B.1 shows the results. Overall, we observe that PAFM improves over FM, despite not utiliz-ing REPA. 
+
+## C PAFM May be More Robust to Data Sparsity 
+
+We train two rectified flow models for 15,000 steps, using the same regime described inAppendix A, across different data-sparsity regimes. In each regime, we vary the number of target distribution samples available during training according to N = {100 , 200 , 500 , 1000 } total samples. Figure C.1 illustrates the results, where each plot displays the kernel density estimate (KDE) over generations in each sparsity-setting. Overall, we find that models trained with PAFM better recover the true target distribution under data sparsity. We attribute this to the dense supervision inherent in PAFM: at each latent point, the objective aggregates supervision from many target samples, rather than from a single instance as in FM. This provides substantially richer gradient signal, even with N is small. 1Ground Truth    
+
+> Target Dataset Samples = 100 Target Dataset Samples = 200 Target Dataset Samples = 500 Target Dataset Samples = 1000
+> FM Generations PAFM Generations
+
+Figure C.1: Posterior augmented flow matching learns the target distribution better under data sparsity. We train two rectified flow models to generate two crescent moon distributions, under different data sparsity regimes. Column titles indicate the total number of training data points given to each model. Rows indicate the source used for generating targets: the “Ground Truth” distribution (top), the trained “FM” model (middle), and the trained “PAFM” model (bottom). Each plot shows kernel density estimates (KDE) for the generated target distribution. 2

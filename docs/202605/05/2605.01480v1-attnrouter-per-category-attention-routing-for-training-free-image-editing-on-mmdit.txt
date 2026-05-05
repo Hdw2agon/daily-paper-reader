@@ -1,0 +1,438 @@
+Title: AttnRouter: Per-Category Attention Routing for Training-Free Image Editing on MMDiT
+
+URL Source: https://arxiv.org/pdf/2605.01480v1
+
+Published Time: Tue, 05 May 2026 00:42:15 GMT
+
+Number of Pages: 11
+
+Markdown Content:
+# AttnRouter: Per-Category Attention Routing for Training-Free Image Editing on MMDiT 
+
+## Guandong Li iFLYTEK leeguandon@gmail.com Mengxia Ye Aegon THTF 
+
+# Abstract 
+
+We study training-free image editing on Qwen-Image-Edit-2511, a 60-block multi-modal diffusion transformer (MMDiT) that concatenates noise and source-image tokens within a single attention stream. We make three contri-butions. (i) We introduce KVInject , a single-forward at-tention manipulation that α-blends source-half key/value projections into the noise-half within a localized layer/step band. KVInject is simpler than the classical two-pass Mas-aCtrl recipe and avoids the prompt-mismatch failure mode that disables MasaCtrl on MMDiT (composite score drops 31% versus baseline). (ii) We show that no single atten-tion operation dominates across edit types, motivating At-tnRouter , a per-category routing table that dispatches edits to the operation that best preserves source structure for that type. With ground-truth categories the router improves the CLIP-T +DINO-I composite by 6.4% over the editing base-line; an automatic CLIP zero-shot classifier closes 98% of this gap despite only 55% category accuracy. (iii) Through layer-, step-, and α-band ablations we localize the editing-effective attention sub-circuit: K/V injection in early denois-ing steps (S0–7) recovers nearly all of the gain of full-step injection, while injection in early (L0–15) or late (L45–60) layer bands fails to drive editing entirely; α ∈ [0 .3, 0.5] is a stable sweet spot. We also report negative results that high-light what does not transfer from the UNet folklore: simple K/V rescaling never beats baseline and aggressive variants collapse generation entirely (composite 0.084 ). We release code, pre-computed routing tables, and a 100-sample strati-fied subset of ImgEdit-Bench used in all ablations. 
+
+# 1 Introduction 
+
+Recent diffusion models such as Qwen-Image-Edit-2511 [ 24 ], FLUX-Kontext [ 12 ], and SD3-Edit [ 5] treat image editing as a conditional sampling problem in which the source image is encoded as additional tokens in the denoising backbone. In the multi-modal diffusion trans-former (MMDiT) backbone of Qwen-Image-Edit-2511, the source image is concatenated with the noise stream and fed through a 60-block joint attention tower. This raises a natural question for training-free editing: which attention sub-circuit drives the editing process, and can we manipu-late it without retraining? 
+
+A long line of work on UNet-based diffusion editing manipulates self-/cross-attention to steer editing without training [ 7 , 3, 25 , 11 , 19 , 4, 10 ]. These methods rely on the architectural separation of self-attention and cross-attention in the UNet [ 22 ]. MMDiT [ 5 , 20 ] abolishes that separation: image and text tokens flow through the same joint attention, and source/noise are simply different positions within the image stream. Existing operations transplanted directly to MMDiT either underperform or fail outright; we confirm this empirically (Sec. 4.2). 
+
+Why MMDiT changes the editing problem. On UNet diffusion models [ 8, 22 ], training-free editing has a clean lever: the source image’s self-attention activations live in dedicated self-attention layers, while text conditioning is injected via cross-attention layers. P2P [ 7] edits the cross-attention; MasaCtrl [ 3] reuses the source’s self-attention K/V; PnP [ 25 ] swaps spatial features and self-attention. This architectural decomposition gives an editor four or-thogonal knobs (where in space, when in time, which modality, which layer family). MMDiT collapses two of those knobs: source/noise/text live in one tensor, and there is no longer a self-vs-cross distinction. The editor must therefore re-derive where the editing-effective K/V projec-tions are from scratch. This paper investigates training-free editing on Qwen-Image-Edit-2511 along three axes: which operation, where in the network, and at which timestep . We focus on op-erations that act on the key/value projections of the joint attention tower, because rescaling Q has no effect on atten-tion up to a uniform scalar absorbed by softmax. 
+
+Contributions. 
+
+• KVInject , a single-forward attention operator that α-blends source-half K/V into the noise-half K/V within a localized (layer , step ) band. KVInject is simpler than two-pass MasaCtrl and is less brittle on MMDiT. • AttnRouter , a per-category routing table over training-free operations. With oracle category labels the router 1
+
+> arXiv:2605.01480v1 [cs.CV] 2 May 2026
+
+beats every single operation; with an off-the-shelf CLIP zero-shot classifier (55% accuracy) it almost matches the oracle. • Ablation analysis that localizes the editing sub-circuit to layers L30–45 and early denoising steps S0–7, an α
+
+sweet spot of 0.3–0.5, plus negative results that high-light what does not transfer from UNet folklore: classi-cal MasaCtrl loses 31% composite, simple K/V rescal-ing never beats the baseline, and aggressive noise-half scaling collapses generation entirely. 
+
+# 2 Related Work 
+
+## 2.1 Diffusion and flow models for image gen-eration 
+
+Diffusion models [ 8 ] learn to invert a forward noising process and, with classifier-free guidance [ 9], have be-come the standard architecture for text-to-image genera-tion. Latent diffusion [ 22 ] pushed the denoising opera-tor from pixels to a VAE latent and is the basis of ev-ery model studied in this paper. The architecture of the denoiser has steadily migrated from convolutional UNets to pure transformers (DiT [ 20 ]) and recently to MMDiT, which fuses image and text into a single joint-attention tower [ 5, 12 , 24 ]. In parallel, flow-matching training [ 15 ]replaced the score-matching objective in many recent sys-tems including SD3 [ 5 ] and Qwen-Image [ 24 ]; the choice of training objective is orthogonal to the editing problem we study. 
+
+## 2.2 Training-free editing on UNet diffusion 
+
+The dominant family of training-free editors manipulates at-tention activations or features cached from a source-image generation pass. Prompt-to-Prompt (P2P) [ 7] edits cross-attention maps to swap or amplify words in the conditioning prompt. Plug-and-Play (PnP) [ 25 ] additionally injects self-attention K/V and spatial features. MasaCtrl [ 3] reuses the source self-attention K/V to enforce identity in non-rigid ed-its. PnP-Inversion [ 11 ] adds three-line latent corrections on top of inversion-based pipelines. DiffEdit [ 4] uses prompt contrast to derive an edit mask. SDEdit [ 16 ] re-noises and re-denoises a guided initialization. Pix2Pix-Zero [ 19 ]steers cross-attention along learned text-embedding direc-tions. LEDITS++ [ 10 ] stacks multiple semantic edits via concept guidance. Across this family, the editing recipe always exploits the UNet’s separation of self- and cross-attention, and the source image typically lives in a dedicated inversion pass [ 17 ]. None of these methods carries over to a backbone with a single joint-attention tower without modification, motivating our re-derivation on MMDiT. 
+
+## 2.3 Instruction-tuned editing 
+
+A complementary line trains the editor end-to-end on synthetic edit instructions: InstructPix2Pix [ 2], Mag-icBrush [ 27 ], UltraEdit [ 29 ]. The most recent generation of MMDiT-based editors (Qwen-Image-Edit, FLUX-Kontext, SD3-Edit) belongs to this family. On DiT specifically, Edi-tID [ 14 ] explores training-free editable identity customiza-tion, demonstrating that test-time hooks on the DiT resid-ual stream can override behaviors that would otherwise require fine-tuning. Instruction-tuned editors are excellent baselines but require expensive retraining whenever a new editing capability is added; they also tend to over-trust the prompt and bleed source content (the failure mode our router addresses). 
+
+## 2.4 Conditional generation via auxiliary net-works 
+
+A second school adds an auxiliary network that routes a structural condition (depth, edges, pose) into the denoiser; ControlNet [ 28 ] is the canonical example. These meth-ods require training the adapter and are orthogonal to the training-free attention manipulation we study. 
+
+## 2.5 Mechanistic analysis of diffusion atten-tion 
+
+A growing body of work probes which attention layers carry editing-relevant signal in UNet diffusion [ 1], but very little is known about MMDiT. Concurrent work on diffusion-transformer attention guidance [ 13 ] observes that K and V projections in DiT-style backbones exhibit a “bias-delta” structure (token embeddings cluster tightly around a layer-specific bias), motivating joint manipulation of both chan-nels rather than only K; KVInject inherits this insight by always editing K and V together within the same layer band. Our layer-band and step-band ablations (Sec. 4.4, 4.5) extend this picture by mapping the editing-effective sub-circuit on Qwen-Image-Edit-2511 to layers L30–45 and steps S0–7. 
+
+## 2.6 Routing and mixture-of-operations 
+
+Mixture-of-experts and routing have been used at train-ing time in language and vision models [ 23 , 6 ]. To our knowledge no prior work performs per-category routing of training-free editing operations on diffusion models. At-tnRouter is closest in spirit to instance-level operation se-lection in test-time augmentation, but operates on attention manipulations rather than data transformations. 22.7 Editing benchmarks and evaluation met-rics 
+
+For evaluation we follow the convention of measuring edit fidelity in CLIP space [ 21 ] and source preservation in DI-NOv2 space [ 18 ]. We use the recently released ImgEdit-Bench [ 26 ], which provides 561 real-image editing instruc-tions across nine edit categories. PIE-Bench [ 11 ] is the de facto UNet-era benchmark; we did not use it because its source images are biased toward Stable-Diffusion-style syn-thetic data and underrepresent the photographic distribution that MMDiT editors optimize for. 
+
+# 3 Method 
+
+## 3.1 Preliminaries: MMDiT joint attention 
+
+Diffusion / flow denoising. At inference time, all editors we study sample by integrating an ODE/SDE that pushes a noise sample zT to a clean latent z0 over T steps [ 8 , 15 ]. The denoiser ϵθ (zt, t, c ) is conditioned on a text embed-ding c and, in the editing setting, on a source-image latent. Classifier-free guidance [ 9 ] produces a conditional and an unconditional forward at each step; with CFG = 4 in our setup the model executes two forward passes per denoising step. All hooks below fire on both passes. 
+
+Joint-attention tower. Qwen-Image-Edit-2511 is a 60-block MMDiT [ 24 ]. At 1024 ×1024 resolution the image stream contains 8192 tokens: the first 4096 are noise tokens (the latent being denoised) and the next 4096 are source-image tokens (the conditioning image, encoded by the same VAE as the noise). Each transformer block contains two parallel projection sets: • Image stream: to q , to k , to v .• Text stream: add q proj , add k proj ,
+
+add v proj .After projection, image and text tokens are concatenated along the sequence dimension and processed by one joint scaled-dot-product attention. We hook all six projections in all 60 blocks (360 hooks per forward, 720 per denoising step under CFG), recording or replacing their outputs per step. Q is never modified: rescaling Q rescales attention by a constant and is absorbed by softmax. Fig. 1 sketches the layout. 
+
+## 3.2 KVInject: single-forward α-blend 
+
+Let K ∈ RB×8192 ×d be the output of to k (or to v )at a given block and step, with Knoise = K[: , :4096] and 
+
+Algorithm 1 KVInject (per block, per step) 
+
+Require: block index ℓ; step index s; band 
+
+(ℓlo , ℓ hi , s lo , s hi ); blend α
+
+Require: pre-attention K/V: K, V ∈ RB×8192 ×d 
+
+> 1:
+
+if not (ℓlo ≤ ℓ < ℓ hi and slo ≤ s < s hi ) then return 
+
+K, V ▷ out of band  
+
+> 2:
+
+Kn, K s ← K[: , :4096] , K [: , 4096:]  
+
+> 3:
+
+Vn, V s ← V [: , :4096] , V [: , 4096:]  
+
+> 4:
+
+Kn ← αK s + (1 − α)Kn 
+
+> 5:
+
+Vn ← αV s + (1 − α)Vn 
+
+> 6:
+
+return concat( Kn, K s), concat( Vn, V s)
+
+Ksrc = K[: , 4096 :] . KVInject replaces the noise-half with an α-blend toward the source-half: 
+
+K′ 
+
+> noise
+
+= α · Ksrc + (1 − α) · Knoise , (1) applied only within a configurable layer band [ℓlo , ℓ hi ) and step band [slo , s hi ). The text-stream projections are un-touched. Algorithm 1 gives the per-step pseudocode; the entire mechanism fits in ∼10 lines and adds zero parame-ters. 
+
+Why same-forward, not two-forward? Classical Mas-aCtrl [ 3 ] runs two forwards: a source forward with a neu-tral prompt that records K/V, and a target forward with the edit prompt that injects the cached K/V. On MMDiT, the recorded K/V are conditioned on the neutral prompt and lack edit-relevant semantics; injecting them disrupts target generation (Sec. 4.2: composite drops 31%). Our same-forward shortcut uses K/V from the source-half tokens of the edit-prompt forward, which already carry edit-relevant semantics. This trade-off is the central methodological ob-servation of the paper: in MMDiT the source tokens are co-attended with the edit prompt, so the edit semantics are baked into Ksrc even though Ksrc describes the source image, not the target. 
+
+Cost. KVInject adds zero parameters and zero extra for-wards. The hook copies a 4096 × d slice and writes it back; on a 60-block 8192-token model this is < 2% wall-clock overhead per step. Memory cost is one tensor of shape 
+
+Knoise (already resident) plus a temporary blend buffer. 
+
+## 3.3 AttnRouter 
+
+KVInject is parameterized by (α, ℓ lo , ℓ hi , s lo , s hi ). No sin-gle setting dominates across edit types: add edits prefer the editing baseline (extra source bias hurts), style edits benefit most from α=0 .5, while replace , attribute , and background 
+
+prefer α=0 .3. AttnRouter exposes this per-category prefer-ence through a routing table R : category → op: 3Figure 1: End-to-end pipeline. Source image and noise latent are encoded into a shared VAE latent space; their tokens are concatenated to form the 8192-token image stream. Text tokens enter through the parallel add * proj branch. After projection but before joint attention, KVInject overwrites the noise-half of to k /to v with an α-blend toward the source-half within a chosen (layer , step ) band. AttnRouter selects the band and α per edit-instruction category. 
+
+Algorithm 2 AttnRouter inference 
+
+Require: source image Is, edit instruction p, routing table 
+
+R
+
+Require: CLIP text encoder ϕT , anchor centroids {μc}c∈C  
+
+> 1:
+
+ˆc ← arg max c∈C cos( ϕT (p), μ c) ▷ auto router  
+
+> 2:
+
+(α, ℓ lo , ℓ hi , s lo , s hi ) ← R[ˆ c] 
+
+> 3:
+
+configure KVInject hooks with the band; op ← Alg. 1  
+
+> 4:
+
+Ie ← Pipe( Is, p ; HOOK = op ) ▷ single forward  
+
+> 5:
+
+return Ie    
+
+> category op replace, attribute, background KVInject( α=0 .3, L30–45) remove, style KVInject( α=0 .5, L30–45) add baseline (no injection)
+
+Oracle router uses the ground-truth category from the benchmark. Auto router predicts the category from the edit instruction with a CLIP zero-shot classifier: we hand-craft K=5 anchor sentences per category, encode them into the CLIP text space, average per-category centroids, and assign each instruction to the argmax-similarity centroid. Algorithm 2 gives the inference-time procedure end-to-end. 
+
+Why a discrete table, not a continuous policy? A con-tinuous policy on (α, ℓ lo , . . . ) would in principle domi-nate, but it requires either (i) supervised data of the form 
+
+(edit , op ∗), which is not available, or (ii) test-time gradi-ent/RL search, which contradicts the training-free desidera-tum. The discrete table is recoverable from a small offline grid sweep (we used α ∈ { 0.3, 0.5, 0.7}, three layer bands, full steps, ∼1000 inference calls total) and is the simplest object that captures the per-category preference we mea-sured. 
+
+## 3.4 Implementation: hook system 
+
+Our routing logic does not modify the editor’s source code. Instead, we register PyTorch forward hook son each of the six projection nn.Linear s in ev-ery MMDiT block (360 hooks total). A shared 
+
+AttnHub object tracks the current step index (ad-vanced via diffusers’ callback on step end ) and ex-poses a replace fn:(layer, proj, step) →
+
+Tensor callback. Ops self-gate by (layer , proj , step ) and compose by chaining (one block per op); a ComposeOps 
+
+wrapper iterates ops in order and lets each op mutate the running tensor. This makes adding a new training-free op a 
+
+∼30-line change with zero re-training. 
+
+# 4 Experiments 
+
+## 4.1 Setup 
+
+Benchmark. We use ImgEdit-Bench [ 26 ], a benchmark of 561 real-image editing instructions across nine edit types. We sample N =100 instructions stratified across the six categories most relevant to attention manipulation: replace 
+
+(n=17 ), add (n=17 ), remove (n=17 ), attribute (n=16 ), 
+
+style (n=17 ), background (n=16 ). All edits are evaluated at 1024 ×1024 with 28 denoising steps and CFG scale 4.0.Negative prompts and seeds are fixed across all variants for paired comparison. 4Table 1: Main results on ImgEdit-Bench-100. Composite =0.5( CLIP-T + DINO-I ). Best in bold .                                
+
+> Method CLIP-T ↑DINO-I ↑CLIP-D ↑comp. ↑
+> Baseline 0.2193 0.5565 0.0608 0.3879
+> Prior baselines
+> Simple K/V scale (best) 0.2203 0.5304 0.0605 0.3753 TextScale (P2P-like) 0.2234 0.5772 0.0676 0.4003 MasaCtrl-proper 0.2248 0.3107 0.0506 0.2678
+> Ours
+> KVInject (single best op) 0.2203 0.5852 0.0645 0.4028 AttnRouter (auto, CLIP cls) 0.2214 0.6012 0.0677 0.4113 AttnRouter (oracle) 0.2218 0.6037 0.0685 0.4127
+
+Metrics. CLIP-T is the cosine similarity between the edited image and the edit instruction in CLIP-ViT-L/14 space [ 21 ] (edit fidelity). DINO-I is the cosine similarity between the edited image and the source image in DINOv2-base feature space [ 18 ] (source preservation). Composite =0.5 CLIP-T + 0 .5 DINO-I summarizes both. CLIP-D is omitted from the headline metric because ImgEdit does not provide source captions, but we report it for completeness. 
+
+Baselines. We compare against (a) the editing baseline (no attention manipulation), (b) simple K/V rescaling on the source/noise halves at five (half , scale ) settings, (c) text K/V scaling (P2P-style amplification of cross-modal at-tention) [ 7] at three magnitudes, and (d) MasaCtrl-proper (the classical two-forward recipe with a neutral source prompt) [3]. 
+
+Hardware. All experiments run on a single NVIDIA H800 80GB. End-to-end runtime per edit (28 steps, CFG=4.0, 1024 × 1024 , bf16) is ∼15s for the editing base-line, ∼15.3s with KVInject, and ∼30s for MasaCtrl-proper (which doubles forwards). 
+
+## 4.2 Main results 
+
+Tab. 1 shows the seven-row main result on ImgEdit-Bench-100. Three observations. 
+
+Classical MasaCtrl fails on MMDiT. The two-pass MasaCtrl recipe drops the composite by 31% relative to baseline (0.2678 vs. 0.3879). DINO-I collapses from 0.557 to 0.311 because the recorded K/V are conditioned on a neu-tral prompt and lack the structural information that target generation expects. CLIP-T rises slightly (the model at-tends less to the source) but the source preservation collapse dominates the composite. 
+
+Simple K/V rescaling does not help. Across five rescal-ing configurations (source-half scale ∈ { 0, 0.5, 2.0}, noise-half scale ∈ { 0.5, 2.0}), every variant underperforms the baseline. The best ( src a2p0 ) drops composite by 3.2%; 0.16 0.17 0.18 0.19 0.20 0.21 0.22 0.23  
+
+> CLIP-T (edit fidelity)
+> 0.0
+> 0.1
+> 0.2
+> 0.3
+> 0.4
+> 0.5
+> 0.6
+> DINO-I  (source preservation)
+> comp=0.30
+> comp=0.35
+> comp=0.40
+> oracle
+> auto
+> baseline
+> KVInject (alpha-band sweep)
+> KVInject (step-band sweep)
+> AttnRouter (oracle / auto)
+> TextScale
+> simple K/V scale
+> MasaCtrl-proper
+> degenerate (L45-60)
+
+Figure 2: CLIP-T vs. DINO-I scatter of every variant evaluated in this paper (23 points on ImgEdit-Bench-100). Dotted lines are iso-composite contours 0.5( CLIP-T + DINO-I )= c. AttnRouter (blue stars, oracle and auto) sits on the highest contour reached by any variant; baseline (black square) and the KVInject sweep cluster between comp =0 .38 –0.40 ; MasaCtrl-proper (brown plus) and degenerate simple-K/V configurations fall sharply along the DINO-I axis. 
+
+Table 2: α sweep (KVInject, full steps). Sweet spot is α=0 .3–
+
+0.5; α=0 .7 in the L30–45 band drives DINO-I down (over-injection: the noise stream is dragged so close to the source that the prompt-aligned content is suppressed).                                 
+
+> αlayer band CLIP-T DINO-I comp. 0.0 (baseline) —0.2193 0.5565 0.3879 0.3 L15–30 0.2190 0.5653 0.3921 0.3 L30–45 0.2203 0.5852 0.4028
+> 0.5 L15–30 0.2206 0.5580 0.3893 0.5 L30–45 0.2219 0.5726 0.3972 0.7 L15–30 0.2206 0.5464 0.3835 0.7 L30–45 0.2283 0.4383 0.3333
+
+aggressive noise scaling ( noi a2p0 ) collapses genera-tion entirely (composite 0.0843); zeroing source-half K/V (src a0p0 ) drives DINO-I to 0.36 (the source signal is wiped out). 
+
+KVInject and routing. Our single-best KVInject con-figuration ( α=0 .3, L30–45) improves composite by 3.8% over the baseline. The oracle router improves composite by 6.4%, and the automatic CLIP-classifier router closes 98% of the gap to oracle (0.4113 vs. 0.4127), despite only 55% category-classification accuracy. Section 4.8 analyzes why. 
+
+## 4.3 α-band ablation 
+
+We sweep α ∈ { 0.3, 0.5, 0.7} with two layer bands (Tab. 2; Fig. 3). The composite peaks at α=0 .3 in L30–45 and degrades smoothly for nearby α. At α=0 .7 in L30–45 50.0 0.2 0.4 0.6       
+
+> (source noise blend strength)
+> 0.34
+> 0.36
+> 0.38
+> 0.40
+> composite
+> baseline
+> sweet spot
+> (= 0.3 , L30-45)
+> L30-45
+> L15-30
+> 0.0 0.2 0.4 0.6
+> (source noise blend strength)
+> 0.45
+> 0.50
+> 0.55
+> DINO-I
+> baseline
+> over-injection
+> collapse
+> L30-45
+> L15-30
+
+Figure 3: α-sweep curves for two layer bands. Left : composite. 
+
+Right : DINO-I. Sweet spot is α=0 .3 in band L30–45; pushing 
+
+α to 0.7 in L30–45 triggers the over-injection collapse (DINO-I drops from 0.586 to 0.438 while CLIP-T rises to 0.228, see Tab. 2). 
+
+Table 3: Layer-band ablation (KVInject α=0 .3, all steps). Com-posite is misleading when DINO-I is near 1: L0–15 and L45–60 produce near-identity images that fail to follow the edit instruc-tion. Layer band CLIP-T DINO-I comp. edits? Baseline 0.2193 0.5565 0.3879 yes L0–15 0.2231 0.7539 0.4885 no 
+
+L30–45 (ours) 0.2203 0.5852 0.4028 yes L45–60 0.2036 0.8109 0.5073 no 
+
+a phase transition appears: CLIP-T jumps (0.2283, the highest in the table) but DINO-I collapses (0.4383). The model is now half-following the prompt and half-generating something that looks loosely like the source; the composite falls to 0.333. This is the failure mode of over-injection and gives the upper end of the usable α range. 
+
+## 4.4 Layer-band ablation 
+
+We sweep KVInject across three disjoint 15-layer bands while keeping α=0 .3 and full denoising-step coverage (Tab. 3). The composite score for L0–15 (0.489) and L45– 60 (0.507) appears to dominate L30–45 (0.403), but inspec-tion reveals these are degenerate: DINO-I climbs to 0.75– 0.81 because the model produces near-copies of the source image (so source preservation is trivially high), while CLIP-T is at or below baseline. L45–60 in particular pushes CLIP-T below baseline (0.2036 vs. 0.2193). Only L30–45 simultaneously moves CLIP-T and DINO-I in the right direction. This identifies the structural-control sub-circuit in MMDiT. 
+
+Connection to UNet diffusion. On UNet-based stable diffusion, prior probing work [25, 1] found that mid-block self-attention layers carry the strongest editing-relevant sig-nal. Our finding (mid-depth L30–45 in a 60-block trans-former) is consistent with that: in the 60-block MMDiT, L30–45 is the second half of the network’s middle third, exactly where text and image have already aligned but the 
+
+Table 4: Step-band ablation (KVInject α=0 .3, L30–45). Al-most all of the editing gain comes from the first seven denoising steps. Step band CLIP-T DINO-I comp. ∆
+
+Baseline 0.2193 0.5565 0.3879 —S0–7 (early) 0.2206 0.5838 0.4022 +3.7% 
+
+S7–14 0.2188 0.5582 0.3885 +0.2% S14–21 0.2187 0.5582 0.3884 +0.1% S21–28 (late) 0.2194 0.5579 0.3886 +0.2% S0–28 (full) 0.2203 0.5852 0.4028 +3.8% S0 7 S7 14 S14 21 S21 28 S0 28 
+
+denoising step band 
+
+0.2 
+
+0.4 
+
+0.6 
+
+> score
+
+Step-band ablation (KVInject = 0.3 , L30 45) 
+
+> composite
+> DINO-I
+> CLIP-T (×2 for scale)
+
+Figure 4: Step-band ablation. Composite (red) and DINO-I (blue) jump above baseline (dotted) only when K/V injection covers early denoising steps S0–7; the remaining three step bands return to baseline. 
+
+residual stream has not yet committed to a final pixel struc-ture. 
+
+## 4.5 Step-band ablation 
+
+We split the 28 denoising steps into four contiguous 7-step bands (Tab. 4, visualized in Fig. 4). Every gain comes from 
+
+S0–7 : injecting K/V only during the first seven steps recov-ers 99% of the gain of full-step injection (composite 0.4022 vs. 0.4028). The remaining three step bands are statistically indistinguishable from baseline. This matches the diffusion-model folklore that early denoising steps establish coarse structure while late steps refine details, and it suggests that future training-free editors can save substantial compute by restricting attention manipulation to the first quarter of the denoising trajectory. 
+
+Compute saving. Restricting injection to S0–7 means hooks fire on 7 × 2 = 14 forwards instead of 28 × 2 = 56 ,a 4× saving in hook overhead. End-to-end this is small ( <
+
+1% wall-clock since hook overhead is tiny in the first place), but on edge-deployed editors with shallower batching the same recipe could matter more. 6Table 5: TextScale (P2P-like) sweep on the text K/V projections                       
+
+> add k proj /add v proj . Scale = 3 .0approaches KVInject but never beats it on DINO-I.
+> Variant CLIP-T DINO-I CLIP-D comp. Baseline 0.2193 0.5565 0.0608 0.3879 TextScale 0.5 0.2165 0.5204 0.0565 0.3684 TextScale 1.5 0.2199 0.5653 0.0614 0.3926 TextScale 3.0 0.2234 0.5772 0.0676 0.4003
+
+## 4.6 Attention-pattern visualization 
+
+The two ablations above identify a sub-circuit (L30–45, S0–7) but do not say what changes in attention when KV-Inject is applied. Fig. 5 sketches the picture in three panels: (a) under the editing baseline, the noise →source attention map within the joint attention is diffuse, with no strong correspondence between a noise position q and a source position k; (b) once KVInject blends source-half K into the noise-half (so Knoise inherits a fraction α of the source’s geometric structure), the same attention map develops a strong diagonal q ≈ k plus a few sharp off-diagonal peaks at salient regions; (c) per-layer cosine similarity between 
+
+Knoise and Ksrc is high at shallow and very deep layers (the two streams are still close to identity-mapped), but drops sharply over the middle band L30–45, which is precisely where injecting source K/V exerts the strongest leverage. This is a conceptual illustration consistent with our quan-titative ablations; we leave a head-by-head, layer-by-layer attention probe to future work. 
+
+## 4.7 TextScale baseline 
+
+Tab. 5 sweeps the magnitude of TextScale, which simply rescales the text-stream K/V uniformly. The behavior is monotone and capped: doubling and tripling text K/V in-creases CLIP-T modestly but trails KVInject by ∼0.6 points of composite. This confirms that on MMDiT, source-half image K/V is a strictly stronger editing lever than text K/V. 
+
+## 4.8 Auto-router analysis 
+
+The CLIP zero-shot classifier achieves only 55% top-1 cat-egory accuracy on ImgEdit-Bench-100. Yet the auto router (composite 0.4113) almost matches the oracle (0.4127). Why? 
+
+Confusable categories share routes. The classifier’s main confusions are between replace /attribute /background 
+
+(all three route to a0p3 L30 45 ), and between re-move /style (both route to a0p5 L30 45 ). 92% of misclas-sifications cross category lines that share the same route, so the routing decision is unaffected. This makes AttnRouter unusually robust to classifier weakness: the system be-haves like a 92%-accurate classifier for routing pur-poses, even though it is a 55%-accurate classifier for prediction purposes .
+
+Anchor sentences. Each category c is described by K =5 anchor sentences (e.g., for replace : “Replace the X with Y”, “Swap the X for a Y”, ...). We embed all 5 |C| = 30 
+
+anchors with the CLIP text encoder, average per category, and use the centroid as the class prototype. Reducing K
+
+from 5 to 1 drops the composite by approximately 0.002 in our runs (i.e., still above KVInject-best); raising K above 5 saturates. We did not tune the anchor prompts, suggesting that the router is robust to the exact phrasing of the anchors as long as they cover the category’s surface form. 
+
+## 4.9 Per-category breakdown 
+
+The single best KVInject variant ( α=0 .3, L30–45) is not the best for every category: it is best for replace , attribute , and 
+
+background ; remove and style prefer α=0 .5; add prefers the un-modified baseline (any source bias suppresses the new content the user wants to insert). Per-category gains (Fig. 6) range from +24% on style to ≈ 0% on add ; the router codifies this preference into a discrete table. 
+
+## 4.10 Failure analysis 
+
+We inspected all 100 edits manually. Three failure modes emerge. 
+
+(F1) Add edits with sparse subjects. add edits ask the model to insert a new object that is not present in the source. Any KVInject with α > 0 partially overwrites the noise stream’s K/V with source K/V, biasing attention toward what is present and away from what should be added .The router handles this by mapping add to baseline, but baseline itself sometimes fails to produce the new object. This failure mode is upstream of routing. 
+
+(F2) Style edits that demand whole-image change. On global style transfer (e.g., “make it a watercolor painting”) the L30–45/ α=0 .5 recipe sometimes preserves too much of the original brushwork. We attribute this to over-aggressive source preservation; a finer-grained mask-based op (similar to DiffEdit [4]) is plausible future work. 
+
+(F3) Identity drift on multi-subject scenes. When the source contains two or more salient subjects, KVIn-ject’s blanket per-position blend mixes their K/V uniformly; the model then drifts identity across subjects. A position-aware variant of KVInject (apply only inside the edit region) would address this. 
+
+## 4.11 Qualitative comparison 
+
+Fig. 7 shows source → baseline → best-single-op → oracle-router → auto-router on one representative sample per cate-gory. The router noticeably preserves background structure 7Figure 5: Schematic attention visualization. (a) Baseline noise →source attention is unstructured. (b) After KVInject ( α=0 .3, L30– 45, S0–7) the noise stream’s K inherits the source’s geometric structure and a clear diagonal emerges: noise position p now attends preferentially to source position p, propagating identity. (c) Per-layer cosine similarity between Knoise    
+
+> ℓand Ksrc
+> ℓis highest at shallow/deep layers and dips over L30–45 – the band where KVInject has the strongest effect (Tab. 3). Conceptual figure consistent with our ablations; not a per-head probe. replace
+> attribute
+> background
+> remove
+> style
+> add
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> composite (  )
+> +11%
+> +1%
+> +1%
+> +7%
+> +24%
+
+Per-category composite (CLIP-T + DINO-I)/2     
+
+> baseline
+> AttnRouter (oracle)
+> Figure 6: Per-category composite improvement of AttnRouter (oracle) over baseline. Style edits gain the most ( +24% ); add
+> edits route to the baseline (no improvement) because injecting source K/V suppresses content insertion.
+
+on style edits and small object identity on attribute edits, which is consistent with the DINO-I gain. 
+
+# 5 Discussion 
+
+What MMDiT changes about editing. On UNet dif-fusion, source preservation is a property of self-attention reuse, and edit fidelity is a property of cross-attention ma-nipulation; the two channels are architecturally orthogonal. On MMDiT they are entangled in a single joint-attention tensor, and the editor’s only knob is which positions in the K/V tensor at which depth at which step to manipulate. This paper quantifies that knob: the editing-effective sub-circuit on Qwen-Image-Edit-2511 is the source-half K/V at depths L30–45 during steps S0–7, with α ∈ [0 .3, 0.5] . The knob is narrow (mid-depth, early-step) but controllable. 
+
+Why does the per-category preference exist? The cat-egories that most prefer α=0 .3 (replace, attribute, back-ground) all have a clear “foreground vs. rest” decomposi-tion in which the rest should be preserved verbatim. The categories that prefer α=0 .5 (style, remove) demand a uni-form global change in which source preservation is more disposable. Add is the outlier because its required output adds tokens that simply do not exist in the source, so any source bias is destructive. This intuition gives a recipe for porting AttnRouter to new editing backbones: build a small calibration set of ∼10 edits per intended category, sweep 
+
+α ∈ { 0.3, 0.5, 0.7}, and pick the (α, band ) with the largest composite per category. 
+
+CLIP-T gain is small. The headline win comes from DINO-I ( +8 .5% ); CLIP-T moves only +0 .0025 , which is within the noise floor of CLIP-ViT-L/14. A skeptical reader can frame the contribution as “the router makes the model more conservative” rather than “the router makes the edit better”. We believe the right interpretation is that on MMDiT-based editors, where source bleed is the domi-nant failure mode, source preservation is the editing prob-lem; CLIP-T saturates near baseline because the underlying model is already well-aligned to the prompt at the chosen CFG scale. 
+
+Single backbone. We evaluate only on Qwen-Image-Edit-2511. Extending to FLUX-Kontext and SD3-Edit [ 12 , 5]would test whether the L30–45/S0–7 sub-circuit localiza-tion transfers across MMDiT instances or is specific to the Qwen weights. The recipe in the previous paragraph (small per-category sweep) is the natural way to do this without 8re-deriving everything from scratch. 
+
+Single benchmark, single resolution. ImgEdit-Bench [26] is recent and single-resolution at 1024 × 1024 .We have not yet evaluated on PIE-Bench [ 11 ] or Mag-icBrush [ 27 ]. The 1024 × 1024 setting is convenient because the noise/source halves are both exactly 4096 
+
+tokens; at other resolutions source start must change, and our scripts treat it as a configurable constant. 
+
+No human evaluation. CLIP-T and DINO-I are proxies; a human study would harden the claim. We provide a qualitative grid (Fig. 7) but no MTurk-scale annotation. A small ( n=50 ) human pairwise preference study against baseline is the natural follow-up. 
+
+Future work. Three concrete extensions. (1) Position-aware KVInject: restrict the α-blend to a region predicted from cross-attention or from a small auto-mask network, addressing F3. (2) Per-step α schedules: our results suggest a step-decaying α (high early, zero late) would match the S0–7 finding without a hard step-band cutoff. (3) Differ-entiable router: replace the discrete CLIP classifier with a small learned router head trained on edit-instruction-to-(α, band ) pairs gathered from offline sweeps; this would generalize to operations outside our six-category taxonomy. 
+
+# 6 Conclusion 
+
+We presented AttnRouter , a per-category routing table over training-free attention operations for image editing on MMDiT, and KVInject , a same-forward α-blend that is simpler and more robust on MMDiT than the classical two-pass MasaCtrl recipe. Layer-, step-, and α-band ablations localize the editing-effective sub-circuit to L30–45, steps S0–7, and α ∈ [0 .3, 0.5] . The auto router closes 98% of the gap to the oracle despite a 55%-accurate classifier, because confusable categories tend to share routes. The work positions training-free editing on MMDiT as a per-category routing problem rather than a search for a single dominant operation, and the negative results (MasaCtrl, simple K/V scale) explain what does not transfer from the UNet era. 
+
+# References 
+
+[1] Samyadeep Basu, Nanxuan Zhao, Vlad Morariu, Soheil Feizi, and Varun Manjunatha. Localizing and editing knowl-edge in text-to-image generative models. In International Conference on Learning Representations (ICLR) , 2024. [2] Tim Brooks, Aleksander Holynski, and Alexei A. Efros. In-structPix2Pix: Learning to follow image editing instructions. In Conference on Computer Vision and Pattern Recognition (CVPR) , 2023. [3] Mingdeng Cao, Xintao Wang, Zhongang Qi, Ying Shan, Xiaohu Qie, and Yinqiang Zheng. MasaCtrl: Tuning-free mutual self-attention control for consistent image synthesis and editing. In International Conference on Computer Vision (ICCV) , 2023. [4] Guillaume Couairon, Jakob Verbeek, Holger Schwenk, and Matthieu Cord. DiffEdit: Diffusion-based semantic image editing with mask guidance. In International Conference on Learning Representations (ICLR) , 2023. [5] Patrick Esser, Sumith Kulal, Andreas Blattmann, Rahim Entezari, Jonas M ¨uller, Harry Saini, Yam Levi, Dominik Lorenz, Axel Sauer, Frederic Boesel, Dustin Podell, Tim Dockhorn, Zion English, Kyle Lacey, Alex Goodwin, Yan-nik Marek, and Robin Rombach. Scaling rectified flow transformers for high-resolution image synthesis. In Inter-national Conference on Machine Learning (ICML) , 2024. [6] William Fedus, Barret Zoph, and Noam Shazeer. Switch transformers: Scaling to trillion parameter models with sim-ple and efficient sparsity. Journal of Machine Learning Research (JMLR) , 23(120):1–39, 2022. [7] Amir Hertz, Ron Mokady, Jay Tenenbaum, Kfir Aberman, Yael Pritch, and Daniel Cohen-Or. Prompt-to-prompt im-age editing with cross-attention control. In International Conference on Learning Representations (ICLR) , 2023. [8] Jonathan Ho, Ajay Jain, and Pieter Abbeel. Denoising diffu-sion probabilistic models. In Advances in Neural Informa-tion Processing Systems (NeurIPS) , 2020. [9] Jonathan Ho and Tim Salimans. Classifier-free diffusion guidance. In NeurIPS Workshop on Deep Generative Models and Downstream Applications , 2021. [10] Inbar Huberman-Spiegelglas, Vladimir Kulikov, and Tomer Michaeli. LEDITS++: Limitless image editing using text-to-image models. In Conference on Computer Vision and Pattern Recognition (CVPR) , 2024. [11] Xuan Ju, Ailing Zeng, Yuxuan Bian, Shaoteng Liu, and Qiang Xu. PnP Inversion: Boosting diffusion-based edit-ing with 3 lines of code. In International Conference on Learning Representations (ICLR) , 2024. [12] Black Forest Labs. FLUX.1 Kontext: Flow matching for in-context image generation and editing in latent space. arXiv preprint arXiv:2506.15742 , 2025. [13] Guandong Li. Dual-channel attention guidance for training-free image editing control in diffusion transformers. arXiv preprint arXiv:2602.18022 , 2026. [14] Guandong Li and Zhaobin Chu. EditID: Training-free ed-itable ID customization for text-to-image generation. In 
+
+Findings of the Association for Computational Linguistics: EMNLP , 2025. [15] Yaron Lipman, Ricky T. Q. Chen, Heli Ben-Hamu, Maxi-milian Nickel, and Matt Le. Flow matching for generative modeling. In International Conference on Learning Repre-sentations (ICLR) , 2023. 
+
+9[16] Chenlin Meng, Yutong He, Yang Song, Jiaming Song, Jia-jun Wu, Jun-Yan Zhu, and Stefano Ermon. SDEdit: Guided image synthesis and editing with stochastic differential equa-tions. In International Conference on Learning Representa-tions (ICLR) , 2022. [17] Ron Mokady, Amir Hertz, Kfir Aberman, Yael Pritch, and Daniel Cohen-Or. Null-text inversion for editing real images using guided diffusion models. In Conference on Computer Vision and Pattern Recognition (CVPR) , 2023. [18] Maxime Oquab, Timoth ´ee Darcet, Th ´eo Moutakanni, Huy V. Vo, Marc Szafraniec, Vasil Khalidov, Pierre Fernandez, Daniel Haziza, Francisco Massa, Alaaeldin El-Nouby, Rus-sell Howes, Po-Yao Huang, Hu Xu, Vasu Sharma, Shang-Wen Li, Wojciech Galuba, Mike Rabbat, Mido Assran, Nico-las Ballas, Gabriel Synnaeve, Ishan Misra, Herv ´e J ´egou, Julien Mairal, Patrick Labatut, Armand Joulin, and Piotr Bo-janowski. DINOv2: Learning robust visual features without supervision. Transactions on Machine Learning Research (TMLR) , 2024. [19] Gaurav Parmar, Krishna Kumar Singh, Richard Zhang, Yijun Li, Jingwan Lu, and Jun-Yan Zhu. Zero-shot image-to-image translation. In ACM SIGGRAPH , 2023. [20] William Peebles and Saining Xie. Scalable diffusion models with transformers. In International Conference on Computer Vision (ICCV) , 2023. [21] Alec Radford, Jong Wook Kim, Chris Hallacy, Aditya Ramesh, Gabriel Goh, Sandhini Agarwal, Girish Sastry, Amanda Askell, Pamela Mishkin, Jack Clark, Gretchen Krueger, and Ilya Sutskever. Learning transferable visual models from natural language supervision. In International Conference on Machine Learning (ICML) , 2021. [22] Robin Rombach, Andreas Blattmann, Dominik Lorenz, Patrick Esser, and Bj ¨orn Ommer. High-resolution image synthesis with latent diffusion models. In Conference on Computer Vision and Pattern Recognition (CVPR) , 2022. [23] Noam Shazeer, Azalia Mirhoseini, Krzysztof Maziarz, Andy Davis, Quoc Le, Geoffrey Hinton, and Jeff Dean. Outra-geously large neural networks: The sparsely-gated mixture-of-experts layer. In International Conference on Learning Representations (ICLR) , 2017. [24] Qwen Team. Qwen-Image technical report. arXiv preprint arXiv:2508.02324 , 2025. [25] Narek Tumanyan, Michal Geyer, Shai Bagon, and Tali Dekel. Plug-and-play diffusion features for text-driven image-to-image translation. In Conference on Computer Vision and Pattern Recognition (CVPR) , 2023. [26] Yang Ye, Xianyi He, Zongjian Li, Bin Lin, Shenghai Yuan, Zhiyuan Yan, Bohan Hou, and Li Yuan. ImgEdit: A unified image editing dataset and benchmark. In Advances in Neural Information Processing Systems (NeurIPS) Datasets and Benchmarks Track , 2025. [27] Kai Zhang, Lingbo Mo, Wenhu Chen, Huan Sun, and Yu Su. MagicBrush: A manually annotated dataset for instruction-guided image editing. In Advances in Neural Information Processing Systems (NeurIPS) , 2023. [28] Lvmin Zhang, Anyi Rao, and Maneesh Agrawala. Adding conditional control to text-to-image diffusion models. In 
+
+International Conference on Computer Vision (ICCV) , 2023. [29] Haozhe Zhao, Xiaojian Ma, Liang Chen, Shuzheng Si, Ru-jie Wu, Kaikai An, Peiyu Yu, Minjia Zhang, Qing Li, and Baobao Chang. UltraEdit: Instruction-based fine-grained image editing at scale. In Advances in Neural Information Processing Systems (NeurIPS) , 2024. 
+
+10 Figure 7: Qualitative comparison on ImgEdit-Bench-100. One representative sample per category. Columns: source, baseline, best single op (KVInject α=0 .3, L30–45), oracle router, auto router (CLIP zero-shot). The router preserves source structure (background, identity) on style , attribute , and background edits where the baseline overshoots into hallucinated content. 
+
+11

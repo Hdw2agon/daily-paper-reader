@@ -1,0 +1,646 @@
+Title: SpecEdit: Training-Free Acceleration for Diffusion based Image Editing via Semantic Locking
+
+URL Source: https://arxiv.org/pdf/2605.02152v1
+
+Published Time: Tue, 05 May 2026 01:47:28 GMT
+
+Number of Pages: 21
+
+Markdown Content:
+# SpecEdit: Training-Free Acceleration for Diffusion based Image Editing via Semantic Locking 
+
+Zhengan Yan 1∗ Shikang Zheng 1∗ Haoran Qin 1,3∗ Xiaobing Tu 2 Yinggui Wang 2
+
+Jiacheng Liu 1 Jiaxuan Ren 1,4 Yuqi Lin 1,5 Peiliang Cai 1 Jinkui Ren 2
+
+Xiantao Zhang 2 Linfeng Zhang 1† 
+
+> 1
+
+EPIC Lab , Shanghai Jiao Tong University 2 Alibaba Group 3 Shandong University  
+
+> 4
+
+UESTC 5 Jilin University 
+
+Abstract 
+
+Diffusion-based image editing offers strong semantic controllability, but remains com-putationally expensive due to iterative high-resolution denoising over all spatial tokens. Dynamic-resolution sampling reduces this cost by performing early steps at reduced reso-lution. However, existing approaches prioritize upsampling using low-level heuristics such as edge detection or channel variance, which are weakly aligned with editing semantics and may lead to structural inconsistency. Moreover, spatial regions are often upsampled with-out verifying whether semantic modification is actually required, resulting in redundant high-resolution computation and accumulated errors. Therefore, we propose SpecEdit 
+
+(Spec ulative Edit ing), a training-free dynamic-resolution framework tailored for diffusion-based image editing. SpecEdit follows a draft-and-verify scheme: a low-resolution draft first estimates the semantic outcome, after which token-level discrepancies are used to identify edit-relevant tokens for high-resolution denoising, while the remaining tokens stay at a coarse resolution. Experiments on Qwen-Image-Edit and FLUX.1-Kontext-dev demonstrate up to 10 × and 7 × acceleration, while maintaining strong quality. SpecEdit is complementary to step distillation and other acceleration techniques, achieving up to 13 × speedup when com-bined with existing methods. Our code is in supplementary material and will be released on GitHub. 
+
+Keywords: Image Editing, Diffusion Acceleration 
+
+## 1 Introduction 
+
+Diffusion Transformers (DiTs) have become a dominant backbone for high-fidelity image gener-ation and are increasingly adopted in instruction-based image editing systems. By conditioning on textual instructions and reference images, recent editors such as Qwen-Image-Edit [1] and FLUX.1-Kontext-dev [2] enable precise and localized semantic manipulation while preserving global realism. However, despite their strong controllability and visual quality, practical de-ployment remains constrained by inference efficiency. Image editing typically requires dozens of iterative denoising steps, and at each step the Transformer performs high-resolution token interactions across the entire latent grid. As attention complexity scales quadratically with the number of spatial tokens, this uniform full-resolution computation incurs substantial latency and computational cost, limiting interactive and real-time applications. Diffusion acceleration methods mainly explore two directions: temporal and spatial opti-mization. Temporal acceleration reduces the number of sampling steps using improved solvers,   
+
+> ∗Equal contribution.
+> †Corresponding author.
+
+1  
+
+> arXiv:2605.02152v1 [cs.CV] 4 May 2026 Dissimilarity Ratio Dissimilarity Ratio Only 1% Region are Selected and Edited
+> Number of Samples
+> Number of Samples
+> Distribution of
+> GEdit -Bench
+> Distribution of
+> ImgEdit -Bench
+> Dissimilarity
+> Ratio: 0.013
+
+Figure 1: (Left ) Visualization of the semantic discrepancy estimated by our semantic verifi-cation mechanism. The discrepancy is computed between the result and the original input in a perceptual feature space, revealing that only a small spatial region participates in the edit. (Right ) Distribution of dissimilarity ratios on GEdit-Bench [3] and ImgEdit-Bench [4], where the ratio measures the proportion of tokens whose perceptual features change after edit-ing. Most samples exhibit very low dissimilarity, indicating that real-world editing typically modifies only a small portion of the image. distillation, or timestep reduction strategies [5, 6]. While effective for unconditional generation, aggressive step reduction can be fragile in editing scenarios, where identity preservation and structural consistency in unedited regions are critical. Semantic drift and localized artifacts become more likely when the denoising trajectory is shortened. Change the        
+
+> action of cat
+> to jumping
+> Remove the
+> bag near the
+> character ’s
+> hand
+> Add a flying
+> baseball
+> coming
+> towards the
+> player
+> Change the
+> color of bear
+> to black
+> Source Image Semantic Region Results Semantic Region Results
+> Replace the
+> cat on the
+> laptop with a
+> robot
+> Replace the
+> text ' APEX '
+> with ' CSGO '
+> Source Image
+> Add a blue
+> feathered
+> helmet
+> Craft the
+> cat using
+> cloisonné
+> enamel
+
+Figure 2: Visualization of semantic locking captured by SpecEdit. Spatial acceleration instead reduces per-step computation by lowering resolution or restrict-ing token interactions [7, 9, 10]. This direction is particularly attractive for image editing because edits are inherently sparse: only a subset of spatial tokens undergo semantic modifica-tion. Applying high-resolution denoising uniformly to all tokens therefore results in substantial redundant computation. This sparsity is empirically supported by benchmark statistics. As illustrated in Fig. 1, semantic modification is spatially concentrated: only a subset of tokens ex-hibit substantial discrepancy under editing instructions, while most regions remain structurally stable. This observation is further confirmed statistically in Fig. 1, where discrepant regions occupy only a limited fraction of the image on both GEdit and ImgEdit benchmarks. These ob-servations suggest that allocating high-resolution computation selectively to truly edited tokens 2(a) RALU (CVPR,2026)         
+
+> Edge detection
+> Not Semantic-aware Low-Res. Edit
+> (c) SpecEdit (Ours)
+> (,,)
+> Original Image
+> Difference
+> Semantic and Edit-aware
+> (b) Fresco (CVPR,2026)
+> Not Edit-aware
+> Variance > τ
+
+Figure 3: Comparison with conventional dynamic-resolution methods. (a) Edge-based methods (e.g., RALU [7]) select refinement regions using edge responses, which mainly capture low-level structures and are not semantic-aware. (b) Channel-variance-based methods (e.g., Fresco [8]) rely on channel statistics to guide region refinement but remain weakly aligned with editing semantics. (c) SpecEdit (Ours) generates an ultra-low-resolution draft and compares it with the original image to perform semantics-aware refinement, achieving stronger semantic alignment with the editing instruction. could significantly improve efficiency without sacrificing fidelity. Dynamic-resolution sampling follows this intuition by performing early denoising at reduced resolution and selectively up-sampling spatial tokens. However, directly adopting existing dynamic-resolution schemes for image editing remains nontrivial. The central difficulty lies in determining which tokens deserve high-resolution computation. Most prior dynamic-resolution approaches are designed for unconditional or text-to-image gen-eration and rely on low-level heuristics such as edge responses or feature variance to prioritize upsampling [7, 8]. These signals are weakly correlated with editing intent: visually salient edges may correspond to background structures that should remain unchanged, whereas semantic ed-its often involve texture, attributes, or small objects with limited geometric saliency. As a result, heuristic-driven upsampling may allocate computation to irrelevant regions while ne-glecting tokens that genuinely require semantic modification. This mismatch leads to two issues in editing: degraded semantic consistency in modified regions and unnecessary high-resolution computation in unedited areas. As visualized in Fig. 3, heuristic-driven dynamic resolution of-ten refines geometrically salient but semantically irrelevant regions, whereas SpecEdit explicitly locks semantically modified areas through draft-based verification. In this work, we propose SpecEdit (Spec ulative Edit ing), a training-free dynamic-resolution framework tailored specifically for diffusion-based image editing. Our key insight is that high-resolution computation should be allocated based on semantic verification rather than geometric heuristics. SpecEdit adopts a spatial draft and verification paradigm inspired by speculative decoding [11]. Instead of performing full-resolution denoising over all tokens, we first generate a low-resolution draft in a heavily downsampled latent space, capturing the coarse semantic outcome of the edit at low cost. We then compute a token-level perceptual discrepancy map be-tween the draft and the original input representation to identify edit-relevant tokens, effectively capturing the spatial regions that require semantic modification (Fig. 2). Only the verified tokens are priority-upsampled and fed into the Transformer for high-resolution denoising, while the remaining tokens stay at low resolution throughout the dynamic-resolution process and are upsampled only at the final reconstruction stage. To stabilize global structure and prevent isolated artifacts, we additionally include a sparse set of uniformly sam-pled tokens in the upsampling set. This mixed-resolution design preserves global context while concentrating computation on semantically meaningful regions. We evaluate SpecEdit on two representative editing models, Qwen-Image-Edit and FLUX.1-Kontext-dev, using the GEdit [3] and ImgEdit [4] benchmarks. Across a wide range of computational budgets, SpecEdit im-proves the balance between efficiency and quality, achieving up to 10 × and 7 × acceleration, respectively, while maintaining strong semantic consistency and perceptual quality. SpecEdit is 3orthogonal to temporal acceleration and model compression techniques. When combined with distillation or caching, it can reach up to 13 × speedup. Our contributions are summarized as follows: 
+
+• Dynamic resolution for image editing. We are the first to systematically introduce dynamic-resolution sampling into diffusion-based image editing, adapting it to the unique requirement of semantic preservation under instruction-guided modification. 
+
+• Semantics-aware draft-and-verify mechanism. We propose SpecEdit , a training-free framework that employs a preliminary low-resolution draft for semantic discrepancy estima-tion and selectively expands verified tokens for high-resolution Transformer computation. 
+
+• Outstanding performance. Across Qwen-Image-Edit and FLUX.1-Kontext-dev, SpecEdit consistently improves acceleration without sacrificing semantic fidelity, and integrates seam-lessly with temporal acceleration and model-efficiency techniques to provide additive speedups. 
+
+## 2 Related Works 
+
+While diffusion models have achieved remarkable performance in image generation, growing attention has been devoted to the field of image editing, with the pursuit of more accurate and efficient image editing approaches. Existing studies mainly focus on two aspects. One concerns semantic region distinction and the other focuses on model efficiency. 
+
+Semantic Region Distinction in Image Editing. Early researchers retained certain refer-ence features by injecting external information (e.g., Contronet[12] and KV injection techniques[13, 14]), and achieved promising results in both semantic information and image quality. With the further rapid development of transformers, diffusion transformer models can directly modify the corresponding semantic regions without manual masking. However, existing methods lack sufficient consideration for distinguishing edited and unedited regions, and fail to fully reflect the differences between the two during the denoising process. 
+
+Efficiency Optimization of Diffusion Models. In terms of efficiency, researchers have carried out studies around the temporal and spatial dimensions, and proposed a series of opti-mization methods, which are divided into temporal acceleration and spatial acceleration: 
+
+Temporal Acceleration. The core idea of temporal acceleration is to reduce the number of timesteps as much as possible without degrading image quality. As the first method to propose a deterministic sampler, DDIM [15] enables fast image generation while controlling the perceptual loss at an extremely low level. In the aspect of high-order numerical solving, DPM-Solver[16, 17, 18] and its various variants take minimizing the local truncation error as the core means, achieving a precise balance between generation quality and efficiency. Progres-sive distillation technology[19] compresses the originally lengthy denoising chain into a shallow student model, reducing the model running cost from the training side. under the direct map-ping paradigm, consistency models abandon the traditional denoising logic and directly learn the fixed-point mapping relationship from noise to target signals, thereby further reducing the number of steps required in the inference stage. In addition, training-free computational op-timization methods [5, 20, 21]without redundancy can reuse the hidden states and attention maps of different timesteps through the feature caching mechanism, thus significantly reducing the resource overhead caused by repeated computations. 
+
+Spatial Acceleration. Although sparse token interactions reduce the quadratic complexity of self-attention for diffusion acceleration, they yield merely limited practical speedup[22, 23, 24]. Similarly, cascade diffusion models for coarse-to-fine synthesis introduce extra overhead from additional training pipelines and auxiliary networks[25, 26]. State-of-the-art training-free dy-namic resolution schemes avoid such extra costs yet heavily rely on elaborately designed renois-ing schedules and fragile hyperparameter configurations, which compromise their deployment stability and limit the final acceleration gains. More importantly, during partial upsampling, 4existing dynamic resolution frameworks only prioritize edge regions or areas with large channel variance[7, 8], thus completely failing to maintain semantic alignment with the input editing guidance. 
+
+## 3 Method 
+
+3.1 Preliminaries 
+
+3.1.1 Diffusion Models 
+
+Diffusion models [27] define a forward noising process and a learned reverse denoising process. The forward process gradually perturbs a clean sample x0 into noise: 
+
+xt = √¯αtx0 + √1 − ¯αt ϵt, ϵt ∼ N (0 , I), (1) where ¯ αt = Qts=1 αs. The reverse predicts xt−1 using a neural network ϵθ:
+
+xt−1 = 1
+
+√αt
+
+
+
+xt − 1 − αt
+
+√1 − ¯αt
+
+ϵθ(xt, t )
+
+
+
++ σtϵ.  (2) In diffusion Transformers, each step operates over a spatial token grid, leading to quadratic complexity with respect to token count. 
+
+3.1.2 Dynamic Resolution 
+
+Dynamic resolution reduces computation by running early denoising steps on downsampled latents. Given xt ∈ RH×W ×C :
+
+ˆxt = Us
+
+ f (Ds(xt)) , (3) where Ds and Us denote downsampling and resolution restoration operators. For editing, however, the central problem is not merely resolution scaling, but identifying which tokens truly require high-resolution computation. 
+
+3.2 SpecEdit Overview 
+
+The overall pipeline is illustrated in Fig. 4. SpecEdit consists of two stages: a preliminary draft stage for semantic verification and a subsequent dynamic-resolution sampling framework for efficient denoising. 
+
+Preliminary draft stage. Before entering the dynamic-resolution framework, we perform a lightweight draft inference at heavily downsampled (16 ×) resolution. A complete low-resolution denoising trajectory produces a coarse edited result, which is compared with the original input to estimate token-level semantic discrepancies. This stage determines the verified tokens requiring high-resolution processing, but does not participate in the subsequent denoising trajectory. 
+
+Dynamic-resolution sampling. After region verification, we enter the dynamic-resolution framework. The latent is first downsampled by a moderate factor (4 ×) to construct a coarse global representation. Verified tokens are selectively expanded to fine resolution for high-resolution Transformer computation, while remaining tokens stay at the coarse resolution. In the final reconstruction stage, all tokens are restored to full resolution to produce the output image. 5Semantic mask  
+
+> semantics
+> Average mask
+> spatial uniformity
+> Low Resolution Denoise (Very Fast)
+
+4x Downsample Complete Upsample Output Image 
+
+> score > τ
+> Tiny Feature
+> Extractor
+
+16x Downsample             
+
+> Decoder
+> Guidance
+> mask
+> Timesteps 30 ··· 20 ··· 6··· 0
+> Evaluation
+> Stage A: Low-Cost Draft:
+> Before Edit After Edit
+> Partial Upsample
+> Stage B: Dynamic Resolution
+> Encoder
+> Edit Prompt:
+> “Add a red balloon ”
+> Reference Image
+> 1024 x 1024
+> 512x512
+> (512~1024) x (512~1024)
+> 1024x1024
+> 1024x1024
+> 256x256 256x256
+
+Figure 4: Overview of SpecEdit. A low-resolution draft is produced to estimate semantic discrepancies. The verified tokens are prioritized for high-resolution upsampling during sam-pling. A sparse set of uniformly sampled tokens is additionally included to maintain global structural stability. 
+
+3.3 Spatial Draft-and-Verify Mechanism 
+
+3.3.1 Draft Generation 
+
+Before entering the dynamic-resolution denoising framework, we introduce a lightweight pre-liminary stage operating entirely at a heavily downsampled resolution. Given the input latent zori , we first apply a 16 × spatial downsampling: 
+
+˜zori = D16 (zori ). (4) We then perform a complete diffusion sampling process at this coarse resolution using a fixed number of inference steps: 
+
+˜zdraft = Denoise(˜ zori , c; ϵθ). (5) This stage produces a fully denoised low-resolution edited result under standard diffusion in-ference, but at significantly reduced computational cost. The resulting draft is used only for semantic discrepancy estimation. 
+
+3.3.2 Semantic Verification 
+
+To estimate which spatial tokens are likely involved in the edit, we compute a token-wise discrepancy map between the draft result and the original input in a perceptual feature space[28]. Specifically, we extract intermediate feature maps {Φℓ}Lℓ=1 from the decoder and measure a normalized multi-layer feature distance: 
+
+S(i, j ) = 1
+
+L
+
+LX
+
+ℓ=1 
+
+Norm 
+
+
+
+Φℓ(Us(˜ zdraft )) 
+
+
+
+i,j − Norm  Φℓ(zori )
+
+i,j 
+
+22
+
+, (6) where Norm( ·) denotes channel-wise ℓ2 normalization. Tokens with large discrepancy values are regarded as edit-relevant: 
+
+Tedit = {(i, j ) | S(i, j ) > τ }. (7) This verification step serves as a lightweight semantic estimator for guiding partial upsampling. The perceptual discrepancy itself follows standard practice. Our main contribution lies in how the resulting token set is integrated into the dynamic-resolution denoising framework. 63.4 Resolution Restoration and Selective Computation 
+
+3.4.1 Token Expansion (Resolution Restoration) 
+
+For tokens selected for high-resolution processing, we restore spatial resolution through a struc-tured token expansion. Each coarse token is projected using an orthogonal transformation and combined with a small random perturbation to produce four fine-resolution tokens arranged on a 2 × 2 grid: 
+
+zfine  
+
+> i,j
+
+= Expand( zcoarse  
+
+> i,j
+
+), (8) where Expand( ·) denotes a resolution restoration operator that preserves energy under an or-thogonal mapping. This step merely restores spatial granularity and does not introduce addi-tional learnable parameters in our framework. 
+
+3.4.2 Uniform Coverage 
+
+To stabilize global geometry, we additionally introduce a sparse uniform set: 
+
+Tuniform = {(i, j ) | i mod k = 0 , j mod k = 0 }. (9) The final expansion set is: 
+
+Texpand = Tedit ∪ T uniform . (10) 
+
+3.4.3 Selective High-Resolution Transformer Update 
+
+We construct a mixed-resolution latent where tokens in Texpand are restored to fine resolution, while others remain in draft form. Let Mt denote one Transformer denoising step: 
+
+zt−1 = Mt(zmixed  
+
+> t−1
+
+, c, t ; Texpand ). (11) Only tokens in Texpand undergo full-resolution attention and feed-forward computation. All remaining tokens reuse coarse representations, preserving global context while significantly re-ducing computation. SpecEdit differs from prior dynamic-resolution methods in that spatial computation is allo-cated based on semantic verification rather than geometric heuristics. The resolution restoration operator is lightweight and orthogonal to our main contribution. The overall framework is fully training-free and compatible with existing temporal acceleration techniques. 
+
+## 4 Experiment 
+
+4.1 Experiment Settings 
+
+Implementation Details. We evaluate SpecEdit on two representative diffusion-based edit-ing models, Qwen-Image-Edit and FLUX.1-Kontext-dev . All experiments are conducted on NVIDIA A100 GPUs. We compare against diverse acceleration baselines spanning step reduction, attention sparsification[10], spatial resolution scheduling (e.g., RALU [7], Bottle-neck Sampling[29] and Fresco [8]), feature caching and forecasting methods (e.g., ToCa [30], FORA [31], DuCa [32], Freqca [21], TaylorSeer [5], FoCa [33]), as well as distillation-based variants when applicable. To assess compatibility, we further combine SpecEdit with the step-distilled FLUX.1-Kontext-Lightning .
+
+Datasets and Metrics. Experiments are conducted on two public editing benchmarks: 
+
+GEdit-Bench [3] and ImgEdit-Bench [4], where we focus on the single-turn setting across nine editing categories. We evaluate both editing quality and computational efficiency, mea-suring efficiency by NFE, latency, speedup, and FLOPs, and assessing quality using Structural Consistency (SC), Perceptual Quality (PQ), and Overall Score (OS) on GEdit-Bench, together with category-level and overall performance on ImgEdit-Bench. 7Table 1: Quantitative results of image-editing on GEdit-Bench. 
+
+Method NFE Acceleration GEdit-CN(FULL) GEdit-EN(FULL) Latency (s) ↓ Speed ↑ FLOPs (T) ↓ Speed ↑ SC ↑ PQ ↑ OS ↑ SC ↑ PQ ↑ OS ↑
+
+100% steps 50 284.51 1.00 × 28219.71 1.00 × 7.68 7.51 7.41 7.82 7.54 7.54 60% steps 30 172.43 1.65 × 16931.83 1.67 × 7.70 7.53 7.44 7.77 7.52 7.47 20% steps 10 58.66 4.85 × 5638.18 5.00 × 7.65 7.42 7.35 7.73 7.46 7.44 SpargeAttention 50 231.30 1.23 × 16846.78 1.67 × 7.87 7.57 7.56 7.81 7.53 7.50 ToCa ( N = 6) 50 172.43 1.65 × 7850.13 3.59 × 7.89 7.50 7.57 7.89 7.46 7.54 
+
+Bottleneck Sampling 30 109.38 2.60 × 9954.36 2.83 × 7.44 7.59 7.28 7.62 7.40 7.24 RALU 30 105.87 2.69 × 9286.52 3.04 × 7.83 7.58 7.55 7.83 7.52 7.52 
+
+SpecEdit 30 96.23 2.96 × 8623.70 3.27 × 7.91 7.53 7.58 7.87 7.54 7.54 
+
+Bottleneck Sampling 18 85.95 3.31 × 8090.07 3.49 × 7.75 7.52 7.45 7.70 7.46 7.39 Duca ( N = 7) 50 69.54 4.09 × 5699.89 4.95 × 7.73 7.44 7.44 7.80 7.40 7.45 RALU 18 66.94 4.25 × 6200.73 4.55 × 7.89 7.56 7.60 7.82 7.52 7.51 TaylorSeer ( N = 6) 50 65.66 4.33 × 5643.13 5.00 × 7.53 7.40 7.25 7.60 7.37 7.30 FORA( N = 5) 50 63.15 4.51 × 5643.13 5.00 × 7.60 7.31 7.25 7.62 7.34 7.28 
+
+SpecEdit (N = 18) 18 56.01 5.08 × 5230.34 5.40 × 7.91 7.54 7.59 7.92 7.52 7.59 
+
+TaylorSeer ( N = 9) 50 53.92 5.28 × 4515.74 6.25 × 6.61 6.65 6.31 6.67 6.63 6.31 FORA ( N = 7) 50 52.20 5.45 × 4515.74 6.25 × 7.42 7.13 7.06 7.43 7.19 7.06 Freqca ( N = 9) 50 51.09 5.57 × 4514.48 6.25 × 7.62 7.18 7.27 7.66 7.12 7.21 
+
+SpecEdit 11 47.11 6.04 × 3992.31 7.07 × 7.85 7.51 7.52 7.85 7.51 7.53 SpecEdit 9 44.27 6.43 × 2580.52 10.94 × 7.80 7.43 7.45 7.79 7.39 7.43 
+
+• SC : semantic consistency, PQ : perceptual quality, OS : overall score. 
+
+4.2 Results on Qwen-Image-Edit 
+
+Low-to-moderate acceleration. In the low-to-moderate regime, SpecEdit consistently achieves the best balance between efficiency and quality. On GEdit-Bench , at 30 NFE it deliv-ers 2.96 × speedup (96.23s) while achieving the highest overall scores on both CN/EN (OS 7.58/7.54) and strong semantic consistency (SC 7.91/7.87), outperforming Bottleneck Sampling 
+
+(2.60 ×, OS 7.28/7.24). On ImgEdit-Bench , SpecEdit matches the full-step overall score (3.88) at 2.96 × speedup, whereas RALU at similar acceleration (2.69 ×) drops to 3.44. At 18 NFE , SpecEdit reaches 5.08 × speedup while maintaining strong performance (OS 7.59/7.59 on GEdit, 3.80 on ImgEdit), showing that semantics-aware token selection preserves fidelity under reduced budgets. These results indicate that draft-guided semantic verification enables more accurate allocation of high-resolution computation to truly edited regions. In contrast, heuristic upsampling strategies tend to prioritize geometrically salient areas, which may not align with the actual editing semantics. Our approach instead identifies semantically relevant tokens through perceptual feature discrepancies, enabling computation to focus on regions that truly participate in the edit. Table 2: Quantitative results of image-editing on ImgEdit-Bench.                                                                                                                                                                                                                                     
+
+> Model NFE Acceleration ImgEdit-Bench Latency (s) ↓Speedup ↑Action Add Adjust Background Compose Extract Remove Replace Style Overall ↑
+> 100% steps 50 284.51 1.00 ×3.97 4.72 3.96 4.19 3.57 4.25 3.97 3.14 2.92 3.88 60% steps 30 172.43 1.65 ×4.01 4.63 4.15 4.07 3.57 4.34 3.93 3.08 2.94 3.88 20% steps 10 58.66 4.85 ×3.82 4.64 3.99 3.91 3.52 4.11 3.61 2.99 2.94 3.75 ToCa (N=6) 50 172.43 1.65 ×3.93 4.56 4.22 4.21 3.52 4.32 3.84 3.04 2.96 3.88 Bottleneck 30 109.38 2.60 ×3.96 4.68 4.16 3.95 3.65 3.96 3.57 2.91 2.92 3.75 RALU 30 105.87 2.69 ×3.87 4.40 3.55 3.77 3.13 3.72 2.93 2.92 2.63 3.44
+> SpecEdit 30 96.23 2.96 ×3.94 4.63 4.08 4.17 3.52 4.19 4.02 3.10 3.00 3.88
+> Bottleneck 18 85.95 3.31 ×3.65 4.13 3.15 3.88 2.93 3.49 2.63 2.67 2.75 3.25 FoCa (N=9) 50 74,67 3.81 ×3.58 3.83 2.52 2.88 2.52 2.98 2.79 2.39 2.24 2.86 RALU 18 66.94 4.25 ×3.97 4.52 4.01 4.03 3.52 4.25 3.79 2.77 2.94 3.76
+> SpecEdit 18 56.01 5.08 ×3.79 4.60 4.08 4.06 3.50 4.28 3.74 3.02 2.87 3.80
+> DuCa (N=8) 50 77.73 3.66 ×3.93 4.54 3.92 3.95 3.54 4.31 3.68 3.02 2.86 3.77 Freqca (N=5) 50 71.30 3.99 ×3.96 4.63 4.01 4.07 3.65 4.17 3.75 3.21 3.04 3.83 FORA (N=6) 50 60.40 4.71 ×3.51 4.26 3.27 2.62 3.20 2.95 2.72 2.39 2.09 2.94
+> SpecEdit 11 47.11 6.04 ×3.92 4.50 4.01 4.11 3.59 4.22 3.98 3.02 3.00 3.84 SpecEdit 944.27 6.43 ×3.95 4.53 3.95 3.97 3.61 4.20 3.91 2.93 2.89 3.78
+
+8High acceleration. SpecEdit remains notably stable. On GEdit-Bench , at 11/9 NFE 
+
+it achieves 6.04 ×/6.43 × speedup while maintaining competitive quality (OS 7.52/7.45 on CN and 7.53/7.43 on EN). In contrast, TaylorSeer (N=9) attains comparable speedup (5.28 ×) but degrades substantially (OS 6.31/6.31). On ImgEdit-Bench , SpecEdit maintains 3.84 (11 NFE) and 3.78 (9 NFE) at over 6 × acceleration. These results indicate that draft-guided semantic verification enables robust structural preservation even in the high-acceleration regime. Table 3: Compatibility with Acceleration Methods on GEdit-Bench.                                                 
+
+> Method NFE Acceleration GEdit-CN(FULL) GEdit-EN(FULL) Latency (s) ↓Speed ↑FLOPs (T) ↓Speed ↑SC ↑PQ ↑OS ↑SC ↑PQ ↑OS ↑
+> 100% steps 50 284.51 1.00 ×28219.71 1.00 ×7.68 7.51 7.41 7.82 7.54 7.54
+> SpecEdit+FoCa 18 47.45 6.00 ×4453.91 6.34 ×7.86 7.51 7.56 7.87 7.53 7.57
+> •SC : semantic consistency, PQ : perceptual quality, OS : overall score.
+
+Table 4: Compatibility with Acceleration Methods on ImgEdit-Bench.                                            
+
+> Model NFE Acceleration ImgEdit-Bench Latency (s) ↓Speedup ↑Action Add Adjust Background Compose Extract Remove Replace Style Overall ↑
+> 100% steps 50 284.51 1.00 ×3.97 4.72 3.96 4.19 3.57 4.25 3.97 3.14 2.92 3.88 SpecEdit + FoCa 18 47.45 6.00 ×3.88 4.50 4.02 3.96 3.54 4.24 3.90 2.87 2.87 3.75
+
+Compatibility with complementary acceleration methods. Table 4 and Table 3 evalu-ate the compatibility of SpecEdit with feature caching (FoCa). On ImgEdit-Bench , combining SpecEdit with FoCa achieves 6.00 × latency speedup (47.45s) while maintaining competitive overall performance (3.75 vs. 3.88). On GEdit-Bench , SpecEdit+FoCa further delivers 6.00 ×
+
+latency and 6.34 × FLOPs reduction while sustaining strong semantic consistency and percep-tual quality (OS 7.56/7.57 on CN/EN), close to the full-step baseline. Table 5: Quantitative results of image-editing on GEdit-Bench. 
+
+Method NFE Acceleration GEdit-EN(FULL) Latency (s) ↓ Speed ↑ FLOPs (T) ↓ Speed ↑ SC ↑ PQ ↑ OS ↑
+
+100% steps 50 50.20 1.00 × 8299.54 1.00 × 6.80 7.26 6.51 60% steps 30 32.23 1.56 × 4979.72 1.67 × 6.54 7.28 6.25 20% steps 10 10.47 4.79 × 1659.91 5.00 × 6.60 7.18 6.28 SpargeAttention 50 46.05 1.09 × 5603.68 1.48 × 6.46 7.25 6.21 RALU 30 23.34 2.15 × 2730.53 3.04 × 7.06 7.20 6.70 
+
+Fresco 30 20.48 2.45 × 2361.22 3.51 × 7.02 7.12 6.65 Bottleneck Sampling 30 18.25 2.75 × 2727.10 3.04 × 6.46 6.63 6.08 
+
+SpecEdit 30 15.93 3.15 × 2508.60 3.31 × 7.08 7.08 6.65 ToCa ( N = 8) 50 29.56 1.70 × 1841.35 4.51 × 6.43 7.25 6.12 Fresco 18 17.73 2.83 × 1878.83 4.42 × 7.01 7.15 6.66 RALU 18 15.30 3.28 × 2123.74 3.91 × 7.05 7.16 6.68 Bottleneck Sampling 18 15.21 3.30 × 2274.58 3.65 × 6.86 6.77 6.43 TaylorSeer ( N = 6) 50 13.95 3.60 × 1660.95 5.00 × 6.47 7.29 6.17 FoCa ( N = 6) 50 13.86 3.62 × 1660.01 5.00 × 6.62 7.27 6.27 
+
+SpecEdit 18 12.24 4.10 × 1541.50 5.38 × 7.12 6.98 6.69 
+
+ToCa ( N = 12) 50 20.72 2.42 × 1359.61 6.10 × 6.39 6.91 6.04 TaylorSeer ( N = 9) 50 12.05 4.17 × 1329.02 6.24 × 6.40 6.99 6.07 DuCa ( N = 12) 50 10.39 4.83 × 1376.55 6.03 × 6.59 7.01 6.17 
+
+SpecEdit 11 7.84 6.40 × 1199.78 6.92 × 7.13 6.97 6.68 
+
+SpecEdit 9 7.12 7.05 × 1125.74 7.37 × 7.01 7.07 6.75    
+
+> •SC : semantic consistency, PQ : perceptual quality, OS : overall score.
+
+94.3 Results on FLUX.1-Kontext-dev 
+
+In the low to moderate regime (30/18 NFE), SpecEdit consistently achieves a strong balance between efficiency and quality. On GEdit-Bench , at 30 NFE it delivers 3.15 × speedup with the highest SC (7.08) and competitive OS (6.65), outperforming Bottleneck Sampling (2.75 ×,OS 6.08) and matching or surpassing Fresco at higher acceleration. At 18 NFE, SpecEdit further reaches 4.10 × speedup with the best OS (6.69), surpassing both RALU and Bottleneck. On ImgEdit-Bench , SpecEdit achieves 3.15 × and 4.10 × speedup at 30/18 NFE while maintaining the strongest overall performance (3.64/3.68), indicating more stable semantic preservation than heuristic spatial or temporal baselines. This improvement suggests that draft-guided semantic verification provides a more reliable criterion for token selection, enabling computation to focus on truly edited regions while pre-serving global structure and maintaining consistent editing quality under different sampling budgets. Notably, these improvements are reflected across both semantic consistency and over-all performance, indicating that the proposed mechanism achieves a favorable balance between efficiency and fidelity. By reducing redundant high-resolution computation in semantically irrel-evant regions, SpecEdit improves the stability of the denoising process and maintains consistent editing behavior across datasets and acceleration levels. Table 6: Quantitative results of image-editing on ImgEdit-Bench.                                                                                                                                                                                                                                           
+
+> Model NFE Acceleration ImgEdit-Bench Latency (s) ↓Speedup ↑Action Add Adjust Background Compose Extract Remove Replace Style Overall ↑
+> 100% steps 50 50.20 1.00 ×3.89 4.41 3.60 4.05 3.24 4.00 3.47 3.20 2.84 3.66 60% steps 30 32.23 1.56 ×3.87 4.41 3.45 4.01 3.34 3.99 3.31 3.14 2.85 3.60 20% steps 10 10.47 4.79 ×3.82 4.53 3.41 3.95 3.30 3.87 3.29 3.22 2.70 3.58 SpargeAttention 50 48.26 1.04 ×3.88 4.48 3.59 3.82 3.26 3.86 2.92 3.08 2.88 3.54 RALU 30 23.34 2.15 ×3.86 4.61 3.63 4.07 3.28 3.96 3.43 3.08 2.91 3.64
+> Bottleneck Sampling 30 18.25 2.75 ×3.70 4.11 3.36 3.86 2.89 3.41 2.66 2.76 2.82 3.30
+> SpecEdit 30 15.93 3.15 ×3.92 4.51 3.52 4.16 3.15 3.89 3.35 3.33 2.72 3.64
+> Fresco 18 17.73 2.83 ×3.82 4.53 3.44 4.16 3.33 3.92 3.46 3.23 2.82 3.63 Bottleneck Sampling 18 15.21 3.30 ×3.56 4.21 3.09 3.85 2.92 3.49 2.69 2.77 2.87 3.27 TaylorSeer ( N= 6) 50 13.21 3.80 ×3.86 4.62 3.55 3.63 3.24 3.76 3.07 2.71 2.52 3.44 FORA ( N= 6) 50 12.26 4.09 ×3.86 4.38 3.50 3.84 3.35 3.87 3.03 3.11 2.80 3.53
+> SpecEdit 18 12.24 4.10 ×3.92 4.53 3.59 4.15 3.24 3.95 3.45 3.36 2.75 3.68
+> TaylorSeer ( N= 9) 50 11.43 4.39 ×3.60 4.17 3.11 3.72 2.93 3.41 2.78 3.03 2.74 3.29 FORA ( N= 9) 50 8.61 5.83 ×3.86 4.44 3.31 3.77 2.50 3.71 3.00 3.04 2.63 3.42 RALU 18 9.07 5.53 ×3.87 4.40 3.55 3.77 3.13 3.72 2.93 2.92 2.63 3.44
+> SpecEdit 11 7.84 6.40 ×3.88 4.54 3.60 4.06 3.22 3.76 3.41 3.27 2.66 3.62 SpecEdit 97.12 7.05 ×3.82 4.42 3.47 3.94 2.76 3.71 3.28 3.09 2.54 3.49
+
+Under aggressive computation budgets (11/9 NFE), SpecEdit remains stable and reliable without noticeable structural degradation. On GEdit-Bench , it achieves 6.40 ×/7.05 × accel-eration while maintaining strong perceptual quality (OS 6.68/6.75), substantially outperform-ing TaylorSeer (4.17 ×, OS 6.07) under comparable settings. On ImgEdit-Bench , SpecEdit preserves competitive overall performance (3.62/3.49) while achieving more than 6 × speedup, indicating a favorable balance between robustness and efficiency. These results suggest that the draft-guided semantic verification mechanism effectively sta-bilizes the denoising trajectory, preserving structural consistency and semantic alignment even under high acceleration. Specifically, by first generating a low-resolution draft to accurately identify edit-relevant spatial tokens through perceptual feature discrepancy estimation, the mechanism ensures that high-resolution computational resources are strategically allocated only to the regions that truly require semantic modification. As a result, the edited output main-tains robust structural consistency with the original input in unmodified regions while achieving precise semantic alignment with the editing instructions in modified areas, striking a critical bal-ance between efficiency and fidelity that prior heuristic-driven dynamic-resolution approaches fail to achieve. 10 Reference Specedit (Ours) TaylorSeer Ralu FoCa Bottleneck 
+
+Generate a 
+
+Pixar-style 
+
+animation with a 
+
+cheerful spring 
+
+background 
+
+Change the 
+
+action of cat 
+
+to sleeping 
+
+Add a beautiful 
+
+woman to 
+
+accompany the 
+
+boyfriend in 
+
+the image 
+
+Replace 
+
+the bear 
+
+with a fox   
+
+> 5.38x 5.00x 3.04x 5.00x 3.04x
+
+Original 
+
+> 1.00x
+
+Figure 5: Qualitative comparison on GEdit-Bench. SpecEdit achieves superior semantic preservation and visual quality at a higher acceleration ratio ( 5.38 ×) compared to state-of-the-art baselines. Table 7: Compatibility with Other Acceleration Methods on GEdit-Bench. 
+
+Method NFE Acceleration GEdit-EN(FULL) Latency (s) ↓ Speed ↑ FLOPs (T) ↓ Speed ↑ SC ↑ PQ ↑ OS ↑
+
+FLUX.1-Kontext-dev 50 50.20 1.00 × 8299.54 1.00 × 6.80 7.26 6.51 TaylorSeer ( N = 6) 50 13.95 3.60 × 1660.95 5.00 × 6.47 7.29 6.17 
+
+SpecEdit +TaylorSeer 30 11.43 4.39 × 1238.73 6.70 × 7.04 6.81 6.56 
+
+FLUX.1-Kontext-Lightning 8 8.24 6.09 × 1327.92 6.25 × 6.91 7.23 6.61 FLUX.1-Kontext-Lightning 6 6.36 7.89 × 995.94 8.33 × 6.96 7.19 6.63 SpecEdit +Step Distillation 8 6.97 7.20 × 856.98 9.68 × 6.99 7.02 6.58 
+
+SpecEdit +Step Distillation 6 5.48 9.16 × 636.65 13.03 × 6.93 7.12 6.57 
+
+• SC : semantic consistency, PQ : perceptual quality, OS : overall score. 
+
+Table 8: Compatibility with Other Acceleration Methods on ImgEdit-Bench.                                   
+
+> Model NFE Acceleration ImgEdit-Bench Latency (s) ↓Speedup ↑Action Add Adjust Background Compose Extract Remove Replace Style Overall ↑
+> FLUX.1-Kontext-dev 50 50.20 1.00 ×3.89 4.41 3.60 4.05 3.24 4.00 3.47 3.20 2.84 3.66 Specedit+Taylorseer 30 11.43 4.39 ×3.92 4.47 3.46 4.13 3.35 3.88 3.41 3.36 2.72 3.65
+
+Table 7 and Table 8 demonstrate that SpecEdit is orthogonal to both temporal caching and step distillation. On GEdit-Bench , combining SpecEdit with TaylorSeer improves latency from 3.60 × to 4.39 × speedup while increasing SC from 6.47 to 7.04 and raising OS from 6.17 to 6.56 , indicating that semantics-aware spatial allocation complements temporal feature reuse. When integrated with step distillation (FLUX.1-Kontext-Lightning), SpecEdit further achieves up to 9.16 × latency and 13.03 × FLOPs reduction, while maintaining competitive quality (OS 6.57 at 6 NFE), close to or exceeding the distilled baseline. Consistent gains are observed on ImgEdit-Bench , where SpecEdit+TaylorSeer reaches 4.39 × speedup with stable overall performance (3.65). These results confirm that draft-guided semantic verification provides additive acceleration without compromising structural consistency or semantic fidelity. 11 SpecEdit with Step Distillation, 
+
+13.03 x accelerated 
+
+SpecEdit with TaylorSeer , 6.70x 
+
+accelerated, completely training-free          
+
+> Convert the
+> young man and
+> woman into chibi-
+> style characters
+> Remove the
+> peanuts
+> Add a large diamond
+> ring on the finger,
+> making it abstract,
+> exaggerated, and funny
+> Change the color of
+> jacket to purple
+> Change the
+> background to the
+> ocean
+> Adjust the image
+> style to a watercolor
+> effect
+> Remove the text
+> from the image
+> Source Image Output
+> Source Image Output
+
+Figure 6: Compatibility with other methods. SpecEdit achieves additive speedups of up to 13.03 × and 6.70 × when combined with distillation and caching, respectively. Table 9: Ablation Study on FLUX.1-Kontext-dev with GEdit-Bench 
+
+Method NFE Acceleration GEdit-EN(FULL) Latency (s) ↓ Speed ↑ FLOPs (T) ↓ Speed ↑ SC ↑ PQ ↑ OS ↑
+
+FLUX.1-Kontext-dev 50 50.20 1.00 × 8299.54 1.00 × 6.80 7.26 6.51 Only semantic Region Upsampling 18 12.15 4.13 × 1518.58 5.47 × 7.10 6.80 6.60 Average Upampling 18 11.59 4.33 × 1383.57 5.99 × 6.94 7.08 6.56 
+
+SpecEdit 18 12.24 4.10 × 1541.50 5.38 × 7.12 6.98 6.69 
+
+SpecEdit(Average k=2) 18 12.50 4.02 × 1573.77 5.27 × 7.02 7.12 6.63 SpecEdit(Average k=4) 18 11.80 4.25 × 1532.55 5.42 × 7.12 6.95 6.65 
+
+SpecEdit(Average k=3) 18 12.24 4.10 × 1541.50 5.38 × 7.12 6.98 6.69 
+
+Specedit(w/o draft) 18 12.10 4.15 × 1449.01 5.73 × - - -
+
+Specedit(w/ draft) 18 12.24 4.10 × 1541.50 5.38 × 7.12 6.98 6.69 
+
+• SC : semantic consistency, PQ : perceptual quality, OS : overall score. 
+
+## 5 Ablation study 
+
+Effect of draft-based verification and upsampling strategies. Table 9 compares to-ken upsampling strategies under the same budget (18 NFE) on FLUX.1-Kontext-dev (GEdit-Bench). Semantic-only upsampling improves semantic consistency (SC 7.10) but reduces per-ceptual quality (PQ 6.80), while uniform upsampling achieves the highest efficiency (4.33 ×
+
+latency, 5.99 × FLOPs reduction) and higher PQ (7.08) at the cost of weaker semantic align-ment (SC 6.94). These results reveal a clear trade-off between semantic fidelity and perceptual quality when relying on a single token selection strategy. By combining semantic verification with sparse uniform coverage, SpecEdit achieves the best overall performance (OS 6.69) and the highest semantic consistency (SC 7.12) while main-taining competitive acceleration (4.10 ×). Performance remains stable across different strides k
+
+(best at k = 3), and removing the draft stage leads to unstable token selection, confirming that the ultra-low-resolution draft provides an effective and low-cost semantic prior. 
+
+## 6 Conclusion 
+
+We presented SpecEdit , a training-free dynamic-resolution framework tailored to diffusion-based image editing. SpecEdit follows a draft-and-verify paradigm: a low-resolution draft first 12 approximates the semantic evolution of the edit, and token-level perceptual discrepancies are then used to identify tokens that warrant high-resolution Transformer computation, with a sparse uniform coverage set introduced to stabilize global structure. Across Qwen-Image-Edit and FLUX.1-Kontext-dev on GEdit-Bench and ImgEdit-Bench, SpecEdit consistently improves the balance between efficiency and quality, achieving up to  10 × and  7× acceleration while main-taining strong semantic consistency and perceptual quality. The framework is fully training-free and compatible with complementary acceleration techniques such as caching and temporal re-duction, providing additional gains when combined. We hope this work encourages further research on semantics-aware spatial computation for efficient and high-fidelity image editing. 
+
+## References 
+
+[1] Chenfei Wu, Jiahao Li, Jingren Zhou, Junyang Lin, Kaiyuan Gao, Kun Yan, Sheng-ming Yin, Shuai Bai, Xiao Xu, Yilei Chen, et al. Qwen-image technical report. arXiv preprint arXiv:2508.02324 , 2025. [2] Black Forest Labs, Stephen Batifol, Andreas Blattmann, Frederic Boesel, Saksham Consul, Cyril Diagne, Tim Dockhorn, Jack English, Zion English, Patrick Esser, Sumith Kulal, Kyle Lacey, Yam Levi, Cheng Li, Dominik Lorenz, Jonas M¨ uller, Dustin Podell, Robin Rombach, Harry Saini, Axel Sauer, and Luke Smith. Flux.1 kontext: Flow matching for in-context image generation and editing in latent space, 2025. [3] Shiyu Liu, Yucheng Han, Peng Xing, Fukun Yin, Rui Wang, Wei Cheng, Jiaqi Liao, Ying-ming Wang, Honghao Fu, Chunrui Han, et al. Step1x-edit: A practical framework for general image editing. arXiv preprint arXiv:2504.17761 , 2025. [4] Yang Ye, Xianyi He, Zongjian Li, Bin Lin, Shenghai Yuan, Zhiyuan Yan, Bohan Hou, and Li Yuan. Imgedit: A unified image editing dataset and benchmark. arXiv preprint arXiv:2505.20275 , 2025. [5] Jiacheng Liu, Chang Zou, Yuanhuiyi Lyu, Junjie Chen, and Linfeng Zhang. From reusing to forecasting: Accelerating diffusion models with taylorseers. In Proceedings of the IEEE/CVF International Conference on Computer Vision , pages 15853–15863, 2025. [6] Feng Liu, Shiwei Zhang, Xiaofeng Wang, Yujie Wei, Haonan Qiu, Yuzhong Zhao, Yingya Zhang, Qixiang Ye, and Fang Wan. Timestep embedding tells: It’s time to cache for video diffusion model. In Proceedings of the Computer Vision and Pattern Recognition Conference , pages 7353–7363, 2025. [7] Wongi Jeong, Kyungryeol Lee, Hoigi Seo, and Se Young Chun. Upsample what matters: Region-adaptive latent sampling for accelerated diffusion transformers. arXiv preprint arXiv:2507.08422 , 2025. [8] Shikang Zheng, Guantao Chen, Lixuan He, Jiacheng Liu, Yuqi Lin, Chang Zou, and Linfeng Zhang. From sketch to fresco: Efficient diffusion transformer with progressive resolution. 
+
+arXiv preprint arXiv:2601.07462 , 2026. [9] Ye Tian, Xin Xia, Yuxi Ren, Shanchuan Lin, Xing Wang, Xuefeng Xiao, Yunhai Tong, Ling Yang, and Bin Cui. Training-free diffusion acceleration with bottleneck sampling. arXiv preprint arXiv:2503.18940 , 2025. [10] Jintao Zhang, Chendong Xiang, Haofeng Huang, Jia Wei, Haocheng Xi, Jun Zhu, and Jianfei Chen. Spargeattn: Accurate sparse attention accelerating any model inference. In 
+
+International Conference on Machine Learning (ICML) , 2025. 13 [11] Yaniv Leviathan, Matan Kalman, and Yossi Matias. Fast inference from transformers via speculative decoding. In International Conference on Machine Learning , pages 19274– 19286. PMLR, 2023. [12] Lvmin Zhang, Anyi Rao, and Maneesh Agrawala. Adding conditional control to text-to-image diffusion models. In Proceedings of the IEEE/CVF international conference on computer vision , pages 3836–3847, 2023. [13] Amir Hertz, Ron Mokady, Jay Tenenbaum, Kfir Aberman, Yael Pritch, and Daniel Cohen-Or. Prompt-to-prompt image editing with cross attention control. arXiv preprint arXiv:2208.01626 , 2022. [14] Bahjat Kawar, Shiran Zada, Oran Lang, Omer Tov, Huiwen Chang, Tali Dekel, Inbar Mosseri, and Michal Irani. Imagic: Text-based real image editing with diffusion models. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition ,pages 6007–6017, 2023. [15] Jiaming Song, Chenlin Meng, and Stefano Ermon. Denoising diffusion implicit models. 
+
+arXiv preprint arXiv:2010.02502 , 2020. [16] Cheng Lu, Yuhao Zhou, Fan Bao, Jianfei Chen, Chongxuan Li, and Jun Zhu. Dpm-solver: A fast ode solver for diffusion probabilistic model sampling in around 10 steps. Advances in neural information processing systems , 35:5775–5787, 2022. [17] Cheng Lu, Yuhao Zhou, Fan Bao, Jianfei Chen, Chongxuan Li, and Jun Zhu. Dpm-solver++: Fast solver for guided sampling of diffusion probabilistic models. Machine Intelligence Research , 22(4):730–751, 2025. [18] Kaiwen Zheng, Cheng Lu, Jianfei Chen, and Jun Zhu. Dpm-solver-v3: Improved diffusion ode solver with empirical model statistics. Advances in Neural Information Processing Systems , 36:55502–55542, 2023. [19] Tim Salimans and Jonathan Ho. Progressive distillation for fast sampling of diffusion models. arXiv preprint arXiv:2202.00512 , 2022. [20] Shikang Zheng, Guantao Chen, Qinming Zhou, Yuqi Lin, Lixuan He, Chang Zou, Peiliang Cai, Jiacheng Liu, and Linfeng Zhang. Let features decide their own solvers: Hybrid feature caching for diffusion transformers, 2025. [21] Jiacheng Liu, Peiliang Cai, Qinming Zhou, Yuqi Lin, Deyang Kong, Benhao Huang, Yupei Pan, Haowen Xu, Chang Zou, Junshu Tang, et al. Freqca: Accelerating diffusion models via frequency-aware caching. arXiv preprint arXiv:2510.08669 , 2025. [22] Iz Beltagy, Matthew E Peters, and Arman Cohan. Longformer: The long-document trans-former. arXiv preprint arXiv:2004.05150 , 2020. [23] Rewon Child, Scott Gray, Alec Radford, and Ilya Sutskever. Generating long sequences with sparse transformers. arXiv preprint arXiv:1904.10509 , 2019. [24] Manzil Zaheer, Guru Guruganesh, Kumar Avinava Dubey, Joshua Ainslie, Chris Alberti, Santiago Ontanon, Philip Pham, Anirudh Ravula, Qifan Wang, Li Yang, et al. Big bird: Transformers for longer sequences. Advances in neural information processing systems ,33:17283–17297, 2020. [25] Jonathan Ho, Chitwan Saharia, William Chan, David J Fleet, Mohammad Norouzi, and Tim Salimans. Cascaded diffusion models for high fidelity image generation. Journal of Machine Learning Research , 23(47):1–33, 2022. 14 [26] Haoying Li, Yifan Yang, Meng Chang, Shiqi Chen, Huajun Feng, Zhihai Xu, Qi Li, and Yueting Chen. Srdiff: Single image super-resolution with diffusion probabilistic models. 
+
+Neurocomputing , 479:47–59, 2022. [27] Jonathan Ho, Ajay Jain, and Pieter Abbeel. Denoising diffusion probabilistic models. 
+
+Advances in neural information processing systems , 33:6840–6851, 2020. [28] Zhibin Qin, Zhenxiong Tan, Zeqing Wang, Songhua Liu, and Xinchao Wang. Spotedit: Selective region editing in diffusion transformers. arXiv preprint arXiv:2512.22323 , 2025. [29] Ye Tian, Xin Xia, Yuxi Ren, Shanchuan Lin, Xing Wang, Xuefeng Xiao, Yunhai Tong, Ling Yang, and Bin Cui. Training-free diffusion acceleration with bottleneck sampling, 2025. [30] Chang Zou, Xuyang Liu, Ting Liu, Siteng Huang, and Linfeng Zhang. Accelerating diffu-sion transformers with token-wise feature caching. arXiv preprint arXiv:2410.05317 , 2024. [31] Pratheba Selvaraju, Tianyu Ding, Tianyi Chen, Ilya Zharkov, and Luming Liang. Fora: Fast-forward caching in diffusion transformer acceleration. arXiv preprint arXiv:2407.01425 , 2024. [32] Chang Zou, Evelyn Zhang, Runlin Guo, Haohang Xu, Conghui He, Xuming Hu, and Lin-feng Zhang. Accelerating diffusion transformers with dual feature caching. arXiv preprint arXiv:2412.18911 , 2024. [33] Shikang Zheng, Liang Feng, Xinyu Wang, Qinming Zhou, Peiliang Cai, Chang Zou, Ji-acheng Liu, Yuqi Lin, Junjie Chen, Yue Ma, et al. Forecast then calibrate: Feature caching as ode for efficient diffusion transformers. arXiv preprint arXiv:2508.16211 , 2025. 15 Supplementary Material 7 Additional Ablation Studies 
+
+Table 10: Ablation Study on FLUX.1-Kontext-dev with GEdit-Bench                                                       
+
+> Method NFE Acceleration GEdit-EN(FULL) Latency ( s)↓Speed ↑FLOPs ( T)↓Speed ↑SC ↑PQ ↑OS ↑
+> FLUX.1-Kontext-dev 50 50.20 1.00 ×8299.54 1.00 ×6.80 7.26 6.51 SpecEdit( τ= 0 .4) 18 12.60 3.98 ×1594.16 5.20 ×6.99 7.12 6.61 SpecEdit( τ= 0 .90) 18 12.20 4.11 ×1488.84 5.57 ×6.90 7.10 6.55
+> SpecEdit (τ= 0 .75) 18 12.50 4.02 ×1541.50 5.38 ×7.12 6.98 6.69
+> •SC : semantic consistency, PQ : perceptual quality, OS : overall score.
+
+Effect of the verification threshold. Table 9 studies the effect of the discrepancy threshold 
+
+τ on FLUX.1-Kontext-dev with GEdit-Bench. The results show that the threshold controls a clear trade-off between efficiency and editing fidelity. A smaller threshold such as τ = 0 .4 selects more tokens for high-resolution refinement, which leads to better perceptual quality with PQ reaching 7.12 , but the computational cost is slightly higher. In contrast, a larger threshold such as τ = 0 .90 is more aggressive in filtering tokens and therefore achieves the best efficiency with 
+
+4.11 × latency speedup and 5.57 × FLOPs reduction, but this comes with a drop in semantic consistency and overall score. Our default setting τ = 0 .75 provides the best balance. It attains the highest overall score of 6.69 together with the strongest semantic consistency of 7.12 ,while still maintaining strong acceleration at 4.02 ×. These results indicate that moderate semantic verification is sufficient to focus computation on truly edited regions while avoiding the instability caused by overly sparse refinement. Table 11: Ablation Study on FLUX.1-Kontext-dev with GEdit-Bench                                              
+
+> Method NFE Acceleration GEdit-EN(FULL) Latency ( s)↓Speed ↑FLOPs ( T)↓Speed ↑SC ↑PQ ↑OS ↑
+> FLUX.1-Kontext-dev 50 50.20 1.00 ×8299.54 1.00 ×6.80 7.26 6.51 SpecEdit( Ndraft = 4) 18 12.05 4.17 ×1488.08 5.58 ×7.01 7.10 6.64
+> SpecEdit (Ndraft = 8) 18 12.24 4.10 ×1541.50 5.38 ×7.12 6.98 6.69
+> •SC : semantic consistency, PQ : perceptual quality, OS : overall score.
+
+Effect of the draft sampling length. We further study the number of draft inference steps in the preliminary verification stage. As shown in Table 11, both settings achieve strong acceler-ation and competitive editing quality, which suggests that the draft stage is robust to moderate changes in sampling length. Using Ndraft = 4 yields slightly better efficiency with 4.17 × la-tency speedup and 5.58 × FLOPs reduction, and it also achieves the best perceptual quality of 7.10 . Using Ndraft = 8 produces the best semantic consistency and overall score, reaching 
+
+7.12 SC and 6.69 OS. This result suggests that a slightly longer draft trajectory provides a more reliable semantic estimate for token verification, which improves the final balance between semantic preservation and perceptual quality. Unless otherwise specified, we use Ndraft = 8 as the default setting in the main experiments. 16 Table 12: Quantitative results of image-editing on ImgEdit-Bench.                                                                           
+
+> Model NFE Acceleration ImgEdit-Bench Latency (s) ↓Speedup ↑Action Add Adjust Background Compose Extract Remove Replace Style Overall ↑
+> 100% steps 50 50.20 1.00 ×3.89 4.41 3.60 4.05 3.24 4.00 3.47 3.20 2.84 3.66 FLUX.1-Kontext-Lightning 88.24 6.09 ×3.88 4.37 3.53 3.98 3.37 3.86 3.37 3.24 2.78 3.60
+> FLUX.1-Kontext-Lightning 66.36 7.89 ×3.84 4.37 3.45 4.14 3.22 3.78 3.33 3.22 2.73 3.56
+> SpecEdit+Step Distillation 86.97 7.20 ×3.87 4.37 3.54 4.04 3.33 3.83 3.19 3.27 2.72 3.57
+> SpecEdit+Step Distillation 65.48 9.16 ×3.83 4.39 3.58 4.10 3.30 3.75 3.25 3.23 2.68 3.57
+
+Compatibility with step distillation. Table 12 shows that SpecEdit is naturally compat-ible with step distillation on FLUX.1-Kontext-dev. When combined with FLUX.1-Kontext-Lightning at 8 NFE, SpecEdit improves the latency from 8.24s to 6.97s, increasing the speedup from 6.09 × to 7.20 ×, while maintaining a very similar overall score of 3.57 compared with 3.60 for the distilled baseline. At 6 NFE, the gain becomes more significant. SpecEdit further re-duces the latency to 5.48s and reaches 9.16 × speedup, while preserving the same overall score of 3.57. It also improves several category scores including Add and Adjust , which indicates that semantics-aware spatial allocation complements temporal compression effectively. These results confirm that SpecEdit is orthogonal to distillation based acceleration and can provide additional efficiency gains without noticeably degrading editing quality. 
+
+## 8 Supplementary Visualizations 
+
+Overview of supplementary visualizations. Figure 7 analyzes the effect of different down-sampling ratios in the draft stage and shows that 16 × downsampling preserves sufficient struc-tural information for reliable localization of edited regions, while more aggressive downsampling removes important details and leads to inaccurate identification of edited areas. Figure 8 vi-sualizes the semantic locking effect captured by SpecEdit, highlighting how the method con-centrates high-resolution computation on semantically modified regions. Figure 9 compares the partially upsampled regions selected by different methods, showing that SpecEdit identifies editing-relevant areas more accurately than heuristic approaches such as RALU and Fresco and avoids unnecessary refinement of irrelevant regions. Figure 10 presents additional qualitative comparisons on GEdit-Bench, demonstrating that SpecEdit maintains better semantic consis-tency and visual quality under high acceleration compared with existing acceleration methods. 17 Change the    
+
+> background to a
+> city street
+> Add a red cherry
+> on top of pizza
+> Prompts
+> Change the
+> background to
+> high mountains
+> Change the color
+> of goat to yellow
+> Add a palm tree
+> behind him
+> Replace the
+> school bus with a
+> truck
+> Replace the text
+> '95' with ' 123 '
+> Replace the
+> eagle with a
+> parrot
+> Modify this
+> image, changing
+> the wall color to
+> dark gray
+> Reference
+> 1024 ×1024
+> Edited
+> 1024 ×1024
+> Reference
+> 256 ×256
+> Edited
+> 256 ×256
+> Reference
+> 170 ×170
+> Edited
+> 170 ×170
+> Reference
+> 128 ×128
+> Edited
+> 128 ×128
+
+Figure 7: Effect of different downsampling ratios on preserving editable regions. We compare the reference and edited images at the original resolution (1024 ×1024) together with their downsampled versions (256 ×256, 170 ×170, and 128 ×128), corresponding to 16 ×, 36 ×,and 64 × downsampling . When using 16 × downsampling , most structural and semantic information of the image is preserved, enabling the edited regions to be reliably localized by comparing the reference and denoised images. In contrast, more aggressive downsampling ( 36 ×
+
+and 64 ×) removes substantial spatial details, making it difficult to accurately identify the modified areas. 18 Add a potted green plant to the right of the sofa Replace the eagle with a parrot Dye her hair brown Change the painting on the scroll in the man’s hand to a treasure map 
+
+Source Image Source Image Semantic region Results Semantic region Results 
+
+Change the color of fire hydrant to lavender Remove the sign that measures height Change the tablecloth color to bright red Change the hair of the person in the photo to yellow Change the color of goat to yellow Include a candle on top of the cake Change the text 'FAIRGROU NDS' to 'PARKWAY' Remove the meat pie Change the color of suit cases to silver Remove the freight train Add a cat sitting in the basket Replace the text 'DARK' with 'DUCK' Figure 8: More visualization of semantic locking captured by SpecEdit. 19 Specedit(Ours) Fresco Edited Ralu Prompts 
+
+Remove the 
+
+peanuts  
+
+> Change the
+> background to the
+> interior of a
+> spaceship
+
+Replace the 
+
+text 'STOP' 
+
+with ' Caution '
+
+Make the 
+
+person jump 
+
+Reference 
+
+Erase the 
+
+stop sign 
+
+Make his skin 
+
+smoother, no 
+
+wrinkles 
+
+Add a 
+
+bookshelf in 
+
+the corner 
+
+> Replace the text 'CS'
+> with ' VALO ' and
+> replace 'GO' with
+> 'RANT '
+
+Remove the 
+
+pizza 
+
+Remove the 
+
+woman Figure 9: Comparison of partially upsampled regions. We visualize the spatial regions selected for high-resolution refinement by different methods, including RALU , Fresco , and 
+
+SpecEdit (ours). RALU and Fresco rely on low-level structural cues such as edges or chan-nel statistics, which often activate regions unrelated to the editing instruction. In contrast, 
+
+SpecEdit identifies semantically relevant areas through draft-based verification, resulting in more accurate localization of edited regions and fewer redundant high-resolution computations. 20 Reference Specedit(Ours) TaylorSeer ToCa 
+
+‘’Remove the meat pie‘’ ‘’Change the action of cat to sleeping‘’ ‘’Adjust the image style to a bubble-like aesthetic‘’  
+
+> 5.40x 5.00x 3.59x
+
+Original 
+
+> 1.00x
+
+Ralu 
+
+> 3.04x
+
+Prompts 
+
+‘’Write 'SMILE' on the blackboard‘’ 
+
+‘’Switch the image to a minimalist aesthetic‘’ ‘’Replace the eagle with a parrot‘’ ‘’Add a robot bird in the sky‘’ ‘’Add an image of Naruto on the left side‘’ ‘’Light the candle to enhance the candlelight‘’ Figure 10: More qualitative comparison on GEdit-Bench. SpecEdit achieves superior semantic preservation and visual quality at a higher acceleration ratio ( 5.38 ×) compared to state-of-the-art baselines. 21

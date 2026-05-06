@@ -6,61 +6,61 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-05-05
-- 运行时间：2026-05-05 20:17:43 UTC
+- 最新运行日期：2026-05-06
+- 运行时间：2026-05-06 20:58:36 UTC
 - 运行状态：成功
 - 本次总论文数：13
 - 精读区：2
 - 速读区：11
 
 ### 今日简报（AI）
-今日聚焦 13 篇视觉前沿成果，深度解析个性化图像补全与高维张量恢复的最新突破。
-重点关注 AlbumFill 提出的相册引导推理检索框架，以及四元数非线性变换在低秩张量补全中的数学创新。
-建议优先了解如何通过外部参考信息提升生成式 AI 的个性化精准度，并关注底层视觉任务的统一化趋势。
-- 详情：[/202605/05/README](/202605/05/README)
+今日聚焦 13 篇影像修复前沿，重点攻克高频医疗内窥镜成像与边缘侧高效架构难题。
+高分论文展示了 Lissajous 扫描多帧修复的突破，并证明将 Transformer 蒸馏至状态空间模型（SSM）可显著提升端侧处理效率。
+建议关注 SSM 架构在轻量化修复中的潜力，探索如何将大模型能力高效迁移至低功耗设备。
+- 详情：[/202605/06/README](/202605/06/README)
 
 ### 精读区论文标签
-1. [AlbumFill: Album-Guided Reasoning and Retrieval for Personalized Image Completion](/202605/05/2605.02892v1-albumfill-album-guided-reasoning-and-retrieval-for-personalized-image-completion)  
-   标签：评分：9.0/10、query:q6
-   evidence：免训练的个性化图像补全与检索
-2. [Quaternion Nonlinear Transform-Induced Nuclear Norm for Low-Rank Tensor Completion](/202605/05/2605.01467v1-quaternion-nonlinear-transform-induced-nuclear-norm-for-low-rank-tensor-completion)  
-   标签：评分：8.0/10、query:q1
-   evidence：用于恢复缺失数据的低秩张量补全
+1. [Multi-frame Restoration for High-rate Lissajous Confocal Laser Endomicroscopy](/202605/06/2605.00527v2-multi-frame-restoration-for-high-rate-lissajous-confocal-laser-endomicroscopy)  
+   标签：评分：9.0/10、query:q1
+   evidence：修复扫描轨迹中的结构化空洞
+2. [Edge-Efficient Image Restoration: Transformer Distillation into State-Space Models](/202605/06/2605.02794v1-edge-efficient-image-restoration-transformer-distillation-into-state-space-models)  
+   标签：评分：8.0/10、query:q7
+   evidence：结合Transformer和SSM的混合图像修复
 
 ### 速读区论文标签
-1. [Faithful Extreme Image Rescaling with Learnable Reversible Transformation and Semantic Priors](/202605/05/2605.00605v1-faithful-extreme-image-rescaling-with-learnable-reversible-transformation-and-semantic-priors)  
-   标签：评分：7.0/10、query:q3
-   evidence：基于扩散模型的极端图像缩放框架
-2. [Neighbor2Inverse: Self-Supervised Denoising for Low-Dose Region-of-Interest Phase Contrast CT](/202605/05/2605.01075v1-neighbor2inverse-self-supervised-denoising-for-low-dose-region-of-interest-phase-contrast-ct)  
-   标签：评分：7.0/10、query:q7
-   evidence：自监督去噪与修复
-3. [Degradation-Aware Adaptive Context Gating for Unified Image Restoration](/202605/05/2605.01236v1-degradation-aware-adaptive-context-gating-for-unified-image-restoration)  
-   标签：评分：7.0/10、query:q1
-   evidence：具有自适应上下文门控的统一图像修复
-4. [AttnRouter: Per-Category Attention Routing for Training-Free Image Editing on MMDiT](/202605/05/2605.01480v1-attnrouter-per-category-attention-routing-for-training-free-image-editing-on-mmdit)  
+1. [TOC-SR: Task-Optimal Compact diffusion for Image Super Resolution](/202605/06/2605.02767v1-toc-sr-task-optimal-compact-diffusion-for-image-super-resolution)  
    标签：评分：7.0/10、query:q4
-   evidence：基于扩散Transformer的免训练图像编辑
-5. [Unifying Deep Stochastic Processes for Image Enhancement](/202605/05/2605.01568v1-unifying-deep-stochastic-processes-for-image-enhancement)  
-   标签：评分：7.0/10、query:q7
-   evidence：用于图像修复的随机过程
-6. [IConFace: Identity-Structure Asymmetric Conditioning for Unified Reference-Aware Face Restoration](/202605/05/2605.02814v1-iconface-identity-structure-asymmetric-conditioning-for-unified-reference-aware-face-restoration)  
-   标签：评分：7.0/10、query:q3
-   evidence：统一的有参考和无参考面部修复
-7. [End-to-End Autoregressive Image Generation with 1D Semantic Tokenizer](/202605/05/2605.00503v1-end-to-end-autoregressive-image-generation-with-1d-semantic-tokenizer)  
+   evidence：用于图像修复和超分辨率的生成模型
+2. [RPBA-Net: An Interpretable Residual Pyramid Bilateral Affine Network for RAW-Domain ISP Enhancement](/202605/06/2605.03626v1-rpba-net-an-interpretable-residual-pyramid-bilateral-affine-network-for-raw-domain-isp-enhancement)  
+   标签：评分：7.0/10、query:profile-1
+   evidence：可解释的图像修复与增强
+3. [Colorful-Noise: Training-Free Low-Frequency Noise Manipulation for Color-Based Conditional Image Generation](/202605/06/2605.00548v1-colorful-noise-training-free-low-frequency-noise-manipulation-for-color-based-conditional-image-generation)  
    标签：评分：6.0/10、query:q4
-   evidence：自回归图像生成与重建
-8. [End-to-End Autoregressive Image Generation with 1D Semantic Tokenizer](/202605/05/2605.00503v2-end-to-end-autoregressive-image-generation-with-1d-semantic-tokenizer)  
+   evidence：用于条件图像生成的免训练噪声处理技术
+4. [ScribbleEdit: Synthetic Data for Image Editing with Scribbles and Text](/202605/06/2605.01135v2-scribbleedit-synthetic-data-for-image-editing-with-scribbles-and-text)  
    标签：评分：6.0/10、query:q4
-   evidence：用于图像生成和重建的自回归生成模型
-9. [Multi-Branch Non-Homogeneous Image Dehazing via Concentration Partitioning and Image Fusion](/202605/05/2605.00885v1-multi-branch-non-homogeneous-image-dehazing-via-concentration-partitioning-and-image-fusion)  
+   evidence：用于图像编辑和空间控制的生成模型
+5. [SpecEdit: Training-Free Acceleration for Diffusion based Image Editing via Semantic Locking](/202605/06/2605.02152v1-specedit-training-free-acceleration-for-diffusion-based-image-editing-via-semantic-locking)  
    标签：评分：6.0/10、query:q1
-   evidence：通过去雾和融合进行图像修复
-10. [SRGAN-CKAN: Expressive Super-Resolution with Nonlinear Functional Operators under Minimal Resources](/202605/05/2605.01459v1-srgan-ckan-expressive-super-resolution-with-nonlinear-functional-operators-under-minimal-resources)  
-   标签：评分：6.0/10、query:q3
-   evidence：使用对抗学习的图像修复与超分辨率
-11. [DataEvolver: Let Your Data Build and Improve Itself via Goal-Driven Loop Agents](/202605/05/2605.01789v1-dataevolver-let-your-data-build-and-improve-itself-via-goal-driven-loop-agents)  
+   evidence：无需训练的图像编辑与语义修改
+6. [DriftDecode: One-Step Wireless Image Decoding via Drifting-Inspired Detail Recovery](/202605/06/2605.02325v1-driftdecode-one-step-wireless-image-decoding-via-drifting-inspired-detail-recovery)  
+   标签：评分：6.0/10、query:q1
+   evidence：图像重建中的细节恢复
+7. [DirectEdit: Step-Level Accurate Inversion for Flow-Based Image Editing](/202605/06/2605.02417v1-directedit-step-level-accurate-inversion-for-flow-based-image-editing)  
    标签：评分：6.0/10、query:q4
-   evidence：用于图像编辑和数据构建的生成循环智能体
+   evidence：无需训练的图像编辑与重建
+8. [Multispectral Blind Image Super-Resolution for Standing Dead Tree Segmentation](/202605/06/2605.02471v1-multispectral-blind-image-super-resolution-for-standing-dead-tree-segmentation)  
+   标签：评分：6.0/10、query:q7
+   evidence：用于盲超分辨率的非配对样本
+9. [Text-Conditional JEPA for Learning Semantically Rich Visual Representations](/202605/06/2605.03245v1-text-conditional-jepa-for-learning-semantically-rich-visual-representations)  
+   标签：评分：6.0/10、query:q7
+   evidence：通过掩码特征预测进行自监督学习
+10. [BFORE: Butterfly-Firefly Optimized Retinex Enhancement for Low-Light Image Quality Improvement](/202605/06/2605.03509v1-bfore-butterfly-firefly-optimized-retinex-enhancement-for-low-light-image-quality-improvement)  
+   标签：评分：6.0/10、query:q3
+   evidence：图像修复的自动参数调整
+11. [Real Image Denoising with Knowledge Distillation for High-Performance Mobile NPUs](/202605/06/2605.03680v1-real-image-denoising-with-knowledge-distillation-for-high-performance-mobile-npus)  
+   标签：评分：6.0/10、query:q7
+   evidence：基于深度学习的图像修复与去噪
 
 
 <div class="dpr-home-promo-card">

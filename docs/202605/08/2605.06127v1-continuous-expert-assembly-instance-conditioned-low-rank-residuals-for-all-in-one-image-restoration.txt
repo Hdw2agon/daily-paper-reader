@@ -1,0 +1,799 @@
+Title: Continuous Expert Assembly: Instance-Conditioned Low-Rank Residuals for All-in-One Image Restoration
+
+URL Source: https://arxiv.org/pdf/2605.06127v1
+
+Published Time: Fri, 08 May 2026 01:25:10 GMT
+
+Number of Pages: 23
+
+Markdown Content:
+# Continuous Expert Assembly: Instance-Conditioned Low-Rank Residuals for All-in-One Image Restoration 
+
+Haisen He 
+
+Southern University of Science and Technology 
+
+Xiangyu Zou 
+
+Shenzhen University 
+
+SongLin Dong 
+
+Shenzhen University of Advanced Technology 
+
+Heng Li 
+
+Shenzhen University of Advanced Technology 
+
+Yihong Gong 
+
+Xi’an Jiaotong University 
+
+Zhiheng Ma ∗
+
+Shenzhen University of Advanced Technology 
+
+## Abstract 
+
+Real-world image degradation is often unknown, spatially non-uniform, and com-positional, requiring all-in-one restoration models to adapt a single set of weights to diverse local corruption patterns without test-time degradation labels. Existing methods typically modulate a shared backbone with global prompts or degradation descriptors, or route features through predefined expert pools. However, com-pact global conditioning can bottleneck localized degradation evidence, while static expert routing may produce homogeneous updates or rely on unstable sparse assignments. We propose Continuous Expert Assembly (CEA), a token-wise dynamic parameterization framework for all-in-one image restoration. CEA em-ploys a lightweight Cross-Attention Hyper-Adapter to probe intermediate spatial features and synthesize instance-conditioned low-rank routing bases and residual directions. Each spatial token then assembles its own residual update via dense signed dot-product affinities over the generated rank-wise components, avoiding external prompts, static expert banks, and discrete Top-K selection. The result-ing assembly rule also admits a linear-attention perspective, making its dense token-wise routing behavior transparent. Experiments on AIO-3, AIO-5, and CDD-11 show that CEA improves average restoration quality over strong prompt-, descriptor-, and expert-based baselines, with the clearest gains on spatially varying and compositional degradations, while maintaining favorable parameter, FLOP, and runtime efficiency. 
+
+## 1 Introduction 
+
+Real-world photographs rarely suffer from one form of degradation in isolation. Low light, haze, rain, motion blur, and sensor noise often co-occur in a single image, are spatially non-uniform, and are unknown at inference time. All-in-one (AiO) image restoration [ 27 , 37 , 18 ] therefore requires a single model to handle multiple degradation types and their compositions without test-time knowledge of the corruption. While Transformer-based restorers [ 29 , 47 , 52 , 7] have substantially advanced single-degradation performance through long-range and multi-scale modeling, AiO introduces a distinct difficulty: one set of weights must serve heterogeneous, spatially non-uniform corruptions that often appear in composition. 
+
+> ∗Corresponding author Preprint.
+> arXiv:2605.06127v1 [cs.CV] 7 May 2026
+
+Existing AiO restorers commonly adapt a shared backbone in one of two ways. The first uses global conditioning signals, such as degradation representations, task priors, learned prompts, language instructions, or explicit degradation descriptors [ 27 , 30 , 54 , 37 , 9 , 18 ]. These signals are compact and effective, but they can compress spatially heterogeneous degradation evidence into an image-level representation. The second allocates conditional capacity through expert branches or low-rank parameter bases [42 , 14 , 26 , 38 , 16 , 50 , 41 , 1 , 2]. Such designs provide specialization, but they often rely on a fixed expert pool or sparse Top-K routing, which can introduce assignment instability, capacity-handling overhead, or homogeneous updates across spatial locations. What remains missing is a mechanism that is both input-adaptive and spatially adaptive, without collapsing the image into a global descriptor or restricting adaptation to static expert parameters. We argue that AiO restoration requires a more flexible form of parameter adaptation. Instead of selecting from a static set of experts or modulating the network with a single global condition, the model should dynamically assemble restoration parameters conditioned on the input image and apply them at the token level. This formulation is particularly suitable for compositional degradations, where different spatial tokens can receive different residual updates while sharing a compact and efficient input-conditioned parameter space. 
+
+Figure 1: Conceptual comparison of adaptation paradigms for All-in-One Image Restoration. 
+
+(a) Representative global or discrete expert adaptation. A compact image-level signal or sparse router selects or modulates a fixed set of parameters, which can become coarse when degradations vary spatially or appear in composition. (b) Continuous Expert Assembly (CEA). A lightweight hyper-adapter probes spatial features and generates instance-conditioned low-rank routing bases A(x)
+
+and residual directions B(x). Each spatial token uses dense signed dot-product affinities to assemble its own residual update ∆Yn, enabling instance-conditioned low-rank residual assembly without discrete expert selection. To this end, we propose Continuous Expert Assembly (CEA), a token-wise dynamic parameteri-zation framework for all-in-one image restoration. CEA synthesizes instance-conditioned low-rank routing bases and residual directions from the current degraded image. Each spatial token then assembles its own additive residual update through dense signed dot-product affinities over these generated rank-wise components. In this way, CEA replaces discrete selection from fixed experts with continuous assembly in an input-generated residual subspace, enabling fine-grained adaptation without static expert pools or hard routing decisions. CEA is implemented with a lightweight Cross-Attention Hyper-Adapter . Rather than pooling intermediate features into a single global descriptor, the adapter uses learnable queries to probe condensed spatial contexts and decode them into routing bases and residual directions. The assembled residual updates are injected into the attention projections of the restoration backbone, allowing spatial feature interactions to adapt to the degradation structure of each image. From a modeling perspective, the proposed assembly rule admits a linear-attention-style algebraic view. The token-wise residual can be written as a dot-product interaction between spatial tokens and dynamically synthesized routing bases, followed by a weighted combination of synthesized residual directions. In this form, spatial tokens serve as queries, while the generated routing bases and residual directions play roles analogous to keys and values. This view makes the dense routing 2behavior of CEA transparent: each token continuously assembles its own residual update from an input-conditioned low-rank component space. We evaluate CEA on standard AiO restoration benchmarks, including AIO-3, AIO-5, and CDD-11 compositional degradations. CEA improves average restoration quality over prompt-, descriptor-, and expert-based baselines, with the clearest gains under spatially varying and compositional degradations, while maintaining favorable parameter, FLOP, and runtime efficiency. Our contributions are summarized as follows: • We propose Continuous Expert Assembly , a token-wise dynamic parameterization frame-work that synthesizes input-conditioned low-rank routing bases and residual directions for fine-grained AiO restoration. • We design a lightweight Cross-Attention Hyper-Adapter that probes spatial degradation contexts and generates dynamic low-rank factors on the fly, avoiding both global prompt bottlenecks and static expert pools. • We present a linear-attention-style interpretation of CEA, showing that dense token-wise residual assembly can be written as softmax-free dot-product aggregation between spatial tokens, generated routing bases, and generated residual directions. • Extensive experiments on AIO-3, AIO-5, and CDD-11 demonstrate that CEA achieves strong average restoration performance with favorable parameter count, computational cost, and runtime efficiency, especially under compositional degradations. 
+
+## 2 Related Work 
+
+Restoration backbones. Image restoration has evolved from discriminative CNN restorers such as DnCNN [ 55 ], MPRNet [ 51 ], HINet [ 4], and NAFNet [ 5], to architectures with stronger global interaction, including IPT [ 3] and MAXIM [ 45 ]. Transformer-based restorers have further improved long-range dependency modeling and high-resolution restoration through efficient attention and hierarchical designs, as in SwinIR [ 29 ], Uformer [ 47 ], Restormer [ 52 ], and CAT [ 7]. These backbones provide strong restoration priors, but they are typically optimized for individual degradations. AiO restoration requires a single backbone to adapt its computation under unknown, spatially varying, and compositional degradations. 
+
+All-in-one restoration and conditioning. AiO restoration targets a single model that handles multiple degradation types under unknown corruption. AirNet learns degradation representations to guide a shared restorer [ 27 ]; TAPE introduces task-agnostic prior embeddings for cross-task restoration [ 30 ]; IDR formulates multi-degradation restoration through reusable degradation ingredients [ 54 ]; and TransWeather addresses unified adverse-weather restoration [ 23 ]. A related line conditions restoration with learned prompts, visual prompts, language instructions, or explicit degradation descriptors, including PromptIR [ 37 ], ProRes [ 33 ], PIP [ 28 ], InstructIR [ 9 ], and OneRestore [ 18 ]. These methods are effective when the conditioning signal captures the degradation well, but global prompts or descriptors can become coarse when degradations vary spatially or appear in composition. CEA instead generates parameter components from spatially probed features and assembles token-specific updates. 
+
+Conditional computation and expert allocation. Mixture-of-Experts allocates capacity by routing inputs to expert modules [ 42 ]. Scalable sparse MoE systems such as Switch Transformer and GShard activate only a subset of experts and typically introduce routing decisions, capacity handling, or load-balancing objectives [ 14 , 26 ]. Vision MoE extends this idea to visual recognition [ 40 ]. In image restoration, AdaptIR uses heterogeneous expert branches for parameter-efficient adaptation [ 16 ], while MoCE-IR introduces complexity experts for all-in-one restoration [ 50 ]. Soft MoE replaces hard Top-K assignment with dense differentiable mixing over a fixed expert set [ 38 ]. CEA shares the goal of avoiding hard expert assignment, but differs in the object being mixed. Sparse and soft MoE methods mix outputs or representations produced by a sample-independent expert bank. In contrast, CEA first generates an input-conditioned low-rank residual subspace and then lets each spatial token assemble an additive update over this generated subspace. Thus, the rank-wise components are not fixed expert networks, and the routing weights are signed dot-product affinities rather than normalized probabilities over a static expert pool. 3Low-rank and dynamic parameterization. Parameter-efficient adaptation methods, including Adapters [ 20 ], LoRA [ 21 ], AdaLoRA [ 56 ], and DoRA [ 31 ], show that low-rank updates can efficiently adapt large backbones. Hypernetworks and dynamic filters generate sample-conditioned parameters for adaptive computation [ 19 , 10 , 49 , 6, 34 ]. Recent AiO restoration methods combine these ideas by routing among low-rank branches or hypernetwork-generated bases, such as ABAIR [ 41 ], LoRA-IR [ 1], and HAIR [ 2 ]. CEA is related to this compact adaptation family, but differs in both factor generation and factor application: its low-rank factors are synthesized by cross-attention queries that probe intermediate spatial features, and each spatial token assembles its own residual update through dense signed affinities over the generated rank-wise components. This makes CEA particularly suited to spatially non-uniform and compositional degradations. 
+
+Linear-attention-style computation. Efficient and linear attention methods reduce the quadratic cost of standard attention by exploiting associative matrix products or kernelized feature maps [ 43 , 24 , 8]. CEA does not propose a new general-purpose attention layer. Instead, we observe that the CEA residual has the same algebraic form as dot-product attention without softmax, QK ⊤V , where the keys and values are instance-conditioned routing bases and residual directions generated by the hyper-adapter. This view provides an efficient implementation of dense token-to-rank assembly. 
+
+Figure 2: Overall architecture of the proposed method. (a) Backbone. We build upon a U-shaped Transformer backbone. To dynamically adapt to unknown degradations, our proposed modules are integrated into the decoder blocks to modulate the intermediate spatial features. (b) Cross-Attention Hyper-Adapter. Spatial features are condensed via depthwise-pointwise (DW/PW) convolutions to provide local context. A compact set of learnable queries (R(l) 
+
+> A
+
+, R (l) 
+
+> B
+
+) probes this context via cross-attention. The contextualized queries are decoded into instance-conditioned routing bases A(l) 
+
+> τ
+
+(x)
+
+and residual directions B(l) 
+
+> τ
+
+(x), followed by RankNorm for stable assembly. (c) Continuous Expert Assembly. For each spatial token Xn, CEA computes dense signed dot-product affinities ⟨Xn, a k⟩
+
+with the generated routing bases. These affinities weight the corresponding residual directions bk
+
+to assemble a token-specific residual update ∆Yn, which is added to the base projection XnW to produce the adapted feature Yn.
+
+## 3 Method 
+
+3.1 Problem Formulation & The Mixture-of-Experts Baseline 
+
+In All-in-One (AiO) image restoration, we are given a degraded observation x ∈ RH×W ×3 generated by an unknown degradation process x = Dt(y; ξ), where t denotes a latent degradation type or composition and ξ represents its severity and nuisance parameters. Our primary objective is to learn a 4unified model F (·) that reconstructs the clean image ˆy = F (x) ≈ y without prior knowledge of the explicit degradation parameters (t, ξ ).To address the severe heterogeneity of diverse degradations within a single model, a representative strategy is expert allocation via conditional computation, such as (sparse) Mixture-of-Experts (MoE) and MoE-style expert branches explored in recent restoration models [16, 50]. Formally, at decoder block l, we flatten the intermediate feature map of spatial size Hl × Wl into a token sequence 
+
+X(l) ∈ RN ×din with N = HlWl spatial tokens, and use X(l) 
+
+> n
+
+∈ Rdin to denote the n-th token (we omit the batch index for clarity). For the n-th token X(l) 
+
+> n
+
+, a common MoE-style expert augmentation 
+
+adds expert-dependent residual branches on top of a shared projection W ∈ Rdin ×dout , using a sparse router over a static expert set {E i}Ei=1 :
+
+Y (l) 
+
+> n
+
+= X(l) 
+
+> n
+
+W +
+
+> E
+
+X
+
+> i=1
+
+gi(X(l) 
+
+> n
+
+)Ei(X(l) 
+
+> n
+
+), (1) where gi(·) is a discrete routing mechanism (e.g., Top-K Softmax) that assigns the token to specific experts. 
+
+Limitations in the restoration setting. While sparse MoE is a natural way to allocate conditional capacity, it introduces additional design considerations for AiO restoration. First, Top-K routing yields discontinuous expert assignments; in practice this can make optimization more sensitive and often requires capacity handling. Second, the expert parameters are typically shared across samples, so adaptation is limited to mixing a discrete set of functions even when degradations vary continuously in type and severity. These observations motivate a dense, continuous, and instance-conditioned alternative. 
+
+3.2 Continuous Expert Assembly: Generated Low-Rank Routing 
+
+We propose Continuous Expert Assembly (CEA), which relaxes sparse expert allocation into continuous low-rank residual assembly. Instead of selecting from a fixed pool of expert networks, CEA synthesizes rank-wise routing bases and residual directions from the current degraded image. Each spatial token then assembles an additive update over this generated subspace using dense signed inner products rather than sparse or probability-normalized routing weights. With these design choices, we replace discrete expert allocation with a continuous, input-conditioned low-rank residual assembly rule. We use the term residual direction for b(l)
+
+> τ,k
+
+(x) because it is an output-space vector that specifies the direction of the additive update contributed by the k-th rank component. It is not a standalone expert network. When needed, we refer to the pair (a(l)
+
+> τ,k
+
+, b (l)
+
+> τ,k
+
+) as a rank-wise component: a(l) 
+
+> τ,k
+
+determines how strongly a token uses the component, while b(l) 
+
+> τ,k
+
+specifies the direction added to the residual update. For a token X(l) 
+
+> n
+
+, the instance-conditioned continuous routing residual ∆Y (l) 
+
+> τ,n
+
+for target projection τ is defined as: 
+
+∆Y (l) 
+
+> τ,n
+
+= α
+
+> r
+
+X
+
+> k=1
+
+⟨X(l) 
+
+> n
+
+, a (l)
+
+> τ,k
+
+(x)⟩
+
+| {z }
+
+> signed affinity
+
+b(l)
+
+> τ,k
+
+(x)
+
+| {z } 
+
+> residual direction
+
+, (2) where a(l)
+
+> τ,k
+
+(x) ∈ Rdin is the k-th routing basis (key) for target τ , b(l)
+
+> τ,k
+
+(x) ∈ Rdout is the corresponding instance-conditioned residual direction , and α = 1 /r is a stabilizing scaling factor. Crucially, when written for the full token sequence, Eq. (2) has the same algebraic form as dot-product attention without softmax, QK ⊤V . Since the effective keys and values correspond to the generated rank-r factors, the update can be computed by two low-rank matrix multiplications, scaling linearly with the number of tokens N and the rank r. Let A(l) 
+
+> τ
+
+(x) ∈ Rdin ×r and B(l) 
+
+> τ
+
+(x) ∈ Rr×dout 
+
+be the matrices formed by columns a(l)
+
+> τ,k
+
+(x) and rows b(l)
+
+> τ,k
+
+(x), respectively. The global parameter assembly becomes: 5G(l) 
+
+> τ
+
+(x) ≜ X(l)A(l) 
+
+> τ
+
+(x) ∈ RN ×r ,
+
+∆Y (l) 
+
+> τ
+
+= α G (l) 
+
+> τ
+
+(x)B(l) 
+
+> τ
+
+(x)= α X (l)A(l) 
+
+> τ
+
+(x)B(l) 
+
+> τ
+
+(x)= α Attn lin 
+
+
+
+X(l), A (l) 
+
+> τ
+
+(x)⊤, B (l) 
+
+> τ
+
+(x)
+
+
+
+.
+
+(3) Here Attn lin (Q, K, V ) = QK ⊤V denotes dot-product attention without softmax; the last line uses 
+
+Q = X(l), K = A(l) 
+
+> τ
+
+(x)⊤, and V = B(l) 
+
+> τ
+
+(x). In this view, each row of G(l) 
+
+> τ
+
+(x) provides dense token-wise routing weights over the r rank-wise components, and B(l) 
+
+> τ
+
+(x) stores the corresponding residual directions to be mixed. Eq. (3) gives an attention-style algebraic view of the CEA residual. Unlike standard attention keys and values, however, A(l) 
+
+> τ
+
+(x) and B(l) 
+
+> τ
+
+(x) are image-conditioned, shared across tokens within the same layer and target, and produced by the hyper-adapter rather than by projecting X(l). CEA is therefore neither a uniform hypernetwork-generated LoRA matrix nor soft expert mixing over a fixed bank. Instead, token dependence arises from G(l) 
+
+> τ
+
+(x) = X(l)A(l) 
+
+> τ
+
+(x), whose rows provide token-specific signed, softmax-free affinities over the generated rank-wise components; these affinities then combine the generated residual directions in B(l) 
+
+> τ
+
+(x) to yield spatially varying residual updates. 
+
+3.3 Cross-Attention Hyper-Adapter 
+
+The low-rank factors in CEA should be conditioned on the current degradation while remaining efficient to generate. A simple option is to pool the feature map into a global descriptor and predict 
+
+A(x) and B(x) with an MLP. However, such global conditioning can discard spatial evidence that is important for localized and compositional degradations. We therefore use spatial query probing rather than global factor prediction. To this end, we introduce a lightweight Cross-Attention Hyper-Adapter (illustrated in Figure 2). Instead of relying on a single global descriptor that can compress spatially heterogeneous degradation cues, we use a compact set of learnable queries as spatial probes. The queries interact with condensed spatial features via cross-attention to aggregate local degradation context for generating routing bases and residual directions. Given the intermediate spatial features X(l) at the l-th block, we first condense their spatial resolution via depthwise-pointwise convolutions to yield ˆX(l). This operation efficiently reduces the computa-tional overhead of the subsequent attention mechanism while encoding local structural patterns. The learnable queries then interact with these condensed features via cross-attention to aggregate local degradation contexts: 
+
+T (l) 
+
+> ϕ
+
+(x) = R(l) 
+
+> ϕ
+
++ CrossAttn 
+
+
+
+R(l) 
+
+> ϕ
+
+, ˆX(l), ˆX(l)
+
+, ϕ ∈ { A, B }. (4) Finally, lightweight fully-connected (FC) heads decode these contextualized query representations into a set of routing bases and residual directions for continuous low-rank residual assembly. We share T (l) 
+
+> A
+
+(x) and T (l) 
+
+> B
+
+(x) across targets, while using target-specific heads to produce the correspond-ing routing bases and residual directions (i.e., matrices A(l) 
+
+> τ
+
+(x) and B(l) 
+
+> τ
+
+(x)) for each modulated projection (e.g., Q and K): 
+
+A(l) 
+
+> τ
+
+(x) = 
+
+
+
+FC (l)
+
+> A,τ
+
+ T (l) 
+
+> A
+
+(x)⊤
+
+, B(l) 
+
+> τ
+
+(x) = FC (l)
+
+> B,τ
+
+ T (l) 
+
+> B
+
+(x), τ ∈ { Q, K }. (5) 
+
+3.4 Stable Parameter Assembly and Injection Resolving Scale Ambiguity (RankNorm). Dynamic factorization is inherently scale-ambiguous, as 
+
+AB = ( cA )( B/c ). To prevent norm drift and destabilization during training, we apply Rank-wise 6Factor Normalization (RankNorm) to the generated factors. For each target τ and rank index k,
+
+ A(l)′ 
+
+> τ
+
+(x) 
+
+> :,k
+
+=
+
+ A(l) 
+
+> τ
+
+(x)
+
+> :,k
+
+∥ A(l) 
+
+> τ
+
+(x)
+
+> :,k
+
+∥2 + ϵ ,  B(l)′ 
+
+> τ
+
+(x) 
+
+> k, :
+
+=
+
+ B(l) 
+
+> τ
+
+(x)
+
+> k, :
+
+∥ B(l) 
+
+> τ
+
+(x)
+
+> k, :
+
+∥2 + ϵ . (6) Crucially, this normalization is applied per instance to prevent cross-sample coupling, ensuring that each dynamically synthesized rank component remains well-conditioned. In implementation, the residual is computed as two low-rank products, (X(l)A(l)′ 
+
+> τ
+
+(x)) B(l)′ 
+
+> τ
+
+(x), rather than forming and applying a dense dynamic projection. This reduces the dominant computation from a full N d in dout 
+
+dynamic projection to N d in r + N rd out , with r ≪ din , d out .
+
+Injection Targets. The normalized factors are used to construct the residual ∆Y (l). In our default architecture, we inject this dynamic residual into the Attention Query ( Q) and Key ( K) projections: 
+
+Q = X(l)WQ + ∆ Y (l) 
+
+> Q
+
+, K = X(l)WK + ∆ Y (l) 
+
+> K
+
+. (7) In particular, ∆Y (l) 
+
+> Q
+
+and ∆Y (l) 
+
+> K
+
+are assembled by Eq. (3) using their corresponding target-specific factors (A(l) 
+
+> Q
+
+(x), B (l) 
+
+> Q
+
+(x)) and (A(l) 
+
+> K
+
+(x), B (l) 
+
+> K
+
+(x)) , respectively. By modulating Q and K, CEA adjusts the backbone’s attention patterns in a token-dependent manner, enabling spatially adaptive routing under the current degradation instance. 
+
+Training objective. We train the network with a reconstruction objective 
+
+Ltotal = Lrec + λf Lfft .
+
+Here Lrec is the pixel-domain ℓ1 loss. Following recent frequency-aware restoration practice and the training recipe of MoCE-IR [ 50 ], we also use a Fourier-domain reconstruction loss Lfft as a shared regularizer. This term is not part of the proposed CEA module; it is used for all matched variants in the controlled analysis. 
+
+## 4 Experiments 
+
+4.1 Experiment Settings Datasets and protocols. We evaluate our Continuous Expert Assembly (CEA) framework following standard All-in-One (AiO) restoration protocols [ 37 , 54 ]. Specifically, we conduct experiments under the AIO-3 and AIO-5 settings, where a single model is trained on mixed degradations and tested on task-specific benchmarks, as well as under the CDD-11 protocol [ 18 ] for compositional degradations involving combinations of up to three operators. 
+
+Implementation details. We adopt an asymmetric U-shaped Transformer backbone following prior all-in-one restorers. By default, CEA modules are inserted into decoder blocks and modulate the attention Q/K projections. We optimize all CEA models and controlled variants using Adam [ 25 ]with a reconstruction objective consisting of a spatial ℓ1 loss and a Fourier-domain reconstruction regularizer, following recent all-in-one restoration practice [ 50 ] and frequency-aware restoration objectives [ 22 ]. This Fourier term is shared across matched variants and is not a label-based auxiliary loss. No degradation labels, prompts, or auxiliary classification/contrastive objectives are used. 
+
+4.2 All-in-One Restoration on Standard AIO Benchmarks 
+
+Table 1 summarizes the average performance on AIO-3 and AIO-5; full per-task comparisons are provided in Appendix C.1 and Appendix C.2. 
+
+AIO-3. In the lightweight regime, CEA-IR-S improves the average score from 32.57/0.916 to 32.89/0.918 compared with MoCE-IR-S while using fewer parameters. The gains are most visible on SOTS dehazing and Rain100L deraining, which involve spatially varying weather degradations. In the higher-capacity setting, CEA-IR improves the average score from 32.73/0.917 to 33.07/0.922. The denoising gains are smaller but consistent across noise levels, indicating that input-conditioned assembly does not sacrifice performance on more homogeneous degradations. 7Table 1: Main all-in-one restoration results. We report average PSNR/SSIM. Full per-task compar-isons are provided in Appendix C.1 and Appendix C.2.                                                   
+
+> Benchmark Scale Method Params. Avg. PSNR Avg. SSIM Gain AIO-3 Light MoCE-IR-S 11M 32.57 .916 –Light CEA-IR-S 10M 32.89 .918 +0.32/+.002
+> AIO-3 Heavy MoCE-IR 25M 32.73 .917 –Heavy CEA-IR 22M 33.07 .922 +0.34/+.005
+> AIO-5 Light MoCE-IR-S 11M 30.08 .913 –Light CEA-IR-S 10M 30.80 .919 +0.72/+.006
+> AIO-5 Heavy MoCE-IR 25M 30.58 .919 –Heavy CEA-IR 22M 31.13 .922 +0.55/+.003
+
+Table 2: CDD-11 compositional restoration. We report group-level PSNR/SSIM on single, double, and triple degradation groups. Full per-category scores are provided in Appendix C.3.                 
+
+> Method Single Double Triple Overall OneRestore 31.68/.938 27.35/.866 24.84/.790 28.47/.878 MoCE-IR-S 32.54/.941 27.73/.869 25.40/.790 29.05/.881 CEA-IR-S 33.36/.943 28.51/.875 25.90/.798 29.79/.886
+
+AIO-5. Compared with MoCE-IR-S, CEA-IR-S improves the average score from 30.08/0.913 to 30.80/0.919. The gain is mainly driven by deraining, deblurring, low-light enhancement, and a smaller improvement on denoising. On dehazing, CEA-IR-S obtains slightly lower PSNR than MoCE-IR-S but comparable SSIM, indicating that the average improvement does not rely on uniformly dominating every task. For heavy models, CEA-IR improves the average score from 30.58/0.919 to 31.13/0.922. The largest gains appear on dehazing and deraining, while the model remains competitive but slightly lower on GoPro deblurring compared with MoCE-IR. 
+
+4.3 Compositional Degradations on CDD-11 
+
+Compositional degradations require generalization beyond individual degradation operators to their interactions and spatial overlap. Table 2 reports group-level results on the CDD-11 protocol [ 18 ]. Single, Double, and Triple denote category-wise averages over the corresponding degradation groups, and Overall is the category-wise average over all 11 degradation categories following prior work. CEA-IR-S achieves the best overall average of 29.79/0.886 using 10M parameters, improving over OneRestore and MoCE-IR-S by 1.32 dB and 0.74 dB, respectively. The gains are consistent across single, double, and triple degradation groups, with especially clear improvements on haze-related compositions in the full per-category table. These results match the motivation of CEA: compositional degradations often involve both global visibility changes and localized degradation patterns, making it useful to generate an input-conditioned residual subspace while allowing different spatial regions to assemble different updates. We therefore analyze the roles of factor generation and spatial assembly explicitly in Sec. 4.6. Table 3: Computational demands. FLOPs are computed on an input image of size 224 × 224 .Runtime (mean ± std in milliseconds) is re-evaluated on a single local NVIDIA RTX 4090 GPU using officially released codebases under identical input configurations. Method Params. Memory FLOPs Runtime (ms) AirNet 8.93M 4829M 238G 42.13 ± 0.13 PromptIR 35.59M 9830M 132G 40.86 ± 0.24 MoCE-IR 25.35M 5887M 80.59G 43.10 ± 0.27 MoCE-IR-S 11.47M 4228M 36.93G 41.63 ± 0.41 CEA-IR-S (Ours) 9.71M 3517M 28.03G 29.92 ± 0.25 
+
+8Table 4: Factorial ablation on CDD-11. All variants use the same lightweight backbone, Q/K injection, rank r = 8 , and reconstruction losses. “Static” learns input-independent low-rank factors, while “Dynamic” generates factors with the CEA hyper-adapter. “Top-2” applies sparse softmax routing over the top two rank components; “Dense” uses CEA’s softmax-free signed dot-product assembly.                          
+
+> Factor source Routing rule Single Double Triple Avg. Static Top-2 softmax 32.15/.939 27.50/.867 25.16/.787 28.77/.879 Static Dense signed dot-product 32.35/.940 27.77/.869 25.40/.790 29.01/.881 Dynamic Top-2 softmax 32.50/.941 27.94/.870 25.76/.792 29.20/.882 Dynamic Dense signed dot-product, CEA 33.36/.943 28.51/.875 25.90/.798 29.79/.886
+
+4.4 Qualitative Evaluation 
+
+Representative qualitative comparisons are provided in Appendix F. Across individual and composi-tional degradations, CEA reduces localized residual artifacts such as rain streaks, haze boundaries, and low-light texture distortions, while preserving fine structures. These visual trends are consistent with the quantitative gains in Tables 1–2. 
+
+4.5 Efficiency 
+
+Table 3 reports parameter count, memory, FLOPs, and runtime measured under the same input setting. CEA-IR-S uses 9.71M parameters and 28.03 GFLOPs, both lower than MoCE-IR-S and PromptIR, and runs in 29.92 ms on an RTX 4090. The efficiency mainly comes from applying the image-conditioned update through two low-rank matrix multiplications, rather than executing sparse expert branches or applying an equivalent dense dynamic projection. This yields a favorable accuracy–efficiency trade-off among the compared all-in-one restorers. 
+
+4.6 Controlled Analysis Disentangling factor source and routing rule. Table 4 tests whether the gain comes from the specific mechanism of CEA rather than from simply adding low-rank residual capacity. Static variants replace the input-conditioned hyper-adapter with per-block learnable factors A, B that are independent of the input image. Dynamic variants generate A(x), B (x) with the CEA hyper-adapter. Top-2 variants replace CEA’s dense assembly with sparse softmax routing over the top two rank components, whereas Dense uses CEA’s softmax-free signed dot-product assembly in Eq. (3) . All variants share the same lightweight backbone, Q/K injection, rank r = 8 , and reconstruction losses. The factorial ablation shows that the gain does not come from merely adding low-rank residual capacity. With Top-2 routing, dynamic factors improve the overall average from 28.77/0.879 to 29.20/0.882. With dense assembly, the same change improves the overall average from 29.01/0.881 to 29.79/0.886, showing the importance of input-conditioned factor generation. Static dense assembly remains close to the backbone-only result in Table 12, suggesting that input-independent low-rank factors are not sufficient for compositional restoration. Dense signed assembly also improves over Top-2 routing under both factor sources, and the gain is larger with dynamic factors (+0.59 dB) than with static factors (+0.24 dB). This interaction supports the central design of CEA: rank-wise components should be generated from the current image and used through dense token-wise assembly. Additional controlled studies on spatial query probing, RankNorm, rank sensitivity, and injection targets are provided in Appendix D. 
+
+## 5 Limitations 
+
+This work focuses on standard individual and compositional restoration benchmarks. Evaluating CEA on additional restoration settings would further clarify its generalization behavior. The current implementation uses a U-shaped Transformer backbone and modulates attention projections; extend-ing CEA to other backbones and dense prediction tasks is left for future work. As with other image enhancement methods, improved restoration may raise privacy concerns or unintended downstream use, so responsible use should consider consent and appropriate data handling. 96 Conclusion 
+
+We proposed Continuous Expert Assembly (CEA), a parameter-efficient framework for all-in-one image restoration under unknown and compositional degradations. CEA changes expert adaptation from selecting among fixed experts to assembling token-specific residual updates from input-generated rank-wise components. A lightweight Cross-Attention Hyper-Adapter probes intermediate spatial features to synthesize routing bases and residual directions, while dense signed affinities assemble spatially adaptive residuals without discrete expert selection. Experiments on AIO-3, AIO-5, and CDD-11 show improved average restoration quality, especially on compositional degradations, while maintaining favorable parameters, FLOPs, and runtime efficiency. 
+
+## References 
+
+[1] Yuang Ai, Huaibo Huang, and Ran He. Lora-ir: Taming low-rank experts for efficient all-in-one image restoration. arXiv preprint arXiv:2410.15385 , 2024. doi: 10.48550/arXiv.2410.15385. [2] Jin Cao, Yi Cao, Li Pang, Deyu Meng, and Xiangyong Cao. Hair: Hypernetworks-based all-in-one image restoration. arXiv preprint arXiv:2408.08091 , 2024. doi: 10.48550/arXiv. 2408.08091. [3] Hanting Chen, Yunhe Wang, Tianyu Guo, Chang Xu, Yiping Deng, Zhenhua Liu, Siwei Ma, Chunjing Xu, Chao Xu, and Wen Gao. Pre-trained image processing transformer. In 2021 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 12294– 12305, 2021. doi: 10.1109/CVPR46437.2021.01212. [4] Liangyu Chen, Xin Lu, Jie Zhang, Xiaojie Chu, and Chengpeng Chen. Hinet: Half instance normalization network for image restoration. In 2021 IEEE/CVF Conference on Computer Vision and Pattern Recognition Workshops (CVPRW) , pages 182–192, June 2021. doi: 10.1109/ CVPRW53098.2021.00027. [5] Liangyu Chen, Xiaojie Chu, Xiangyu Zhang, and Jian Sun. Simple baselines for image restora-tion. In Computer Vision – ECCV 2022 , pages 17–33, 2022. doi: 10.1007/978-3-031-20071-7\ _2. [6] Yinpeng Chen, Xiyang Dai, Mengchen Liu, Dongdong Chen, Lu Yuan, and Zicheng Liu. Dynamic convolution: Attention over convolution kernels. In 2020 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 11027–11036, 2020. doi: 10.1109/ CVPR42600.2020.01104. [7] Zheng Chen, Yulun Zhang, Jinjin Gu, Yongbing Zhang, Linghe Kong, and Xin Yuan. Cross aggregation transformer for image restoration. In Advances in Neural Information Processing Systems (NeurIPS) , volume 35, pages 25478–25490, 2022. [8] Krzysztof Choromanski, Valerii Likhosherstov, David Dohan, Xingyou Song, Andreea Gane, Tamás Sarlós, Peter Hawkins, Jared Davis, Afroz Mohiuddin, Lukasz Kaiser, David Belanger, Lucy J. Colwell, and Adrian Weller. Rethinking attention with performers. In International Conference on Learning Representations (ICLR) , 2021. [9] Marcos V. Conde, Gregor Geigle, and Radu Timofte. Instructir: High-quality image restoration following human instructions. In Computer Vision – ECCV 2024 , pages 1–21, 2024. doi: 10.1007/978-3-031-72764-1\_1. [10] Bert De Brabandere, Xu Jia, Tinne Tuytelaars, and Luc Van Gool. Dynamic filter net-works. In Advances in Neural Information Processing Systems (NeurIPS) , page 667–675, 2016. 10.48550/arXiv.1605.09673. [11] Yu Dong, Yihao Liu, He Zhang, Shifeng Chen, and Yu Qiao. FD-GAN: Generative adversarial networks with fusion-discriminator for single image dehazing. In Proceedings of the AAAI Conference on Artificial Intelligence , 2020. doi: 10.1609/aaai.v34i07.6701. [12] Huiyu Duan, Xiongkuo Min, Sijing Wu, Wei Shen, and Guangtao Zhai. Uniprocessor: A text-induced unified low-level image processor. In Computer Vision – ECCV 2024 , pages 180–199, 2024. doi: 10.1007/978-3-031-72855-6\_11. 10 [13] Qingnan Fan, Dongdong Chen, Lu Yuan, Gang Hua, Nenghai Yu, and Baoquan Chen. A general decoupled learning framework for parameterized image operators. IEEE Transactions on Pattern Analysis and Machine Intelligence , 43:33–47, 2021. doi: 10.1109/TPAMI.2019.2925793. [14] William Fedus, Barret Zoph, and Noam Shazeer. Switch transformers: Scaling to trillion parameter models with simple and efficient sparsity. Journal of Machine Learning Research , 23 (120):1–39, 2022. [15] Hongyun Gao, Xin Tao, Xiaoyong Shen, and Jiaya Jia. Dynamic scene deblurring with parameter selective sharing and nested skip connections. In 2019 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 3843–3851, 2019. URL 10.1109/ CVPR.2019.00397 .[16] Hang Guo, Tao Dai, Yuanchao Bai, Bin Chen, Xudong Ren, Zexuan Zhu, and Shu-Tao Xia. Parameter efficient adaptation for image restoration with heterogeneous mixture-of-experts. In 
+
+Advances in Neural Information Processing Systems (NeurIPS) , pages 13522–13547, 2024. doi: 10.52202/079017-0432. [17] Hang Guo, Jinmin Li, Tao Dai, Zhihao Ouyang, Xudong Ren, and Shu-Tao Xia. Mambair: A simple baseline for image restoration with state-space model. In Computer Vision – ECCV 2024 , 2024. doi: 10.1007/978-3-031-72649-1\_13. [18] Yu Guo, Yuan Gao, Yuxu Lu, Huilin Zhu, Ryan Wen Liu, and Shengfeng He. Onerestore: A universal restoration framework for composite degradation. In Computer Vision – ECCV 2024 ,pages 255–272, 2025. doi: 10.1007/978-3-031-72655-2\_15. [19] David Ha, Andrew Dai, and Quoc V. Le. Hypernetworks. In International Conference on Learning Representations (ICLR) , 2017. [20] Neil Houlsby, Andrei Giurgiu, Stanislaw Jastrzebski, Bruna Morrone, Quentin De Laroussilhe, Andrea Gesmundo, Mona Attariyan, and Sylvain Gelly. Parameter-efficient transfer learning for NLP. In Proceedings of the 36th International Conference on Machine Learning (ICML) ,volume 97, pages 2790–2799, 2019. [21] Edward J. Hu, Yelong Shen, Phillip Wallis, Zeyuan Allen-Zhu, Yuanzhi Li, Shean Wang, Lu Wang, and Weizhu Chen. Lora: Low-rank adaptation of large language models. In 
+
+International Conference on Learning Representations (ICLR) , 2022. doi: 10.48550/arXiv.2106. 09685. [22] Liming Jiang, Bo Dai, Wayne Wu, and Chen Change Loy. Focal frequency loss for image reconstruction and synthesis. In 2021 IEEE/CVF International Conference on Computer Vision (ICCV) , pages 13899–13909, October 2021. doi: 10.1109/ICCV48922.2021.01366. [23] Jeya Maria Jose Valanarasu, Rajeev Yasarla, and Vishal M. Patel. Transweather: Transformer-based restoration of images degraded by adverse weather conditions. In 2022 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 2343–2353, 2022. doi: 10.1109/CVPR52688.2022.00239. [24] Angelos Katharopoulos, Apoorv Vyas, Nikolaos Pappas, and François Fleuret. Transformers are RNNs: Fast autoregressive transformers with linear attention. In Proceedings of the 37th International Conference on Machine Learning , volume 119 of Proceedings of Machine Learning Research , pages 5156–5165, 2020. [25] Diederik P. Kingma and Jimmy Ba. Adam: A method for stochastic optimization. arXiv preprint arXiv:1412.6980 , 2014. doi: 10.48550/arXiv.1412.6980. [26] Dmitry Lepikhin, HyoukJoong Lee, Yuanzhong Xu, Dehao Chen, Orhan Firat, Yanping Huang, Maxim Krikun, Noam Shazeer, and Zhifeng Chen. Gshard: Scaling giant models with condi-tional computation and automatic sharding. In International Conference on Learning Represen-tations (ICLR) , 2021. 11 [27] Boyun Li, Xiao Liu, Peng Hu, Zhongqin Wu, Jiancheng Lv, and Xi Peng. All-in-one image restoration for unknown corruption. In 2022 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 17431–17441, 2022. doi: 10.1109/CVPR52688.2022. 01693. [28] Zilong Li, Yiming Lei, Chenglong Ma, Junping Zhang, and Hongming Shan. Prompt-in-prompt learning for universal image restoration. arXiv preprint arXiv:2312.05038 , 2023. doi: 10.48550/arXiv.2312.05038. [29] Jingyun Liang, Jiezhang Cao, Guolei Sun, Kai Zhang, Luc Van Gool, and Radu Timofte. Swinir: Image restoration using swin transformer. In 2021 IEEE/CVF International Conference on Computer Vision Workshops (ICCVW) , pages 1833–1844, 2021. doi: 10.1109/ICCVW54120. 2021.00210. [30] Lin Liu, Lingxi Xie, Xiaopeng Zhang, Shanxin Yuan, Xiangyu Chen, Wengang Zhou, Houqiang Li, and Qi Tian. TAPE: Task-agnostic prior embedding for image restoration. In Computer Vision – ECCV 2022 , 2022. doi: 10.1007/978-3-031-19797-0\_26. [31] Shih-Yang Liu, Chien-Yi Wang, Hongxu Yin, Pavlo Molchanov, Yu-Chiang Frank Wang, Kwang-Ting Cheng, and Min-Hung Chen. DoRA: Weight-decomposed low-rank adaptation. In 
+
+Proceedings of the 41st International Conference on Machine Learning (ICML) , volume 235, pages 32100–32121, 2024. doi: 10.48550/arXiv.2402.09353. [32] Ziwei Luo, Fredrik K. Gustafsson, Zheng Zhao, Jens Sjölund, and Thomas B. Schön. Controlling vision-language models for multi-task image restoration. In International Conference on Learning Representations (ICLR) , 2024. [33] Jiaqi Ma, Tianheng Cheng, Guoli Wang, Qian Zhang, Xinggang Wang, and Lefei Zhang. Prores: Exploring degradation-aware visual prompt for universal image restoration. arXiv preprint arXiv:2306.13653 , 2023. doi: 10.48550/ARXIV.2306.13653. [34] Ben Mildenhall, Jonathan T. Barron, Jiawen Chen, Dillon Sharlet, Ren Ng, and Robert Carroll. Burst denoising with kernel prediction networks. In 2018 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 2502–2510, 2018. doi: 10.1109/CVPR.2018. 00265. [35] Chong Mou, Qian Wang, and Jian Zhang. Deep generalized unfolding networks for image restoration. In 2022 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , 2022. doi: 10.1109/CVPR52688.2022.01688. [36] Ozan Özdenizci and Robert Legenstein. Restoring vision in adverse weather conditions with patch-based denoising diffusion models. IEEE Transactions on Pattern Analysis and Machine Intelligence , 45(8):10346–10357, 2023. doi: 10.1109/TPAMI.2023.3238179. [37] Vaishnav Potlapalli, Syed Waqas Zamir, Salman H. Khan, and Fahad Shahbaz Khan. Promptir: prompting for all-in-one blind image restoration. In Advances in Neural Information Processing Systems (NeurIPS) , pages 71275–71293, 2023. doi: 10.52202/075280-3121. [38] Joan Puigcerver, Carlos Riquelme Ruiz, Basil Mustafa, and Neil Houlsby. From sparse to soft mixtures of experts. In International Conference on Learning Representations , pages 28435–28445, 2024. [39] Bin Ren, Yawei Li, Xu Zheng, Yuqian Fu, Danda Pani Paudel, Hong Liu, Ming-Hsuan Yang, Luc Van Gool, and Nicu Sebe. Efficient degradation-agnostic image restoration via channel-wise functional decomposition and manifold regularization. arXiv preprint arXiv:2505.18679 , 2026. doi: 10.48550/arXiv.2505.18679. [40] Carlos Riquelme, Joan Puigcerver, Basil Mustafa, Maxim Neumann, Rodolphe Jenatton, An-dré Susano Pinto, Daniel Keysers, and Neil Houlsby. Scaling vision with sparse mixture of experts. In Advances in Neural Information Processing Systems (NeurIPS) , pages 8583–8595, 2021. 10.48550/arXiv.2106.05974. 12 [41] David Serrano-Lozano, Luis Herranz, Shaolin Su, and Javier Vazquez-Corral. Adaptive blind all-in-one image restoration. arXiv preprint arXiv:2411.18412 , 2025. doi: 10.48550/arXiv. 2411.18412. [42] Noam Shazeer, Azalia Mirhoseini, Krzysztof Maziarz, Andy Davis, Quoc V. Le, Geoffrey E. Hinton, and Jeff Dean. Outrageously large neural networks: The sparsely-gated mixture-of-experts layer. In International Conference on Learning Representations (ICLR) , 2017. 10.48550/arXiv.1701.06538. [43] Zhuoran Shen, Mingyuan Zhang, Haiyu Zhao, Shuai Yi, and Hongsheng Li. Efficient attention: Attention with linear complexities. In 2021 IEEE Winter Conference on Applications of Computer Vision (WACV) , pages 3530–3538, 2021. doi: 10.1109/WACV48630.2021.00357. [44] Chunwei Tian, Yong Xu, and Wangmeng Zuo. Image denoising using deep CNN with batch renormalization. Neural Networks , 121:461–473, 2020. doi: 10.1016/j.neunet.2019.08.022. [45] Zhengzhong Tu, Hossein Talebi, Han Zhang, Feng Yang, Peyman Milanfar, Alan Bovik, and Yinxiao Li. MAXIM: Multi-axis MLP for image processing. In 2022 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 5759–5770, 2022. doi: 10.1109/ CVPR52688.2022.00568. [46] Tao Wang, Kaihao Zhang, Ziqian Shao, Wenhan Luo, Bjorn Stenger, Tong Lu, Tae-Kyun Kim, Wei Liu, and Hongdong Li. Gridformer: Residual dense transformer with grid structure for image restoration in adverse weather conditions. International Journal of Computer Vision ,132:4541–4563, 2024. doi: 10.1007/s11263-024-02056-0. [47] Zhendong Wang, Xiaodong Cun, Jianmin Bao, Wengang Zhou, Jianzhuang Liu, and Houqiang Li. Uformer: A general u-shaped transformer for image restoration. In 2022 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 17662–17672, June 2022. doi: 10.1109/CVPR52688.2022.01716. [48] Gang Wu, Junjun Jiang, Kui Jiang, and Xianming Liu. Harmony in diversity: Improving all-in-one image restoration via multi-task collaboration. In Proceedings of the 32nd ACM International Conference on Multimedia , 2024. doi: 10.1145/3664647.3680762. [49] Brandon Yang, Gabriel Bender, Quoc V. Le, and Jiquan Ngiam. Condconv: conditionally parameterized convolutions for efficient inference. In Hanna M. Wallach, Hugo Larochelle, Alina Beygelzimer, Florence d’Alché Buc, Emily B. Fox, and Roman Garnett, editors, Advances in Neural Information Processing Systems (NeurIPS) , pages 1307–1318, 2019. [50] Eduard Zamfir, Zongwei Wu, Nancy Mehta, Yuedong Tan, Danda Pani Paudel, Yulun Zhang, and Radu Timofte. Complexity experts are task-discriminative learners for any image restoration. In 2025 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 12753–12763, 2025. doi: 10.1109/CVPR52734.2025.01190. [51] Syed Waqas Zamir, Aditya Arora, Salman Khan, Munawar Hayat, Fahad Shahbaz Khan, Ming-Hsuan Yang, and Ling Shao. Multi-stage progressive image restoration. In 2021 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 14816–14826, 2021. doi: 10.1109/CVPR46437.2021.01458. [52] Syed Waqas Zamir, Aditya Arora, Salman Khan, Munawar Hayat, Fahad Shahbaz Khan, and Ming-Hsuan Yang. Restormer: Efficient transformer for high-resolution image restoration. In 2022 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 5728–5739, 2022. doi: 10.1109/CVPR52688.2022.00564. [53] Haijin Zeng, Xiangming Wang, Yongyong Chen, Jingyong Su, and Jie Liu. Vision-language gradient descent-driven all-in-one deep unfolding networks. In 2025 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , 2025. doi: 10.1109/CVPR52734.2025. 00705. [54] Jinghao Zhang, Jie Huang, Mingde Yao, Zizheng Yang, Hu Yu, Man Zhou, and Feng Zhao. Ingredient-oriented multi-degradation learning for image restoration. In 2023 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 5825–5835. IEEE, 2023. doi: 10.1109/CVPR52729.2023.00564. 13 [55] Kai Zhang, Wangmeng Zuo, Yunjin Chen, Deyu Meng, and Lei Zhang. Beyond a gaussian denoiser: Residual learning of deep cnn for image denoising. IEEE Transactions on Image Processing , 26(7):3142–3155, 2017. doi: 10.1109/TIP.2017.2662206. [56] Qingru Zhang, Minshuo Chen, Alexander Bukharin, Nikos Karampatziakis, Pengcheng He, Yu Cheng, Weizhu Chen, and Tuo Zhao. Adaptive budget allocation for parameter-efficient fine-tuning. In International Conference on Learning Representations (ICLR) , 2023. 10.48550/arXiv.2303.10512. [57] Yurui Zhu, Tianyu Wang, Xueyang Fu, Xuanyu Yang, Xin Guo, Jifeng Dai, Yu Qiao, and Xiaowei Hu. Learning weather-general and weather-specific features for image restoration under multiple adverse weather conditions. In 2023 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 21747–21758, 2023. doi: 10.1109/CVPR52729.2023. 02083. 
+
+## A Additional Method Details 
+
+A.1 Cross-Attention Hyper-Adapter Details Feature condensation. For each CEA-equipped decoder block, the hyper-adapter first condenses the intermediate feature map before cross-attention. The condensation module consists of a depthwise 
+
+3 × 3 convolution followed by a pointwise 1 × 1 convolution. The depthwise convolution uses stride 
+
+sc and padding 1, reducing the spatial resolution from Hl × Wl to ⌈Hl/s c⌉ × ⌈ Wl/s c⌉, while the pointwise convolution preserves the channel dimension. Unless otherwise stated, we use sc = 2 .The resulting condensed tokens are used as keys and values in the Cross-Attention Hyper-Adapter, while the learnable queries remain compact and rank-oriented. The subsequent query probing and target-specific FC decoding follow Eqs. (4)–(5). 
+
+A.2 RankNorm and Sequential Low-Rank Assembly 
+
+The factorization A(l) 
+
+> τ
+
+(x)B(l) 
+
+> τ
+
+(x) is scale-ambiguous because AB = ( cA )( B/c ) for any nonzero scalar c. We therefore normalize each generated rank component before assembly. For each target τ
+
+and rank index k,
+
+ A(l)′ 
+
+> τ
+
+(x) 
+
+> :,k
+
+=
+
+ A(l) 
+
+> τ
+
+(x)
+
+> :,k
+
+∥ A(l) 
+
+> τ
+
+(x)
+
+> :,k
+
+∥2 + ϵ ,  B(l)′ 
+
+> τ
+
+(x) 
+
+> k, :
+
+=
+
+ B(l) 
+
+> τ
+
+(x)
+
+> k, :
+
+∥ B(l) 
+
+> τ
+
+(x)
+
+> k, :
+
+∥2 + ϵ . (8) This per-instance normalization stabilizes the token-to-rank affinities and avoids cross-sample cou-pling. The residual update is then implemented as 
+
+∆Y (l) 
+
+> τ
+
+= α
+
+
+
+X(l)A(l)′ 
+
+> τ
+
+(x)
+
+
+
+B(l)′ 
+
+> τ
+
+(x), (9) which requires two low-rank matrix multiplications and avoids forming the equivalent dense din ×dout 
+
+dynamic update. 
+
+## B Detailed Experimental Settings 
+
+B.1 Datasets and Protocols 
+
+We follow standard all-in-one image restoration protocols. AIO-3 trains one model on mixed dehazing, deraining, and denoising data and evaluates it on SOTS, Rain100L, and BSD68 with Gaussian noise levels σ ∈ { 15 , 25 , 50 }. AIO-5 further includes deblurring and low-light enhancement and is reported using five benchmark entries: SOTS, Rain100L, BSD68 at σ = 25 , GoPro, and LOLv1. For compositional restoration, we follow the CDD-11 protocol, which includes four single degradations, five double compositions, and two triple compositions. All evaluations are blind: the model receives only the degraded image and does not use test-time degradation labels, prompts, or descriptors. 14 B.2 Backbone and CEA Configuration 
+
+We use an asymmetric U-shaped Transformer encoder-decoder backbone following prior all-in-one restorers. The encoder contains three downsampling stages with [4 , 6, 6] Transformer blocks, followed by a latent stage with 8 blocks. The decoder contains [2 , 4, 4] Transformer blocks from low to high resolution, followed by 4 refinement blocks. We report two model scales: CEA-IR-S uses initial embedding dimension C = 32 , while CEA-IR uses C = 48 ; in both cases the channel dimension doubles after each downsampling stage. The attention heads are [1 , 2, 4, 8] across the four resolution levels, the FFN expansion ratio is 2, and convolution/projection biases are disabled. Unless otherwise stated, CEA modules are inserted into alternating decoder blocks, starting from the first block of each decoder stage. This gives 1, 2, and 2 CEA-equipped blocks in the three decoder stages, respectively. The default injection targets are the attention query and key projections ( Q and 
+
+K). The low-rank bottleneck is r = 8 , and each hyper-adapter uses 4-head cross-attention with 16 learnable queries in total, with 8 queries for A and 8 queries for B. The CEA placement, injection targets, rank, and hyper-adapter configuration are kept the same across the two model scales. 
+
+B.3 Optimization and Training Objective 
+
+All CEA models and matched controlled variants are trained without degradation labels, prompts, or label-based auxiliary objectives. We optimize 
+
+Ltotal = Lrec + λf Lfft , Lrec = ∥ˆy − y∥1, (10) with λf = 0 .10 . The Fourier-domain reconstruction regularizer is 
+
+Lfft = |F (ˆ y)| − |F (y)| 1, (11) where F(·) denotes FFT. Following recent restoration practice, this term is used as a shared re-construction regularizer for all CEA models and matched controlled variants. It is not part of the proposed CEA module and should not be interpreted as label-based auxiliary supervision. We train all CEA models and matched controlled variants using Adam with (β1, β 2) = (0 .9, 0.999) ,a total batch size of 64, an initial learning rate of 5 × 10 −4, and cosine learning-rate decay. AIO models are trained for 120 epochs, while CDD-11 models are trained for 200 epochs. We use random 
+
+128 × 128 crops and horizontal/vertical flips for data augmentation. 
+
+Training hardware and wall-clock cost. All reported training runs were conducted on a single workstation with four NVIDIA RTX 4090 GPUs. For the lightweight CEA-IR-S model, CDD-11 training took approximately 15 hours for 200 epochs. AIO-3 and AIO-5 training took approximately 30–37.5 hours each, about 2–2.5 × the CDD-11 wall-clock time under the same total batch size of 64 and 128 × 128 crop setting. The wall-clock time can vary with dataset I/O, implementation details, and model scale. 
+
+Inference measurement. Runtime is measured on a single NVIDIA RTX 4090 GPU after 100 warm-up iterations and averaged over 1000 measured runs. 
+
+## C Additional Quantitative Results 
+
+C.1 Full Results on AIO-3 
+
+Table 5 provides the full per-task AIO-3 comparison corresponding to the compact summary in the main paper. 
+
+C.2 Full Results on AIO-5 
+
+Table 6 provides the full per-task AIO-5 comparison corresponding to the compact summary in the main paper. 
+
+C.3 Full Per-Category Results on CDD-11 
+
+Table 7 provides the full per-category CDD-11 comparison. The main paper reports group-level averages to save space. 15 Table 5: Full AIO-3 benchmark. Quantitative comparison on three degradations following the standard AiO protocol [ 37 , 54 ]. We report PSNR (dB, ↑) / SSIM ( ↑) on SOTS (dehazing), Rain100L (deraining), and BSD68 Gaussian denoising with σ ∈ { 15 , 25 , 50 }. Methods are grouped by model capacity ( Light vs. Heavy ). Best results within each group are highlighted. 
+
+Method Params. Dehazing Deraining Denoising Average SOTS Rain100L BSD68 σ = 15 BSD68 σ = 25 BSD68 σ = 50 PSNR SSIM Light BRDNet [44] – 23.23 .895 27.42 .895 32.26 .898 29.76 .836 26.34 .693 27.80 .843 LPNet [15] – 20.84 .828 24.88 .784 26.47 .778 24.77 .748 21.26 .552 23.64 .738 FDGAN [11] – 24.71 .929 29.89 .933 30.25 .910 28.81 .868 26.43 .776 28.02 .883 DL [13] 2M 26.92 .931 32.62 .931 33.05 .914 30.41 .861 26.90 .740 29.98 .876 AirNet [27] 9M 27.94 .962 34.90 .967 33.92 .933 31.26 .888 28.00 .797 31.20 .910 MoCE-IR-S [50] 11M 30.94 .979 38.22 .983 34.08 .933 31.42 .888 28.16 .798 32.57 .916 
+
+CEA-IR-S (ours) 10M 31.90 .981 38.62 .984 34.16 .933 31.51 .889 28.27 .803 32.89 .918 
+
+> Heavy
+
+MPRNet [51] 16M 25.28 .955 33.57 .954 33.54 .927 30.89 .880 27.56 .779 30.17 .899 PromptIR [37] 36M 30.58 .974 36.37 .972 33.98 .933 31.31 .888 28.06 .799 32.06 .913 Gridformer [46] 34M 30.37 .970 37.15 .972 33.93 .931 31.37 .887 28.11 .801 32.19 .912 PromptIR+Art [48] 33M 30.83 .979 37.94 .982 34.06 .934 31.42 .891 28.14 .801 32.49 .917 DA-CLIP [32] 125M 29.46 .963 36.28 .968 30.02 .821 24.86 .585 22.29 .476 28.58 .763 UniProcessor [12] 1002M 31.66 .979 38.17 .982 34.08 .935 31.42 .891 28.17 .803 32.70 .918 LoRA-IR [1] – 30.68 .961 37.75 .979 34.06 .935 31.42 .891 28.18 .803 32.42 .914 Res-HAIR [2] 29M 30.98 .979 38.59 .983 34.16 .935 31.51 .892 28.24 .803 32.70 .919 VLU-Net [53] 35M 30.71 .980 38.93 .984 34.13 .935 31.48 .892 28.23 .804 32.70 .919 MoCE-IR [50] 25M 31.34 .979 38.57 .984 34.11 .932 31.45 .888 28.18 .800 32.73 .917 
+
+CEA-IR (ours) 22M 32.33 .983 38.92 .985 34.22 .937 31.58 .895 28.32 .809 33.07 .922 
+
+Table 6: Full AIO-5 benchmark. Comparison on five degradations under the same AiO training protocol [ 37 , 54 ]. We evaluate on SOTS (dehazing), Rain100L (deraining), BSD68 ( σ = 25 ), GoPro (deblurring), and LOLv1 (low-light). PSNR (dB, ↑) / SSIM ( ↑) are computed on full RGB images. Our method consistently achieves the best average across two model scales. 
+
+Method Params. Dehazing Deraining Denoising Deblurring Low-Light Average SOTS Rain100L BSD68 σ=25 GoPro LOLv1 PSNR SSIM Light SwinIR [29] 1M 21.50 .891 30.78 .923 30.59 .868 24.52 .773 17.81 .723 25.04 .835 DL [13] 2M 20.54 .826 21.96 .762 23.09 .745 19.86 .672 19.83 .712 21.05 .743 TAPE [30] 1M 22.16 .861 29.67 .904 30.18 .855 24.47 .763 18.97 .621 25.09 .801 AirNet [27] 9M 21.04 .884 32.98 .951 30.91 .882 24.35 .781 18.18 .735 25.49 .847 MoCE-IR-S [50] 11M 31.33 .978 37.21 .978 31.25 .884 28.90 .877 21.68 .851 30.08 .913 
+
+CEA-IR-S (ours) 10M 31.02 .979 38.50 .984 31.45 .888 29.47 .886 23.58 .858 30.80 .919 
+
+> Heavy
+
+NAFNet [5] 17M 25.23 .939 35.56 .967 31.02 .883 26.53 .808 20.49 .809 27.76 .881 DGUNet [35] 17M 24.78 .940 36.62 .971 31.10 .883 27.25 .837 21.87 .823 28.32 .891 Restormer [52] 26M 24.09 .927 34.81 .962 31.49 .884 27.22 .829 20.41 .806 27.60 .881 MambaIR [17] 27M 25.81 .944 36.55 .971 31.41 .884 28.61 .875 22.49 .832 28.97 .901 Transweather [23] 38M 21.32 .885 29.43 .905 29.00 .841 25.12 .757 21.21 .792 25.22 .836 IDR [54] 15M 25.24 .943 35.63 .965 31.60 .887 27.87 .846 21.34 .826 28.34 .893 Gridformer [46] 34M 26.79 .951 36.61 .971 31.45 .885 29.22 .884 22.59 .831 29.33 .904 InstructIR-5D [9] 17M 27.10 .956 36.84 .973 31.40 .873 29.40 .886 23.00 .836 29.55 .908 Res-HAIR [2] 29M 30.62 .978 38.11 .981 31.49 .891 28.52 .874 23.12 .847 30.37 .914 VLU-Net [53] 35M 30.84 .980 38.54 .982 31.43 .891 27.46 .840 22.29 .833 30.11 .905 MoCE-IR [50] 25M 30.48 .974 38.04 .982 31.34 .887 30.05 .899 23.00 .852 30.58 .919 
+
+CEA-IR (ours) 22M 31.96 .981 38.95 .985 31.53 .894 29.90 .894 23.32 .857 31.13 .922 
+
+Table 7: Full CDD-11 compositional degradations. Results on the CDD-11 protocol introduced in OneRestore [ 18 ]. We report PSNR (dB, ↑) / SSIM ( ↑) on single, double, and triple degradation compositions (L: low-light, H: haze, R: rain, S: snow). Our method achieves the best overall average and yields consistent gains on challenging haze-related compositions.                                                                                                           
+
+> Method Params. CDD11-Single CDD11-Double CDD11-Triple Avg. Low (L) Haze (H) Rain (R) Snow (S) L+H L+R L+S H+R H+S L+H+R L+H+S AirNet [27] 9M 24.83/.778 24.21/.951 26.55/.891 26.79/.919 23.23/.779 22.82/.710 23.29/.723 22.21/.868 23.29/.901 21.80/.708 22.24/.725 23.75/.814 PromptIR [37] 36M 26.32/.805 26.10/.969 31.56/.946 31.53/.960 24.49/.789 25.05/.771 24.51/.761 24.54/.924 23.70/.925 23.74/.752 23.33/.747 25.90/.850 WGWSNet [57] 26M 24.39/.774 27.90/.982 33.15/.964 34.43/.973 24.27/.800 25.06/.772 24.60/.765 27.23/.955 27.65/.960 23.90/.772 23.97/.771 26.96/.863 WeatherDiff [36] 83M 23.58/.763 21.99/.904 24.85/.885 24.80/.888 21.83/.756 22.69/.730 22.12/.707 21.25/.868 21.99/.868 21.23/.716 21.04/.698 22.49/.799 OneRestore [18] 6M 26.48/.826 32.52/.990 33.40/.964 34.31/.973 25.79/.822 25.58/.799 25.19/.789 29.99/.957 30.21/.964 24.78/.788 24.90/.791 28.47/.878 MoCE-IR-S [50] 11M 27.26/.824 32.66/.990 34.31/.970 35.91/.980 26.24/.817 26.25/.800 26.04/.793 29.93/.964 30.19/.970 25.41/.789 25.39/.790 29.05/.881
+> CEA-IR-S (ours) 10M 27.47/.827 34.75/.993 34.72/.971 36.49/.982 26.67/.824 26.65/.806 26.58/.802 31.15/.968 31.49/.974 25.87/.797 25.93/.799 29.79/.886
+
+16 D Additional Statistical and Ablation Studies 
+
+D.1 Paired Bootstrap Analysis on AIO-3 and AIO-5 
+
+We perform paired bootstrap analyses on the lightweight AIO-3 and AIO-5 comparisons to assess whether the improvements are consistent across matched test images. Table 8 reports the observed paired differences and bootstrap confidence intervals. For each benchmark entry, we compute the per-image PSNR/SSIM difference between CEA-IR-S and MoCE-IR-S, resample matched image pairs with replacement, and report the mean difference together with the 95% percentile confidence interval over 10,000 bootstrap resamples. This analysis measures test-set paired significance rather than variability across independent training runs. For AIO-5, the overall statistic is computed as the unweighted mean over five benchmark entries: SOTS, Rain100L, BSD68 at σ = 25 , GoPro, and LOLv1. Because Gaussian noise is generated online for denoising and the full benchmark tables report rounded aggregate scores, the bootstrap mean computed from raw matched per-image differences may not exactly equal the arithmetic difference obtained from the displayed rounded table entries. Table 8: Paired bootstrap analysis on AIO-3 and AIO-5. Differences are computed as CEA-IR-S minus MoCE-IR-S on matched test images. Confidence intervals are estimated from 10,000 paired bootstrap resamples.                
+
+> Benchmark Metric Observed difference 95% CI AIO-3 PSNR +0.3046 [ +0.2565, +0.3582 ] AIO-3 SSIM +0.0019 [ +0.0017, +0.0022 ] AIO-5 PSNR +0.6892 [ +0.3591, +1.0192 ] AIO-5 SSIM +0.0054 [ +0.0033, +0.0073 ]
+
+All confidence intervals are strictly positive. Across 10,000 bootstrap resamples, no resampled mean difference is non-positive for either benchmark, giving an empirical one-sided bootstrap probability of pboot < 10 −4. On AIO-5, CEA-IR-S improves most benchmark entries, with the only negative PSNR difference occurring on SOTS dehazing; the overall paired improvement remains positive. 
+
+D.2 Paired Bootstrap Analysis on CDD-11 
+
+To further assess the robustness of the CDD-11 improvement, we perform a paired bootstrap analysis between CEA-IR-S and MoCE-IR-S. The analysis uses matched test images: for each image, we first compute the PSNR/SSIM difference between the two methods, and then resample matched image pairs with replacement. We run 10,000 bootstrap resamples, and Table 9 reports the mean difference together with the 95% percentile confidence interval. Table 9: Paired bootstrap analysis on CDD-11. Differences are computed as CEA-IR-S minus MoCE-IR-S on matched test images. Confidence intervals are estimated from 10,000 paired bootstrap resamples.            
+
+> Metric MoCE-IR-S CEA-IR-S Difference with 95% CI PSNR 29.0490 29.7924 +0.7434 [ +0.6692, +0.8205 ] SSIM 0.8806 0.8857 +0.0051 [ +0.0047, +0.0057 ]
+
+Both confidence intervals are strictly positive, indicating that the CDD-11 gain is consistent under paired resampling rather than being driven by a small subset of test images. Across 10,000 bootstrap resamples, no resampled mean difference is non-positive, giving an empirical one-sided bootstrap probability of pboot < 10 −4.
+
+D.3 Global Conditioning vs. Spatial Query Probing 
+
+To evaluate whether spatial probing is necessary for factor generation, Table 10 compares CEA with a Global-Dynamic variant that predicts A(x) and B(x) from a global average-pooled feature using an MLP. Both variants use the same backbone, Q/K injection, rank r = 8 , reconstruction losses, and dense softmax-free dot-product assembly; only the factor generator differs. 17 Table 10: Global conditioning vs. spatial query probing on CDD-11. All variants are trained without degradation labels or auxiliary objectives.             
+
+> Generator Single Double Triple Avg. GAP + MLP 32.53/.941 27.87/.871 25.53/.792 29.14/.882 Cross-attention queries (CEA) 33.36/.943 28.51/.875 25.90/.798 29.79/.886
+
+Spatial query probing improves the overall average from 29.14/0.882 to 29.79/0.886. The gain is observed across all degradation groups, supporting the use of cross-attention queries to collect spatial degradation evidence before generating the low-rank factors. 
+
+D.4 RankNorm and Rank Sensitivity 
+
+We further analyze two design choices in the low-rank assembly: the use of RankNorm and the rank 
+
+r. All variants are evaluated on CDD-11 using the lightweight CEA-IR-S setting with the same backbone, training objective, and Q+K injection. The left part of Table 11 shows that removing RankNorm reduces the overall average from 29.79/0.886 to 29.59/0.885. This indicates that RankNorm improves the conditioning of dynamically generated factors, although the model remains effective without it. The right part of Table 11 studies the rank 
+
+r. Increasing the rank from 4 to 8 improves the average PSNR from 29.40 to 29.79, while further increasing the rank to 16 slightly decreases performance to 29.70. We therefore use r = 8 as the default setting, which provides the best accuracy with negligible parameter overhead. Table 11: RankNorm and rank sensitivity on CDD-11. (a) RankNorm improves the conditioning of dynamically generated low-rank factors. (b) Performance saturates at r = 8 , indicating that a compact residual subspace is sufficient.                        
+
+> (a) Effect of RankNorm
+> Variant PSNR ↑SSIM ↑
+> w/o RankNorm 29.59 .885 w/ RankNorm 29.79 .886 (b) Effect of rank rrParams. PSNR ↑SSIM ↑
+> 49.708M 29.40 .884 89.712M 29.79 .886
+> 16 9.718M 29.70 .885
+
+D.5 Ablation on Injection Targets 
+
+Table 12: Ablation on injection targets (CDD-11). We report PSNR/SSIM averaged over CDD11-Single, CDD11-Double, CDD11-Triple, and the overall average.                                      
+
+> Injection targets Single Avg. Double Avg. Triple Avg. Overall Avg. None (backbone only) 32.35/.941 27.74/.870 25.42/.792 29.00/.882
+> Qonly 32.88/.942 28.12/.873 25.62/.794 29.39/.884
+> Konly 32.81/.942 28.00/.872 25.39/.792 29.28/.883
+> Vonly 32.73/.942 27.99/.871 25.51/.792 29.26/.882
+> Q+K(default) 33.36/.943 28.51/.875 25.90/.798 29.79/.886
+> Q+K+V32.94/.942 28.18/.873 25.68/.795 29.46/.884
+> W1only (FFN-in) 32.73/.942 27.93/.871 25.50/.792 29.23/.883
+
+Table 12 studies where to inject the CEA residual. Modulating Q and K gives the best overall result, improving over the backbone-only variant by 0.79 dB in PSNR. All single-target variants improve PSNR over the backbone, but their gains are smaller than Q+K injection. This suggests that CEA is most effective when it reshapes attention matching rather than only changing value content or feed-forward features. Adding V on top of Q+K reduces the overall average from 29.79/0.886 to 29.46/0.884. We therefore use Q+K injection as the default accuracy–efficiency trade-off. 18 E Additional Out-of-Distribution Evaluation 
+
+E.1 Zero-Shot Underwater Enhancement on UIEB 
+
+Table 13 reports out-of-domain generalization on UIEB under the zero-shot protocol used in recent degradation-agnostic restoration work. Models are trained under the all-in-one restoration setting and directly evaluated on the paired UIEB subset without underwater-specific training or finetuning. This experiment is therefore intended as a cross-domain diagnostic rather than a comparison with underwater-supervised enhancement methods. Table 13: Zero-shot underwater enhancement on UIEB. PSNR/SSIM are evaluated on the paired UIEB subset. All methods are evaluated under a zero-shot restoration setting without underwater-specific training or finetuning.                     
+
+> Method PSNR SSIM SwinIR 15.31 .740 NAFNet 15.42 .744 Restormer 15.46 .745 AirNet 15.46 .745 IDR 15.58 .762 PromptIR 15.48 .748 MoCE-IR 15.91 .765 MIRAGE-S 17.29 .773 CEA-IR-S 17.31 .774
+
+CEA-IR-S obtains 17.31/0.774 on UIEB without underwater-specific training or finetuning. Com-pared with zero-shot all-in-one baselines, it improves over MoCE-IR by 1.40 dB and is slightly above MIRAGE-S [ 39 ]. Since underwater images are outside the training degradation set, these results should be interpreted as an out-of-domain generalization diagnostic rather than evidence of specialization for underwater enhancement. 
+
+## F Additional Qualitative Results 
+
+F.1 Qualitative Comparison on AIO-3 
+
+Figure 3 provides representative AIO-3 examples. CEA-IR-S produces fewer residual artifacts in localized degraded regions, such as rain streaks and haze boundaries, while preserving fine structures under denoising. 19 Figure 3: Qualitative comparison on the AIO-3 benchmark. We compare CEA-IR-S against AirNet, PromptIR, and MoCE-IR-S across dehazing, deraining, and denoising. The bottom rows show zoom-in crops and absolute error maps, where darker regions indicate lower reconstruction error. CEA reduces residual degradation artifacts and preserves fine structures across the three restoration tasks. 
+
+F.2 Qualitative Comparison on AIO-5 
+
+Figure 4 shows representative AIO-5 examples. Across the five tasks, CEA reduces residual artifacts in local regions and better preserves structural details, while maintaining natural brightness and color in the low-light case. 20 Figure 4: Additional qualitative comparison on the AIO-5 benchmark. We compare our method with representative baselines across dehazing, deraining, denoising, deblurring, and low-light en-hancement. 
+
+F.3 Qualitative Comparison on CDD-11 
+
+Figures 5–7 provide additional CDD-11 comparisons. The advantage of CEA is most visible when multiple degradation operators interact, especially in haze-related compositions where both global visibility and local detail preservation are required. 21 Figure 5: Qualitative comparison on CDD-11 single degradations. We compare OneRestore, MoCE-IR-S, and CEA-IR-S on low-light, haze, rain, and snow. 22 Figure 6: Qualitative comparison on CDD-11 double degradations. Representative examples include low-light+haze, low-light+rain, low-light+snow, haze+rain, and haze+snow. 
+
+Figure 7: Qualitative comparison on CDD-11 triple degradations. We show representative examples with low-light+haze+rain and low-light+haze+snow. 23

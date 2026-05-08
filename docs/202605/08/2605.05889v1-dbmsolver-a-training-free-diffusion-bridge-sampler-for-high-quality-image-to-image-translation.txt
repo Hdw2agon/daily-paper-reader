@@ -1,0 +1,2571 @@
+Title: DBMSolver: A Training-free Diffusion Bridge Sampler for High-Quality Image-to-Image Translation
+
+URL Source: https://arxiv.org/pdf/2605.05889v1
+
+Published Time: Fri, 08 May 2026 00:59:48 GMT
+
+Number of Pages: 26
+
+Markdown Content:
+DBMSolver: A Training-free Diffusion Bridge Sampler for High-Quality Image-to-Image Translation 
+
+Sankarshana Venugopal 
+
+sankarshana.v@gmail.com 
+
+Mohammad Mostafavi Seoul National University 
+
+mostafavi.isfahani@gmail.com 
+
+Jonghyun Choi *
+
+jonghyunchoi@snu.ac.kr 
+
+Figure 1. Few-step image synthesis (6 NFEs ↓) with high-quality generated details (3.38 FID ↓) on DIODE (256 × 256) [37]. 
+
+Abstract 
+
+Diffusion-based image-to-image (I2I) translation excels in high-fidelity generation but suffers from slow sampling in state-of-the-art Diffusion Bridge Models (DBMs), often re-quiring dozens of function evaluations (NFEs). We in-troduce DBMSolver , a training-free sampler that exploits the semi-linear structure of DBM’s underlying SDE and ODE via exponential integrators, yielding highly-efficient 
+
+1st - and 2nd -order solutions. This reduces NFEs by up to 5× while boosting quality (e.g., FID drops 53% on DIODE at 20 NFEs vs. 2nd -order baseline). Experi-ments on inpainting, stylization, and semantics-to-image tasks across resolutions up to 256 ×256 show DBMSolver sets new SOTA efficiency-quality tradeoffs, enabling real-world applicability. Our code is publicly available at https://github.com/snumprlab/dbmsolver. 
+
+1. Introduction 
+
+Image-to-Image (I2I) Translation is a generative modeling paradigm that learns to map an input image to a target out-
+
+> *Corresponding author. JC is with ECE, IPAI, ASRI in SNU.
+
+put. It encompasses tasks like image restoration, grayscale colorization, and inpainting of occluded or corrupted re-gions, as well as style transfer and semantic reinterpretation via cross-domain synthesis [7, 14, 36]. Recent diffusion-based works, as alternatives to tradi-tional generative approaches such as GANs [15, 45], have brought significant advances in the synthesis of high-fidelity images [17, 22, 29]. Among them, [43] proposed Diffusion Bridge Models (DBMs), capable of performing I2I Trans-lation by establishing a diffusion bridge that facilitates the translation from one arbitrary image distribution to another. While DBMs offer a theoretically elegant diffusion framework for I2I Translation, generating high-quality im-ages using such diffusion-based models remains computa-tionally expensive, as it requires numerous costly function evaluations (NFEs)–which we aim to tackle in this work 
+
+without requiring any additional training overhead .Figure 1 presents the fact that while Hybrid Heun [43] and DBIM [42] require numerous NFEs for coherent or high-quality outputs on DIODE [37], our method (DBM-Solver) achieves superior fidelity in just 6 NFEs, preserving intricate details like tree branches without artifacts. Unlike DBIM’s linear multistep methods [42] or audio-
+
+> arXiv:2605.05889v1 [cs.CV] 7 May 2026
+
+specific EI in Bridge-TTS [2], DBMSolver derives closed-form solutions for VP/VE bridges, avoiding crude approxi-mations and enabling FID gains even at low NFEs. 
+
+1.1. DBMSolver Overview 
+
+We introduce DBMSolver : a training-free, highly efficient solver specifically designed to accelerate the DBM-based sampling process. Previous research on improving the sam-pling speeds explored either model distillation [8, 9, 40], fine-tuning [6, 9], or re-training of an entire neural net-work [44]. In contrast, DBMSolver is a drop-in replacement for existing DBM sampling methods, avoiding the need for any architectural changes or extra training, thus enabling broad compatibility and immediate benefits. We devise DBMSolver by rigorously analyzing the un-derlying Stochastic and Ordinary Differential Equations (SDE and ODE) governing DBMs’ reverse-time diffusion process (Equations 2 and 5). Specifically, in Section 3.2, we identify the inherent semi-linear structure of the SDE and leverage the Exponential Integrators (EI) [12] method to derive an efficient 1st -order solution. Next, in Section 3.3, we analyze the ODE to show that it has a semi-linear struc-ture as well, allowing us to formulate an exact solution that we efficiently approximate with a 2nd -order solution. By combining the two ODE/SDE solutions, we devise a sam-pling procedure that drastically reduces the required NFEs while enhancing the image quality, as showcased in Sec-tion 3.4. The key contributions of this work are as follows: • A novel, training-free bridge sampler : DBMSolver accelerates DBM sampling by 20x (e.g., 6 NFEs vs. 119 for Hybrid Heun) on conditional/unconditional I2I tasks, with zero retraining–unlike distillation [9] or fine-tuning [8] approaches. • Theoretically grounded : We provide analytical solu-tions for the Bridge SDE and ODE governing DBMs, grounded in diffusion bridge theory. • State-of-the-art performances on various I2I tasks :Through extensive experimentation on various I2I tasks and image resolutions, we show that DBMSolver con-sistently achieves state-of-the-art results, outperforming prior arts [20, 39, 42] in terms of generation quality and computational efficiency. 
+
+2. Preliminaries and Related Work 
+
+2.1. Diffusion-based Generative Models 
+
+Diffusion Probabilistic Models (DPMs). Owing to their ability to generate high-quality outputs, DPMs have become ubiquitous for various noise-to-image generation tasks [16, 28]. DPMs learn to traverse from a Gaussian distribu-tion pprior (x) to an unknown data distribution p0(x) := 
+
+pdata (x) through a gradual denoising process [4, 11, 33]. In other words, starting from a prior distribution pT (x) := 
+
+pprior (x) ≈ N (0, σ 2 
+
+> T
+
+I) with σT > 0, DPMs iteratively de-noise xT ∼ pT (x) (i.e. , white noise) to recover the desired output x0 ∼ p0(x). This reverse diffusion process is shown to follow the Ordinary Differential Equation (ODE) [1, 33]: 
+
+dxt =
+
+
+
+f (xt, t ) − 12 g(t)2∇xt log pt(x)
+
+
+
+dt,  (1) where pt(x) is the marginal distribution of xt at t, and 
+
+∇xt log pt(x) is its score function learned by a neural net-work [13], and f (xt, t ) and g(t) are the drift and diffusion coefficients, respectively (see Supplementary). [33] terms this the Probability Flow (PF) ODE .
+
+Diffusion Bridge Models (DBMs). Although DPMs have gained popularity for N2I Generation tasks, their un-derlying theory only holds when the prior distribution is purely Gaussian, i.e. , pT (x) ≈ N (0, σ 2 
+
+> T
+
+I). However, this assumption does not hold for I2I translation tasks where 
+
+pT (x) is not necessarily Gaussian noise, leading to output images that do not remain faithful to the original x0, limit-ing their applicability in such settings. To solve this, [43] extend the diffusion framework from N2I Generation to I2I Translation by making use of Doob’s h-transform [5, 27]. By steering the forward diffusion pro-cess almost surely to a target via Doob’s h-transform, they form a diffusion bridge between x0 ∼ p0(x) and xT ∼
+
+pT (x), yielding a conditioned forward diffusion process. The corresponding reverse-time process is governed by the Bridge SDE: 
+
+dxt = f (xt, t )dt − g(t)2∇xt log pt(xt | xT )dt
+
++ g(t)2∇xt log pt(xT | xt)dt + g(t) dwt, (2) where ∇xt log pt(xt | xT ) is the score of the tractable con-ditional probability , pt(xt | xT ): 
+
+> SNR T
+> SNR t
+> αt
+> αT
+
+xT + αt
+
+
+
+1 − SNR T
+
+> SNR t
+
+
+
+x0 − xt
+
+σ2
+
+> t
+
+
+
+1 − SNR T
+
+> SNR t
+
+ , (3) which is learned by a DBM via Bridge Score Matching [43] (i.e. , sθ (xt, t, xT ) ≈ ∇ xt log pt(xt | xT )). The score of the transition probability , pt(xT | xt), is: 
+
+∇xt log pt(xT | xt) =  
+
+> αt
+> αT
+
+xT − xt
+
+σ2
+
+> t
+
+ SNR t 
+
+> SNR T
+
+− 1
+
+ , SNR t := α2
+
+> t
+
+/σ2 
+
+> t
+
+,
+
+(4) where SNR t is the signal-to-noise ratio at time t. Lastly, the SDE in Equation (2) has an equivalent ODE interpretation, which we name Bridge Probability Flow (PF) ODE :
+
+dxt
+
+dt = f (xt, t ) − 12 g(t)2∇xt log pt(xt | xT )+ g(t)2∇xt log pt(xT | xt). (5) Table 1. Comparison of diffusion samplers . N2I methods assume Gaussian priors, invalid for DBMs’ arbitrary pT (x). Our DBMSolver uses Exponential Integrator (EI) [12] solutions for bridges, enabling Markovian, higher-order sampling.                                                               
+
+> Sampling Method Assumption of Prior Distribution pT(x)
+> Theoretically valid on Image-to-Image Translation Order Sampling Procedure Is Markovian?
+> Samplers designed for N2I-based DPMs:
+> DDIM [31] xT∼ N (0, σ 2
+> TI)✗1st pt(xti−1|xti)✗
+> DPMSolver++(2M) [24] xT∼ N (0, σ 2
+> TI)✗2nd Analytic Soln. of ODE via EI [12] ✓
+> Samplers designed for I2I-based DBMs:
+> Hybrid Heun (HH) [43] xT∼pprior (x)✓2nd Alternating Bridge SDE (Euler-Maruyama) & ODE (Heun) Steps ✓
+> ODES3 [39] xT∼pprior (x)✓2nd Initial Bridge SDE (Euler-Maruyama) with Subsequent ODE (Heun) Steps ✓
+> DBIM-1 [42] xT∼pprior (x)✓1st pt(xti−1|xti,xT)✗
+> DBIM-2 [42] and DBIM-3 [42]
+> xT∼pprior (x)✓
+> 2nd
+> and
+> 3rd
+> Analytic Soln. of Bridge SDE & ODE via EI [12], with Linear Multistep methods (numerical; not closed-form)
+> ✗
+> DBMSolver (Ours) xT∼pprior (x)✓2nd Analytic Soln. of Bridge SDE & ODE via EI [12] ✓
+
+2.2. Fast Samplers for DMs and DBMs 
+
+For DPM-based N2I Generation, works such as [23, 24, 41] proposed fast samplers that generate high-quality images in 
+
+≤ 20 NFEs. These methods follow the assumption that the prior is a pure Gaussian distribution. However, since this assumption becomes invalid for I2I Translation (as prior 
+
+pT (x) can be arbitrary), their theoretical foundation is un-suitable for I2I tasks, calling for samplers that support ar-bitrary priors. Table 1 contrasts samplers, highlighting why N2I methods (e.g., DDIM [31]) fail on DBMs: their Gaus-sian prior assumption breaks when pT (x) is not Gaussian, leading to an invalid bridge (see Supp. for examples). To generate high-quality images with DBMs, [43] pro-posed the Hybrid Heun (HH) Sampler, which alternatively solves the Bridge SDE (Equation (2)) via 1st -order Euler-Maruyama and the Bridge PF ODE (Equation (5)) via 2nd -order Heun. Next, inspired by [31], [42] proposed a non-Markovian 1st -order sampler called DBIM (“DBIM-1”). “DBIM-2” and “DBIM-3” have also been proposed, de-rived via Linear Multistep methods analogous to DPM-Solver++(2M) [24], serving as 2nd - and 3rd -order samplers, respectively. A recent finding, ODES3 [39], implements a straightforward algorithm with 1st -order Euler-Maruyama initial step with the Bridge SDE and subsequent 2nd -order Heun steps with the Bridge ODE. In contrast, we analyze and rigorously derive exact so-lutions for the Bridge SDE and ODE to propose a highly-efficient 2nd -order sampler that surpasses prior works in im-age quality and efficiency. DBMSolver is capable of han-dling arbitrary priors while achieving better results com-pared to previous HH, DBIM-2/3, and ODES3 samplers. 
+
+3. DBMSolver: A Fast DBM Sampler 
+
+DBMs’ diffusion bridge introduces non-Gaussian drifts that N2I solvers do not take into account. We uncover their overlooked semi-linear form–linear in xt with non-linear scores–and provide exact linear-term solutions that prior works missed. The fundamental difference between DPMs and DBMs is that xT is pure noise for DPMs, but it can be an arbitrary image for DBMs. Consequently, DBMs in-volve a reverse diffusion process conditioned on xT , which is crucial for I2I Translation. As discussed in Section 2.2, this crucial distinction invalidates the direct application of state-of-the-art fast N2I solvers [24] for sampling DBMs. We explore a different approach to developing fast samplers specifically for DBMs by thoroughly analyzing their under-lying reverse diffusion SDE and ODE (Eqs. 2 & 5), and de-riving analytic solutions that eliminate approximation errors associated with the linear terms using Exponential Integra-tors (EI) [12]. With these solutions, we develop a higher-order sampling procedure that generates high-quality im-ages significantly faster, tailored for DBMs. Let Dθ (xs, s, xT , T ) denote an x0-predicting DBM such that Dθ (xs, s, xT , T ) ≈ x0 for s ∈ [0 , T ]. For brevity, we adopt Dθ (xs) := Dθ (xs, s, xT , T ).
+
+3.1. Uncovering the Semi-Linear Structures 
+
+To derive an efficient solver, we first reformulate the reverse process. From the definition of pt(xt | xT ) in Equation (3), its score and the x0-predicting DBM Dθ are related via: 
+
+sθ (xt) =  
+
+> SNR T
+> SNR t
+> αt
+> αT
+
+xT + αt
+
+
+
+1 − SNR T
+
+> SNR t
+
+
+
+Dθ (xt) − xt
+
+σ2
+
+> t
+
+
+
+1 − SNR T
+
+> SNR t
+
+ ,
+
+(6) where sθ (xt) ≈ ∇ xt log pt(xt | xT ). By substituting the 
+
+x0-predictor Dθ back into the Bridge PF ODE (Eq. 5), the ODE can be rewritten as a semi-linear equation: 
+
+dxt
+
+dt = L(t) xt
+
+| {z } 
+
+> Linear term
+
++ N (Dθ (xt), t, xT )
+
+| {z }
+
+> Non-linear term
+
+, (7) (derivation available in the Supplementary). We analyti-cally derive exact solutions for the linear term using the EI method and Taylor-expansions for the non-linear term that includes the x0-predicting DBM Dθ (xt).3.2. Deriving the Solution to the Bridge SDE 
+
+By simplifying and re-structuring the Bridge SDE (Equa-tion (2), we observe that it also has a semi-linear structure. We derive its exact solution by leveraging the EI method, which is particularly powerful for semi-linear differential equations that have a structure like Equation (7). By taking Taylor-expansions, we derive an efficient 1 st -order solution, allowing for an accurate sampling procedure: 
+
+Proposition 1 Given an initial value xs and time steps 0 ≤
+
+t < s ≤ T , a first-order approximation of the solution to 
+
+xt (derived via the Taylor-expansion of the EI solution) is: 
+
+xt = SNR s
+
+SNR t
+
+αt
+
+αs
+
+xs + αt
+
+
+
+1 − SNR s
+
+SNR t
+
+
+
+Dθ (xs)+ σt
+
+r
+
+1 − SNR s
+
+SNR t
+
+zt, (8) 
+
+where zt ∼ N (0, I), and SNR t := α2
+
+> t
+
+/σ2 
+
+> t
+
+is the signal-to-noise ratio at time t (proof in Supplementary). 
+
+Note that Proposition 1 is an efficient 1st -order Taylor-approximation (with error O( ∆t2)) of the exact EI solution. While higher orders are possible, they provide marginal gains for reasons explained in Section 3.4. 
+
+3.3. Deriving the Solution to the Bridge PF ODE 
+
+Having set grounds with Proposition 1, we next focus on the Bridge PF ODE (Equation (5)). Similar to the Bridge SDE analysis above, we show that the Bridge ODE also ex-hibits semi-linearity in its structure, which has been largely overlooked in prior work. We take advantage of this prop-erty and derive a closed-form exact solution through the EI method. We then utilize the change-of-variables method to reformulate the solution as an exponentially-weighted in-tegral. Finally, we analytically minimize discretization er-rors by approximating via the Taylor-expansion of this in-tegral, yielding a fast and efficient sampling procedure, as presented in Proposition 2 with proof in Supplementary. 
+
+Proposition 2 Given an initial value xs and time steps 0 ≤
+
+t < s < T , the exact solution to xt is: 
+
+xt = αt
+
+αs
+
+e2( λs−λt)
+
+s
+
+ρ(λt, λ T )
+
+ρ(λs, λ T ) xs
+
++ αt
+
+αT
+
+e2( λT −λt)
+
+"
+
+1 −
+
+s
+
+ρ(λt, λ T )
+
+ρ(λs, λ T )
+
+#
+
+xT
+
++ αt e−2λt
+
+pρ(λt, λ T )
+
+Z λt
+
+> λs
+
+e2λ Dθ (xλ)
+
+pρ(λ, λ T ) dλ
+
+| {z }
+
+> The Exponential Integral
+
+, (9) 
+
+where λt := log( αt/σ t) with the inverse function tλ(·), and 
+
+xλ := xtλ(λ) is the change-of-variable form for λ, and 
+
+ρ(a, b ) := e2( a−b) − 1. Intuitively, λt can be thought of as half the log SNR at time t.
+
+We simplify the Exponential Integral in Equation (9) by taking its (k − 1) th Taylor-expansion: 
+
+Z λb
+
+> λa
+
+e2λ Dθ (xλ)
+
+pρ(λ, λ T ) dλ ≈ O (( λt − λs)k+1 )
+
+| {z }
+
+> Error-Term (Omitted)
+
++
+
+> k−1
+
+X
+
+> n=0
+
+D(n) 
+
+> θ
+
+(xλs )
+
+| {z }
+
+> Estimated
+
+Z λt
+
+> λs
+
+e2λ
+
+pρ(λ, λ T )(λ − λs)n
+
+n! dλ
+
+| {z }
+
+> Analytically Computed (Supplementary)
+
+(10) where k ≥ 1, and D(n) 
+
+> θ
+
+(xλs ) := dnDθ (xλs ) 
+
+> dλn
+
+is the nth -order derivative of Dθ (·) w.r.t. λ. Note that we omit the error term 
+
+O(( λt − λs)k+1 ). Notably, the k = 1 (1st-order) approxi-mation of our solution is equivalent to DBIM-1 [42]. 
+
+3.4. Devising DBMSolver using Equations 8 and 9 
+
+Initial Step. We observe that our solution of the Bridge PF ODE in Equation (9) is only valid for time t < T ,which implies that it cannot be employed for an initial step from s = T to time t < T . This is because, as s → T ,
+
+ρ(λs, λ T ) → ρ(λT , λ T ) = 0 which would cause the coeffi-cient of xs to diverge to infinity. We instead employ the 1st -order Bridge SDE solution (Equation (8)) exclusively for this initial step from s = T to t = T − ϵ (ϵ ≈ 1e-4), and the regular Bridge PF ODE solution (Equation (9)) for the subsequent steps (where t < s ≤ T − ϵ), as described next. 
+
+Subsequent Steps. Higher-order formulations of Equa-tion (10) can lead to a sampling procedure capable of gener-ating high-quality images more efficiently, as demonstrated in previous work [23, 24, 41]. This improvement stems from the fact that higher-order Taylor-approximations have smaller error bounds, yielding more accurate approxima-tions. Following this idea, we set k = 2 , resulting in a 2nd -order Bridge ODE solution for Equation (9). We adopt this 
+
+2nd -order formulation for DBMSolver (complete derivation in Supplementary) and provide the rationale below. 
+
+Summarizing DBMSolver’s Algorithm. Given time steps T = tN > tN −1 > · · · > t1 > t0 = 0, we first compute ˜xtN −1 from prior image xtN ∼ pT (x) us-ing Equation (8). For the next N − 2 steps, we iteratively apply Equation (9) with k = 2 , yielding better approxi-mations for each intermediate noisy sample until ˜xt1 . To obtain the final ˜x0 prediction, we solve the Bridge PF ODE from t1 to t0 using the widely used Euler method, resulting in a high-fidelity output. We summarize it in Algorithm 1 and validate it empirically in the next section. Algorithm 1 DBMSolver: A Training-free Sampler for Diffusion-based I2I Translation 
+
+Inputs: Pretrained DBM Dθ (·), Number of sampling steps N , Time steps T = tN > · · · > t 1 > t 0 = 0 ,and Prior distribution pT (x).
+
+Initialization: Sample ˜xT ∼ pT (x), z ∼ N (0, I), and 
+
+˜x0 ← Dθ (˜ xtN )
+
+Initial Stochastic Update: Compute ˜xtN −1 from ˜xT us-ing Eq. (8). 
+
+Subsequent Deterministic Refinement: for i = N − 1 to 1 do if i > 1 then 
+
+a ← ti, and b ← ti−1.Compute ˜xb from ˜xa using Eq. (9) with k = 2 .
+
+else 
+
+sθ ← GetScoreFromX0 (Dθ (˜ xt1 ), ˜xt1 , t 1, xT ) {▷
+
+Convert x0-pred to score via Eq. (6) }
+
+strans ← ∇ xt log pt1 (xT | ˜xt1 ) {▷ Tractable transition score from Eq. (4) }
+
+dxt1 ← f (˜ xt1 , t 1) − 12 g(t1)2sθ + g(t1)2strans 
+
+˜x0 ← ˜xt1 + ( t0 − t1) dxt1 {▷ Final Euler Update }
+
+end if end for Output: ˜x0 {▷ Final Translated Image }
+
+Rationale for DBMSolver Order Selection. As men-tioned above, our method involves two distinct integration phases. For the initial Bridge SDE step , we employ the 
+
+1st -order solution Proposition 1. Our rationale is that this step is taken over a very small interval d t = ϵ, rendering the marginal accuracy gains from a higher-order approx-imation unnecessary. Nonetheless, for completeness, we present derivations for higher-order Bridge SDE solutions in the Supplementary. For the subsequent Bridge ODE steps , we note that 
+
+k ≥ 3 involves a non-elementary antiderivative , mean-ing its solution cannot be expressed in closed form us-ing elementary functions (e.g., polynomials, exponentials, or logarithms). While such equations can be addressed using numerical techniques like linear multistep methods, an approach adopted by DBIM [42] for their higher-order (DBIM-2 and DBIM-3) samplers, we instead avoid this as-sociated complexity and larger error bounds. As the ex-periments in Section 4.1 will show, our 2nd-order DBM-Solver significantly outperforms [42]’s 1st-order DBIM-1 and the numerically approximated higher-order DBIM-2 and DBIM-3. Therefore, we restrict DBMSolver to the 
+
+k = 2 (2nd -order) solution, which remains analytically tractable. Ablations in Supplementary confirm k = 2 gen-erates better FID scores than k = 1 (DBIM-1’s analog). 
+
+4. Experiments and Results 
+
+We conducted extensive experiments to evaluate DBM-Solver against established baselines on various I2I Translation tasks, including conditional image inpaint-ing and semantics-to-image generation, to demonstrate its versatility across diverse tasks. Specifically, we evaluate the following datasets: Sketch-to-Image on 
+
+Edges2Handbags (E2H) [14], Surface normals-to-Image on DIODE-Outdoor [37], Face-to-Comic stylization on 
+
+Face2Comics (F2C), Conditional Image Inpainting with central masks on ImageNet [3], and Semantic Label-to-Face generation on CelebAMask-HQ [18]. We bench-mark against DDBM (Hybrid Heun) [43], DBIM variants (1st/2nd/3rd-order) [42]. Note that, DBIM-2/3 use their multistep numerics for higher order. Additional baselines of DDIB [34], SDEdit [25], and I 2SB [22] are evaluated following the DDBM and DBIM protocols. We mainly assess sampling quality using FID [10], MSE, IS, and LPIPS, and computational efficiency via the num-ber of forward evaluations NFEs [23, 31], following prior works [42, 43]. For CelebAMask-HQ, we additionally re-port the classification accuracy (CA), following [20]. We use the publicly available DBM checkpoints from [43] for E2H and DIODE, highlighting DBMSolver’s training-free integration. For ImageNet inpainting, we adopt the DBM checkpoint from [42], which was finetuned via I 2SB [22] from a pre-trained N2I Diffusion Model. For datasets lack-ing checkpoints (e.g., Face2Comics, CelebAMask-HQ), we train DBMs from scratch using the ADM U-Net [4], follow-ing standard diffusion architectures. We describe the train-ing and sampling details in the Supplementary. 
+
+4.1. Results 
+
+Image Translation on E2H (64 ×64 ) and DIODE 
+
+(256 ×256 ). Table 2 reports FID scores and NFEs across methods. DBMSolver achieves state-of-the-art results with significantly fewer evaluations. At just 6 NFEs, it achieves FID scores of 0.97 (E2H) and 3.38 (DIODE), outperform-ing Hybrid Heun and DBIM-1/2/3. Its high efficiency at 
+
+Table 2. Quantitative results on DIODE (256 × 256) [37]. FID (↓), IS ( ↑), MSE( ↓), and LPIPS ( ↓) are reported against NFE ( ↓).                                                                 
+
+> Family Method NFE ↓DIODE (256 ×256) [37] FID ↓IS ↑LPIPS ↓MSE ↓
+> Diffusion & Flow DDIB [34] ≥40 242.3 4.22 0.798 0.794 SDEdit [25] ≥40 31.14 5.70 0.714 0.534 I2SB [22] ≥40 9.34 5.77 0.373 0.145 DBM Sampling Hybrid Heun [43] 119 4.43 6.21 0.244 0.084 DBIM-1 [42] 20 4.99 6.10 0.201 0.017 DBIM-2 [42] 20 4.40 6.11 0.200 0.017 DBIM-3 [42] 20 4.23 6.05 0.201 0.017 ODES3 [39] 28 2.29 5.92 0.203 0.018 DBMSolver (Ours) 63.38 6.00 0.196 0.015
+> DBMSolver (Ours) 20 2.06 6.00 0.198 0.018
+
+(a) DIODE (256 × 256) (b) Edges2Handbags (64 × 64) (c) Face2Comics (256 × 256) 
+
+Figure 2. FID vs. NFE on DIODE, E2H, and Face2Comics datasets. We consistently get lower FID scores with fewer NFEs. Table 3. Quantitative results on E2H (64 × 64) [14]. FID ( ↓), IS (↑), MSE( ↓), and LPIPS ( ↓) are reported against NFE ( ↓).                                                                
+
+> Family Method NFE ↓Edges2Handbags (64 ×64) [14] FID ↓IS ↑LPIPS ↓MSE ↓
+> Diffusion & Flow DDIB [34] ≥40 186.84 2.04 0.869 1.050 SDEdit [25] ≥40 26.50 3.58 0.271 0.510 I2SB [22] ≥40 7.43 3.40 0.244 0.191 DBM Sampling Hybrid Heun [43] 119 1.83 3.73 0.142 0.040 DBIM-1 [42] 20 1.74 3.63 0.095 0.005
+> DBIM-2 [42] 20 1.48 3.60 0.098 0.005
+> DBIM-3 [42] 20 1.45 3.61 0.098 0.005
+> ODES3 [39] 28 0.54 3.65 0.097 0.005
+> DBMSolver (Ours) 60.93 3.60 0.106 0.006 DBMSolver (Ours) 20 0.53 3.64 0.099 0.005
+
+Table 4. Left: Quantitative comparison on Face2Comics [36]. 
+
+Right: Quantitative results for Label-to-Face Generation on CelebAMask-HQ [18] at NFEs of 6 and 30, complementing the visual examples in Figure 5.                                                                      
+
+> Face2Comics (256 ×256) [36] Method NFE ↓FID ↓
+> GANs & Other Diffusion-based Models:
+> Pix2Pix [14] 149.96 CycleGAN [45] 135.13 DRIT++ [19] –28.87 CDE [30] –33.98 LDM [28] –24.28 BBDM [20] 200 23.20
+> DBM Sampling:
+> Hybrid Heun [43] 119 2.36 DBIM-1 [42] 20 9.28 DBIM-2 [42] 20 8.74 DBIM-3 [42] 20 8.61 DBMSolver (Ours) 63.04 DBMSolver (Ours) 20 0.96
+> CelebAMask-HQ (256 ×256) [18] Method NFE ↓FID ↓
+> GANs & Other Diffusion-based Models:
+> Pix2Pix [14] 156.99 CycleGAN [45] 178.23 DRIT++ [19] –77.79 SPADE [26] –44.17 OASIS [35] –27.75 CDE [30] –24.40 LDM [28] –22.81 BBDM [20] 200 21.35
+> DBM Sampling:
+> Hybrid Heun [43] 119 97.75 DBIM-1 [42] 20 23.41 DBIM-2 [42] 20 19.86 DBIM-3 [42] 20 19.49 DBMSolver (Ours) 20 17.56
+
+low NFEs enables rapid sampling, making it well-suited for real-time DBM applications by supporting faster generation and higher throughput. It exhibits strong scalability with in-creasing NFEs, yielding further improvements in FID. The trends in Figure 2-a,b show that as NFE increases, DBMSolver quickly achieves high fidelity and remains sta-ble. Figure 3 supports this, indicating that even at low NFEs (e.g., 6), DBMSolver and DBIM generate visually rich, co-herent outputs, outperforming others in detail and realism. DPMSolver++2M preserves structure but lacks vibrant col-ors and texture, especially at lower NFEs. While DBIM 
+
+Table 5. Quantitative results for Class-Conditional Inpainting (center 128 ×128 mask) on ImageNet [3]. DBMSolver achieves superior FID and Classification Accuracy (CA) across all NFEs, delivering high image fidelity with only 6 NFEs, outperforming prior methods that require more NFEs for comparable quality.                                                                       
+
+> Methods ImageNet (256 ×256) [3] Time ↓Rate ↑NFE ↓FID ↓CA ↑
+> Other Diffusion-based Models:
+> DDRM [17] ––20 24.40 62.1
+> ΠGDM [32] ––100 7.30 72.6 DDNM [38] ––100 15.10 55.9 Palette [29] ––1000 6.10 63.0 I2SB [22] ––1000 4.90 66.1
+> Sampling via Diffusion Bridge Models:
+> Hybrid Heun [43] 172.78 0.95 119 6.02 69.5 DBIM-1 [42] 13.67 12.19 20 4.13 71.9 DBIM-2 [42] 13.67 12.20 20 4.07 72.0
+> DBIM-3 [42] 13.61 12.24 20 4.07 72.0
+> DBMSolver (Ours) 3.66 45.41 64.98 70.8 DBMSolver (Ours) 14.05 11.85 20 4.07 72.0
+
+yields appealing outputs, it lacks fine detail compared to our method– a gap reflected in FID and trend metrics. Please refer to the intricate structural details observable in the tree branches and twigs within the DIODE images, as well as the fine-grained textures and contours present in the handbag depictions. DBMSolver consistently balances efficiency and quality across all datasets. 
+
+Label-to-Face on CelebAMask-HQ (256 ×256 ). Fig-ures 4 and 5 together with Table 4 show that our method generates images with precise facial segmentation and co-herent boundaries. At as low as 6 NFEs, DBMSolver achieves an FID of 34.76 (in Figure 5) outperforming DBIM-1’s 44.92 as well as GAN-based models and other diffusion approaches, while using significantly fewer NFEs. Visually, DBMSolver preserves fine structural details such as eye contours, hairlines, and mask edges, which are often blurred or distorted in DBIM outputs. DBMSolver consis-tently produces sharper, more anatomically faithful genera-tions, enhancing both realism and image accuracy. 
+
+Image Stylization on Face2Comics (256 ×256 ). As shown in Tables Tab. 4 and 7, DBMSolver achieves top per-formance with just 10 NFEs. At 20 NFEs, it attains an FID of 0.96, outperforming HH (2.36 at 119 NFEs), DBIM-2 Figure 3. Visuals for Tables 2 and 3 (DPMSolver++ and HH shown at 11 NFEs due to poor 6-NFE quality).        
+
+> Figure 4. Generated samples on CelebAMask-HQ (256 ×256) using our DBMSolver in 6 NFEs.
+> Figure 5. Label-to-Face Generation on CelebAMask-HQ (256 ×256) .
+
+(8.74), and various GAN and diffusion methods. This high-lights DBMSolver’s efficiency and sample quality across di-verse datasets, as illustrated in Figure 1. Even at 6 NFEs, its outputs rival those of higher-NFE baselines, demonstrating strong perceptual fidelity at minimal cost. 
+
+Class-Conditional Inpainting on ImageNet (256 ×256 ).
+
+Table 5 and Figure 6 demonstrate DBMSolver’s superior performance. At just 6 NFEs, it delivers coherent structure and textures with FID 4.98), outperforming DBIM-1’s 5.36 FID. DBMSolver maintains fidelity and avoids the blurry textures seen in DBIM-1, evident in the milk barrel writ-ings and hallucinated drawings. DBIM and HH results were reproduced using their official code. 
+
+Relation to Schr¨ odinger Bridges. We distinguish our work from methods addressing the Schr¨ odinger Bridge (SB) problem, such as [2]. SB methods solve a specific, entropy-regularized optimal transport problem; [2], for example, as-sumes a “tractable” SB formulation that results in a specific set of bridge SDEs/ODEs. Our approach is distinct. DBM-Solver is a general-purpose solver derived specifically for the generalized VP/VE-Bridge framework of [43], which unifies VP, VE, and Brownian bridge constructions. Be-cause DBMs’ [43] underlying framework is different from SB, our resulting Bridge SDEs/ODE solutions (Proposi-tions 1 and 2) are also fundamentally different. Therefore, while [2] derives solutions for their specific SB equations, Figure 6. Class-Conditional Inpainting on Images of ImageNet dataset (256 × 256) .
+
+Figure 7. Image Stylization on Face2Comics (256 × 256) .
+
+DBMSolver is a novel solver tailored to the SDEs/ODEs of the generalized VP/VE-Bridge [43] framework. 
+
+5. Conclusion 
+
+We introduce DBMSolver, a principled, training-free sam-pler that significantly enhances the efficiency and qual-ity of diffusion bridge-based I2I translation. By lever-aging the semi-linear structure of the Bridge SDE and PF ODE, DBMSolver accelerates sampling without com-promising fidelity. Experiments on diverse datasets such as Edges2Handbags, DIODE-Outdoor, Face2Comics, CelebAMask-HQ, and ImageNet Inpainting show that 
+
+Table 6. DBMSolver (training-free) vs. distillation (retrained) on equiv. quality (FID at low NFE). CDBM [9]/IBMD [8] are close at 1-2 NFEs, but require considerable training overhead .                                                
+
+> Task and Resolution Method NFE ↓FID ↓Training-free? E2H CDBM [9] 21.30 ✗
+> (64 ×64) IBMD [8] 11.26 ✗
+> DBMSolver (Ours) 60.97 ✓
+> DIODE CDBM [9] 23.66 ✗
+> (256 ×256) IBDM [8] 14.07 ✗
+> DBMSolver (Ours) 63.38 ✓
+> ImageNet Inpainting CDBM [9] 25.65 ✗
+> (128 ×128) IBMD [8] 15.87 ✗
+> DBMSolver (Ours) 64.98 *✓
+
+DBMSolver sets a new benchmark for efficient diffusion bridge models and marking a step toward the practical de-ployment of powerful solvers for I2I Translation. 
+
+Limitations and Future Work. A limitation is that DBMSolver performed similarly to previous solvers on more realistic tasks like ImageNet Inpainting, which we hypothesize is due to the non-linear Dθ term being the main cause of approximation errors. Exploring DBMs for text-conditioned I2I translation, adaptive stepsize for DBM sampling, or integration with flow-matching [21], are also promising avenues for research. Acknowledgements 
+
+This work was partly supported by the InnoCORE program (26-InnoCORE-01), the IITP grants (RS-2022-II220077, RS-2022-II220113, RS-2022-II220959, RS-2022-II220871, RS-2021-II211343 (SNU AI), RS-2025-25442338 (AI Star Fellowship-SNU)) funded by the Korea government (MSIT), grants (RS-2025-25462891 (US-KOR BARI), RS-2025-25453780) funded by MOTIR, a grant of Korean ARPA-H Project through the Ko-rea Health Industry Development Institute (KHIDI), funded by the Ministry of Health & Welfare, Republic of Korea (RS-2025-25424639), and the BK21 FOUR program, SNU in 2025. 
+
+References 
+
+[1] Brian D.O. Anderson. Reverse-time diffusion equation mod-els. Stochastic Processes and their Applications , 12(3), 1982. 2 [2] Zehua Chen, Guande He, Kaiwen Zheng, Xu Tan, and Jun Zhu. Schrodinger bridges beat diffusion models on text-to-speech synthesis. arXiv preprint arXiv:2312.03491 , 2023. 2, 7[3] Jia Deng, Wei Dong, Richard Socher, Li-Jia Li, Kai Li, and Li Fei-Fei. Imagenet: A large-scale hierarchical image database. In 2009 IEEE Conference on Computer Vision and Pattern Recognition , 2009. 5, 6 [4] Prafulla Dhariwal and Alexander Nichol. Diffusion models beat gans on image synthesis. Advances in neural informa-tion processing systems , 34, 2021. 2, 5 [5] Joseph L Doob. Classical potential theory and its probabilis-tic counterpart . Springer, 1984. 2 [6] Zhengyang Geng, Ashwini Pokle, William Luo, Justin Lin, and J Zico Kolter. Consistency models made easy. arXiv preprint arXiv:2406.14548 , 2024. 2 [7] Ian J Goodfellow, Jean Pouget-Abadie, Mehdi Mirza, Bing Xu, David Warde-Farley, Sherjil Ozair, Aaron Courville, and Yoshua Bengio. Generative adversarial nets. Advances in neural information processing systems , 27, 2014. 1 [8] Nikita Gushchin, David Li, Daniil Selikhanovych, Evgeny Burnaev, Dmitry Baranchuk, and Alexander Korotin. Inverse bridge matching distillation. arXiv preprint arXiv:2502.01362 , 2025. 2, 8 [9] Guande He, Kaiwen Zheng, Jianfei Chen, Fan Bao, and Jun Zhu. Consistency diffusion bridge models. Advances in Neu-ral Information Processing Systems , 2024. 2, 8 [10] Martin Heusel, Hubert Ramsauer, Thomas Unterthiner, Bernhard Nessler, and Sepp Hochreiter. Gans trained by a two time-scale update rule converge to a local nash equilib-rium. Advances in neural information processing systems ,30, 2017. 5 [11] Jonathan Ho, Ajay Jain, and Pieter Abbeel. Denoising dif-fusion probabilistic models. Advances in neural information processing systems , 33, 2020. 2 [12] Marlis Hochbruck and Alexander Ostermann. Exponential integrators. Acta Numerica , 19, 2010. 2, 3 [13] Aapo Hyv¨ arinen. Estimation of non-normalized statistical models by score matching. Journal of Machine Learning Research , 6(24), 2005. 2 [14] Phillip Isola, Jun-Yan Zhu, Tinghui Zhou, and Alexei A Efros. Image-to-image translation with conditional adver-sarial networks. CVPR , 2017. 1, 5, 6 [15] Tero Karras, Samuli Laine, Miika Aittala, Janne Hellsten, Jaakko Lehtinen, and Timo Aila. Analyzing and improv-ing the image quality of stylegan. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , 2020. 1 [16] Tero Karras, Miika Aittala, Timo Aila, and Samuli Laine. Elucidating the design space of diffusion-based generative models. Advances in neural information processing systems ,35, 2022. 2 [17] Bahjat Kawar, Michael Elad, Stefano Ermon, and Jiaming Song. Denoising diffusion restoration models. Advances in neural information processing systems , 2022. 1, 6 [18] Cheng-Han Lee, Ziwei Liu, Lingyun Wu, and Ping Luo. Maskgan: Towards diverse and interactive facial image ma-nipulation. In IEEE Conference on Computer Vision and Pat-tern Recognition (CVPR) , 2020. 5, 6 [19] Hsin-Ying Lee, Hung-Yu Tseng, Jia-Bin Huang, Maneesh Singh, and Ming-Hsuan Yang. Diverse image-to-image translation via disentangled representations. In Proceed-ings of the European conference on computer vision (ECCV) ,2018. 6 [20] Bo Li, Kaitao Xue, Bin Liu, and Yu-Kun Lai. Bbdm: Image-to-image translation with brownian bridge diffusion models. In Proceedings of the IEEE/CVF conference on computer vi-sion and pattern Recognition , 2023. 2, 5, 6 [21] Yaron Lipman, Ricky TQ Chen, Heli Ben-Hamu, Maximil-ian Nickel, and Matt Le. Flow matching for generative mod-eling. arXiv preprint arXiv:2210.02747 , 2022. 8 [22] Guan-Horng Liu, Arash Vahdat, De-An Huang, Evange-los A Theodorou, Weili Nie, and Anima Anandkumar. I2sb: Image-to-image schr \” odinger bridge. arXiv preprint arXiv:2302.05872 , 2023. 1, 5, 6 [23] Cheng Lu, Yuhao Zhou, Fan Bao, Jianfei Chen, Chongxuan Li, and Jun Zhu. Dpm-solver: A fast ode solver for diffusion probabilistic model sampling in around 10 steps. Advances in Neural Information Processing Systems , 35, 2022. 3, 4, 5 [24] Cheng Lu, Yuhao Zhou, Fan Bao, Jianfei Chen, Chongx-uan Li, and Jun Zhu. Dpm-solver++: Fast solver for guided sampling of diffusion probabilistic models. arXiv preprint arXiv:2211.01095 , 2022. 3, 4 [25] Chenlin Meng, Yutong He, Yang Song, Jiaming Song, Jia-jun Wu, Jun-Yan Zhu, and Stefano Ermon. Sdedit: Guided image synthesis and editing with stochastic differential equa-tions. arXiv preprint arXiv:2108.01073 , 2021. 5, 6 [26] Taesung Park, Ming-Yu Liu, Ting-Chun Wang, and Jun-Yan Zhu. Semantic image synthesis with spatially-adaptive nor-malization. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , 2019. 6 [27] L Chris G Rogers and David Williams. Diffusions, Markov processes, and martingales: Itˆ o calculus . Cambridge univer-sity press, 2000. 2 [28] Robin Rombach, Andreas Blattmann, Dominik Lorenz, Patrick Esser, and Bj¨ orn Ommer. High-resolution image synthesis with latent diffusion models. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , 2022. 2, 6 [29] Chitwan Saharia, William Chan, Huiwen Chang, Chris Lee, Jonathan Ho, Tim Salimans, David Fleet, and Mohammad Norouzi. Palette: Image-to-image diffusion models. In ACM SIGGRAPH 2022 conference proceedings , 2022. 1, 6 [30] Chitwan Saharia, Jonathan Ho, William Chan, Tim Sali-mans, David J Fleet, and Mohammad Norouzi. Image super-resolution via iterative refinement. IEEE transactions on pat-tern analysis and machine intelligence , 2022. 6 [31] Jiaming Song, Chenlin Meng, and Stefano Ermon. Denoising diffusion implicit models. arXiv preprint arXiv:2010.02502 , 2020. 3, 5 [32] Jiaming Song, Arash Vahdat, Morteza Mardani, and Jan Kautz. Pseudoinverse-guided diffusion models for inverse problems. In International Conference on Learning Repre-sentations , 2023. 6 [33] Yang Song, Jascha Sohl-Dickstein, Diederik P Kingma, Ab-hishek Kumar, Stefano Ermon, and Ben Poole. Score-based generative modeling through stochastic differential equa-tions. arXiv preprint arXiv:2011.13456 , 2020. 2 [34] Xuan Su, Jiaming Song, Chenlin Meng, and Stefano Ermon. Dual diffusion implicit bridges for image-to-image transla-tion. arXiv preprint arXiv:2203.08382 , 2022. 5, 6 [35] Vadim Sushko, Edgar Sch¨ onfeld, Dan Zhang, Juergen Gall, Bernt Schiele, and Anna Khoreva. You only need adversar-ial supervision for semantic image synthesis. arXiv preprint arXiv:2012.04781 , 2020. 6 [36] Sxela. Face2comics. https://github.com/Sxela/ face2comics , 2021. 1, 6 [37] Igor Vasiljevic, Nick Kolkin, Shanyi Zhang, Ruotian Luo, Haochen Wang, Falcon Z. Dai, Andrea F. Daniele, Moham-madreza Mostajabi, Steven Basart, Matthew R. Walter, and Gregory Shakhnarovich. DIODE: A Dense Indoor and Out-door DEpth Dataset. CoRR , 2019. 1, 5 [38] Yinhuai Wang, Jiwen Yu, and Jian Zhang. Zero-shot im-age restoration using denoising diffusion null-space model. 
+
+arXiv preprint arXiv:2212.00490 , 2022. 6 [39] Yuang Wang, Pengfei Jin, Li Zhang, Quanzheng Li, Zhiqiang Chen, and Dufan Wu. An ordinary differential equation sampler with stochastic start for diffusion bridge models. arXiv preprint arXiv:2412.19992 , 2024. 2, 3, 5, 6 [40] Sirui Xie, Zhisheng Xiao, Diederik Kingma, Tingbo Hou, Ying Nian Wu, Kevin P Murphy, Tim Salimans, Ben Poole, and Ruiqi Gao. Em distillation for one-step diffusion models. 
+
+Advances in Neural Information Processing Systems , 2024. 2[41] Wenliang Zhao, Lujia Bai, Yongming Rao, Jie Zhou, and Jiwen Lu. Unipc: A unified predictor-corrector framework for fast sampling of diffusion models. Advances in Neural Information Processing Systems , 36, 2024. 3, 4 [42] Kaiwen Zheng, Guande He, Jianfei Chen, Fan Bao, and Jun Zhu. Diffusion bridge implicit models. arXiv preprint arXiv:2405.15885 , 2024. 1, 2, 3, 4, 5, 6 [43] Linqi Zhou, Aaron Lou, Samar Khanna, and Stefano Er-mon. Denoising diffusion bridge models. arXiv preprint arXiv:2309.16948 , 2023. 1, 2, 3, 5, 6, 7, 8 [44] Linqi Zhou, Stefano Ermon, and Jiaming Song. Inductive moment matching. arXiv preprint arXiv:2503.07565 , 2025. 2[45] Jun-Yan Zhu, Taesung Park, Phillip Isola, and Alexei A Efros. Unpaired image-to-image translation using cycle-consistent adversarial networks. In Proceedings of the IEEE international conference on computer vision , 2017. 1, 6 DBMSolver: A Training-free Diffusion Bridge Sampler for High-Quality Image-to-Image Translation 
+
+Supplementary Material 
+
+1. Diffusion Models 
+
+The reverse diffusion process is given by the PF ODE [1, 11]: dxt =
+
+[
+
+f (xt, t ) − 12g(t)2∇xt log pt(x)
+
+]
+
+dt, (1) where the marginal distribution of xt at t is pt(x), and ∇xt log pt(x) is its score function , which is learned by a neural network [4]. Furthermore, the drift and diffusion coefficients are: 
+
+f (xt, t ) = xt
+
+ddt log αt, and g(t)2 = −2σ2
+
+> t
+
+ddt log 
+
+(αt
+
+σt
+
+)
+
+,
+
+where αt := α(t) and σt := σ(t), for time t ∈ [0 , T ] (where T > 0). Different formulations of αt and σt give rise to different formulations for the diffusion process. Prior works hand-design these to obtain the variance-preserving 
+
+(VP) [11, 15], variance-exploding (VE) [6], and TrigFlow [9] formulations. We contrast the design choices of such diffusion formulations in Table 1. 
+
+> Table 1. Design choices for widely-used diffusion formulations. DDBM [15] mainly utilizes the VP and VE bridges, while TrigFlow is utilized by [9].
+
+Formulation αt σt f (xt, t ) g(t)2 SNR t = α2
+
+> t
+
+/σ2 
+
+> t
+
+Domain of t
+
+VP [11, 15] e−(0 .5t2+0 .05 t) √1 − e−(t2+0 .1t) −(t + 0 .05) xt 2t + 0 .1 1/(e(t2+0 .1t)−1) [0 .0001 , 1] 
+
+VE [6] 1 t 0 2t 1/t2 [0 .002 , 80] 
+
+TrigFlow [9] cos( t) sin( t) − tan( t) xt 2 tan( t) cot 2(t) [0 , π/2]
+
+> 1
+
+2. Proofs & Derivations 
+
+2.1. Proof of Proposition 1 of the main paper 
+
+Given a well-trained DBM Dθ(·) that approximates data sample x0, we can simplify Equation 2 of the main paper as: dxt = ( f (xt, t ) − g(t)2[∇xt log pt(xt | xT ) − ∇ xt log pt(xT | xt)] ) dt + g(t) dwt
+
+=
+
+xt
+
+d log αt
+
+dt + 2 σ2
+
+> t
+
+d log 
+
+(αt
+
+> σt
+
+)
+
+dt [∇xt log pt(xt | xT ) − ∇ xt log pt(xT | xt)] 
+
+ dt
+
++ σt
+
+√√√√−2
+
+d log 
+
+(αt
+
+> σt
+
+)
+
+dt dwt
+
+= xt
+
+d log αt
+
+dt dt − 2σ2
+
+> t
+
+d log 
+
+(αt
+
+> σt
+
+)
+
+dt
+
+ 
+
+> αt
+> αT
+
+xT − xt
+
+σ2
+
+> t
+
+(α2  
+
+> tσ2
+> T
+> σ2
+> tα2
+> T
+
+− 1
+
+) dt
+
++ 2 σ2
+
+> t
+
+d log 
+
+(αt
+
+> σt
+
+)
+
+dt
+
+   
+
+> α2
+> Tσ2
+> t
+> σ2
+> Tα2
+> t
+> αt
+> αT
+
+xT + αtDθ(xt)
+
+(
+
+1 − α2  
+
+> Tσ2
+> t
+> σ2
+> Tα2
+> t
+> αt
+> αT
+
+)
+
+− xt
+
+σ2
+
+> t
+
+(
+
+1 − α2  
+
+> Tσ2
+> t
+> σ2
+> Tα2
+> t
+> αt
+> αT
+
+) dt
+
++ σt
+
+√√√√−2
+
+d log 
+
+(αt
+
+> σt
+
+)
+
+dt dwt
+
+=
+
+xt
+
+d log αt
+
+dt + 2 σ2
+
+> t
+
+d log 
+
+(αt
+
+> σt
+
+)
+
+dt
+
+[αtDθ(xt) − xt
+
+σ2
+
+> t
+
+] dt + σt
+
+√√√√−2
+
+d log 
+
+(αt
+
+> σt
+
+)
+
+dt dwt
+
+=
+
+d log αt
+
+dt − 2
+
+d log 
+
+(αt
+
+> σt
+
+)
+
+dt
+
+︸ ︷︷ ︸ 
+
+> L(t)(Linear Term)
+
+xt dt
+
++
+
+2 αt
+
+d log 
+
+(αt
+
+> σt
+
+)
+
+dt Dθ(xt) + σt
+
+√√√√−2
+
+d log 
+
+(αt
+
+> σt
+
+)
+
+dt
+
+dwt
+
+dt
+
+︸ ︷︷ ︸  
+
+> N(xt,t )(Non-linear Term)
+
+dt, (2) 
+
+> 2
+
+where L(t) is the linear term, and N (xt, t ) is the non-linear term. This shows the semi-linearity of Proposition 2 of the main paper. Thanks to the semi-linearity, we can make use of the Exponential Integrators method [3] to solve Equation (2), as explained next. Given initial value xa, where b = a + ∆ τ and 0 < b < a < T , we obtain the solution to xb as: 
+
+xb = e∫ ba L(r) dr xa +
+
+∫ ba
+
+e∫ ba+τ L(h) dh · N (xτ , τ ) dτ. (3) To simplify the integral of the linear term L(r) from a to b, we first expand L(r) using the properties of logarithms: 
+
+L(r) = d log αr
+
+dr − 2
+
+d log 
+
+(αr
+
+> σr
+
+)
+
+dr
+
+= ddr [log αr − 2(log αr − log σr)] = ddr [2 log σr − log αr]= ddr
+
+[
+
+log 
+
+(σ2
+
+> r
+
+αr
+
+)] 
+
+. (4) Because L(r) simplifies to a single exact derivative, we can easily evaluate its integral with respect to r from a to b:
+
+∫ ba
+
+L(r) dr =
+
+∫ ba
+
+ddr
+
+[
+
+log 
+
+(σ2
+
+> r
+
+αr
+
+)] 
+
+dr
+
+=
+
+[
+
+log σ2
+
+> r
+
+αr
+
+]ba
+
+= log 
+
+(σ2
+
+> b
+
+αb
+
+)
+
+− log 
+
+( σ2
+
+> a
+
+αa
+
+)
+
+= log 
+
+(αa
+
+αb
+
+· σ2
+
+> b
+
+σ2
+
+> a
+
+)
+
+. (5) Next, let’s define λt := log αt 
+
+> σt
+
+, with the inverse function tλ(·), that satisfies tλ(λt) = t.Through the change-of-variables method for λ, we can denote αλ := αtλ(λ),
+
+xλ := xtλ(λ), Dθ(xλ) := Dθ(xtλ(λ)), wλ := wtλ(λ), d wλ := 
+
+√
+
+−dλ 
+
+> dt
+
+dwtλ(λ), and 
+
+N (xλ, λ ) := N (xtλ(λ), t λ(λ)) .
+
+> 3
+
+Thus, we rewrite Equation (3) as: 
+
+xb = αa
+
+αb
+
+σ2
+
+> b
+
+σ2
+
+> a
+
+xa +
+
+∫ λb
+
+> λa
+
+αλ
+
+αb
+
+σ2
+
+> b
+
+σ2
+
+> λ
+
+· N (xλ, λ ) dλ
+
+= αa
+
+αb
+
+σ2
+
+> b
+
+σ2
+
+> a
+
+xa +
+
+∫ λb
+
+> λa
+
+αλ
+
+αb
+
+σ2
+
+> b
+
+σ2
+
+> λ
+
+(
+
+2 αλDθ(xλ) + √2 σλ
+
+dwλ
+
+dλ
+
+)
+
+dλ
+
+= αa
+
+αb
+
+σ2
+
+> b
+
+σ2
+
+> a
+
+xa + 2 σ2
+
+> b
+
+αb
+
+∫ λb
+
+> λa
+
+α2
+
+> λ
+
+σ2
+
+> λ
+
+Dθ(xλ) dλ + √2 σ2
+
+> b
+
+αb
+
+∫ λb
+
+> λa
+
+αλ
+
+σλ
+
+dwλ
+
+= αa
+
+αb
+
+σ2
+
+> b
+
+σ2
+
+> a
+
+xa + 2 αb e−2λb
+
+∫ λb
+
+> λa
+
+e2λDθ(xλ) dλ
+
+︸ ︷︷ ︸
+
+> Use Taylor Expansion
+
++√2 αb e−2λb
+
+∫ λb
+
+> λa
+
+eλ dwλ
+
+︸ ︷︷ ︸
+
+> It ˆo Integral
+
+. (6) The integral ∫ λb 
+
+> λa
+
+e2λDθ(xλ) dλ can be computed by performing Taylor Expansion: 
+
+∫ λb
+
+> λa
+
+e2λDθ(xλ) dλ ≈
+
+> k−1
+
+∑
+
+> n=0
+
+D(n) 
+
+> θ
+
+(xλa )
+
+∫ λb
+
+> λa
+
+e2λ (λ − λa)n
+
+n! dλ + O(( λb − λa)k+1 ), (7) where k ≥ 1, and D(n) 
+
+> θ
+
+(xλa ) := dnDθ (xλa ) 
+
+> dλn
+
+is the nth -order derivative of Dθ(·) w.r.t. λ.Furthermore, we can compute the It ˆo integral [10] as: 
+
+∫ λb
+
+> λa
+
+eλ dwλ =
+
+√∫ λb
+
+> λa
+
+e2λ dλ
+
+ zb = eλb
+
+√2
+
+√
+
+1 − e2( λa−λb) zb,
+
+where zb ∼ N (0, I). 
+
+> 2.1.1.
+
+1st -order Bridge SDE Solution 
+
+Substituting k = 1 for Equation (7), we can ultimately simplify Equation (6) as: 
+
+xb = αb
+
+αa
+
+e2( λa−λb)xa + αb
+
+(
+
+1 − e2( λa−λb)
+
+)
+
+Dθ(xλa ) + σb
+
+√
+
+1 − e2( λa−λb) zb
+
+= αb
+
+αa
+
+SNR a
+
+SNR b
+
+xa + αb
+
+(
+
+1 − SNR a
+
+SNR b
+
+)
+
+Dθ(xλa ) + σb
+
+√
+
+1 − SNR a
+
+SNR b
+
+zb, (8) where SNR t := α2
+
+> t
+
+/σ2 
+
+> t
+
+= e2λt , giving us the 1 st -order solution to the Bridge SDE. Thus, given the initial value xa, where b = a + ∆ t and 0 ≤ b < a ≤ T , the solution to 
+
+xb is: 
+
+xb = αb
+
+αa
+
+SNR a
+
+SNR b
+
+xa + αb
+
+(
+
+1 − SNR a
+
+SNR b
+
+)
+
+Dθ(xa) + σb
+
+√
+
+1 − SNR a
+
+SNR b
+
+zb. (9) 
+
+■ 
+
+> 42.1.2.
+
+2nd -order Bridge SDE Solution 
+
+Similar to the process above, by substituting k = 2 for Equation (7), we simplify Equation (6) as: 
+
+xb = αb
+
+αa
+
+e2( λa−λb)xa + αb
+
+(
+
+1 − e2( λa−λb)
+
+)
+
+Dθ(xλa ) (10) 
+
++ αb
+
+(
+
+λb − λa + e2( λa−λb) − 1
+
+)
+
+D(1)  
+
+> θ
+
+(xλa ) + σb
+
+√
+
+1 − e2( λa−λb) zb
+
+= SNR a
+
+SNR b
+
+αb
+
+αa
+
+xa + αb
+
+(
+
+1 − SNR a
+
+SNR b
+
+)
+
+Dθ(xλa ) (11) 
+
++ αb
+
+(
+
+λb − λa + SNR a
+
+SNR b
+
+− 1
+
+)
+
+D(1)  
+
+> θ
+
+(xλa ) + σb
+
+√
+
+1 − SNR a
+
+SNR b
+
+zb, (12) where D(n) 
+
+> θ
+
+(xλa ) := dnDθ (xλa ) 
+
+> dλn
+
+is the nth -order derivative of Dθ(·) w.r.t. λ, giving us the 2nd -order solution to the Bridge SDE. 
+
+■
+
+> 2.1.3. Ablation Study on the Bridge SDE Solutions
+
+We provide an ablation study on the effect of k = 1 (Eq. (9)) and k = 2 (Eq. (12)). In Section 3 of the main paper, we justify our choice of k = 1 for the initial Bridge SDE step in DBMSolver. As k = 2 step is higher-order, it requires an extra NFE. However, because this initial step is taken over a very small interval d t = ϵ, k = 2 ’s higher-order solution renders the gains trivial, providing negligible benefits. To validate this claim, we conduct an ablation study on the DIODE (256 × 256) 
+
+dataset using DBMSolver. For a fixed number of sampling steps (with the same 
+
+2nd -order Bridge ODE step), we compare k = 1 and k = 2 and report the results in Table 2. For 4 sampling steps, both settings achieve an FID of 3.38. However, k = 1 
+
+requires only 6 NFEs, whereas k = 2 requires 7 NFEs due to its higher-order computation. With 11 sampling steps, the FIDs for k = 1 and k = 2 are 2.06 and 2.07, respectively. Although the IS metric for k = 2 is slightly better (6.04 IS) compared to that of k = 1 (6.00 IS), the improvement is marginal compared to the computational cost incurred for the extra NFE . These results confirm that using k = 2 offers no meaningful improvement in generation quality over k = 1 , supporting our choice to use k = 1 for the initial Bridge SDE step.  
+
+> 5Table 2.
+
+Ablation Study on value of k for the Bridge SDE solution on DIODE (256 × 256) . We see that compared to using k = 2 , using k = 1 for the solution for DBMSolver is sufficiently good and requires lower computational resources. 
+
+Value of k Steps NFEs FID ↓ IS ↑ LPIPS ↓ MSE ↓
+
+k = 2 4 7 3.38 6.04 0.197 0.015 
+
+k = 2 11 21 2.07 6.02 0.198 0.018 
+
+k = 1 (Proposed) 4 6 3.38 6.00 0.196 0.015 
+
+k = 1 (Proposed) 11 20 2.06 6.00 0.198 0.018 
+
+2.2. Proof of Proposition 2 of the main paper 
+
+Given a well-trained DBM Dθ(·) that approximates data sample x0, we can re-write the Bridge PF ODE (Equation 5 of the main paper) as: dxt
+
+dt = f (xt, t ) − g(t)2
+
+(12∇xt log pt(xt | xT ) − ∇ xt log pt(xT | xt)
+
+)
+
+= xt
+
+d log αt
+
+dt + 2 σ2
+
+t
+
+d log 
+
+(αt
+
+σt
+
+)
+
+dt
+
+(12∇xt log pt(xt | xT ) − ∇ xt log pt(xT | xt)
+
+)
+
+= xt
+
+d log αt
+
+dt + σ2
+
+t
+
+d log 
+
+(αt
+
+σt
+
+)
+
+dt ·
+
+α2 
+
+> T
+
+σ2
+
+> t
+
+σ2 
+
+> T
+
+α2
+
+> t
+
+αt
+
+αT xT + αt
+
+(
+
+1 − α2 
+
+> T
+
+σ2
+
+> t
+
+σ2 
+
+> T
+
+α2
+
+> t
+
+)
+
+Dθ(xt) − xt
+
+σ2
+
+t
+
+(
+
+1 − α2 
+
+> T
+
+σ2
+
+> t
+
+σ2 
+
+> T
+
+α2
+
+> t
+
+)
+
+− 2σ2
+
+t
+
+d log 
+
+(αt
+
+σt
+
+)
+
+dt ·
+
+αt
+
+αT xT − xt
+
+σ2
+
+t
+
+(α2 
+
+> t
+
+σ2
+
+> T
+
+σ2 
+
+> t
+
+α2
+
+> T
+
+− 1
+
+)
+
+= xt
+
+d log αt
+
+dt +
+
+d log 
+
+(αt
+
+σt
+
+)
+
+dt
+
+αt Dθ(xt) − xt −
+
+αt
+
+αT xT − xtα2 
+
+> t
+
+σ2
+
+> T
+
+σ2 
+
+> t
+
+α2
+
+> T
+
+− 1
+
+
+
+= xt
+
+d log αt
+
+dt −
+
+d log 
+
+(αt
+
+σt
+
+)
+
+dt + 1
+
+α2 
+
+> t
+
+σ2
+
+> T
+
+σ2 
+
+> t
+
+α2
+
+> T
+
+− 1
+
+d log 
+
+(αt
+
+σt
+
+)
+
+dt
+
+
+
++ αt
+
+d log 
+
+(αt
+
+σt
+
+)
+
+dt
+
+Dθ(xt) − xT/αT
+
+α2 
+
+> t
+
+σ2
+
+> T
+
+σ2 
+
+> t
+
+α2
+
+> T
+
+− 1
+
+ .
+
+6We further simplify the equation above as: dxt
+
+dt = xt
+
+d log σt
+
+dt + 1  
+
+> α2
+> tσ2
+> T
+> σ2
+> tα2
+> T
+
+− 1
+
+d log 
+
+(αt
+
+> σt
+
+)
+
+dt
+
+︸ ︷︷ ︸ 
+
+> L(t)(Linear Term)
+
++ αt
+
+Dθ(xt) − xT/αT  
+
+> α2
+> tσ2
+> T
+> σ2
+> tα2
+> T
+
+− 1
+
+ d log 
+
+(αt
+
+> σt
+
+)
+
+dt
+
+︸ ︷︷ ︸  
+
+> N(xt,t )(Non-linear Term)
+
+.
+
+(13) where L(t) is the linear term, and N (xt, t ) is the non-linear term. Thus, we can clearly observe the semi-linearity of Equation 5 of the main paper. Similar to the derivation above, we can once again make use of the EI method to solve Equation (13): Given an initial value xa where b = a + ∆ τ and 0 < b < a < T , we obtain the solution to xb as: 
+
+xb = e∫ ba L(r) dr xa +
+
+∫ ba
+
+e∫ ba+τ L(h) dh · N (xτ , τ ) dτ. (14) To simplify the equation, we first integrate the linear term L(r) with respect to r from 
+
+a to b:
+
+∫ ba
+
+L(r) dr =
+
+[
+
+log 
+
+(
+
+αr
+
+√e2( λr −λT ) − 1
+
+e2λr
+
+)] ba
+
+= log 
+
+ αb
+
+αa
+
+e2( λa−λb)
+
+√
+
+e2( λb−λT ) − 1
+
+e2( λa−λT ) − 1
+
+ ,
+
+(15) where λt := log αt 
+
+> σt
+
+has the inverse function tλ(·) which satisfies tλ(λt) = t.Next, we can use the change-of-variables method for λ. We denote αλ := αtλ(λ),
+
+xλ := xtλ(λ), and N (xλ, λ ) := N (xtλ(λ), t λ(λ)) .Substituting Equation (15) along with the value of N (xλ, λ ) back into Equation (14), we get: 
+
+xb = αb
+
+αa
+
+e2( λa−λb)
+
+√
+
+e2( λb−λT ) − 1
+
+e2( λa−λT ) − 1 xa
+
++ αb e−2λb
+
+∫ λb
+
+> λa
+
+e2λ
+
+αλ
+
+√
+
+e2( λb−λT ) − 1
+
+e2( λ−λT ) − 1 · αλ
+
+[
+
+Dθ(xλ) − xT/αT
+
+e2( λ−λT ) − 1
+
+]
+
+dλ
+
+︸ ︷︷ ︸
+
+> Separate and simplify integral further
+
+(16) 
+
+> 7
+
+When we simplify the integral in Equation (16), we get: 
+
+√
+
+e2( λb−λT ) − 1
+
+∫ λb
+
+> λa
+
+[
+
+e2λ Dθ(xλ)
+
+√e2( λ−λT ) − 1 − xT e2λ
+
+αT
+
+(e2( λ−λT ) − 1)3/2
+
+]
+
+dλ. (17) Next, we separately integrate the individual terms of Equation (17). For the integral associated with xT , we use integration-by-parts to simplify it: 
+
+∫ λb
+
+> λa
+
+xT e2λ
+
+αT
+
+(e2( λ−λT ) − 1)3/2 dλ = −xT
+
+αT
+
+e2λT
+
+√e2( λb−λT ) − 1
+
+1 −
+
+√
+
+e2( λb−λT ) − 1
+
+e2( λa−λT ) − 1
+
+ (18) Using the result in Equation (18), we can simplify Equation (16) as: 
+
+xb = αb
+
+αa
+
+e2( λa−λb)
+
+√
+
+ρ(λb, λ T )
+
+ρ(λa, λ T ) xa + αb
+
+αT
+
+e2( λT −λb)
+
+(
+
+1 −
+
+√
+
+ρ(λb, λ T )
+
+ρ(λa, λ T )
+
+)
+
+xT
+
++ αb e−2λb
+
+√ρ(λb, λ T )
+
+∫ λb
+
+> λa
+
+e2λ Dθ(xλ)
+
+√ρ(λ, λ T ) dλ
+
+︸ ︷︷ ︸
+
+> Use Taylor Expansion
+
+, (19) where ρ(m, n ) := e2( m−n) − 1.Finally, we perform Taylor Expansion to obtain the solution to the integral in Equation (19): 
+
+∫ λb
+
+> λa
+
+e2λ Dθ(xλ)
+
+√ρ(λ, λ T ) dλ ≈
+
+> k−1
+
+∑
+
+> n=0
+
+D(n) 
+
+> θ
+
+(xλa )
+
+︸ ︷︷ ︸
+
+> Estimated
+
+∫ λb
+
+> λa
+
+e2λ
+
+√ρ(λ, λ T )(λ − λa)n
+
+n! dλ
+
+︸ ︷︷ ︸
+
+> Analytically Computed (Section 2.3)
+
++ O(( λb − λa)k+1 )
+
+︸ ︷︷ ︸
+
+> Omitted
+
+,
+
+where k ≥ 1, and D(n) 
+
+> θ
+
+(xλa ) := dnDθ (xλa ) 
+
+> dλn
+
+is the nth -order derivative of Dθ(·) w.r.t. λ.This is the same as Equation 10 of the main paper. Thus, we can derive an exact solution for xb. For completeness, we derive the 1st - and 
+
+2nd -order solutions below. 
+
+■
+
+> 8
+
+2.3. Deriving Solutions for Proposition 2 of the main paper  
+
+> 2.3.1.
+
+1st -order Bridge ODE Solution 
+
+We use Taylor Expansion to find the solution. By using k = 1 , the 1st -order solution is as follows: 
+
+∫ λb
+
+> λa
+
+e2λ Dθ(xλ)
+
+√ρ(λ, λ T ) dλ ≈ D(0)  
+
+> θ
+
+(xλa )
+
+∫ λb
+
+> λa
+
+e2λ
+
+√ρ(λ, λ T )(λ − λa)0
+
+0! dλ
+
+= Dθ(xλa )
+
+∫ λb
+
+> λa
+
+e2λ
+
+√ρ(λ, λ T ) dλ
+
+= Dθ(xλa ) e2λT
+
+√ρ(λb, λ T )
+
+(
+
+1 −
+
+√
+
+ρ(λa, λ T )
+
+ρ(λb, λ T )
+
+)
+
+. (20) Substituting Equation (20) back into Equation (19), we get the following 1st -order formulation of xb:
+
+xb = αb
+
+αa
+
+e2( λa−λb)
+
+√
+
+ρ(λb, λ T )
+
+ρ(λa, λ T ) xa + αb
+
+αT
+
+e2( λT −λb)
+
+(
+
+1 −
+
+√
+
+ρ(λb, λ T )
+
+ρ(λa, λ T )
+
+)
+
+xT
+
++ αb e2( λT −λb)ρ(λb, λ T )
+
+(
+
+1 −
+
+√
+
+ρ(λa, λ T )
+
+ρ(λb, λ T )
+
+)
+
+Dθ(xλa ). (21) 
+
+■ 
+
+> Relation to DBIM Sampler [14].
+
+Our solution is a generalized form of the DBIM-1 sampler’s deterministic step. Simplifying the DBIM-1 deterministic step’s formulation for xb
+
+> 9
+
+(with ρ = 0 ), we get: 
+
+xb = αb
+
+αT
+
+SNR T
+
+SNR b
+
+xT + αb
+
+(
+
+1 − SNR T
+
+SNR b
+
+)
+
+Dθ(xa)+ σb
+
+√
+
+1 − SNR T
+
+SNR b
+
+
+
+xa − αa 
+
+> αT
+> SNR T
+> SNR a
+
+xT − αa
+
+(
+
+1 − SNR T
+
+> SNR a
+
+)
+
+Dθ(xa)
+
+σa
+
+√
+
+1 − SNR T
+
+> SNR a
+
+
+
+= αb
+
+αa
+
+SNR a
+
+SNR b
+
+√√√√ SNR b 
+
+> SNR T
+
+− 1 
+
+> SNR a
+> SNR T
+
+− 1xa + αb
+
+αT
+
+SNR T
+
+SNR b
+
+1 −
+
+σb
+
+√
+
+1 − SNR T
+
+> SNR b
+
+σa
+
+√
+
+1 − SNR T
+
+> SNR a
+
+αa
+
+αT
+
+SNR T
+
+SNR a
+
+αT
+
+αb
+
+SNR b
+
+SNR T
+
+ xT
+
++ αb
+
+SNR T
+
+SNR b
+
+( SNR b
+
+SNR T
+
+− 1
+
+) 1 −
+
+√√√√ SNR a 
+
+> SNR T
+
+− 1 
+
+> SNR b
+> SNR T
+
+− 1
+
+ Dθ(xa). (22) By substituting the equation above with e2λt := SNR t, we in fact see that Equation (22) simplifies to our 1st -order formulation of xb in Equation (21). Thus, we see that DBIM is actually a 1st -order formulation of our solution to the Bridge PF ODE ( i.e. , k = 1 ). DBMSolver’s advantage is that it instead utilizes a more precise, 
+
+2nd -order solution that has lower error bounds compared to DBIM.  
+
+> 2.3.2.
+
+2nd -order Bridge ODE Solution 
+
+Similar to the derivation in Section 2.3.1, we use Taylor Expansion to find the solution when k = 2 :
+
+∫ λb
+
+> λa
+
+e2λ Dθ(xλ)
+
+√ρ(λ, λ T ) ≈ D(0)  
+
+> θ
+
+(xλa )
+
+∫ λb
+
+> λa
+
+e2λ
+
+√ρ(λ, λ T ) dλ
+
+︸ ︷︷ ︸
+
+> Solution derived in Equation (20)
+
++ D(1)  
+
+> θ
+
+(xλa )
+
+∫ λb
+
+> λa
+
+e2λ(λ − λa)
+
+√ρ(λ, λ T ) dλ
+
+︸ ︷︷ ︸
+
+> Solution derived below
+
+.
+
+(23) The second term’s integral can be solved as: 
+
+∫ λb
+
+> λa
+
+e2λ(λ − λa)
+
+√ρ(λ, λ T ) dλ = e2λT
+
+[
+
+tan −1
+
+(√ ρ(λb, λ T )
+
+)
+
+− tan −1
+
+(√ ρ(λa, λ T )
+
+)] 
+
++ e2λT
+
+[
+
+(λb − λa − 1) √ρ(λb, λ T ) + √ρ(λa, λ T )
+
+]
+
+. (24) By substituting Equations 20 and 24 into Equation (23), we reach the 2nd -order Taylor 
+
+> 10
+
+Expansion: 
+
+e2λT
+
+√ρ(λb, λ T )
+
+(
+
+1 −
+
+√
+
+ρ(λa, λ T )
+
+ρ(λb, λ T )
+
+) [
+
+Dθ(xλa ) − D(1)  
+
+> θ
+
+(xλa )
+
+]
+
++ e2λT
+
+√ρ(λb, λ T )
+
+λb − λa +tan −1
+
+(√ρ(λb, λ T )
+
+)
+
+− tan −1
+
+(√ρ(λa, λ T )
+
+)√ρ(λb, λ T )
+
+ D(1)  
+
+> θ
+
+(xλa ).
+
+(25) Finally, substituting Equation (25) back into Equation (19), we get the following formulation of xb:
+
+xb = αb
+
+αa
+
+e2( λa−λb)
+
+√
+
+ρ(λb, λ T )
+
+ρ(λa, λ T ) xa + αb
+
+αT
+
+e2( λT −λb)
+
+(
+
+1 −
+
+√
+
+ρ(λb, λ T )
+
+ρ(λa, λ T )
+
+)
+
+xT
+
+− αb ρ(λT , λ b)
+
+[
+
+1 −
+
+√
+
+ρ(λa, λ T )
+
+ρ(λb, λ T )
+
+] (
+
+Dθ(xλa ) − D(1)  
+
+> θ
+
+(xλa )
+
+)
+
+− αb ρ(λT , λ b)
+
+λb − λa +tan −1
+
+(√ρ(λb, λ T )
+
+)
+
+− tan −1
+
+(√ρ(λa, λ T )
+
+)√ρ(λb, λ T )
+
+ D(1)  
+
+> θ
+
+(xλa ),
+
+(26) where D(n) 
+
+> θ
+
+(xλa ) := dnDθ (xλa ) 
+
+> dλn
+
+is the nth -order derivative of Dθ(·) w.r.t. λ. Note that 
+
+˜xλm , the perturbed image at λm, is obtained via Equation (21). 
+
+■
+
+3. Experiment Details 
+
+> 3.1. Training Details
+
+We provide thorough details for the diffusion bridge models and their training procedures in Table 3. 
+
+> 3.2. Sampling Details
+
+To ensure consistency across different Image-to-Image Translation tasks, the sampling hyperparameters used in our experiments are summarized in Table 4. The following table outlines the discretization schedules and step counts applied to each dataset. 
+
+> 11
+
+Table 3. Training details for the various Image-to-Image Translation tasks. 
+
+Dataset Edges2Handbags [5] DIODE [13] Inpainting on Conditional ImageNet [2] CelebAMask-HQ [7] Face2Comics [12] 
+
+Hyperparameters and Training Details 
+
+Bridge Formulation VP VP I2SB [8] VP VP Noise Conditioning, cnoise 250 ln t 250 ln t 1000 t 250 ln t 250 ln t
+
+Learning Rate 1e-4 1e-4 1e-4 1e-4 1e-4 EMA Rate 0.9999 0.9999 0.9999 0.9993 0.9993 Noise Discretization Schedule Karras Karras Karras Karras Karras Noise Discretization Steps 40 40 40 40 40 Batch Size 256 64 256 64 64 Training Iterations 400k 400k 400k 120k 120k Number and Type of GPUs 4 A100 4 A100 8 A800 8 A6000 8 A6000 
+
+Model Details 
+
+Model Channels 192 256 256 256 256 Dropout 10% 10% 10% 10% 10% Time Embedding Cosine Cosine Cosine Cosine Cosine Channel Multiplier (1, 2, 3, 4) (1, 1, 2, 2, 4, 4) (1, 1, 2, 2, 4, 4) (1, 1, 2, 2, 4, 4) (1, 1, 2, 2, 4, 4) Number of Residual Layers 3 2 2 2 2Attention Resolutions (8, 16, 32) (8, 16, 32) (8, 16, 32) (8, 16, 32) (8, 16, 32) Model Capacity (Mparams) 284 534 534 534 534 
+
+Table 4. Sampling details for the various Image-to-Image Translation tasks. 
+
+Dataset Edges2Handbags [5] DIODE [13] Inpainting on Conditional ImageNet [2] CelebAMask-HQ [7] Face2Comics [12] 
+
+Hyperparameters for Sampling 
+
+Discretization Schedule Karras Karras Uniform Uniform Karras Discretization Steps 40 40 40 40 40 
+
+4. More Qualitative Results 
+
+Beyond the quantitative metrics presented earlier, we include additional qualitative results in Figures 1–3 to further highlight the perceptual advantages of DBMSolver. We generate images with different random seeds to observe the image generation quality across multiple instances, as portrayed in Figure 1. We observe that different random seeds lead to the generation of different images. This is because the random seed affects the initial Bridge SDE step of DBMSolver, which utilizes random gaussian noise. In Figures 2 and 3, we continue to observe that our DBMSolver produces significantly better qualitative results compared to other baselines. DBMSolver achieves 34.76 FID in 6 NFEs, while DBIM-1 achieves 44.92 FID on CelebAMask-HQ (256 × 256) . On the Class-conditional Inpainting task on ImageNet (256 × 256) , we achieve 4.98 FID in 6 NFEs while DBIM-1 achieves 5.36 FID, demonstrating our DBMSolver’s improvements. 
+
+12 Figure 1. Additional CelebAMask-HQ samples for DBMSolver with 6 NFEs, with different initial SDE steps. 
+
+13 Figure 2. Additional qualitative comparison for Label-to-Face Generation on CelebAMask-HQ. 
+
+14 Figure 3. Additional qualitative comparison for Class-Conditional Inpainting on ImageNet. 
+
+15 References 
+
+[1] Brian D.O. Anderson. Reverse-time diffusion equation models. Stochastic Processes and their Applications , 12(3), 1982. 1 [2] Jia Deng, Wei Dong, Richard Socher, Li-Jia Li, Kai Li, and Li Fei-Fei. Imagenet: A large-scale hierarchical image database. In 
+
+2009 IEEE Conference on Computer Vision and Pattern Recognition , 2009. 12 [3] Marlis Hochbruck and Alexander Ostermann. Exponential integrators. Acta Numerica , 19, 2010. 3 [4] Aapo Hyv¨ arinen. Estimation of non-normalized statistical models by score matching. Journal of Machine Learning Research , 6 (24), 2005. 1 [5] Phillip Isola, Jun-Yan Zhu, Tinghui Zhou, and Alexei A Efros. Image-to-image translation with conditional adversarial networks. 
+
+CVPR , 2017. 12 [6] Tero Karras, Miika Aittala, Timo Aila, and Samuli Laine. Elucidating the design space of diffusion-based generative models. 
+
+Advances in neural information processing systems , 35, 2022. 1 [7] Cheng-Han Lee, Ziwei Liu, Lingyun Wu, and Ping Luo. Maskgan: Towards diverse and interactive facial image manipulation. In 
+
+IEEE Conference on Computer Vision and Pattern Recognition (CVPR) , 2020. 12 [8] Guan-Horng Liu, Arash Vahdat, De-An Huang, Evangelos A Theodorou, Weili Nie, and Anima Anandkumar. I2sb: Image-to-image schr \” odinger bridge. arXiv preprint arXiv:2302.05872 , 2023. 12 [9] Cheng Lu and Yang Song. Simplifying, stabilizing and scaling continuous-time consistency models. arXiv preprint arXiv:2410.11081 , 2024. 1 [10] L Chris G Rogers and David Williams. Diffusions, Markov processes, and martingales: Itˆ o calculus . Cambridge university press, 2000. 4 [11] Yang Song, Jascha Sohl-Dickstein, Diederik P Kingma, Abhishek Kumar, Stefano Ermon, and Ben Poole. Score-based generative modeling through stochastic differential equations. arXiv preprint arXiv:2011.13456 , 2020. 1 [12] Sxela. Face2comics. https://github.com/Sxela/face2comics , 2021. 12 [13] Igor Vasiljevic, Nick Kolkin, Shanyi Zhang, Ruotian Luo, Haochen Wang, Falcon Z. Dai, Andrea F. Daniele, Mohammadreza Mostajabi, Steven Basart, Matthew R. Walter, and Gregory Shakhnarovich. DIODE: A Dense Indoor and Outdoor DEpth Dataset. 
+
+CoRR , abs/1908.00463, 2019. 12 [14] Kaiwen Zheng, Guande He, Jianfei Chen, Fan Bao, and Jun Zhu. Diffusion bridge implicit models. arXiv preprint arXiv:2405.15885 , 2024. 9 [15] Linqi Zhou, Aaron Lou, Samar Khanna, and Stefano Ermon. Denoising diffusion bridge models. arXiv preprint arXiv:2309.16948 ,2023. 1 
+
+16

@@ -1,0 +1,1495 @@
+Title: FREPix: Frequency-Heterogeneous Flow Matching for Pixel-Space Image Generation
+
+URL Source: https://arxiv.org/pdf/2605.06421v1
+
+Published Time: Fri, 08 May 2026 01:44:11 GMT
+
+Number of Pages: 31
+
+Markdown Content:
+# FREPix: Frequency-Heterogeneous Flow Matching for Pixel-Space Image Generation 
+
+Mingfeng Lin Jiakun Chen Liang Han † Liqiang Nie †
+
+Harbin Institute of Technology (Shenzhen) 
+
+# Abstract 
+
+Pixel-space diffusion has re-emerged as a promising alternative to latent-space generation because it avoids the representation bottleneck introduced by VAEs. Yet most existing methods still treat image generation as a frequency-homogeneous process, overlooking the distinct roles and learning dynamics of low- and high-frequency components. To address this, we propose FREPix, a FRE quency-heterogeneous flow matching framework for Pix el-space image generation. FREPix explicitly decomposes generation into low- and high-frequency components, as-signs them separate transport paths, predicts them with a factorized network, and trains them with a frequency-aware objective. In this way, coarse-to-fine generation becomes an explicit design principle rather than an implicit behavior. On ImageNet class-to-image generation, FREPix achieves competitive results among pixel-space generation models, reaching 1.91 FID at 256 × 256 and 2.38 FID at 512 × 512 ,with particularly strong behavior in the low-NFE regime. 
+
+Figure 1: Visualization of frequency decoupling in FREPix. Evolution of low-frequency sub-state 
+
+lt (top), high-frequency sub-state ht (middle), and final image xt (bottom) over time t ∈ [0 , 1] .
+
+# 1 Introduction 
+
+Latent diffusion [ 1– 5] has become the dominant paradigm for image generation by moving denoising from raw pixels to a compact latent space, which greatly reduces spatial complexity and makes large-scale training practical. But this efficiency comes with a structural cost. Generation is no longer performed in the original image domain, and image quality is inevitably tied to the representation and reconstruction fidelity of the VAEs [ 6– 8]. These limitations have renewed interest in pixel-space generation, where models operate directly on raw images and avoid the representational bottleneck introduced by latent space encodings. Despite this appeal, pixel-space generation remains fundamentally difficult. Raw images are high-dimensional, spatially dense and entangle global semantics with local details in a single state 
+
+> †Corresponding authors. Preprint.
+> arXiv:2605.06421v1 [cs.CV] 7 May 2026
+
+space [ 9]. Recent progress has made this paradigm increasingly viable through coarse-to-fine architectures [ 10 , 11 ] and stronger pixel-level modeling [ 12 –14 ]. Still, most existing methods treat image generation as a homogeneous process. They model the whole image with a single state and leave the separation between global structures and fine details to emerge implicitly during learning. 0 2 4 6 8 10 12         
+
+> Pixel Energy in LF
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> Average Pixel Ratio
+> LF Distribution
+> HF Distribution
+> 0.0 0.2 0.4 0.6 0.8 1.0 1.2
+> Pixel Energy in HF
+
+Figure 2: Frequency heterogene-ity in natural images. The low-frequency component exhibits larger per-location energy (up to 12.0 vs. 1.2) and a broader distribution than the high-frequency component. The energy is measured by the squared 
+
+ℓ2 norm of the corresponding low-/high-frequency coefficients at each location. Natural images are not organized uniformly across frequen-cies. Low-frequency components mainly determine large-scale layout, color composition, and semantic structure, while high-frequency components are more closely associated with edges, textures, and perceptual sharpness [ 15 , 16 ]. More importantly, these two differ not only in visual role, but also in their under-lying statistics and learning dynamics [ 17 ]. As illustrated in Fig. 2, the stark divergence in their energy distributions pro-vides an empirical evidence of this heterogeneity. Therefore, treating these heterogeneous components with a single state representation, a shared interpolation path, and a unified mod-eling strategy imposes an unnecessarily restrictive inductive bias on pixel-space generation. In this paper, we propose FREPix, a FRE quency-heterogeneous flow matching framework for Pix el-space im-age generation. Natural images are frequency-heterogeneous, yet current pixel-space generation is still formulated largely as a frequency-homogeneous process. FREPix makes this het-erogeneity explicit throughout generation. It decomposes the image into low- and high-frequency sub-states, assigns them heterogeneous interpolation paths, and explicitly decomposes the generation target: a low-frequency backbone first predicts the clean low-frequency component, while a high-frequency decoder then predicts the corresponding high-frequency com-ponent conditioned on the predicted low-frequency component. Training objective is further aligned with this factorization through a specifically designed frequency-aware flow matching objective. In this way, FREPix turns coarse-to-fine generation from an implicit behavior that the network is expected to discover into an explicit design principle for pixel-space flow matching. Extensive experiments validate the effectiveness of FREPix in class-to-image generation. It achieves competitive results among pixel-space generation models on ImageNet, reaching 1.91 FID at 256×256 and 2.38 FID at 512×512, while also attaining competitive quality at an early stage of training and under low-NFE sampling. Together, these results show that explicitly modeling frequency heterogeneity provides a stronger inductive bias for end-to-end pixel-space generation. 
+
+# 2 Related Work 
+
+Latent-Space and Pixel-Space Image Generation. Modern image generation has developed along two main routes: latent-space modeling, which improves efficiency by denoising on a compressed representation, and pixel-space modeling, which operates directly on a raw image. Latent diffu-sion [ 2 ] established compressed-space denoising as the dominant paradigm, further strengthened by transformer-based models like DiT [ 3 ] and SiT [ 4]. However, this efficiency introduces a fundamental autoencoder bottleneck, where generation quality is strictly bounded by reconstruction fidelity and susceptible to decoding artifacts. These limitations have motivated a renewed interest in pixel-space generation [ 18 – 20 ]. Recent works leveraging stronger architectures, such as JiT [ 21 ], PixelDiT [ 12 ], PixNerd [ 13 ], and DeCo [ 22 ], demonstrate that direct raw image modeling is increasingly viable. However, most methods still treat the image as a homogeneous state, leaving the separation between global structures and local details to arise only implicitly through architecture. 
+
+Flow Matching and Transport Design. Diffusion and flow-based generative models can be viewed as learning continuous probability flows that transport a source distribution to the target data distribution. Flow Matching [ 23 ], Rectified Flow [ 24 ], and stochastic interpolants [ 25 ] have made this direction especially flexible, enabling training through prescribed probability paths and simple regression objectives. Recent work has further revisited transport design from several angles. CAR-2Flow [ 26 ] improves conditional generation by reparameterizing source and target distributions to shorten the effective transport path. MeanFlow [ 27 ] and pixel MeanFlow [ 28 ] replace instantaneous velocity with average velocity for one-step generation. In contrast to these methods, our goal is to bring transport design into explicitly decomposed frequency sub-states, assigning low- and high-frequency components different interpolation paths within a unified framework. 
+
+Coarse-to-Fine, Multi-Scale, and Frequency-Aware Generation. Many prior works recognize that the global structure and local detail exhibit distinct learning dynamics. Cascaded diffusion models [ 10 ] realize coarse-to-fine generation through multiple generators across resolutions, while multi-scale pixel-space methods such as SiD2 [ 29 ] and PixelFlow [ 14 ] reduce the difficulty of raw-pixel generation through structured resolution scheduling. Another line of work exploits spectral decompositions, as in WDM [ 30 ], showing that frequency-domain processing can improve efficiency and generation quality. More recent pixel-space methods push this idea further. PixelDiT [ 12 ] employs a dual-level design to separate global semantics from local details, while DeCo [ 22 ] combines a low-frequency backbone with a lightweight decoder for high-frequency refinement. Unlike these methods, ours explicitly factorizes the prediction targets by assigning low- and high-frequency outputs to different modules and accounts for frequency heterogeneity throughout generation. 
+
+# 3 Frequency-Decoupled Flow Matching 
+
+3.1 Frequency-Decomposed State Space and Heterogeneous Interpolation 
+
+Standard pixel-space flow matching methods [ 12 – 14 , 21 , 22 ] represent the sample at time t by a single state xt ∈ Rd and, under the standard linear path, apply the same interpolation schedule to all image components through a shared vector field. While convenient, this homogeneous formulation does not explicitly reflect the frequency heterogeneity of natural images. 
+
+Figure 3: Homogeneous vs. heterogeneous interpolation. Standard pixel-space flow matching applies a shared interpolation schedule to all frequency components, treating the image as a homo-geneous state during transport. In contrast, our method first decomposes the image into low- and high-frequency sub-states and then assigns them separate schedules gl(t) and gh(t).
+
+Frequency-decomposed state space. To make this heterogeneity explicit without sacrificing exactness, we reparameterize the image state with an orthonormal discrete wavelet transform (DWT) 
+
+W : Rd → Rd. For any sample xt, we write 
+
+(lt, h t) = W(xt), xt = W−1(lt, h t), (1) where lt ∈ Rdl denotes the low-frequency sub-state (structure) and ht ∈ Rdh denotes the high-frequency sub-state (detail) , with dl + dh = d. Since W is orthonormal, the factorization is exact and preserves signal energy by Parseval’s identity [ 31 ]. Thus, unlike latent compression, this frequency factorization is lossless and changes only the parameterization of the state space, not the underlying sample space itself. 
+
+From decomposed states to heterogeneous interpolation. Once the image state is explicitly decomposed into low- and high-frequency components, it is natural to decompose the interpolation path accordingly rather than transport all frequencies with a single shared schedule. Let x ∼ ρ1 be a clean image and ϵ ∼ ρ0 = N (0 , I d) be a source noise, with (l, h ) = W(x) and (ϵl, ϵ h) = W(ϵ). We 3define the heterogeneous interpolation path by 
+
+lt = gl(t) l +  1 − gl(t)ϵl, ht = gh(t) h +  1 − gh(t)ϵh, (2) where gl, g h ∈ C1([0 , 1]) are strictly increasing schedules that satisfy gl(0) = gh(0) = 0 and 
+
+gl(1) = gh(1) = 1 . This allows the two frequency sub-states to follow different transport dynamics. For notational convenience, we further write the path in operator form as 
+
+(xt = G(t)x +  I − G(t)ϵ
+
+˙xt = ˙G(t)( x − ϵ) , G(t) = W−1
+
+gl(t)Idl 00 gh(t)Idh
+
+
+
+W, (3) where xt denotes the pixel-space state and ˙xt is its time derivative, i.e., its conditional velocity. This formulation preserves linear operator interpolation between data and noise in pixel space, while generalizing the homogeneous scalar schedule of standard flow matching to a frequency-aware operator over explicitly decomposed sub-states. Fig 3 further illustrates the difference. 
+
+Why use different schedules? Different schedules gl and gh let the transport process reflect the frequency heterogeneity of natural images. Under standard pixel-space flow matching, all frequency components follow the same schedule. Once the state space is decomposed, this homogeneous design becomes unnecessarily restrictive. We therefore adopt frequency-heterogeneous interpolation, allowing low- and high-frequency sub-states to evolve under different transport dynamics within a unified flow matching framework. Sec. 4.2 studies the empirical instantiation of schedules. 
+
+Proposition 3.1 (Validity of Heterogeneous Interpolation) . Assume W is orthonormal, x ∼ ρ1 has finite second moment, ϵ ∼ N (0 , I d), and gl, g h ∈ C1([0 , 1]) are strictly increasing with gl(0) = 
+
+gh(0) = 0 and gl(1) = gh(1) = 1 . Let xt be defined by Eq. (3) and B denote the class of measurable vector fields b(t, ·) such that R 10 E∥b(t, x t)∥2 dt < ∞. Then: 1. Smoothness: The trajectory t 7 → xt is almost surely continuously differentiable, with 
+
+∥ ˙xt∥ ≤ Lg (∥x∥ + ∥ϵ∥);2. Continuity Equation: For every t ∈ [0 , 1) , the law of xt admits a density pt, and the marginal path satisfies the continuity equation ∂tpt + ∇ · (vtpt) = 0 in the sense of distribution, where vt(xt) = E[ ˙ xt|xt] is the marginal velocity field; 3. Learnability: The population regression objective L(b) = R 10 E∥b(t, x t) − ˙xt∥2 dt is uniquely minimized (up to almost-everywhere equality) by the marginal velocity field 
+
+b∗(t, x t) = E[ ˙ xt|xt] = vt(xt).
+
+The proof of Proposition 3.1 is provided in the Appendix D.1. Proposition 3.1 establishes that the heterogeneous interpolation is a principled extension of the standard flow matching path rather than a heuristic modification. This result is central to the remainder of our method: it justifies transport in the decomposed (lt, h t) state space and motivates the following network and the objective designs. 
+
+3.2 Factorized Generative Modeling via Explicit Architectural Decoupling From decomposed transport to factorized generation. While Sec. 3.1 decomposes the state space and transport path by frequency, the generator should preserve this structure rather than collapse it back into a unified prediction problem. Fig. 4 contrasts three architectural paradigms. In a joint design (Fig. 4a), one network operates on the mixed state xt and predicts the clean target in one shot, leaving the separation between low-frequency structure and high-frequency detail entirely implicit. More recent modular designs (Fig. 4b), such as DeCo and PixelDiT, introduce staged pathways that can encourage specialization across scales or levels of detail. However, this specialization is defined primarily through architectural organization and feature routing, rather than by explicitly specifying which module should predict which frequency component. To avoid collapsing the decomposed transport back and make the decomposition explicit at the prediction level, we design the generator to model the heterogeneous sub-state (lt, h t), as illustrated in Fig. 4c. Following JiT [ 21 ], we adopt x-prediction parameterization. Specifically, we decouple the generation into two specialized modules: a structure predictor fφ and a detail refiner gϕ:
+
+ˆl = fφ(lt, t ), ˆh = gϕ(ht, ˆl, t ), ˆx = W−1(ˆl, ˆh). (4) 4Figure 4: Comparison of pixel-space generative architectures. (a) Joint network (e.g., JiT [ 21 ]) treats the image as a homogeneous state and predicts the clean target in one shot, leaving structure and detail entangled. (b) Implicit decoupling (e.g., DeCo [ 22 ], PixelDiT [ 12 ]) introduces staged pathways that can encourage specialization across scales, but does not explicitly assign frequency-specific prediction targets to different modules. (c) Explicit decoupling (ours) directly factorizes prediction responsibility: a structure predictor (DiT) predicts the clean low-frequency component ˆl,and a detail refiner (Decoder) predicts the clean high-frequency component ˆh conditioned on ˆl.The structure predictor fφ is implemented as a Diffusion Transformer (DiT), which takes the noisy low-frequency sub-state lt as input and predicts the clean low-frequency component ˆl, thereby capturing long-range dependencies and global structure. To enable efficient high-frequency modeling without the computational overhead of self-attention, the high-frequency predictor gϕ is implemented as the Decoder from DeCo. It takes the noisy high-frequency sub-state ht as input to generate the clean high-frequency component ˆh while using the predicted low-frequency structure ˆl from the DiT as an explicit condition through AdaLN-Zero [3]. 
+
+Implicit vs. explicit decoupling. The key distinction of our architecture lies not only in modu-larization alone, but also in how the decomposition is specified. In implicitly decoupled designs, staged pathways can encourage different modules to specialize in different frequency roles, but this specialization remains emergent from the architecture. Our model instead makes the decomposition explicit at the prediction level by assigning different prediction targets to different modules and enforcing a low-frequency to high-frequency conditional dependency between them. This turns coarse-to-fine generation from an architectural tendency into a hard design principle, aligning the network itself with the decomposed transport introduced in Sec. 3.1. To make this distinction more concrete, let the direct joint function class be Fdir and the explicit decoupled function class be Fdec . We analyze a simplified statistical setting in which clean targets and predictions are bounded, the clean low-frequency component concentrates near a kL-dimensional manifold, and the relevant loss classes admit covering-number growth in [ 32 ]. Formal assumptions and proofs are presented in Appendix D.2. 
+
+Proposition 3.2 (Generalization comparison for explicit decoupling under simplified assumptions) .
+
+Let the ambient dimension be d := dL + dH , and let Rdir , bRdir and Rdec , bRdec denote the corre-sponding true and empirical risks, respectively (see Definition D.2). The following bounds hold simultaneously for all f ∈ F dir and (gL, g H ) ∈ F dec with probability at least 1 − δ:
+
+Rdir (f ) ≤ bRdir (f ) + 24 A√πd 
+
+√N + 3 
+
+r 2 log(8 /δ )
+
+N , (5) 
+
+Rdec (gL, g H ) ≤ bRdec (gL, g H ) + 12 A√π
+
+√N
+
+ p dL + pkL + dH
+
+ + 3 
+
+r 2 log(8 /δ )
+
+N , (6) 
+
+where kL < d L is the intrinsic dimension of the clean low-frequency component. Consequently, since d = dL + dH and kL < d L, the decoupled complexity term is smaller than the corresponding direct-model term. 
+
+5Proposition D.2 should be interpreted as a comparison under a simplified statistical model rather than an exact characterization of modern Transformer-based architectures. Its role is to formalize the intuition that explicit decoupling can mitigate frequency entanglement by reducing the effective dimension and statistical complexity seen by each branch. In practice, the high-frequency predictor conditions on the predicted low-frequency rather than on the real one. Corollary D.4 in Appendix D.2 shows that this only introduces an additional term controlled by the low-frequency prediction error, so the complexity advantage is retained as long as the structure predictor is sufficiently accurate. 
+
+3.3 Frequency-Aligned Flow Matching Objective 
+
+With state, transport, and architecture all decomposed by frequency, the remaining question is how to align training with the same structure. In particular, the generator in Sec. 3.2 adopts an x-prediction parameterization, producing the clean reconstruction xθ (xt, t ) = net θ (xt, t ) rather than regressing the velocity field directly. Following JiT, we preserve the optimization advantages of clean-data prediction, while recovering a flow matching training signal by analytically converting xθ into the velocity vθ induced by our heterogeneous interpolation path. 
+
+From x-prediction to induced velocity. Under the heterogeneous interpolation xt = G(t)x + I − G(t)ϵ, the conditional velocity induced by the path is obtained by differentiating with respect to t, which gives vt(xt|x) = ˙G(t)( x − ϵ). Further, we can rewrite vt in terms of xt which gives 
+
+vt(xt|x) = ˙G(t) I − G(t)−1(x − xt). (7) This makes it possible to convert clean-image prediction into velocity prediction. Specifically, by replacing the clean target x with its network prediction ˆx, we define the predicted velocity as 
+
+vθ (t, x t) = ˙G(t) I − G(t)−1(ˆ x − xt). (8) 
+
+Frequency-aligned objective. Let Wl and Wh denote the low- and high-frequency projection operators of DWT where (l, h ) = ( Wlx, Whx) = W(x) and W−1(l, h ) = WTl l + WTh h, the conditional velocity induced by the heterogeneous interpolation can be naturally decomposed into low- and high-frequency components: 
+
+vt(xt|x) = W⊤ 
+
+> l
+
+˙gl(t)( l − ϵl) + W⊤ 
+
+> h
+
+˙gh(t)( h − ϵh). (9) This decomposition allows us to explicitly control the relative difficulty of low- and high-frequency learning during training. Let λl(t), λ h(t) > 0 be time-dependent weights, we define the frequency-aligned conditional flow matching objective as 
+
+LFA (θ) := Et,x,ϵ 
+
+h
+
+λl(t)∥W l(vθ (t, x t) − vt(xt|x)) ∥2 + λh(t)∥W h(vθ (t, x t) − vt(xt|x)) ∥2i
+
+. (10) 
+
+Frequency weighting preserves the target flow. The weights λl(t) and λh(t) allow us to rebalance optimization between the low- and high-frequency components over time. This gives a simple mechanism for rebalancing optimization across frequency components. We defer the discussion of specific weighting choices to Sec. 4.2. Importantly, this reweighting should improve training dynamics without changing the target flow field. To make this explicit, define the time-dependent weighting matrix 
+
+M(t) := λl(t)W⊤ 
+
+> l
+
+Wl + λh(t)W⊤ 
+
+> h
+
+Wh. (11) Since W is orthonormal and λl(t), λ h(t) > 0, M(t) is positive definite for all t, and the objective in Eq. (10) can be rewritten as 
+
+LFA (θ) = Et,x,ϵ 
+
+h vθ (t, x t) − vt(xt|x)⊤M(t) vθ (t, x t) − vt(xt|x)i
+
+. (12) 
+
+Theorem 3.3 (Invariance of the Optimal Marginal Velocity under Frequency Weighting) . Let λl, λ h ∈
+
+C([0 , 1]) satisfy λl(t) > 0 and λh(t) > 0 for all t ∈ [0 , 1] , and let M(t) be defined by Eq. (11) .Then the weighted objective in Eq. (12) admits 
+
+LFA (θ) = 
+
+Z 10
+
+Et,x,ϵ 
+
+h vθ (t, x t) − vt(xt)⊤M(t) vθ (t, x t) − vt(xt)i
+
+dt + C, (13) 
+
+where vt(xt) = E[ ˙ xt|xt] is the marginal velocity, and C is a constant independent of θ. Consequently, the unique minimizer of LFA (θ), up to almost-everywhere equality, is v∗ 
+
+> θ
+
+(t, x t) = vt(xt).
+
+6Theorem 3.3 shows that λl(t) and λh(t) reweight the optimization geometry without changing the population-optimal marginal velocity field induced by the heterogeneous interpolation path. They can thus be used to rebalance learning dynamic across frequency sub-states and across time while preserving the same target flow. 
+
+Final training objective. Our primary objective is the frequency-aligned flow matching loss in Eq. (10) . We further add a widely-used REPA loss [ 33 ] on intermediate features to representation alignment. In latent diffusion [ 2], perceptual loss is widely used to improve VAE image reconstruction by supervising the decoded image ˆx. As we adopt x-prediction parameterization, the LPIPS perceptual loss [ 34 ] is a natural auxiliary objective to encourage local pattern recovery. The final objective is 
+
+L = LFA + LREPA + LLPIPS .
+
+# 4 Experiments 
+
+FREPix is evaluated through extensive class-to-image generation experiments on ImageNet at 256×256 and 512×512 resolutions. Following standard practice, we report FID (gFID) [ 35 ], Inception Score (IS) [ 36 ], Precision and Recall [ 37 ] on 50K samples. For the frequency decomposition, we use a single-level orthonormal Haar DWT [38]. More details are in Appendix E. 
+
+4.1 Class-to-image Generation 
+
+The main experiments are conducted using the Extra Large model (FREPix-XL) with 674M parame-ters. For sampling, the Euler solver with 100 steps is adopted as the default choice with classifier-free guidance (CFG). For training, we train the model with 320 epochs (1.6M steps) for 256×256 resolution and finetune it for more 10 epochs for 512×512 resolution. Details are in Appendix E.3. 
+
+Figure 5: Qualitative results on Ima-geNet 256×256 using FREPix-XL. Table 2 reports the quantitative results. At 256 ×256 resolu-tion, FREPix-XL achieves competitive performance among recent pixel-space generation models. With 674M parame-ters and 320 training epochs, it reaches 1.91 FID, 295.6 IS, 0.79 precision, and 0.62 recall, outperforming several re-cent pixel-space baselines on these complementary metrics while remaining at a relatively lightweight model scale. A notable observation is that FREPix is already competitive at a much earlier stage of training: after only 80 epochs, it attains 2.29 FID together with strong IS (294.9), preci-sion (0.79), and recall (0.60). After 320 epochs, FREPix further improves to 1.91 FID, outperforming PixNerd and PixelFlow while remaining close to DeCo. Although its fi-nal FID does not match the strongest reported result among all compared methods, the overall picture is encouraging: FREPix combines strong performance across multiple metrics with favorable early-stage optimization, highlighting frequency heterogeneity as a useful design principle for pixel-space generation. At 512 × 512 resolution, FREPix-XL remains superior in complementary metrics, achieving the 
+
+best IS of 334.7 among the reported methods while maintaining 0.80 precision and 0.59 recall at a comparable parameter scale. Although its FID is not as strong as the best reported result in this setting, the model still demonstrates competitive performance across multiple metrics. Together with the 256 × 256 results, these findings support frequency heterogeneity as a competitive and practically useful design principle for pixel-space generation. Table 1: Comparison results using 25-step Euler sampling in pixel-space diffusion models. All models are trained with 320 epochs. (CFG val-ues: 3.0, interval: [0 .1, 1.0] .)                 
+
+> Method FID ↓IS ↑Pre. ↑Rec. ↑
+> DeCo-XL/16 3.30 289.2 0.78 0.56 PixNerd-XL/16 3.28 297.6 0.79 0.56 FREPix-XL 2.59 334.6 0.82 0.58
+
+A more pronounced advantage appears in the low-NFE regime. As shown in Table 1, under 25-step Euler sampling, FREPix-XL achieves 2.59 FID, substantially improving over DeCo-XL/16 (3.30) and PixNerd-XL/16 (3.28), while also obtaining the best IS, precision, and recall. This suggests that the proposed frequency-heterogeneous formu-lation is particularly beneficial in the low-NFE regime, where sampling must be performed with 7few NFEs. Combined with its favorable computational cost (230 GFLOPs, lower than most recent pixel-space generation methods, see Table 6 in Appendix G.1), these results indicate that FREPix offers an attractive trade-off between generation quality, inference efficiency, and computational cost. Table 2: Class-to-image generation on ImageNet 256×256 and 512×512 with CFG. Text in gray: latent diffusion models that require VAE.                                                                                                                                                                                
+
+> Method Params Epochs NFE FID ↓IS ↑Pre. ↑Rec. ↑
+> 256 ×256
+> DiT-XL/2 [3] 675M + 86M 1400 250 ×22.27 278.2 0.83 0.57 SiT-XL/2 [4] 675M + 86M 1400 250 ×22.06 284.0 0.83 0.59 REPA-XL/2 [33] 675M + 86M 800 250 ×21.42 305.7 0.80 0.64 ADM [1] 554M 400 250 4.59 186.7 0.82 0.52 RDM [11] 553M + 553M 400 250 1.99 260.4 0.81 0.58 JetFormer [39] 2.8B --6.64 -0.69 0.56 FractalMAR-H [40] 848M 600 -6.15 348.9 0.81 0.46 JiT-G/16 [21] 2B 600 100 ×21.82 292.6 --PixelFlow-XL/4 [14] 677M 320 120 ×21.98 282.1 0.81 0.60 PixelDiT-XL [12] 797M 320 100 ×21.61 292.7 0.78 0.64 DeCo-XL/16 [22] 682M 320 100 ×21.90 303.0 0.80 0.61 PixNerd-XL/16 [13] 700M 320 100 ×22.15 297.0 0.79 0.59 FREPix-XL 674M 80 100 ×22.29 294.9 0.79 0.60 FREPix-XL 674M 320 100 ×21.91 295.6 0.79 0.62 512 ×512 DiT-XL/2 [3] 675M + 86M 600 250 ×23.04 240.8 0.84 0.54 SiT-XL/2 [4] 675M + 86M 600 250 ×22.62 252.2 0.84 0.57 ADM-G [1] 554M 400 250 7.72 172.7 0.87 0.53 RIN [41] 320M -250 3.95 210.0 --VDM++ [42] 2B 800 250 ×22.65 278.1 --DeCo-XL/16 [22] 682M 340 100 ×22.22 290.0 0.80 0.60 PixelDiT-XL [12] 797M 360 100 ×22.21 271.1 0.78 0.65 JiT-H/32 [21] 756M 600 100 ×21.94 309.1 --PixNerd-XL/16 [13] 700M 340 100 ×22.84 245.6 0.80 0.59 FREPix-XL 674M 330 100 ×22.38 334.7 0.80 0.59
+
+4.2 Ablation Study 
+
+Ablation studies are conducted using the Large model (FREPix-L) at 256×256 resolution. For sampling, we take the Euler solver with 50 steps as the default choice without classifier-free guidance. The model is trained with 40 epochs (200k steps). More experimental details and results are provided in Appendix E.4 and Appendix G. 
+
+Heterogeneous interpolation path. Sec. 3.1 introduces separate interpolation schedules gl(t) and 
+
+gh(t) for low- and high-frequency sub-states. We instantiate them with the low-frequency path slightly ahead of the high-frequency path, i.e., gl(t) > g h(t) for t ∈ (0 , 1) . Since larger g(t) places the corresponding sub-state closer to its clean endpoint in Eq. (2) , this ordering exposes the model to cleaner structural information earlier, while leaving high-frequency details to be recovered later. The resulting trajectory is therefore explicitly coarse-to-fine: global structure approaches the data manifold before fine detail is fully formed. Concretely, we use smoothed power schedules 
+
+gl(t) = (t + ε)γl − εγl
+
+(1 + ε)γl − εγl
+
+, gh(t) = (t + ε)γh − εγh
+
+(1 + ε)γh − εγh
+
+, (14) where γl < γ h and ε is a small constant, set to 10 −2 in our experiments. The offset ε regularizes the derivatives near t = 0 , while preserving the desired ordering between the two schedules. Table 3(a) shows that placing the low-frequency path ahead is important. The heterogeneous path outperforms both the homogeneous schedule and the reversed ordering, with (γl, γ h) = (0 .95 , 1.05) 
+
+giving the best overall FID–IS trade-off. In contrast, placing the high-frequency path ahead degrades performance. These results support our design principle that the interpolation path should reflect the asymmetric recovery process of natural images: structure should be established before high-frequency details are refined. Notably, we leave sophisticated heterogeneous path design to future work. 8Explicit network decoupling. To evaluate the role of explicit responsibility assignment, we compare our architecture against both a joint network (JiT [ 21 ]) and implicitly decoupled designs (PixFLow [ 14 ], PixNerd [ 13 ] and DeCo [ 22 ]). The joint model predicts the clean target in one shot from the mixed state, while the implicitly decoupled baselines rely on staged specialization to emerge from their architectures. By contrast, our model explicitly assigns low-frequency recovery to the structure predictor and high-frequency recovery to the detail refiner. Empirically, explicit decoupling is substantially more effective than both joint prediction and implicit specialization. Table 3(b) shows that FREPix achieves 13.85 FID, 105.6 IS, and 0.67 precision, compared with 23.25/67.7/0.55 for the joint JiT baseline and 31.35/48.4/0.51 for DeCo, the strongest implicit baseline in this comparison. Relative to DeCo, explicit decoupling improves FID by 17.5 points, more than doubles IS, and raises precision by 0.16. Similar gains hold over PixNerd and PixFlow. Although recall is slightly lower than some baselines, the improvements in FID, IS, and precision indicate that explicit responsibility assignment is much more effective than leaving specialization to emerge implicitly. These results support that coarse-to-fine generation is more effective when encoded as an explicit architectural prior rather than left to emerge implicitly. Table 3: Ablation experiments on power exponents of interpolation path, decoupling strategies and reweighting strength. Background in gray: the settings adopted in our final framework.                                                                    
+
+> (a) Power exponents γland γh
+> γlγhFID ↓IS ↑Pre. ↑Rec. ↑
+> 0.9 1.1 14.12 105.0 0.66 0.54 0.95 1.05 13.85 105.6 0.67 0.54 1.0 1.0 13.94 107.1 0.66 0.54 1.05 0.95 14.84 107.2 0.66 0.52 1.1 0.9 15.72 105.1 0.64 0.52 (b) Decoupling strategies. Type Method FID ↓IS ↑Pre. ↑Rec. ↑
+> Joint JiT 23.25 67.7 0.55 0.65 Implicit PixFlow 54.33 24.7 0.43 0.58 PixNerd 37.49 43.0 0.46 0.62 DeCo 31.35 48.4 0.51 0.65 Explicit FREPix 13.85 105.6 0.67 0.54 (c) Reweighting strength ωωFID ↓IS ↑Pre. ↑Rec. ↑
+> 015.06 102.0 0.65 0.54 0.3 14.74 104.9 0.66 0.54 0.5 14.23 105.3 0.66 0.54 0.7 13.85 105.6 0.67 0.54 -0.7 15.49 99.7 0.65 0.54
+
+Frequency-aware reweighting. Sec. 3.3 introduces frequency-dependent weights λl(t) and λh(t),while leaving their instantiation open. Motivated by the asymmetric recovery difficulty of different frequency bands, we instantiate them with a time-dependent cosine schedule. When t is small, the state is still close to noise, and recovering high-frequency detail is substantially harder than recovering low-frequency structure. In this regime, placing relatively more weight on low-frequency errors encourages the model to first establish a reliable structural signal. As t increases and the sample moves closer to the data manifold, high-frequency refinement becomes more meaningful, and the weighting can shift accordingly. We therefore assign larger low-frequency weight early and larger high-frequency weight late: 
+
+λl(t) = 1 − ω cos  π(1 − t), λh(t) = 1 + ω cos  π(1 − t), (15) where ω controls the reweighting strength. Larger ω yields a stronger asymmetry between low- and high-frequency supervision across time. Table 3(c) shows that both the strength and direction are important. The proposed direction consis-tently outperforms its reversed counterpart, and ω = 0 .7 gives the best overall performance. These results suggest that effective supervision should reflect the time-varying recovery difficulty of low-and high-frequency components, rather than weighting them uniformly throughout the trajectory. 
+
+# 5 Conclusion 
+
+In this paper, we presented FREPix, a frequency-heterogeneous flow matching framework for pixel-space image generation. Our starting point is that natural images are inherently heterogeneous across frequencies, whereas existing pixel-space generation methods still largely formulate generation as a frequency-homogeneous process. FREPix makes this heterogeneity explicit throughout generation. Extensive experiments on ImageNet demonstrate that this formulation yields competitive perfor-mance among pixel-space generation models and that each component of the framework contributes consistently to the final result. We hope this work highlights frequency heterogeneity as a useful perspective for designing future pixel-space generative models. 9References 
+
+[1] Prafulla Dhariwal and Alexander Nichol. Diffusion models beat gans on image synthesis. Advances in neural information processing systems , 34:8780–8794, 2021. [2] Robin Rombach, Andreas Blattmann, Dominik Lorenz, Patrick Esser, and Björn Ommer. High-resolution image synthesis with latent diffusion models. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pages 10684–10695, 2022. [3] William Peebles and Saining Xie. Scalable diffusion models with transformers. In Proceedings of the IEEE/CVF international conference on computer vision , pages 4195–4205, 2023. [4] Nanye Ma, Mark Goldstein, Michael S Albergo, Nicholas M Boffi, Eric Vanden-Eijnden, and Saining Xie. Sit: Exploring flow and diffusion-based generative models with scalable interpolant transformers. In 
+
+European Conference on Computer Vision , pages 23–40. Springer, 2024. [5] Xingjian Leng, Jaskirat Singh, Yunzhong Hou, Zhenchang Xing, Saining Xie, and Liang Zheng. Repa-e: Unlocking vae for end-to-end tuning of latent diffusion transformers. In Proceedings of the IEEE/CVF International Conference on Computer Vision , pages 18262–18272, 2025. [6] Jingfeng Yao, Bin Yang, and Xinggang Wang. Reconstruction vs. generation: Taming optimization dilemma in latent diffusion models. In Proceedings of the Computer Vision and Pattern Recognition Conference , pages 15703–15712, 2025. [7] Minglei Shi, Haolin Wang, Wenzhao Zheng, Ziyang Yuan, Xiaoshi Wu, Xintao Wang, Pengfei Wan, Jie Zhou, and Jiwen Lu. Latent diffusion model without variational autoencoder. arXiv preprint arXiv:2510.15301 , 2025. [8] Philippe Hansen-Estruch, David Yan, Ching-Yao Chuang, Orr Zohar, Jialiang Wang, Tingbo Hou, Tao Xu, Sriram Vishwanath, Peter Vajda, and Xinlei Chen. Learnings from scaling visual tokenizers for reconstruction and generation. In International Conference on Machine Learning , pages 22023–22043. PMLR, 2025. [9] Nasim Rahaman, Aristide Baratin, Devansh Arpit, Felix Draxler, Min Lin, Fred Hamprecht, Yoshua Bengio, and Aaron Courville. On the spectral bias of neural networks. In International conference on machine learning , pages 5301–5310. PMLR, 2019. [10] Jonathan Ho, Chitwan Saharia, William Chan, David J Fleet, Mohammad Norouzi, and Tim Salimans. Cascaded diffusion models for high fidelity image generation. Journal of Machine Learning Research ,23(47):1–33, 2022. [11] Jiayan Teng, Wendi Zheng, Ming Ding, Wenyi Hong, Jianqiao Wangni, Zhuoyi Yang, and Jie Tang. Relay diffusion: Unifying diffusion process across resolutions for image synthesis. In The Twelfth International Conference on Learning Representations , 2024. [12] Yongsheng Yu, Wei Xiong, Weili Nie, Yichen Sheng, Shiqiu Liu, and Jiebo Luo. Pixeldit: Pixel diffusion transformers for image generation. arXiv preprint arXiv:2511.20645 , 2025. [13] Shuai Wang, Ziteng Gao, Chenhui Zhu, Weilin Huang, and Limin Wang. Pixnerd: Pixel neural field diffusion. arXiv preprint arXiv:2507.23268 , 2025. [14] Shoufa Chen, Chongjian Ge, Shilong Zhang, Peize Sun, and Ping Luo. Pixelflow: Pixel-space generative models with flow. arXiv preprint arXiv:2504.07963 , 2025. [15] Antonio Torralba and Aude Oliva. Statistics of natural image categories. Network: computation in neural systems , 14(3):391, 2003. [16] Yunpeng Chen, Haoqi Fan, Bing Xu, Zhicheng Yan, Yannis Kalantidis, Marcus Rohrbach, Shuicheng Yan, and Jiashi Feng. Drop an octave: Reducing spatial redundancy in convolutional neural networks with octave convolution. In Proceedings of the IEEE/CVF international conference on computer vision , pages 3435–3444, 2019. [17] Zhi-Qin John Xu. Frequency principle: Fourier analysis sheds light on deep neural networks. Communica-tions in Computational Physics , 28(5):1746–1767, 2020. [18] Jonathan Ho, Ajay Jain, and Pieter Abbeel. Denoising diffusion probabilistic models. Advances in neural information processing systems , 33:6840–6851, 2020. [19] Yang Song, Sahaj Garg, Jiaxin Shi, and Stefano Ermon. Sliced score matching: A scalable approach to density and score estimation. In Uncertainty in artificial intelligence , pages 574–584. PMLR, 2020. 
+
+10 [20] Alexander Quinn Nichol and Prafulla Dhariwal. Improved denoising diffusion probabilistic models. In 
+
+International conference on machine learning , pages 8162–8171. PMLR, 2021. [21] Tianhong Li and Kaiming He. Back to basics: Let denoising generative models denoise. arXiv preprint arXiv:2511.13720 , 2025. [22] Zehong Ma, Longhui Wei, Shuai Wang, Shiliang Zhang, and Qi Tian. Deco: Frequency-decoupled pixel diffusion for end-to-end image generation. arXiv preprint arXiv:2511.19365 , 2025. [23] Yaron Lipman, Ricky TQ Chen, Heli Ben-Hamu, Maximilian Nickel, and Matt Le. Flow matching for generative modeling. In The Eleventh International Conference on Learning Representations , 2023. [24] Xingchao Liu, Chengyue Gong, et al. Flow straight and fast: Learning to generate and transfer data with rectified flow. In The Eleventh International Conference on Learning Representations , 2023. [25] Michael Albergo, Nicholas M Boffi, and Eric Vanden-Eijnden. Stochastic interpolants: A unifying framework for flows and diffusions. Journal of Machine Learning Research , 26(209):1–80, 2025. [26] Chen Chen, Pengsheng Guo, Liangchen Song, Jiasen Lu, Rui Qian, Tsu-Jui Fu, Xinze Wang, Wei Liu, Yinfei Yang, and Alex Schwing. Car-flow: Condition-aware reparameterization aligns source and target for better flow matching. In The Thirty-ninth Annual Conference on Neural Information Processing Systems ,2025. [27] Zhengyang Geng, Mingyang Deng, Xingjian Bai, J Zico Kolter, and Kaiming He. Mean flows for one-step generative modeling. In The Thirty-ninth Annual Conference on Neural Information Processing Systems ,2025. [28] Yiyang Lu, Susie Lu, Qiao Sun, Hanhong Zhao, Zhicheng Jiang, Xianbang Wang, Tianhong Li, Zhengyang Geng, and Kaiming He. One-step latent-free image generation with pixel mean flows. arXiv preprint arXiv:2601.22158 , 2026. [29] Emiel Hoogeboom, Thomas Mensink, Jonathan Heek, Kay Lamerigts, Ruiqi Gao, and Tim Salimans. Simpler diffusion: 1.5 fid on imagenet512 with pixel-space diffusion. In Proceedings of the Computer Vision and Pattern Recognition Conference , pages 18062–18071, 2025. [30] Hao Phung, Quan Dao, and Anh Tran. Wavelet diffusion models are fast and scalable image generators. In 
+
+Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pages 10199–10208, 2023. [31] Donald P Percival. On estimation of the wavelet variance. Biometrika , 82(3):619–631, 1995. [32] David Pollard. Empirical processes: theory and applications . 1990. [33] Sihyun Yu, Sangkyung Kwak, Huiwon Jang, Jongheon Jeong, Jonathan Huang, Jinwoo Shin, and Saining Xie. Representation alignment for generation: Training diffusion transformers is easier than you think. In 
+
+The Thirteenth International Conference on Learning Representations , 2024. [34] Richard Zhang, Phillip Isola, Alexei A Efros, Eli Shechtman, and Oliver Wang. The unreasonable effectiveness of deep features as a perceptual metric. In Proceedings of the IEEE conference on computer vision and pattern recognition , pages 586–595, 2018. [35] Martin Heusel, Hubert Ramsauer, Thomas Unterthiner, Bernhard Nessler, and Sepp Hochreiter. Gans trained by a two time-scale update rule converge to a local nash equilibrium. Advances in neural information processing systems , 30, 2017. [36] Tim Salimans, Ian Goodfellow, Wojciech Zaremba, Vicki Cheung, Alec Radford, and Xi Chen. Improved techniques for training gans. Advances in neural information processing systems , 29, 2016. [37] Tuomas Kynkäänniemi, Tero Karras, Samuli Laine, Jaakko Lehtinen, and Timo Aila. Improved precision and recall metric for assessing generative models. Advances in neural information processing systems , 32, 2019. [38] Ülo Lepik and Helle Hein. Haar wavelets. In Haar wavelets: with applications , pages 7–20. Springer, 2014. [39] Michael Tschannen, André Susano Pinto, and Alexander Kolesnikov. Jetformer: An autoregressive generative model of raw images and text. In The Thirteenth International Conference on Learning Representations , 2024. 
+
+11 [40] Tianhong Li, Qinyi Sun, Lijie Fan, and Kaiming He. Fractal generative models. Transactions on Machine Learning Research , 2025. [41] Allan Jabri, David J Fleet, and Ting Chen. Scalable adaptive computation for iterative generation. In 
+
+International Conference on Machine Learning , pages 14569–14589. PMLR, 2023. [42] Diederik Kingma and Ruiqi Gao. Understanding diffusion objectives as the elbo with simple data augmentation. Advances in Neural Information Processing Systems , 36:65484–65516, 2023. [43] Tero Karras, Miika Aittala, Timo Aila, and Samuli Laine. Elucidating the design space of diffusion-based generative models. Advances in neural information processing systems , 35:26565–26577, 2022. [44] Richard M Dudley. The sizes of compact subsets of hilbert space and continuity of gaussian processes. 
+
+Journal of Functional Analysis , 1(3):290–330, 1967. [45] RM Dudley. Universal donsker classes and metric entropy. The Annals of Probability , 15(4):1306–1326, 1987. [46] Mehryar Mohri, Afshin Rostamizadeh, and Ameet Talwalkar. Foundations of machine learning . MIT press, 2018. [47] Maxime Oquab, Timothée Darcet, Théo Moutakanni, Huy Vo, Marc Szafraniec, Vasil Khalidov, Pierre Fernandez, Daniel Haziza, Francisco Massa, Alaaeldin El-Nouby, et al. Dinov2: Learning robust visual features without supervision. Transactions on Machine Learning Research Journal , 2024. [48] Karen Simonyan and Andrew Zisserman. Very deep convolutional networks for large-scale image recogni-tion. arXiv preprint arXiv:1409.1556 , 2014. [49] Ilya Loshchilov and Frank Hutter. Decoupled weight decay regularization. In International Conference on Learning Representations , 2018. [50] Tuomas Kynkäänniemi, Miika Aittala, Tero Karras, Samuli Laine, Timo Aila, and Jaakko Lehtinen. Applying guidance in a limited interval improves sample and distribution quality in diffusion models. 
+
+Advances in Neural Information Processing Systems , 37:122458–122483, 2024. [51] Emiel Hoogeboom, Jonathan Heek, and Tim Salimans. Simple diffusion: End-to-end diffusion for high resolution images. arXiv preprint arXiv:2301.11093 , 2023. 
+
+# A Broader Impact 
+
+This work studies pixel-space image generation and proposes a frequency-heterogeneous formulation of flow matching. By making the roles of low- and high-frequency components explicit in the state space, transport path, architecture, and objective, FREPix provides a new perspective on how structure and detail can be separately modeled in generative systems. Beyond improving image synthesis quality, such a formulation may be useful for applications that benefit from direct pixel-space modeling, including image restoration, scientific imaging, and simulation settings where preserving fine-grained spatial information is important. Our work may also encourage future research on structured transport design and frequency-aware modeling in other generative domains. At the same time, improved image generation can also increase risks associated with synthetic media. As with other generative image models, a stronger pixel-space generator may be misused to produce misleading, deceptive, or manipulative visual content. These concerns are not unique to our method, but advances in realism and controllability can make them more consequential in practice. Our work does not introduce mechanisms for safety, provenance, or misuse prevention, and we do not claim to address these broader challenges. We therefore believe that future progress in pixel-space generation should be accompanied by appropriate safeguards, including responsible deployment practices, provenance-aware tooling, and careful consideration of downstream use. 
+
+# B Limitations 
+
+FREPix has several limitations. First, we only explore a limited family of heterogeneous interpolation schedules. While our results show that asymmetric low-/high-frequency transport is beneficial, the best schedule design remains underexplored, and richer or adaptive parameterizations may further improve performance. Second, FREPix is instantiated with a fixed orthonormal wavelet decomposition. This choice provides an exact and simple frequency factorization, but it is not the only way to expose heterogeneous image structure. More flexible multiresolution or learned decompositions may better match the statistics of natural images and further improve 
+
+12 the framework. Finally, our theoretical results are derived under simplified assumptions and are mainly intended to support the design intuition of explicit network decoupling, rather than to provide a complete characterization of modern large-scale architectures. We hope these limitations motivate future work on more flexible frequency decompositions, richer schedule designs, and broader empirical validation. 
+
+# C Preliminaries 
+
+Flow-based generative models [ 23 – 25 ] define sampling as simulating an ODE that pushes a prior distribution 
+
+ρ0 (typically N (0 , I d)) forward to the data distribution ρ1. During training, a noisy sample xt is typically constructed using a simple linear interpolation path: 
+
+xt = t x + (1 − t) ϵ, t ∈ [0 , 1] , (16) where x ∼ ρ1 and ϵ ∼ ρ0 denote the clean data and noise. Here, t ∈ [0 , 1] dictates the generative trajectory from the initial noise state ( t = 0 ) to the clean data ( t = 1 ). This interpolation path induces the conditional velocity field vt(xt | x) = x − ϵ. Conditional Flow Matching (CFM) [ 23 ] learns a time-dependent network vθ
+
+via L2-regression against this target: 
+
+LCFM (θ) = Et, x ∼ρ1, ϵ ∼ρ0
+
+h
+
+vθ (t, x t) − vt(xt | x) 2i
+
+. (17) Once trained, new samples are obtained by integrating the ODE 
+
+ddt xt = vθ (t, x t), t ∈ [0 , 1] , (18) starting from t = 0 and ending at t = 1 . In practice, this ODE can be approximately solved using numerical solvers (e.g., Euler- and Heun-based solvers [43]). 
+
+# D Proofs 
+
+D.1 Proofs of Proposition 3.1 
+
+Proof. Recall the heterogeneous interpolation path in Eq. (3) 
+
+G(t) := W−1
+
+gl(t)Idl 00 gh(t)Idh
+
+
+
+W, xt = G(t)x + ( I − G(t)) ϵ. (19) By the orthonormality of W and the regularity of gl, g h ∈ C1([0 , 1]) , the matrix-valued map t 7 → G(t) is continuously differentiable. Define 
+
+Lg := max 
+
+n
+
+sup 
+
+> t∈[0 ,1]
+
+| ˙gl(t)|, sup 
+
+> t∈[0 ,1]
+
+| ˙gh(t)|
+
+o
+
+< ∞. (20) Since orthonormal changes of coordinates preserve operator norms, 
+
+∥ ˙G(t)∥op = max | ˙gl(t)|, | ˙gh(t)| ≤ Lg , ∥G(t)∥op = max |gl(t)|, |gh(t)| ≤ 1. (21) 
+
+Step 1: Smoothness. For each realization of (x, ϵ ), the path t 7 → xt is C1, with ˙xt = ˙G(t)( x − ϵ), yielding 
+
+∥ ˙xt∥ ≤ ∥ ˙G(t)∥op ∥x − ϵ∥ ≤ Lg (∥x∥ + ∥ϵ∥), (22) which establishes the claimed bound. Furthermore, given that x has finite second moment and ϵ ∼ N (0 , I d),
+
+Z 10
+
+E∥ ˙xt∥2 dt ≤ 2L2
+
+> g
+
+ E∥x∥2 + E∥ϵ∥2 < ∞. (23) 
+
+Step 2: Density and continuity equation. Fix t ∈ [0 , 1) . The strict monotonicity of gl and gh together with the boundary conditions gl(1) = gh(1) = 1 yields 0 ≤ gl(t) < 1 and 0 ≤ gh(t) < 1. Therefore, 
+
+I − G(t) = W−1
+
+(1 − gl(t)) Idl 00 (1 − gh(t)) Idh
+
+
+
+W (24) is invertible, and the conditional law of xt given x is Gaussian: 
+
+xt | x ∼ N  G(t)x, Σt
+
+, Σt := ( I − G(t))( I − G(t)) ⊤. (25) By the positive definiteness of Σt for every t < 1, the law of xt has the density 
+
+pt(z) = 
+
+Z
+
+> Rd
+
+ϕΣt
+
+ z − G(t)x ρ1(dx ), (26) 
+
+13 where ϕΣt denotes the Gaussian density with covariance Σt. In particular, pt is well-defined for every t ∈ [0 , 1) .As t 7 → xt is almost surely C1, the chain rule gives 
+
+ddt φ(xt) = ∇φ(xt) · ˙xt. (27) Moreover, 
+
+ddt φ(xt) ≤ ∥∇ φ∥∞ ∥ ˙xt∥, (28) and the right-hand side is integrable by Step 1. Hence, by dominated convergence, 
+
+ddt E[φ(xt)] = E[∇φ(xt) · ˙xt] . (29) Define the marginal velocity field vt(xt) := E[ ˙ xt | xt]. Using the tower property, 
+
+E[∇φ(xt) · ˙xt] = E[∇φ(xt) · vt(xt)] = 
+
+Z
+
+> Rd
+
+∇φ(z) · vt(z) pt(z) dz. (30) Direct computation yields 
+
+E[φ(xt)] = 
+
+Z
+
+> Rd
+
+φ(z) pt(z) dz. (31) Therefore, 
+
+ddt 
+
+Z
+
+> Rd
+
+φ(z) pt(z) dz =
+
+Z
+
+> Rd
+
+∇φ(z) · vt(z) pt(z) dz = −
+
+Z
+
+> Rd
+
+φ(z) ∇·  vt(z)pt(z) dz. (32) As this identity holds for every φ ∈ C∞ 
+
+> c
+
+(Rd), it follows that 
+
+∂tpt + ∇ · (vtpt) = 0 (33) in the sense of distributions on Rd.
+
+Step 3: Learnability. Let 
+
+B =
+
+n
+
+b : [0 , 1] × Rd → Rd measurable :
+
+Z 10
+
+E∥b(t, x t)∥2 dt < ∞
+
+o
+
+. (34) By Jensen’s inequality for conditional expectations and Step 1, 
+
+Z 10
+
+E∥vt(xt)∥2 dt =
+
+Z 10
+
+E E[ ˙ xt | xt] 2 dt ≤
+
+Z 10
+
+E∥ ˙xt∥2 dt < ∞, (35) which implies v ∈ B .Now fix any b ∈ B . Expansion of the squared norm yields 
+
+∥b(t, x t) − ˙xt∥2 = ∥b(t, x t) − vt(xt)∥2 + ∥vt(xt) − ˙xt∥2 + 2 ⟨b(t, x t) − vt(xt), v t(xt) − ˙xt⟩. (36) Taking expectations, the cross term vanishes: 
+
+E[⟨b(t, x t) − vt(xt), v t(xt) − ˙xt⟩]= E[E[⟨b(t, x t) − vt(xt), v t(xt) − ˙xt⟩ | xt]] = E[⟨b(t, x t) − vt(xt), E[vt(xt) − ˙xt | xt]⟩] = 0 ,
+
+(37) since b(t, x t) − vt(xt) is σ(xt)-measurable and E[vt(xt) − ˙xt | xt] = vt(xt) − E[ ˙ xt | xt] = 0 .
+
+Integrating over t yields the orthogonal decomposition 
+
+L(b) = L(v) + 
+
+Z 10
+
+E∥b(t, x t) − vt(xt)∥2 dt. (38) Hence L(b) ≥ L (v) for every b ∈ B , with equality if and only if 
+
+b(t, x t) = vt(xt) for Lebesgue-a.e. t ∈ [0 , 1] and pt-a.e. xt ∈ Rd. (39) Therefore, the population regression objective is uniquely minimized, up to almost-everywhere equality, by 
+
+b∗(t, x t) = vt(xt) = E[ ˙ xt | xt]. (40) This proves the proposition. 
+
+14 D.2 Proofs of Proposition D.2 
+
+Let W : Rd → RdL × RdH be an orthonormal discrete wavelet transform, where d = dL + dH . For any sample 
+
+(xt, x ), write its wavelet decomposition as 
+
+W(xt) = ( lt, h t), W(x) = ( l, h ). (41) Given N i.i.d. samples S = {(l(i) 
+
+> t
+
+, h (i) 
+
+> t
+
+, l (i), h (i))}Ni=1 , we compare direct modeling with explicit decoupling under a simplified analysis, and then extend the result to the practical architecture. 
+
+Definition D.1 (Function classes) . The direct modeling class takes the full noisy state (lt, h t) ∈ Rd and jointly predicts the clean low- and high-frequency components: 
+
+Fdir := FL 
+
+> dir
+
+× F H
+
+> dir
+
+, FL 
+
+> dir
+
+⊂ { fL : Rd → RdL }, FH 
+
+> dir
+
+⊂ { fH : Rd → RdH }. (42) The decoupled function class separates the prediction responsibilities: the low-frequency branch only takes lt,while the high-frequency branch is analyzed under teacher forcing and takes (l, h t):
+
+Fdec := FL 
+
+> dec
+
+× F H
+
+> dec
+
+, FL 
+
+> dec
+
+⊂ { gL : RdL → RdL }, FH 
+
+> dec
+
+⊂ { gH : RdL × RdH → RdH }. (43) The practical function class feeds the predicted low-frequency component into the high-frequency branch: 
+
+Freal := 
+
+n
+
+(gL, g H ) : gL ∈ F L
+
+> dec
+
+, g H ∈ F H
+
+> dec
+
+o
+
+, (44) with prediction rule ˆl = gL(lt), ˆh = gH (ˆl, h t).
+
+Assumption D.1 (Boundedness) . There exists B > 0 such that almost surely ∥l∥∞, ∥h∥∞ ≤ B, and all candidate predictors satisfy ∥ˆl∥∞, ∥ˆh∥∞ ≤ B. Define the normalized squared losses 
+
+ℓL(ˆl, l ) := ∥ˆl − l∥22
+
+4B2dL
+
+, ℓH (ˆh, h ) := ∥ˆh − h∥22
+
+4B2dH
+
+. (45) Then 0 ≤ ℓL, ℓ H ≤ 1.
+
+Assumption D.2 (Low-dimensional structural manifold) . The clean low-frequency component l is concentrated near a low-dimensional manifold 
+
+ML ⊂ RdL (46) with intrinsic dimension kL < d L.
+
+Assumption D.3 (Covering-number growth under a finite-dimensional proxy analysis) . Let the loss classes induced by the normalized squared losses be 
+
+GL 
+
+> dir
+
+:= {z 7 → ℓL(fL(lt, h t), l ) : fL ∈ F L
+
+> dir
+
+}, GH 
+
+> dir
+
+:= {z 7 → ℓH (fH (lt, h t), h ) : fH ∈ F H
+
+> dir
+
+},
+
+GL 
+
+> dec
+
+:= {z 7 → ℓL(gL(lt), l ) : gL ∈ F L
+
+> dec
+
+}, GH 
+
+> dec
+
+:= {z 7 → ℓH (gH (l, h t), h ) : gH ∈ F H
+
+> dec
+
+}, (47) where z = ( lt, h t, l, h ).We assume a simplified finite-dimensional proxy analysis in which each loss class G admits an effective param-eterization of dimension mG over a bounded parameter set, and the induced loss is uniformly Lipschitz with respect to that parameterization. Under this proxy, the metric entropy satisfies the Pollard-type growth condi-tion [32]: there exists a constant A ≥ 1 such that, for every ε ∈ (0 , 1] and every G ∈ {G L
+
+> dir
+
+, GH
+
+> dir
+
+, GL
+
+> dec
+
+, GH
+
+> dec
+
+},
+
+log N (ε, G, L 2(PN )) ≤ mG log( A/ε ). (48) In the simplified linear proxy considered here, the effective dimensions scale with the corresponding input degrees of freedom: 
+
+mGL 
+
+> dir
+
+= mGH 
+
+> dir
+
+= d, mGL 
+
+> dec
+
+= dL, mGH 
+
+> dec
+
+= kL + dH , (49) where the last relation reflects that the high-frequency branch is conditioned on (l, h t) and the clean low-frequency component l is assumed to lie near a kL-dimensional structural manifold. 
+
+Assumption D.4 (Conditional Lipschitz property) . There exists Lcond > 0 such that for every z, z ′ ∈ RdL and every ht ∈ RdH ,
+
+∥gH (z, h t) − gH (z′, h t)∥2 ≤ Lcond ∥z − z′∥2, ∀gH ∈ F H
+
+> dec
+
+.
+
+This assumption quantifies the error propagation induced by replacing the clean low-frequency input l with its prediction ˆl = gL(lt) in the practical architecture. 
+
+15 D.2.1 From covering numbers to Rademacher complexity 
+
+Lemma D.1 (Entropy integral bound) . Let G ⊂ [0 , 1] X be a function class satisfying 
+
+log N (ε, G, L 2(PN )) ≤ m log( A/ε ), ∀ε ∈ (0 , 1] , (50) 
+
+for a certain constant A ≥ 1. Then the empirical Rademacher complexity of G on the sample S satisfies 
+
+bRS (G) ≤ 6A√πm 
+
+√N . (51) 
+
+Proof. By Dudley’s entropy integral bound [44, 45], 
+
+bRS (G) ≤ inf 
+
+> α> 0
+
+
+
+4α + 12 
+
+√N
+
+Z 1
+
+> α
+
+plog N (ε, G, L 2(PN )) dε 
+
+
+
+. (52) Letting α ↓ 0 yields 
+
+bRS (G) ≤ 12 
+
+√N
+
+Z 10
+
+plog N (ε, G, L 2(PN )) dε. (53) Substituting the covering-number assumption gives 
+
+bRS (G) ≤ 12 √m
+
+√N
+
+Z 10
+
+plog( A/ε ) dε. (54) By the change of variables u = log( A/ε ), which yields ε = Ae −u and dε = −Ae −udu , we obtain 
+
+Z 10
+
+plog( A/ε ) dε = A
+
+Z ∞ 
+
+> log A
+
+√u e −u du 
+
+≤ A
+
+Z ∞
+
+> 0
+
+√u e −u du = A Γ
+
+ 32
+
+
+
+= A√π
+
+2 .
+
+(55) Therefore, 
+
+bRS (G) ≤ 12 √m
+
+√N · A√π
+
+2 = 6A√πm 
+
+√N . (56) 
+
+D.2.2 Risks and generalization comparison 
+
+Definition D.2 (Risks) . Define the branch-wise risks 
+
+RL
+
+> dir
+
+(fL) := EℓL(fL(lt, h t), l ), RH
+
+> dir
+
+(fH ) := EℓH (fH (lt, h t), h ),RL
+
+> dec
+
+(gL) := EℓL(gL(lt), l ), RH
+
+> dec
+
+(gH ) := EℓH (gH (l, h t), h ). (57) The total risks are 
+
+Rdir (f ) := RL
+
+> dir
+
+(fL) + RH
+
+> dir
+
+(fH ), Rdec (gL, g H ) := RL
+
+> dec
+
+(gL) + RH
+
+> dec
+
+(gH ). (58) Their empirical counterparts, denoted by bRdir and bRdec , are defined analogously. 
+
+Proposition D.2 (Generalization comparison for explicit decoupling under simplified assumptions) . Let the ambient dimension be d := dL + dH , and let Rdir , bRdir and Rdec , bRdec denote the corresponding true and empirical risks, respectively (see Definition D.2). The following bounds hold simultaneously for all f ∈ F dir 
+
+and (gL, g H ) ∈ F dec with probability at least 1 − δ:
+
+Rdir (f ) ≤ bRdir (f ) + 24 A√πd 
+
+√N + 3 
+
+r 2 log(8 /δ )
+
+N , (59) 
+
+Rdec (gL, g H ) ≤ bRdec (gL, g H ) + 12 A√π
+
+√N
+
+ √dL + √kL + dH
+
+ + 3 
+
+r 2 log(8 /δ )
+
+N , (60) 
+
+where kL < d L is the intrinsic dimension of the clean low-frequency component. Consequently, since d =
+
+dL + dH and kL < d L, the decoupled complexity term is smaller than the corresponding direct-model term. Proof. We first bound the Rademacher complexities of the four loss classes. By Assumption D.3 and Lemma D.1, 
+
+bRS (GL
+
+> dir
+
+) ≤ 6A√πd 
+
+√N , bRS (GH
+
+> dir
+
+) ≤ 6A√πd 
+
+√N ,
+
+bRS (GL
+
+> dec
+
+) ≤ 6A√πd L
+
+√N , bRS (GH
+
+> dec
+
+) ≤ 6Apπ(kL + dH )
+
+√N .
+
+(61) 
+
+16 In view of Assumption D.1, all losses are [0 , 1] -valued; thus, the standard uniform Rademacher generalization bound [46] implies that for any class G of [0 , 1] -valued losses, with probability at least 1 − η,
+
+R(g) ≤ bR(g) + 2 bRS (G) + 3 
+
+r log(2 /η )2N ∀g ∈ G . (62) 
+
+Direct model. Applying the above bound to GL 
+
+> dir
+
+and GH 
+
+> dir
+
+with confidence level η = δ/ 4 for each class, a union bound yields that, with probability at least 1 − δ/ 2, both inequalities hold simultaneously for all 
+
+f = ( fL, f H ) ∈ F dir :
+
+RL
+
+> dir
+
+(fL) ≤ bRL
+
+> dir
+
+(fL) + 2 bRS (GL
+
+> dir
+
+) + 3 
+
+r log(8 /δ )2N ,RH
+
+> dir
+
+(fH ) ≤ bRH
+
+> dir
+
+(fH ) + 2 bRS (GH
+
+> dir
+
+) + 3 
+
+r log(8 /δ )2N .
+
+(63) Using Eq. (61) and summing the two branch-wise bounds yields 
+
+Rdir (f ) ≤ bRdir (f ) + 24 A√πd 
+
+√N + 3 
+
+r 2 log(8 /δ )
+
+N . (64) 
+
+Decoupled model. Applying the same argument to GL 
+
+> dec
+
+and GH
+
+> dec
+
+, again with confidence level η = δ/ 4 for each class, a union bound yields that, with probability at least 1 − δ/ 2, the following hold simultaneously for all 
+
+(gL, g H ) ∈ F dec :
+
+RL
+
+> dec
+
+(gL) ≤ bRL
+
+> dec
+
+(gL) + 2 bRS (GL
+
+> dec
+
+) + 3 
+
+r log(8 /δ )2N ,RH
+
+> dec
+
+(gH ) ≤ bRH
+
+> dec
+
+(gH ) + 2 bRS (GH
+
+> dec
+
+) + 3 
+
+r log(8 /δ )2N .
+
+(65) Using Eq. (61) and summing gives 
+
+Rdec (gL, g H ) ≤ bRdec (gL, g H ) + 12 A√π
+
+√N
+
+ √dL + √kL + dH
+
+ + 3 
+
+r 2 log(8 /δ )
+
+N . (66) 
+
+Complexity comparison. Each of the two events above occurs with probability at least 1 − δ/ 2. A final union bound implies that both inequalities hold simultaneously with probability at least 1 − δ. From kL < d L,it follows that √dL + √kL + dH < √dL + √dL + dH < 2√dL + dH = 2 √d. (67) Multiplying both sides by 12 A√π/ √N establishes that the decoupled complexity term is strictly smaller than the corresponding direct-model term. 
+
+D.2.3 Error propagation and the practical architecture 
+
+Lemma D.3 (Conditional error propagation) . Under Assumptions D.1 and D.4, for any gH ∈ F H 
+
+> dec
+
+and any 
+
+(l, ˆl, h t, h ), one has 
+
+ℓH
+
+ gH (ˆl, h t), h  ≤ ℓH
+
+ gH (l, h t), h  + Lcond 
+
+B√dH
+
+∥ˆl − l∥2. (68) 
+
+Proof. Fix u := gH (ˆl, h t) and v := gH (l, h t). By the definition of the normalized high-frequency loss, 
+
+ℓH (u, h ) − ℓH (v, h ) = 14B2dH
+
+
+
+∥u − h∥22 − ∥ v − h∥22
+
+
+
+. (69) Using the identity ∥a∥22 − ∥ b∥22 = ( a − b)⊤(a + b) with a = u − h and b = v − h, we obtain 
+
+ℓH (u, h ) − ℓH (v, h ) = 14B2dH
+
+(u − v)⊤(u + v − 2h). (70) Taking absolute values and applying the Cauchy–Schwarz inequality yields 
+
+ℓH (u, h ) − ℓH (v, h ) ≤ 14B2dH
+
+∥u − v∥2 ∥u + v − 2h∥2. (71) By Assumption D.1, ∥u∥∞, ∥v∥∞, ∥h∥∞ ≤ B, so each coordinate of u + v − 2h has magnitude at most 4B,which implies ∥u + v − 2h∥2 ≤ 4B√dH .
+
+17 Moreover, by Assumption D.4, 
+
+∥u − v∥2 = ∥gH (ˆl, h t) − gH (l, h t)∥2 ≤ Lcond ∥ˆl − l∥2. (72) Combining the two estimates yields 
+
+ℓH (u, h ) − ℓH (v, h ) ≤ Lcond 
+
+B√dH
+
+∥ˆl − l∥2. (73) The desired one-sided inequality follows immediately. 
+
+Corollary D.4 (Generalization bound for the practical decoupled model) . Fix any low-frequency predictor 
+
+gL ∈ F L 
+
+> dec
+
+independent of the randomness of the current sample, and let (gL, g H ) ∈ F real . Define the practical risk by Rreal (gL, g H ) := EℓL
+
+ gL(lt), l  + ℓH
+
+ gH (gL(lt), h t), h  . Then, under Assumptions D.1–D.4, with probability at least 1 − δ, the following holds simultaneously for all gH ∈ F H
+
+> dec
+
+:
+
+Rreal (gL, g H ) ≤ bRdec (gL, g H ) + 12 A√π
+
+√N
+
+ √dL + √kL + dH
+
+ + Lcond 
+
+B√dH
+
+E∥gL(lt) − l∥2 + 3 
+
+r 2 log(8 /δ )
+
+N .
+
+(74) 
+
+Proof. Define the practical high-frequency risk 
+
+RH
+
+> real
+
+(gL, g H ) := EℓH
+
+ gH (gL(lt), h t), h  . (75) By Lemma D.3, applied pointwise with ˆl = gL(lt) and then averaged over the data distribution, 
+
+RH
+
+> real
+
+(gL, g H ) ≤ RH
+
+> dec
+
+(gH ) + Lcond 
+
+B√dH
+
+E∥gL(lt) − l∥2. (76) Therefore, 
+
+Rreal (gL, g H ) = RL
+
+> dec
+
+(gL) + RH
+
+> real
+
+(gL, g H )
+
+≤ RL
+
+> dec
+
+(gL) + RH
+
+> dec
+
+(gH ) + Lcond 
+
+B√dH
+
+E∥gL(lt) − l∥2
+
+= Rdec (gL, g H ) + Lcond 
+
+B√dH
+
+E∥gL(lt) − l∥2.
+
+(77) Substituting the bound for Rdec (gL, g H ) from Proposition D.2 completes the proof. 
+
+Remark 1. In the practical architecture, the high-frequency predictor conditions on the predicted ˆl rather than the ground-truth l. Corollary D.4 establishes that this modification introduces only an additional term controlled by the low-frequency prediction error. Consequently, the complexity advantage of explicit decoupling is retained provided that the structure predictor is sufficiently accurate. 
+
+D.3 Proofs of Theorem 3.3 
+
+Proof. We prove the two claims in turn. Recall from Eq. (11) that 
+
+M(t) = λl(t) W⊤ 
+
+> l
+
+Wl + λh(t) W⊤ 
+
+> h
+
+Wh.
+
+By the orthonormality of W, we have W⊤ 
+
+> l
+
+Wl + W⊤ 
+
+> h
+
+Wh = Id, which implies that for any nonzero a ∈ Rd,
+
+a⊤M(t)a = λl(t)∥W la∥22 + λh(t)∥W ha∥22 ≥ min {λl(t), λ h(t)} ∥ a∥22 > 0, (78) where the equality uses ∥W la∥22 + ∥W ha∥22 = ∥a∥22 and the last inequality follows from λl(t), λ h(t) > 0.Thus M(t) is symmetric positive definite for every t ∈ [0 , 1] .Consider the weighted objective in Eq. (12) . For fixed t, ϵ, and z, define δ := vθ (t, z ) − vt(z | x). Since M(t)
+
+is symmetric, expanding the quadratic form and collecting the x-independent term into C1 gives 
+
+LFA (θ) = 
+
+Z 10
+
+Et,x,ϵ 
+
+h
+
+vθ (t, x t)⊤M(t)vθ (t, x t) − 2 vθ (t, x t)⊤M(t)vt(xt | x)+ vt(xt | x)⊤M(t)vt(xt | x)
+
+i
+
+dt 
+
+=
+
+Z 10
+
+Et,x,ϵ 
+
+h
+
+vθ (t, x t)⊤M(t)vθ (t, x t) − 2 vθ (t, x t)⊤M(t)vt(xt | x)
+
+i
+
+dt + C1,
+
+(79) where C1 := R 10 Et,x,ϵ 
+
+vt(xt | x)⊤M(t)vt(xt | x)dt is independent of θ.
+
+18 We now simplify the cross term. For each fixed t, expanding the expectation and using the fact that neither 
+
+vθ (t, z ) nor M(t) depends on the conditioning variable x yields 
+
+Et,x,ϵ 
+
+vθ (t, x t)⊤M(t)vt(xt | x)
+
+=
+
+Z
+
+> Rd
+
+vθ (t, z )⊤M(t)
+
+Z
+
+> Rd
+
+vt(z | x) pt(z | x) ρ1(x) dx 
+
+
+
+dz 
+
+=
+
+Z
+
+> Rd
+
+vθ (t, z )⊤M(t) vt(z) pt(z) dz = Ez∼pt
+
+vθ (t, z )⊤M(t)vt(z),
+
+(80) where the second equality follows from the definition of the marginal velocity field vt(z) = R vt(z | x)pt(z |
+
+x)ρ1(x) dx .Substituting Eq. (80) into Eq. (79) and completing the square yields 
+
+LFA (θ) = 
+
+Z 10
+
+Ez∼pt
+
+h vθ (t, z ) − vt(z)⊤M(t) vθ (t, z ) − vt(z) − vt(z)⊤M(t)vt(z)
+
+i
+
+dt + C1
+
+=
+
+Z 10
+
+Ez∼pt
+
+h vθ (t, z ) − vt(z)⊤M(t) vθ (t, z ) − vt(z)i
+
+dt + C, 
+
+(81) where C := C1 − R 10 Ez∼pt
+
+vt(z)⊤M(t)vt(z)dt is independent of θ. Since the law of z ∼ pt coincides with that of xt, the preceding display is equivalent to Eq. (13). By Step 1, M(t) is positive definite for every t. Hence, for any vector a ∈ Rd, a⊤M(t)a ≥ 0, with equality if and only if a = 0 . Therefore, the integrand in Eq. (13) is nonnegative almost surely, and it vanishes if and only if 
+
+vθ (t, x t) = vt(xt). (82) It follows that the weighted objective is minimized if and only if 
+
+vθ (t, x t) = vt(xt) for Lebesgue-a.e. t ∈ [0 , 1] and pt-a.e. xt ∈ Rd. (83) Thus the unique minimizer of LFA (θ), up to almost-everywhere equality, is 
+
+v∗ 
+
+> θ
+
+(t, x t) = vt(xt). (84) This completes the proof. 
+
+# E Experimental Details 
+
+E.1 Model Configuration 
+
+To start, all experiments are conducted on a node with 8×A800 GPUs. The experiment configurations of our model are summarized in Table 4. In practice, we follow the training setups from previous works such as DiT [ 3]and SiT [ 4]. Notably, existing methods utilize a patch size of 16. In our framework, the low- and high-frequency predictors operate on sub-states derived via DWT, which possess spatial dimensions of H/ 2 × W/ 2 × C.To maintain scale consistency with these approaches, we consequently employ a patch size of 8. For the frequency decomposition, we use a single-level orthonormal Haar DWT. For an input of shape H × W × C, the low-frequency component (LL) has shape H/ 2 × W/ 2 × C, while the high-frequency component is formed by concatenating the three detail sub-bands (LH, HL, HH) and has shape H/ 2 × W/ 2 × 3C.
+
+E.2 Detailed Architecture of FREPix 
+
+In this section, we provide a more detailed formulation of FREPix. Recall that at time t, the image state is decomposed by the orthonormal wavelet transform as 
+
+(lt, h t) = W(xt), xt = W−1(lt, h t), (85) where lt denotes the low-frequency sub-state and ht denotes the high-frequency sub-state. For a single-level 2D DWT applied to an input image of shape H × W × C, the low-frequency component has shape H/ 2 × W/ 2 × C,while the high-frequency component is obtained by concatenating the three detail sub-bands and has shape 
+
+H/ 2 × W/ 2 × 3C.
+
+Low-frequency DiT. Firstly, the low-frequency branch (DiT) tokenizes lt using non-overlapping patches of size P × P . These patch vectors are projected into the DiT hidden space by a linear embedding layer Es(·):
+
+ltok  
+
+> t
+
+= Unfold( lt) ∈ RB×L×3P 2
+
+, (86) 
+
+19 s0 = Es(ltok  
+
+> t
+
+) ∈ RB×L×D , (87) where L = H/ 2 
+
+> PW/ 2
+> P
+
+is the number of low-frequency patches. The condition vector c combines the timestep embedding and the class embedding: 
+
+c = SiLU( Et(t) + Ey (y)) ∈ RB×1×D , (88) where Et(·) denotes the timestep embedder and Ey (·) denotes the label embedding layer. The low-frequency tokens are then processed by K DiT blocks with 2D RoPE: 
+
+sk = DiTBlock k (sk−1, c, RoPE) , k = 1 , . . . , K. (89) After the final block, the low-frequency tokens are projected back to the patch domain: 
+
+ltok = Wl(sk ) ∈ RB×L×3P 2
+
+. (90) Finally, the clean low-frequency prediction is reconstructed by reshaping and folding these tokens back to the spatial grid: 
+
+ˆl = Fold  Reshape( ltok ) ∈ RB×3×H/ 2×W/ 2. (91) 
+
+High-frequency decoder. The high-frequency branch follows a lightweight attention-free decoder from DeCo [ 22 ]. We first patchify the high-frequency component ht and embed each patch with a linear layer Eq (·):
+
+htok  
+
+> t
+
+= Unfold( ht) ∈ RB×L×9P 2
+
+, (92) 
+
+q0 = Eq (htok  
+
+> t
+
+) ∈ R(BL )×P 2×9. (93) The decoder condition is constructed from both the final low-frequency semantic token sK and the predicted low-frequency patch token: 
+
+c′ = Reshape 
+
+
+
+sK + Ws
+
+ sg( ltok )
+
+∈ R(BL )×D . (94) The decoder itself is a stack of patch-local residual MLP blocks: 
+
+qm = qm−1 + αm(c′) ⊙ MLP m
+
+
+
+γm(c′) ⊙ RMSNorm( qm−1) + βm(c′
+
+, m = 1 , . . . , M, (95) where αm(·), βm(·), and γm(·) are AdaLN-Zero [ 3] modulation parameters produced from the condition c′,respectively. After the final block, the decoder predicts the clean high-frequency patch tokens: 
+
+htok = Wh(qM ) ∈ R(BL )×P 2×9. (96) The clean high-frequency prediction is reconstructed by reshaping and folding back to the spatial grid: 
+
+ˆh = Fold  Reshape( htok ) ∈ RB×9×H/ 2×W/ 2. (97) 
+
+Overall pipeline. The two predicted components are finally merged back into pixel space by the inverse DWT: 
+
+ˆx = W−1(ˆl, ˆh). (98) Therefore, the full generator can be written as 
+
+xt
+
+> W
+
+−−→ (lt, h t) fφ, g ϕ
+
+−−−−−→ (ˆl, ˆh) W−1
+
+−−−−→ ˆx. (99) This architecture explicitly factorizes the prediction targets: the DiT predicts clean low-frequency structure first, and the decoder then predicts clean high-frequency detail conditioned on that structure. Since FREPix adopts an x-prediction parameterization, the reconstructed clean image ˆx is subsequently converted into the induced velocity for flow-matching training, as described in Sec. 3.3. 
+
+E.3 Class-to-Image Generation 
+
+This subsection provides further implementation details for class-to-image generation. For ImageNet class-to-image experiments, we initially train the XL-sized model (FREPix-XL) at 256 ×256 resolution for 320 epochs (1.6M steps), followed by fine-tuning at 512 ×512 resolution for an additional 10 epochs (50k steps). During inference, we use 100 steps Euler solver incorporated with Classifier-Free Guidance (CFG) and a guidance interval. The batch size and learning rate follow the default settings in Table 4. We utilize a global batch size of 256 and the AdamW optimizer with a constant learning rate of 1 × 10 −4. The time sampler utilizes a logit-normal distribution over t: logit (t) ∼ N (−0.8, 0.82), which aligns with JiT [ 21 ]. We set the CFG scale to 3.0 for 256 ×256 resolution (320 epochs) and 4.5 for 512 ×512 resolution (totaling 330 epochs). We use the CFG guidance interval of [0 .15 , 1] for the default configuration. 
+
+20 E.4 Ablation Study 
+
+This subsection provides additional implementation details for the ablation studies. All ablation experiments are conducted using the L-sized model (FREPix-L). For computational efficiency, we train the models at 256 × 256 
+
+resolution for 40 epochs (200k steps). During inference, we utilize a 50-step Euler solver without CFG. The batch size and learning rate follow the default settings described previously. We use a global batch size of 256 and the AdamW optimizer with a constant learning rate of 1 × 10 −4. The time sampler employs a logit-normal distribution over t: logit (t) ∼ N (−0.8, 0.82). For power exponent ablation studies, we set the reweighting strength to ω = 0 .7 (our final configuration). For ablation studies of reweighting strength, we employ power exponents of γl = 0 .95 and γh = 1 .05 (our final settings). For ablation studies of decoupling strategies, our model maintains the same parameter settings as the main experiments ( ω = 0 .7, γl = 0 .95 , and γh = 1 .05 ). To ensure a fair comparison, all models are trained with Large-sized and sampled using the same steps. 
+
+Table 4: Configurations of experiments. 
+
+FREPix-L FREPix-XL architecture 
+
+DiT depth 22 28 hidden dim 1024 1152 heads 16 16 params 420M 674M decoder depth 3decoder hidden dim 32 patch size 8dropout 0.1 0.2 image size 256 (other settings: 512) 
+
+representation alignment [33] alignment depth 8-th layer loss weight 0.5 alignment encoder Frozen DINOv2 [47] 
+
+perceptual supervision [34] loss weight 0.5 perceptual encoder Frozen VGG[48] 
+
+training 
+
+optimizer AdamW [49], β1, β 2 = 0 .9, 0.999 
+
+batch size 256 learning rate 1e-4 lr schedule constant weight decay 0ema decay 0.9999 time sampler logit (t) ∼ N (μ, σ 2), μ = −0.8, σ = 0 .8
+
+noise scale 1.0 path smooth constant ε 0.01 
+
+sampling 
+
+ODE solver Euler ODE steps 50 25 and 100 timeshift 1.0 2.0 CFG scale 3.0 ( 256 × 256 ), 4.5 ( 512 × 512 )CFG interval [50] [0.15, 1] 
+
+21 F Pseudo-codes for Training and Sampling 
+
+In this section, we provide the detailed pseudo-codes for the training and sampling procedures of our proposed framework. 
+
+Algorithm 1 Training step 
+
+Require: fφ: low-frequency predictor; gϕ: high-frequency predictor; x: training batch; λl(t), λ h(t):time-dependent weights.  
+
+> 1:
+
+t = sample_t ()  
+
+> 2:
+
+ϵ = randn_like (x) ▷ Sample Gaussian noise  
+
+> 3:
+
+(l, h ) = W(x), (ϵl, ϵ h) = W(ϵ) ▷ DWT  
+
+> 4:
+
+lt = gl(t) l +  1 − gl(t)ϵl, ht = gh(t) h +  1 − gh(t)ϵh ▷ Heterogeneous interpolation  
+
+> 5:
+
+vlt = ˙ gl(t)( l − ϵl), vht = ˙gh(t)( h − ϵh) ▷ Target velocity  
+
+> 6:
+
+ˆl = fφ(lt, t ) ▷ Predicted clean low-freq  
+
+> 7:
+
+ˆh = gϕ(ht, ˆl, t ) ▷ Predicted clean high-freq  
+
+> 8:
+
+ˆx = W−1(ˆl, ˆh) ▷ Predicted clean image  
+
+> 9:
+
+vlθ = ˙gl(t)1−gl(t) (ˆl − lt), vhθ = ˙gh(t)1−gh(t) (ˆh − ht) ▷ Predicted velocity  
+
+> 10:
+
+LFA = λl(t)|| vlθ − vlt|| 2 + λh(t)|| vhθ − vht || 2 ▷ Compute reweighted v-loss  
+
+> 11:
+
+loss ← L FA + LREPA + LLPIPS ▷ Loss 
+
+Algorithm 2 Sampling step (Euler) 
+
+Require: xt: current samples at t; t, t next . 
+
+> 1:
+
+xpred ← net θ (xt, t ) ▷ Network prediction  
+
+> 2:
+
+vpred = ˙G(t) I − G(t)−1(ˆ x − xt) ▷ Estimate velocity, G(t) is in Eq. 3  
+
+> 3:
+
+xnext ← xpred + ( tnext − t) · vpred ▷ Euler update  
+
+> 4:
+
+return xnext 
+
+# G Additional Experiments and Results 
+
+This section provides more experimental results and qualitative results. 
+
+G.1 Additional Experiments Comparison on early training steps. We compare the optimization efficiency of different pixel-space generation models at an early training stage. As shown in Table 5, after only 80 training epochs, FREPix achieves the best FID, IS and recall among all compared methods. These results suggest that FREPix performs favorably in the limited training budget regime. 
+
+Table 5: Comparison results using 100-step Euler sampling in pixel-space diffusion models. All models are trained with 80 epochs. 
+
+Method FID ↓ IS ↑ Pre. ↑ Rec. ↑
+
+DeCo-XL/16 2.57 - - -PixelDiT 2.36 282.3 0.80 0.57 FREPix-XL 2.29 294.9 0.79 0.60 
+
+Computational comparison. To quantify the computational resources of latent-space and pixel-space generation models, we report the number of parameters, training epochs, GFLOPs, FID and Inception Score (IS) for each model. FLOPs are measured for a single forward pass at resolution (256 ×256), excluding sampling steps and CFG duplication. For prior works, we use the results reported in [ 12 ] and convert them to a unified convention where one multiply-add is counted as two FLOPs. Table 6 compares latent-space and pixel-space generation models in terms of parameters, GFLOPs, FID and IS. Latent models achieve strong FID scores with approximately 240–290 GFLOPs, benefiting from generation 
+
+22 in a compact latent space. In contrast, prior pixel-space models typically require several hundred to several thousand GFLOPs to approach a comparable quality regime, reflecting the substantially higher cost of modeling full-resolution pixels directly. Notably, FREPix-XL achieves an FID of 1.91 and an IS of 295.6 with only 
+
+230 GFLOPs . This not only obtains competitive image quality results in existing pixel-space models, but also closes much of the gap to the strongest latent-space models, while using slightly less computation than common latent baselines and substantially less computation than most prior pixel-space methods. These results suggest that explicit frequency-heterogeneous modeling significantly improves the computation–quality trade-off of pixel-space generation, narrowing the efficiency gap between pixel-space and latent-space generative models. 
+
+Table 6: Computation comparison on latent-space and pixel-space generation models at resolution 256 ×256. Text in gray: latent diffusion models that require VAE. 
+
+Method Params Epochs GFLOPs FID ↓ IS ↑
+
+DiT-XL/2 [3] 675M + 86M 1400 238 2.27 278.2 SiT-XL/2 [4] 675M + 86M 1400 238 2.06 277.5 REPA-XL/2 [33] 675M + 86M 800 238 1.42 305.7 ADM [1] 554M 400 2240 4.59 186.7 RIN [41] 410M 480 668 3.42 182.0 SiD, UViT/2 [51] 2B - 1110 2.44 256.3 VDM++, UViT/2 [42] 2B - 1110 2.12 267.7 JiT-G/16 [21] 2B 600 766 1.82 292.6 PixelFlow-XL/4 [14] 677M 320 5818 1.98 282.1 DeCo-XL/16 [22] 682M 320 237 1.90 303.0 PixelDiT-XL [12] 797M 320 311 1.61 292.7 PixNerd-XL/16 [13] 700M 320 268 2.15 297.0 FREPix-XL 674M 320 230 1.91 295.6 
+
+CFG guidance scale and interval. We report the classifier-free guidance (CFG) settings used for FREPix-XL on ImageNet 256 ×256. Table 7 lists the CFG scale, guidance interval, and the resulting gFID, Inception Score (IS), precision, and recall for models trained for 80 and 320 epochs. For the 80 epochs, the best FID of 2.29 is achieved with a relatively higher CFG value of 3.0 and an interval of [0 .15 , 1] . For the 320 epochs, the best FID of 1.91 is achieved with a relatively higher CFG scale of 3.0 and an interval of [0 .15 , 1] . Compared with other settings, this configuration slightly reduces IS and precision while improving recall. 
+
+Table 7: CFG settings and results for FREPix-XL at resolution 256 ×256. For sampling, we use Euler solver with 100 steps. 
+
+Training Steps Epochs CFG value CFG interval FID ↓ IS ↑ Pre. ↑ Rec. ↑
+
+400k 80 2.75 [0 .1, 1.0] 2.61 294.3 0.80 0.59 400k 80 2.75 [0 .15 , 1.0] 2.35 283.8 0.79 0.60 400k 80 3.00 [0 .1, 1.0] 2.62 313.4 0.80 0.59 400k 80 3.00 [0 .15 , 1.0] 2.29 294.9 0.79 0.60 1600k 320 2.75 [0 .1, 1.0] 2.09 310.0 0.80 0.61 1600k 320 2.75 [0 .15 , 1.0] 1.94 300.4 0.79 0.61 1600k 320 3.00 [0 .1, 1.0] 2.07 317.6 0.81 0.61 1600k 320 3.00 [0 .15 , 1.0] 1.91 295.6 0.79 0.62 
+
+23 G.2 Additional Qualitative Results 
+
+We provide additional qualitative results to further assess the visual fidelity and frequency-decoupled generation behavior of FREPix. Fig. 6 to Fig. 13 shows uncurated ImageNet 256 × 256 samples generated by FREPix-XL (settings: train epochs: 320, cfg value: 3.0, cfg guidance interval: [0 .1, 1.0] ). In addition to the final generated images, we visualize the corresponding low- and high-frequency components obtained by the same wavelet decomposition used in our method. These results demonstrate that FREPix produces coherent global structures in the low-frequency branch while preserving localized details and textures in the high-frequency branch. 
+
+(a) Uncurated class-conditional samples generated by FREPix-XL. 
+
+(b) Frequency-decoupled visualization of the generated samples. From top to bottom: generated image, low-frequency component (LF), and high-frequency component (HF). For clarity, HF is displayed using coefficient magnitudes with logarithmic compression, and LF/HF are normalized separately. 
+
+Figure 6: Uncurated samples generated by FREPix-XL conditioned on class 1: goldfish .24 (a) Uncurated class-conditional samples generated by FREPix-XL. 
+
+(b) Frequency-decoupled visualization of the generated samples. From top to bottom: generated image, low-frequency component (LF), and high-frequency component (HF). For clarity, HF is displayed using coefficient magnitudes with logarithmic compression, and LF/HF are normalized separately. 
+
+Figure 7: Uncurated samples generated by FREPix-XL conditioned on class 19: chickadee .25 (a) Uncurated class-conditional samples generated by FREPix-XL. 
+
+(b) Frequency-decoupled visualization of the generated samples. From top to bottom: generated image, low-frequency component (LF), and high-frequency component (HF). For clarity, HF is displayed using coefficient magnitudes with logarithmic compression, and LF/HF are normalized separately. 
+
+Figure 8: Uncurated samples generated by FREPix-XL conditioned on class 22: bald eagle .26 (a) Uncurated class-conditional samples generated by FREPix-XL. 
+
+(b) Frequency-decoupled visualization of the generated samples. From top to bottom: generated image, low-frequency component (LF), and high-frequency component (HF). For clarity, HF is displayed using coefficient magnitudes with logarithmic compression, and LF/HF are normalized separately. 
+
+Figure 9: Uncurated samples generated by FREPix-XL conditioned on class 88: macaw .27 (a) Uncurated class-conditional samples generated by FREPix-XL. 
+
+(b) Frequency-decoupled visualization of the generated samples. From top to bottom: generated image, low-frequency component (LF), and high-frequency component (HF). For clarity, HF is displayed using coefficient magnitudes with logarithmic compression, and LF/HF are normalized separately. 
+
+Figure 10: Uncurated samples generated by FREPix-XL conditioned on class 107: jellyfish .28 (a) Uncurated class-conditional samples generated by FREPix-XL. 
+
+(b) Frequency-decoupled visualization of the generated samples. From top to bottom: generated image, low-frequency component (LF), and high-frequency component (HF). For clarity, HF is displayed using coefficient magnitudes with logarithmic compression, and LF/HF are normalized separately. 
+
+Figure 11: Uncurated samples generated by FREPix-XL conditioned on class 108: sea anemone .29 (a) Uncurated class-conditional samples generated by FREPix-XL. 
+
+(b) Frequency-decoupled visualization of the generated samples. From top to bottom: generated image, low-frequency component (LF), and high-frequency component (HF). For clarity, HF is displayed using coefficient magnitudes with logarithmic compression, and LF/HF are normalized separately. 
+
+Figure 12: Uncurated samples generated by FREPix-XL conditioned on class 978: seashore .30 (a) Uncurated class-conditional samples generated by FREPix-XL. 
+
+(b) Frequency-decoupled visualization of the generated samples. From top to bottom: generated image, low-frequency component (LF), and high-frequency component (HF). For clarity, HF is displayed using coefficient magnitudes with logarithmic compression, and LF/HF are normalized separately. 
+
+Figure 13: Uncurated samples generated by FREPix-XL conditioned on class 979: valley .31

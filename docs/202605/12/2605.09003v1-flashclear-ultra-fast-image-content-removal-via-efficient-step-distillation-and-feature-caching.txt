@@ -1,0 +1,452 @@
+Title: FlashClear: Ultra-Fast Image Content Removal via Efficient Step Distillation and Feature Caching
+
+URL Source: https://arxiv.org/pdf/2605.09003v1
+
+Published Time: Tue, 12 May 2026 01:34:34 GMT
+
+Number of Pages: 23
+
+Markdown Content:
+# FlashClear: Ultra-Fast Image Content Removal via Efficient Step Distillation and Feature Caching 
+
+Yixin Tang 1∗
+
+, Jiawei Guo 1∗
+
+, Junxian Li 1, Zhiteng Li 1, Jixin Zhao 2, Bingya Zhang 3,Chenbo Wang 3, Yulun Zhang 1†
+
+, Shangchen Zhou 2 †
+
+> 1
+
+Shanghai Jiao Tong University, 2Nanyang Technological University, 3Honor Device Co., Ltd 
+
+## Abstract 
+
+Recently, diffusion-based object removal models have achieved impressive re-sults in eliminating objects and their associated visual effects. However, they indiscriminately denoise all tokens across all timesteps, ignoring that removal usually involves small foreground regions. This strategy introduces substantial computational overhead and prolonged inference times. To overcome this com-putational burden, we propose a latent discriminator to implement Region-aware 
+
+Adversarial Distillation ( RAD ), yielding a highly efficient few-step model named 
+
+FlashClear . Furthermore, tailored to few-step diffusion models, we propose FPAC 
+
+(Foreground-Prioritized Asymmetric Attention and Caching), a training-free accel-eration strategy. Extensive experiments demonstrate that our framework provides massive acceleration while maintaining or exceeding the performance of our base model, ObjectClear. Notably, on the OBER benchmark, our FlashClear achieves up to 8.26 × and 122 × speedup over ObjectClear and OmniPaint, respectively, while maintaining high visual quality and fidelity. 
+
+## 1 Introduction 
+
+Object removal is a practical yet challenging form of image inpainting, aiming to completely erase a user-specified object while producing a visually plausible background. Recent diffusion-based image editing and inpainting models [ 32 , 36 , 38 , 7, 21 , 56 , 51 ] have greatly improved the realism and generalization ability of object removal systems. Unlike Early mask-aligned methods [ 8, 65 , 46 , 18 ], which mainly conduct simple object erasure, thus leaving inconsistent object-induced visual effects, more recent approaches [ 48 , 49 , 64 , 62 ] infer and remove object-induced visual effects beyond the object mask. Despite their impressive visual quality, these methods inherit the traditional multi-step diffusion paradigm [ 44 , 10 , 38 ], which introduces massive computational overhead and latency, limiting their deployment in real-time and resource-constrained applications. Efficiency is particularly critical for object removal. Unlike one-shot generation, it is often embedded in interactive editing loops requiring instant feedback. Consequently, diffusion sampling latency becomes a major bottleneck for instant editing, mobile deployment, and large-scale services. Many efforts have accelerated diffusion models. One popular direction is step distillation, which compresses models into few-step generators [ 42 , 20 , 45 , 55 ]. However, most distillation methods target text-to-image generation and remain under-explored for image inpainting tasks like object removal due to their strong spatial constraints and effect-aware reasoning. Another direction is training-free acceleration, particularly feature caching [ 30 , 43 , 5 ], which exploits temporal redundancy by reusing similar features across adjacent denoising steps. However, applying feature caching to step-distilled models reveals a natural incompatibility [ 66 ]: once the denoising trajectory is compressed, temporal redundancy is significantly reduced, making feature reuse more inaccurate and the overhead of cache selection more prominent. Consequently, directly applying existing caching to few-step models yields limited speedup and noticeable quality degradation.          
+
+> ∗Equal contribution.
+> †Corresponding authors: Yulun Zhang, yulun100@gmail.com; Shangcheng Zhou, shangchenzhou@gmail.com. Preprint.
+> arXiv:2605.09003v1 [cs.CV] 9 May 2026 Speedup* 8.26 ×
+> 1.00 ×
+> *Measure speed by FLOPs .
+> 0.038
+> LPIPS.
+> ObjectClear
+> PSNR.
+> 0.036
+> 32.49
+> FlashClear
+> (a)
+> 0.06 ×
+> 32.06
+> Input
+> Reflection Causal Shadow
+> OmniPaint
+> (b) (c) (d)
+> (a) (b) (c) (d)
+> (a) (b) (c) (d)
+> (a) OmniPaint
+> (b) ObjectClear
+> (c) Toca
+> (d) FlashClear
+
+Figure 1: Qualitative and efficiency comparison of different object removal methods OmniPaint [ 57 ]and ObjectClear [ 62 ], and acceleration method ToCa [ 67 ] applied to ObjectClear. FlashClear effectively removes target objects and causal effects, achieving superior quality and the fastest speed. Despite the incompatibility challenge mentioned above, in this work, we show that object removal provides a unique opportunity to reconcile this conflict. Although temporal redundancy becomes weak in the few-step regime, object removal contains strong spatial redundancy. The editing process is intrinsically localized: most background regions should remain unchanged, while only the object and its associated visual effects require substantial recomputation. This property suggests that feature reuse should not rely solely on adjacent denoising steps, but should instead be guided by the spatial structure of the removal task. The key challenge is that the user-provided mask usually covers only the target object and does not explicitly indicate the full region affected by the object, such as shadows and reflections. Recent works [ 53 , 37 , 62 ] also noticed this inconsistency between the user-provided mask and the real region that needs to be edited. To address it, ObjectClear [ 62 ] indicates that diffusion models can implicitly capture object-induced effects through internal attention responses with auxiliary guidance. These attention maps offer a natural spatial prior for distinguishing tokens that require recomputation from invariant background tokens that can be safely cached. Motivated by this observation, we propose FlashClear, an efficient object removal framework that jointly exploits few-step distillation and attention-guided feature caching. Firstly , instead of treating step reduction and feature reuse as two independent or even contradicting acceleration techniques, FlashClear first constructs a low-cost, few-step removal model and then adapts feature caching specifically to this compressed sampling regime. Secondly and concretely, we introduce region-aware adversarial distillation (RAD), which uses the U-Net of the base removal model as a latent discriminator to distill the multi-step removal process into a few-step generator. RAD substantially reduces the sampling cost while preserving the model’s ability to perceive object-induced effects through internal attention maps. Thirdly , based on the distilled model, we further propose FPAC, an attention-guided feature caching mechanism that selectively reuses features of invariant background tokens and recomputes features for foreground and effect-related regions. By shifting the basis of caching from temporal redundancy to task-specific spatial redundancy, FPAC remains effective even when only a few denoising steps are available. Our contributions are summarized as follows: • We propose FlashClear, an efficient object removal framework that integrates few-step distillation with feature caching, addressing the efficiency bottleneck of diffusion-based object removal. • We propose RAD, a region-aware adversarial distillation strategy tailored for object removal to reduce inference steps while maintaining effect-aware capabilities. • We design FPAC, an attention-guided caching mechanism that exploits background spatial redun-dancy, enabling substantially lower computational cost without sacrificing removal quality. 22 Related Work 
+
+Object Removal and Image Editing. Object removal is a challenging inpainting task that requires removing not only the target object but also its associated visual effects ( e.g. , shadows and reflections) while synthesizing a coherent background. Diffusion-based methods have recently achieved strong results in this task. Early approaches rely on synthetic training data [ 47 , 28 , 13 , 25 ], which limits their ability to model real-world object-scene interactions. Alongside these, text-guided diffusion models have revolutionized general image editing and inpainting [ 34 , 40 , 1, 4, 15 ]. Furthermore, to improve spatial controllability and regional consistency, various structural guidance and plug-and-play modules have been proposed [ 59 , 14 , 6 , 31 ]. Recent methods specifically target physical effect removal by constructing higher-quality data from real videos, simulations, or fixed-camera captures [ 62 , 64 , 48 ]. However, almost all the models mentioned use multi-step diffusion inference, which is computationally expensive, restricting practical deployment. 
+
+Step Distillation and Fast Sampling. Accelerating diffusion models traditionally involves com-pressing the sampling trajectory into fewer denoising steps. Orthogonal to distillation, advanced training-free ODE solvers [27, 63, 23] significantly reduce sampling steps by analytically modeling the numerical trajectory. Within the realm of distillation, representative methods include progres-sive distillation [ 41 ], consistency-based models [ 45 , 29 , 26 ], distribution matching distillation [ 55 ], and rectified-flow distillation [ 24 ]. In the extremely low-step regime, adversarial and score-based distillation methods such as ADD [ 42 ], SDXL-Lightning [ 20 ], DMD2 [ 54 ], UFOGen [ 52 ], and SwiftBrush [ 33 ] have demonstrated strong visual quality in one or few steps. Inspired by this line of work, we propose Region-aware Adversarial Distillation (RAD), which adapts adversarial distillation to object removal by emphasizing both global realism and local removal fidelity. 
+
+Architectural Efficiency and Feature Caching. Feature caching provides a complementary training-free acceleration strategy by reusing intermediate computations during diffusion inference. With the recent paradigm shift towards transformer-based diffusion models ( e.g. , DiT [ 35 ] and U-ViT [ 2]), token-level redundancy has been heavily exploited. Existing methods either directly cache fea-tures [ 30 ], dynamically select cache steps or tokens [ 67 , 58 , 43 ], or extrapolate cached representa-tions [ 9 , 50 , 5]. Besides caching, techniques like token merging (ToMe) [ 3 ], attention-map reuse (T-Gate) [61], and architectural compression [19, 16] have been developed to fundamentally reduce computational overhead. Despite their effectiveness, these methods are mainly designed for general multi-step generation and often rely on sufficient denoising steps or additional priors [ 9, 22 ]. This makes them less suitable for our 4-step object removal setting. We therefore introduce FPAC, a foreground-prioritized caching strategy tailored precisely to low-step object removal dynamics. 
+
+## 3 Methodology 
+
+3.1 Preliminary 
+
+Image inpainting tasks aim to edit specified image regions conditioned on inputs such as reference images, masks, and text prompts. As a subcase of the image inpainting task, object removal can be formulated as a conditional generation problem operated within a latent diffusion framework [38]. Following SDXL-inpainting [ 20 ], the input reference image Iref ∈ RH×W ×3 is first encoded into a latent z0 ∈ R4×h×w by a frozen VAE [ 17 ] encoder, where h and w denote the downsampled spatial dimensions. The forward diffusion process continually adds Gaussian noise ϵ ∼ N (0 , I) to the initial latent z0 over T steps. The noisy latent zt with t ∈ [1 , T ] can be obtained as: 
+
+a(zt|z0) = N (zt; p ¯αtz0, (1 − ¯αtI), (1) where ¯αt is the pre-defined noise schedule parameter. Let M ∈ { 0, 1}1×h×w represent the binary mask of input resized to the latent space, where 1
+
+indicates the foreground region to be removed, and 0 indicates the unmasked background. The joint input is formulated by concatenating the noisy latent zt, the binary mask M , and the reference latent 
+
+zref = z0 along the channel dimension as follows: 
+
+zin = Concat (zt, M, z ref ) ∈ R9×h×w. (2) During inference, DDIM [ 44 ] scheduler is used to get the timesteps T = {tN , t N −1, ..., t 1}. Starting from a Gaussian noise zτ4 ∼ N (0 , I), the model iteratively computes the next latent zτi−1 using the deterministic DDIM sampling mechanism: 34)  Output  & Loss 
+
+> Text  prompt
+> Remove  the
+> instance  of
+> noise
+> input
+> input
+> Object
+> Text
+> encoder  Img
+> encoder
+> Post  Fusion
+> Module
+> text-image
+> embeddings
+> Concat
+> CA  SA  CA
+> Generator  U-Net  (4steps)
+> Attention  Supervision
+> Cross  attn.  maps  Foreground  mask
+> Concat  CA  SA
+> conv
+> conv
+> CA  SA
+> Adaptive  Target-aware  Attention
+> Data  Flow  Attention
+> score
+> Decoder
+> latent
+> obj+eff
+> ref
+> latent
+> mask
+> latent
+> ref
+> latent
+> noise
+> latent
+> pred
+> latent
+> gt
+> latent
+> Encoder/
+> Decoder
+> Cross
+> Attention  layer
+> Self
+> Attention  layer  latent  loss
+> T times
+> 1)  Input  Processing  / Condition  2)  Generator  U-Net  / Few-step  densoiing  3)  Latent  Discriminator
+> MLP
+> intermediate
+> attn.  map  at
+> timestep  t
+> mask  loss
+> at  sample  t
+> Sample  random  t
+> SA
+> noise  prediction  at  t
+> pred
+> noise  at  t
+> gt
+> noise  at  t
+> pred
+> image
+> gt
+> image
+> pred
+> latent
+
+Figure 2: Illustration of our Region-aware Adversarial Distillation. To accelerate object removal without introducing inconsistent visual effects, we propose an asymmetric masking strategy. The generator is conditioned strictly on the target object mask (obj mask) to predict the denoised latent. In contrast, the latent discriminator evaluates the generation quality using an expanded mask (obj+eff mask) that includes both the object and its causal effects. Additionally, we utilize a post-fusion module to transform the object image token into the text embedding and apply attention-guided object localization loss to preserve spatial priors. 
+
+zτi−1 = p¯ατi−1
+
+zτi − √1 − ¯ατi ˆϵ(i)
+
+θ
+
+√¯ατi
+
+!
+
++ p1 − ¯ατi−1 ˆϵ(i)
+
+θ , (3) where ˆϵ(i)
+
+θ = Gθ (Concat (zτi , M, z ref ), τ i, c ) represents the predicted noise at step τi and Gθ is the denoising U-Net. In our specific object removal context, we adopt the post-fused Clip text-image embeddings cf usion following the strategy proposed in ObjectClear as the condition c.
+
+3.2 Region-aware Adversarial Distillation (RAD) 
+
+As an effective way to mitigate the computational cost during inference, few-step distillation enables our base model to remove the masked object with a much lower inference cost. Our goal is to minimize the inference steps as much as possible, while avoiding unnatural artifacts caused by step reduction. Furthermore, since we will subsequently conduct attention-guided feature caching for the distilled model (as detailed in Sec. 3.3), preserving the model’s ability to perceive the object with its associated physical effects, such as shadows and reflections, is paramount. Although progressive distillation [ 41 ] and distribution matching methods [ 54 , 55 ] demonstrate great potential in diffusion-based image generation acceleration, accelerating highly constrained tasks like object removal remains under-explored. RORem [ 18 ] adopts the latent consistency model (LCM [ 29 ]) to distill a four-step model for object removal. However, consistency-based trajectories often introduce visual blurring and mode-averaging into the inpainting regions. What’s more, existing distillation methods merely account for the specific characteristics of object removal tasks, namely, the need to remove both the object and its associated physical effects, such as reflections and shadows. To circumvent this, we employ adversarial distillation [ 42 ] with tailored settings to obtain a high-fidelity four-step model. Following the paradigm in sdxl-lightning [ 54 ], we utilize the pre-trained U-Net encoder attached with trainable convolutional heads as our latent discriminator, which is initialized from our base ObjectClear [62] model. 
+
+GAN Architecture. As shown in Figure 2, since our U-Net backbone is built upon the sdxl-inpainting model [ 36 ], our distillation can be efficiently conducted in the latent space with much lower cost. Specifically, the 9-channel input configuration of the inpainting U-Net allows us to design different 4Cross-Attention Layer   
+
+> 1) Few-step Denoising
+> Other Layers
+> ResNet-UpBlock
+> Q (queries)
+> K (keys)
+> Asymmetric Attention Layer
+> Cached Tokens
+> Cross-Attention Layer
+> Other Layers
+> ResNet-UpBlock
+> Q (queries)
+> K (keys)
+> Asymmetric Attention Layer
+> Cached Tokens
+> Time Step t Time Step 1
+> ...
+> Decoder
+> Time Step 0
+> 2) Fusion and Output
+> Background token
+> Foreground token
+> Original token
+> Cached token
+> Binarize
+> Guidance
+> Data Flow
+> Cross-Attention map A tCross-Attention map A 1
+> Visualization
+> Fusion Block
+> ResNet-DownBlock ResNet-DownBlock
+
+Figure 3: Overview of FPAC. Foreground and background tokens are dynamically separated via cross-attention maps. In self-attention layers, cached tokens contribute only Key and Value (K, V) pairs without generating Queries (Q) or undergoing updates, while bypassing computation entirely in other modules ( e.g. , MLPs). The progressive refinement of cross-attention maps throughout the denoising process enables fine-grained token caching. Finally, the accurate attention map at the last timestep guides the seamless fusion of generated foreground tokens with original background tokens. strategies for the generator and discriminator, so as to achieve tailored region-aware adversarial supervision. The input tuple can be formulated as ⟨zt, zref , M⟩, which formals our model’s input as 
+
+zin = Concat (zt, M, zref ) ∈ R9×H×W , (4) where zt denotes the noise map, zref represents the reference image latent, and M is the correspond-ing mask, which is the object-only mask Mobj for generator and object effect mask Mobj+effect for discriminator, respectively. 
+
+Region-aware Adversarial Distillation. During distillation, the generator is conditioned on the same tight object mask Mobj as during inference. On the other hand, we feed the discriminator with an expanded mask Mobj +ef f , which encompasses both the primary object and its associated physical effects. This design makes Mobj +ef f act as a spatial prior to explicitly guide the discriminator to penalize any unnatural remnants ( e.g. , leftover shadows or reflections) within the effect regions. In summary, the additional five channels of the SDXL-inpainting U-Net enable both generator and discriminator to comprehensively understand the physical scene rather than merely blending the tight bounding box during adversarial distillation, ensuring seamless and artifact-free object removal. The final discriminator loss is defined as: 
+
+L(D) 
+
+> adv
+
+= Ezreal ,t [log D(z, zref , Mobj+eff , t )] + Ezpred ,t [log(1 − D (zpred , zref , Mobj+eff , t ))] , (5) where D denotes the discriminator, zpred = G(zt, c, M obj , t ) is the generated image latent, and G,
+
+z, zt, zpred , zref represent fine-tuned generator, ground truth latent, noised latent, reference latent, respectively. In terms of generator loss, we further introduce the commonly used perceptual loss LPIPS [ 60 ] for semantic supervision and the standard diffusion l2 loss for better convergence. Generator loss can be written as follows: 
+
+L(G) 
+
+> adv
+
+= λ1 · L lpips + λ2 · || zpred − z|| 2 + λ3 · Ezt,c,t [−D (zpred , z ref , M obj , t )] , (6) where Mobj denotes tight object-only mask provided for inference. Additionally, to facilitate generator to focus on the region associated with object and the corresponding physical effect, we reintroduce the mask loss Lmask proposed in ObjectClear [ 62 ], where we extract the cross-attention maps A
+
+corresponding to Clip encoder’s visual embedding to get supervised with the foreground object-effect masks Mf g in training dataset. The objective can be formalized as: 
+
+Lmask = mean (A[1 − Mf g ]) − mean (A[Mf g ]) . (7) Through the above implementations, we succeed in guiding our distilled model to completely remove the object and effect to edit within a four-step inference process, while preserving the comparable ability to perceive and obtain region-aware attention maps for our further foreground-prioritized asymmetric attention & caching. 5Table 1: Quantitative comparison on the OBER-Test (512 ×512) and RORD-Val (960 ×540) datasets. The best and second-best performances are marked in red and orange , respectively. Method OBER-Test (512 ×512) RORD-Val (960 ×540) FLOPs (T) ↓ LPIPS ↓ LPIPS-Local ↓ PSNR ↑ PSNR-mask ↑ FLOPs (T) ↓ LPIPS ↓ LPIPS-Local ↓ PSNR ↑ PSNR-mask ↑                                                                                                    
+
+> SDXL-INP [36] 256.9 0.1310 0.4409 22.43 12.26 256.9 0.1808 0.3995 20.23 12.26 PowerPaint [65] 122.4 0.1583 0.3489 23.02 15.35 122.4 0.1903 0.2983 21.76 16.78 GeoRemover [64] 3,897.4 0.1454 0.1859 24.67 21.65 3,897.4 0.1200 0.2094 24.49 19.41 DesignEdit [12] 1,727.2 0.1302 0.2548 26.39 20.60 1,727.2 0.1937 0.3101 23.27 19.68 CLIPAway [8] 80.3 0.1328 0.3614 22.22 14.43 80.3 0.1620 0.3015 21.10 15.63 Omnieraser [48] 2,097.3 0.2102 0.2630 24.35 21.29 2,097.3 0.2289 0.3030 22.11 18.63 Attentive Eraser [46] 549.2 0.0809 0.2436 27.17 20.85 549.2 0.1399 0.3014 24.10 17.84 RORem [18] 331.3 0.0979 0.2391 26.21 19.14 331.3 0.0979 0.2390 26.21 19.14 Omnipaint [57] 1,057.5 0.0521 0.1299 29.05 23.56 2,015.5 0.1178 0.2380 22.74 17.62 FlashClear (ours) 8.6 0.0351 0.1396 33.05 24.12 15.6 0.0698 0.1996 27.66 20.02
+
+3.3 Foreground-Prioritized Asymmetric Attention and Caching (FPAC) 
+
+While RAD successfully compresses the denoising trajectory into minimal steps, substantial spatial redundancy still exists during the generation process. Most background regions remain invariant, whereas the target object and its complex physical effects require intensive recomputation. However, exploiting this spatial redundancy is non-trivial, as user-provided masks cannot explicitly cover these object-induced effects. Furthermore, existing text-to-image caching methods are poorly suited for this scenario. They often incur substantial computational overhead ( e.g. , SiTo [ 58 ]), lack token-level sparsity in self-attention layers ( e.g. , ToCa [ 67 ]), or rely on temporal extrapolations that fail in extreme few-step regimes ( e.g. , HiCache [9]). To overcome these limitations and leverage the spatial prior captured by our distilled model, we pro-pose Foreground-Prioritized Asymmetric Attention and Caching (FPAC), with two core components: 
+
+Input M1 M2 M3 M4
+
+Figure 4: The mask is colored in green. The binary spatial map Mi is refined gradually. 
+
+Foreground-Prioritized Caching. As illus-trated in Figure 3, we leverage cross-attention maps to establish a dynamic threshold, yield-ing a binary spatial mask M ∈ { 0, 1}N , where 
+
+Mi = 0 identifies background tokens and 
+
+Mi = 1 denotes the foreground tokens. As shown in Figure 4, Mi is refined gradually in the process. By utilizing M, we elegantly cache tokens that belong to the background regions. By incorporating an attention-guided fusion mechanism at the final stage—formulated as Ff used = α ⊙ Fpred + (1 − α) ⊙ Forig , where α represents the attention-derived fusion weight and ⊙ denotes element-wise multiplication—we theoretically achieve lossless caching of background tokens. 
+
+Asymmetric Attention. To mitigate the computational bottleneck of the attention mechanism and prevent error accumulation caused by local zero-padding, we introduce Asymmetric Attention. Let 
+
+Q, K, V ∈ RN ×d denote the standard Query, Key, and Value matrices. As illustrated in Figure 3, we define a pruned query matrix Q′ such that for the i-th token, q′ 
+
+> i
+
+= qi if Mi = 1 (foreground), and q′ 
+
+> i
+
+= 0 otherwise. Equivalently, this can be expressed as Q′ = diag (M)Q. The asymmetric attention is then computed as O = Softmax 
+
+
+
+(Q′KT )/√d
+
+
+
+V.Through this formulation, the foreground tokens actively query the continuously updated K and 
+
+V from the entire image space. For the background tokens ( Mi = 0 ), the redundant attention computation is bypassed, and their features are directly populated from the layer cache Hcache .Specifically, the final token representations Hout are obtained via: 
+
+Hout i =
+
+Oi, if Mi = 1 
+
+Hcache i , if Mi = 0 . (8) This structural asymmetry ensures that the foreground regions to be synthesized can still attend to the most up-to-date background context, while the background itself naturally bypasses redundant computational updates and remains strictly unchanged before the final fusion step. Built on FlashClear, our method (denoted as FlashClear-C) sets a new SOTA for object removal. It achieves training-free, lossless complexity reduction, effectively complementing few-step distillation. 6Input w/ Mask Atten.Eraser [46] RORem [18] OmniEraser [48] GeoRemover[64] OmniPaint [57] FlashClear (ours) 
+
+Figure 5: Qualitative comparison of object removal methods. Our method shows stronger object removal ability and can generate more visually reasonable results compared to other methods. 
+
+## 4 Experiments 
+
+4.1 Experiment Settings Implementation Details. Our proposed FlashClear is built upon SDXL [ 36 ] architecture. The model is fine-tuned using Low-Rank Adaptation (LoRA [ 11 ]) with rank =256 and α=256 . We train the network for 10,000 steps using the AdamW optimizer ( β1 = 0 .9, β2 = 0 .999 ) with a learning rate of 10 −5 for both the generator and discriminator. Training is conducted on 2 NVIDIA A800 GPUs with a total batch size of 16 in bfloat16 mixed precision. Inference is conducted on a single NVIDIA A6000 GPU. The model is configured with a fixed four-timestep scheduler, and CFG is disabled. 
+
+Evaluation Data. We evaluate on two benchmarks: the OBER-Test [ 62 ] dataset (163 samples) and the RORD-Val [39 ] dataset (343 samples selected in [ 62 ]). OBER-Test evaluates the general object removal capability at 512 ×512 resolution, whereas RORD-Val contains higher-resolution images (960 ×540) with complex scenes, providing a challenging testbed for practical applications. 
+
+Evaluation Metrics. For computational efficiency, measuring raw latency can be easily confounded by hardware disparities, system states, and varying low-level kernel implementations ( e.g. , FlashAt-tention or xformers). To ensure a fair and objective comparison, we adopt the theoretical denoising FLOPs as the primary criterion for acceleration in our main text. For visual quality assessment, we employ the widely used perceptual metric LPIPS [ 60 ] and the pixel-level similarity metric PSNR. Furthermore, object removal heavily relies on the coherence between the manipulated area and its surroundings. To rigorously investigate the local restoration quality and foreground-background con-sistency, we introduce PSNR-mask and LPIPS-Local. These localized metrics specifically evaluate the fidelity of the masked regions and assess the naturalness of the transition boundaries. 
+
+4.2 Removal Performance 
+
+We compare FlashClear with recent methods across three tasks: image inpainting, object removal, and image editing. The selected baselines include inpainting models (PowerPaint [ 65 ], SDXL-INP [ 36 ]), object removal methods (GeoRemover [64], Omnieraser [48], Attentive Eraser [46], CLIPAway [8], and RORem [18]), and image editing frameworks (DesignEdit [12], Omnipaint [57]). 7Image w/ mask 20% step ToCa [67] SiTo [58] HiCache [9] QuantCache [50] FlashClear-C FlashClear 
+
+Figure 6: Qualitative comparison on acceleration methods based on ObjectClear [ 62 ]. We show the image with green mask, and compare 20% step sampling, ToCa [ 67 ], SiTo [ 58 ], HiCache [ 9], QuantCache [50], FlashClear-C (ours), and FlashClear (ours). Table 2: Ablation study and quantitative comparison of different accelerating strategies on OBER-Test (512 ×512). The best and second performances are marked in red and orange .                                                             
+
+> Method FLOPs (T) ↓Accel ↑LPIPS ↓LPIPS-L. ↓PSNR ↑PSNR-mask ↑
+> ObjectClear [62] 63.6 1.00 ×0.03803 0.1540 32.06 23.34 20% steps 12.7 5.00 ×0.05007 0.2186 32.48 23.24 ToCa [67] 35.3 1.79 ×0.04801 0.1919 32.18 23.53 SiTo [58] 56.2 1.13 ×0.05024 0.2228 30.71 21.74 HiCache [9] 39.9 1.59 ×0.03813 0.1574 32.36 23.43 QuantCache [50] 25.4 2.49 ×0.05205 0.2006 28.10 21.51 FlashClear-C (ours) 7.7 8.26 ×0.03623 0.1438 32.49 23.51 FlashClear (ours) 8.6 7.35 ×0.03506 0.1396 33.05 24.12
+
+(a) Acceleration comparison.                        
+
+> Loss Components Loss Setting III III IV (ours) Diffusion ✓✓✓✓
+> LPIPS ✓✓✓
+> GAN ✓
+> RAD ✓
+> LPIPS ↓0.0575 0.0416 0.0360 0.0351
+> LPIPS-L. ↓0.2649 0.1762 0.1423 0.1396
+
+(b) Ablation study on distillation settings. 
+
+Quantitative Evaluation. As reported in Table 1, our evaluations span datasets with varying image resolutions. The results demonstrate that FlashClear consistently surpasses previous SOTA methods across almost all visual metrics. Crucially, it achieves this superior restoration quality with a drastically reduced computational burden. As evidenced by the significantly lower FLOPs, FlashClear operates at a fraction of the computational cost of existing models, demonstrating that our method can deliver higher-quality object removal with vastly improved efficiency. 
+
+Qualitative Evaluation. Figure 5 shows qualitative comparisons on challenging object removal cases. For reflection-dominated scenes, such as the bridge, pavilion, and duck examples, existing methods often leave object-related traces or introduce inconsistent structures, whereas our method removes both the target object and its reflection while preserving coherent water textures. For scenes involving shadows or local appearance changes, such as the basketball and cow examples, our method produces fewer residual artifacts and more natural background transitions. The cluttered last-row example further shows that our method can remove the masked child while maintaining nearby objects and wall textures. Overall, these results demonstrate that our method removes not only objects but also associated visual effects, achieving realistic restoration within only four steps. 
+
+4.3 Acceleration Performance 
+
+Building upon ObjectClear [ 62 ], we compare our proposed distillation framework (RAD) and training-free acceleration method denoted as FlashClear-C (FPAC) against naive step reduction and state-of-the-art open-source caching and token pruning techniques, including ToCa [ 67 ], HiCache [ 9], QuantCache [ 50 ], and SiTo [ 58 ]. As shown in Figure 6, our approach significantly outperforms existing acceleration methods. Notably, it achieves performance comparable to the uncompressed original model while requiring substantially less computational overhead according to Table 2a. 8Input with mask GAN (Clip) RAD 
+
+Figure 7: Visual comparison of different distil-lation losses. The mask is colored by green.      
+
+> 56789
+> 3.6
+> 3.8
+> 4
+> ·10 −2
+> Region with visible artifacts
+> Ours (3 steps)
+> ToCa [67]
+> FPAC
+> Ours
+> FLOPs (T) ↓
+> LPIPS  ↓
+
+Figure 8: LPIPS and FLOPs (T) trade-off. LPIPS spikes for generally designed acceleration meth-ods like ToCa [67]. 
+
+Effectiveness of RAD. We evaluate our four-step model’s performance with different distillation losses. As shown in Table 2b, Diffusion denotes diffusion loss and GAN means using a standard se-mantic discriminator (Clip) in pixel space, while RAD denotes our proposed region-aware adversarial distillation in latent space. Our method outperforms other ablation settings in both global and local perceptual metrics. What’s more, as illustrated in Fig. 5, the standard generator with semantic dis-criminator fails to maintain the background’s integrity, while our region-aware adversarial distillation shows better object and effect removal performance and a more robust ability to maintain background consistency after removal. These results indicate the effectiveness of our proposed distillation method in preserving model’s capability to remove objects and their causal physical effects.    
+
+> Input with mask 3 steps ToCa [67] FPAC
+
+Figure 9: The mask is colored by green. Compared with the 3-steps and ToCa [ 67 ] strategies, FPAC maintains removal quality without introducing visual artifacts. 
+
+Effectiveness of FPAC. To further reduce com-putational overhead while preserving high vi-sual fidelity, we introduce FPAC, an acceleration plug-in specifically tailored for object removal tasks. Most existing training-free methods either require a substantial amount of prior informa-tion [ 9] or only become effective during the final denoising steps [ 50 ], rendering them incompat-ible with our extreme 4-step setting. Even when compared to applicable general-purpose acceleration methods like ToCa [ 67 ], our approach achieves comparable FLOPs reduction without suffering from severe degradation in generation quality. As shown in Figure 8, FPAC strikes an optimal balance between image quality and computational effi-ciency. Notably, as shown in Figure 9, it successfully avoids visible artifacts that typically accompany aggressive acceleration, maintaining robust performance at a significantly lower computational cost. 
+
+Complementary Nature of RAD and FPAC. This advantage comes from the spatial redundancy of object removal: most background regions should remain unchanged, while only foreground-related regions require intensive recomputation. Benefiting from RAD’s targeted training and loss design, the few-step Cross-Attention maps in FlashClear can accurately cover both the target object and its object-induced effects, making cache reuse feasible even in the extremely few-step regime. By prioritizing removal-relevant tokens and safely reusing stable background information, FPAC avoids the quality drop caused by indiscriminate token pruning or caching, providing additional acceleration on top of RAD while maintaining visually consistent removal results. 
+
+## 5 Conclusion 
+
+In this paper, we propose FlashClear, an ultra-fast and highly efficient diffusion-based object removal model. To overcome the severe latency of multi-step inference, we propose Region-aware Adversarial Distillation (RAD), which successfully compresses the denoising process into minimal steps while strictly preserving the model’s capability to perceive and eliminate complex object-induced visual effects. Furthermore, we designed FPAC, an attention-guided caching mechanism that resolves the fundamental conflict between few-step distillation and feature reuse by exploiting the inherent spatial redundancy of background regions. Extensive experiments demonstrate that FlashClear achieves up to an 8.26 × speedup alongside state-of-the-art visual fidelity, effectively bridging the gap between high-quality content removal and real-time interactive deployment. 9References 
+
+[1] Omri Avrahami, Dani Lischinski, and Ohad Fried. Blended diffusion for text-driven editing of natural images. In CVPR , 2022. [2] Fan Bao, Shen Nie, Kaiwen Xue, Yue Cao, Chongxuan Li, Hang Su, and Jun Zhu. All are worth words: A vit backbone for diffusion models. In CVPR , 2023. [3] Daniel Bolya and Judy Hoffman. Token merging for fast stable diffusion. In CVPR , 2023. [4] Tim Brooks, Aleksander Holynski, and Alexei A Efros. Instructpix2pix: Learning to follow image editing instructions. In CVPR , 2023. [5] Pengtao Chen, Mingzhu Shen, Peng Ye, Jianjian Cao, Chongjun Tu, Christos-Savvas Bouganis, Yiren Zhao, and Tao Chen. ∆-DiT: A training-free acceleration method tailored for diffusion transformers. arXiv preprint arXiv:2406.01125 , 2024. [6] Xi Chen, Lianghua Huang, Yu Liu, Yujun Shen, Deli Zhao, and Hengshuang Zhao. Anydoor: Zero-shot object-level image customization. In CVPR , 2024. [7] Ciprian Corneanu, Raghudeep Gadde, and Aleix M Martinez. Latentpaint: Image inpainting in latent space with diffusion models. In WACV , 2024. [8] Yi˘ git Ekin, Ahmet B Yildirim, Erdem E Caglar, Aykut Erdem, Erkut Erdem, and Aysegul Dundar. Clipaway: Harmonizing focused embeddings for removing objects via diffusion models. In NeurIPS , 2024. [9] Liang Feng, Shikang Zheng, Jiacheng Liu, Yuqi Lin, Qinming Zhou, Peiliang Cai, Xinyu Wang, Junjie Chen, Chang Zou, Yue Ma, et al. HiCache: A plug-in scaled-hermite upgrade for taylor-style cache-then-forecast diffusion acceleration. In ICLR , 2026. [10] Jonathan Ho, Ajay Jain, and Pieter Abbeel. Denoising diffusion probabilistic models. In 
+
+NeurIPS , 2020. [11] Edward J Hu, Yelong Shen, Phillip Wallis, Zeyuan Allen-Zhu, Yuanzhi Li, Shean Wang, Liang Wang, Weizhu Chen, et al. LoRA: Low-rank adaptation of large language models. In ICLR ,2022. [12] Yueru Jia, Yuhui Yuan, Aosong Cheng, Chuke Wang, Ji Li, Huizhu Jia, and Shanghang Zhang. Designedit: Multi-layered latent decomposition and fusion for unified & accurate image editing. In AAAI , 2025. [13] Longtao Jiang, Zhendong Wang, Jianmin Bao, Wengang Zhou, Dongdong Chen, Lei Shi, Dong Chen, and Houqiang Li. Smarteraser: Remove anything from images using masked-region guidance. In CVPR , 2025. [14] Xuan Ju, Xian Liu, Xintao Wang, Yuxuan Bian, Ying Shan, and Qiang Xu. Brushnet: A plug-and-play image inpainting model with decomposed dual-branch diffusion. In ECCV , 2024. [15] Bahjat Kawar, Shiran Zada, Oran Lang, Omer Tov, Huiwen Chang, Tali Dekel, Inbar Mosseri, and Michal Irani. Imagic: Text-based real image editing with diffusion models. In CVPR , 2023. [16] Bo-Kyeong Kim, Hyoung-Kyu Song, Thibault Castells, and Shinkook Choi. Bk-sdm: A lightweight, fast, and cheap version of stable diffusion. In ECCV , 2024. [17] Diederik P Kingma and Max Welling. Auto-encoding variational bayes. arXiv preprint arXiv:1312.6114 , 2013. [18] Ruibin Li, Tao Yang, Song Guo, and Lei Zhang. RORem: Training a robust object remover with human-in-the-loop. In CVPR , 2025. [19] Yanyu Li, Huan Wang, Qing Jin, Ju Hu, Pavlo Chemerys, Yun Fu, Yanzhi Wang, Sergey Tulyakov, and Jian Ren. Snapfusion: Text-to-image diffusion model on mobile devices within two seconds. In NeurIPS , 2023. 10 [20] Shanchuan Lin, Anran Wang, and Xiao Yang. Sdxl-lightning: Progressive adversarial diffusion distillation. arXiv preprint arXiv:2402.13929 , 2024. [21] Haipeng Liu, Yang Wang, Biao Qian, Meng Wang, and Yong Rui. Structure matters: Tackling the semantic discrepancy in diffusion models for image inpainting. In CVPR , 2024. [22] Jiacheng Liu, Chang Zou, Yuanhuiyi Lyu, Junjie Chen, and Linfeng Zhang. From reusing to forecasting: Accelerating diffusion models with taylorseers. In ICCV , 2025. [23] Luping Liu, Yi Ren, Zhijie Lin, and Zhou Zhao. Pseudo numerical methods for diffusion models on manifolds. In ICLR , 2022. [24] Xingchao Liu, Xiwen Zhang, Jianzhu Ma, Jian Peng, et al. Instaflow: One step is enough for high-quality diffusion-based text-to-image generation. In ICLR , 2024. [25] Yi Liu, Hao Zhou, Benlei Cui, Wenxiang Shang, and Ran Lin. Erase diffusion: Empowering object removal through calibrating diffusion pathways. In CVPR , 2025. [26] Cheng Lu and Yang Song. Simplifying, stabilizing and scaling continuous-time consistency models. ICLR , 2025. [27] Cheng Lu, Yuhao Zhou, Fan Bao, Jianfei Chen, Chongxuan Li, and Jun Zhu. Dpm-solver: A fast ode solver for diffusion probabilistic model sampling in around 10 steps. In NeurIPS , 2022. [28] Andreas Lugmayr, Martin Danelljan, Andres Romero, Fisher Yu, Radu Timofte, and Luc Van Gool. Repaint: Inpainting using denoising diffusion probabilistic models. In CVPR , 2022. [29] Simian Luo, Yiqin Tan, Longbo Huang, Jian Li, and Hang Zhao. Latent consistency models: Synthesizing high-resolution images with few-step inference. arXiv preprint arXiv:2310.04378 ,2023. [30] Xinyin Ma, Gongfan Fang, and Xinchao Wang. Deepcache: Accelerating diffusion models for free. In CVPR , 2024. [31] Hayk Manukyan, Andranik Sargsyan, Barsegh Atanyan, Zhangyang Wang, Shant Navasardyan, and Humphrey Shi. Hd-painter: high-resolution and prompt-faithful text-guided image inpaint-ing with diffusion models. In ICLR , 2025. [32] Chenlin Meng, Yutong He, Yang Song, Jiaming Song, Jiajun Wu, Jun-Yan Zhu, and Stefano Ermon. Sdedit: Guided image synthesis and editing with stochastic differential equations. In 
+
+ICLR , 2022. [33] Thuan Hoang Nguyen and Anh Tran. Swiftbrush: One-step text-to-image diffusion model with variational score distillation. In CVPR , 2024. [34] Alex Nichol, Prafulla Dhariwal, Aditya Ramesh, Pranav Shyam, Pamela Mishkin, Bob McGrew, Ilya Sutskever, and Mark Chen. Glide: Towards photorealistic image generation and editing with text-guided diffusion models. arXiv preprint arXiv:2112.10741 , 2021. [35] William Peebles and Saining Xie. Scalable diffusion models with transformers. In ICCV , 2023. [36] Dustin Podell, Zion English, Kyle Lacey, Andreas Blattmann, Tim Dockhorn, Jonas Müller, Joe Penna, and Robin Rombach. SDXL: Improving latent diffusion models for high-resolution image synthesis. In ICLR , 2024. [37] Zhibin Qin, Zhenxiong Tan, Zeqing Wang, Songhua Liu, and Xinchao Wang. SpotEdit: Selective region editing in diffusion transformers. arXiv preprint arXiv:2512.22323 , 2025. [38] Robin Rombach, Andreas Blattmann, Dominik Lorenz, Patrick Esser, and Björn Ommer. High-resolution image synthesis with latent diffusion models. In CVPR , 2022. [39] Min-Cheol Sagong, Yoon-Jae Yeo, Seung-Won Jung, and Sung-Jea Ko. RORD: A real-world object removal dataset. In BMVC , 2022. 11 [40] Chitwan Saharia, William Chan, Huiwen Chang, Chris Lee, Jonathan Ho, Tim Salimans, David Fleet, and Mohammad Norouzi. Palette: Image-to-image diffusion models. In ACM SIGGRAPH ,2022. [41] Tim Salimans and Jonathan Ho. Progressive distillation for fast sampling of diffusion models. In ICLR , 2022. [42] Axel Sauer, Dominik Lorenz, Andreas Blattmann, and Robin Rombach. Adversarial diffusion distillation. In ECCV , 2024. [43] Pratheba Selvaraju, Tianyu Ding, Tianyi Chen, Ilya Zharkov, and Luming Liang. Fora: Fast-forward caching in diffusion transformer acceleration. arXiv preprint arXiv:2407.01425 , 2024. [44] Jiaming Song, Chenlin Meng, and Stefano Ermon. Denoising diffusion implicit models. In 
+
+ICLR , 2021. [45] Yang Song, Prafulla Dhariwal, Mark Chen, and Ilya Sutskever. Consistency models. In ICML ,2023. [46] Wenhao Sun, Xue-Mei Dong, Benlei Cui, and Jingqun Tang. Attentive eraser: Unleashing diffusion model’s object removal potential via self-attention redirection guidance. In AAAI ,2025. [47] Roman Suvorov, Elizaveta Logacheva, Anton Mashikhin, Anastasia Remizova, Arsenii Ashukha, Aleksei Silvestrov, Naejin Kong, Harshith Goka, Kiwoong Park, and Victor Lempitsky. Resolution-robust large mask inpainting with fourier convolutions. In WACV , 2022. [48] Runpu Wei, Zijin Yin, Shuo Zhang, Lanxiang Zhou, Xueyi Wang, Chao Ban, Tianwei Cao, Hao Sun, Zhongjiang He, Kongming Liang, et al. Omnieraser: Remove objects and their effects in images with paired video-frame data. arXiv preprint arXiv:2501.07397 , 2025. [49] Daniel Winter, Matan Cohen, Shlomi Fruchter, Yael Pritch, Alex Rav-Acha, and Yedid Hoshen. ObjectDrop: Bootstrapping counterfactuals for photorealistic object removal and insertion. In 
+
+ECCV , 2024. [50] Junyi Wu, Zhiteng Li, Zheng Hui, Yulun Zhang, Linghe Kong, and Xiaokang Yang. Quantcache: Adaptive importance-guided quantization with hierarchical latent and layer caching for video generation. In ICCV , 2025. [51] Shaoan Xie, Zhifei Zhang, Zhe Lin, Tobias Hinz, and Kun Zhang. SmartBrush: Text and shape guided object inpainting with diffusion model. In CVPR , 2023. [52] Yanwu Xu, Yang Zhao, Zhisheng Xiao, and Tingbo Hou. Ufogen: You forward once large scale text-to-image generation via diffusion gans. In CVPR , 2024. [53] Zexuan Yan, Yue Ma, Chang Zou, Wenteng Chen, Qifeng Chen, and Linfeng Zhang. Eedit: Rethinking the spatial and temporal redundancy for efficient image editing. In ICCV , 2025. [54] Tianwei Yin, Michaël Gharbi, Taesung Park, Richard Zhang, Eli Shechtman, Fredo Durand, and William T Freeman. Improved distribution matching distillation for fast image synthesis. In NeurIPS , 2024. [55] Tianwei Yin, Michaël Gharbi, Richard Zhang, Eli Shechtman, Fredo Durand, William T Freeman, and Taesung Park. One-step diffusion with distribution matching distillation. In 
+
+CVPR , 2024. [56] Yingchen Yu, Fangneng Zhan, Shijian Lu, Jianxiong Pan, Feiying Ma, Xuansong Xie, and Chunyan Miao. WaveFill: A wavelet-based generation network for image inpainting. In ICCV ,2021. [57] Yongsheng Yu, Ziyun Zeng, Haitian Zheng, and Jiebo Luo. Omnipaint: Mastering object-oriented editing via disentangled insertion-removal inpainting. In ICCV , 2025. [58] Evelyn Zhang, Jiayi Tang, Xuefei Ning, and Linfeng Zhang. Training-free and hardware-friendly acceleration for diffusion models via similarity-based token pruning. In AAAI , 2025. 12 [59] Lvmin Zhang, Anyi Rao, and Maneesh Agrawala. Adding conditional control to text-to-image diffusion models. In ICCV , 2023. [60] Richard Zhang, Phillip Isola, Alexei A Efros, Eli Shechtman, and Oliver Wang. The unreason-able effectiveness of deep features as a perceptual metric. In CVPR , 2018. [61] Wentian Zhang, Haozhe Liu, Jinheng Xie, Francesco Faccio, Mike Zheng Shou, and Jürgen Schmidhuber. Cross-attention makes inference cumbersome in text-to-image diffusion models. 
+
+TMLR , 2025. [62] Jixin Zhao, Zhouxia Wang, Peiqing Yang, and Shangchen Zhou. Precise object and effect removal with adaptive target-aware attention. In CVPR , 2026. [63] Wenliang Zhao, Lujia Bai, Yongming Rao, Jie Zhou, and Jiwen Lu. Unipc: A unified predictor-corrector framework for fast sampling of diffusion models. In NeurIPS , 2023. [64] Zixin Zhu, Haoxiang Li, Xuelu Feng, He Wu, Chunming Qiao, and Junsong Yuan. GeoRemover: Removing objects and their causal visual artifacts. In NeurIPS , 2025. [65] Junhao Zhuang, Yanhong Zeng, Wenran Liu, Chun Yuan, and Kai Chen. A task is worth one word: Learning with task prompts for high-quality versatile image inpainting. In ECCV , 2024. [66] Chang Zou, Changlin Li, Yang Li, Patrol Li, Jianbing Wu, Xiao He, Songtao Liu, Zhao Zhong, Kailin Huang, and Linfeng Zhang. DisCa: Accelerating video diffusion transformers with distillation-compatible learnable feature caching. In CVPR , 2026. [67] Chang Zou, Xuyang Liu, Ting Liu, Siteng Huang, and Linfeng Zhang. Accelerating diffusion transformers with token-wise feature caching. In ICLR , 2025. 13 A Overview 
+
+This supplementary material provides additional details and analyses to complement the main paper. We first describe the implementation details of our proposed method, including the training configuration and loss components. We then present our model’s performance and analyses with 2-step distillation, including more quantitative comparisons and qualitative examples on diverse object removal scenarios, to further prove the effectiveness of our region-aware adversarial distillation. We also provide additional details and comparisons of our proposed FPAC and concurrent SOTA cache acceleration method Hicache. To further evaluate whether FPAC still preserves human-preferred object removal results while maintaining substantially higher inference efficiency, we conduct a user study to compare our accelerated variants with the baseline model. Finally, we discuss limitations to give a more comprehensive understanding of the proposed framework. Specifically, Section B presents the implementation details of FlashClear. Section C presents the quantitative and qualitative results of 2-step FlashClear. Section D reports additional explanation on the incapability of HiCache combined with our distilled model to prove the validity of our proposed FPAC. Section E provides a user study on perceptual removal quality. Section F provides more qualitative comparisons with existing object removal and acceleration methods. Section G discusses limitations and potential future directions. 
+
+## B Implementation Details 
+
+As listed in Table 3, all training experiments are conducted on NVIDIA A800 GPUs with 80GB memory. The training of FlashClear takes approximately 24 hours for 10K iterations. The inference and evaluation are conducted on a single A6000 GPU with 48GB memory, with the shorter side of test images resized to 512. We report FLOPs to provide a hardware-independent measure of computational cost, and wall-clock latency to provide speed information for reference only. 
+
+RAD Implementation Details We implement FlashClear based on the SDXL-based ObjectClear model. The model is initialized from the pretrained ObjectClear checkpoint and trained with LoRA adaptation. Unless otherwise specified, we use the same training configuration for all experiments. The model is trained on the OBER dataset for 10K iterations with a per-device batch size of 8. We use the AdamW optimizer with a learning rate of 1 × 10 −5 for both the generator and the discriminator. Mixed-precision training with bfloat16 is adopted to reduce memory consumption. The distillation process compresses the original multi-step object removal model into a 4-step generator. The training objective consists of diffusion loss, perceptual loss, adversarial loss, and object localization supervision (mask loss), where λdiff = 1 .0, λLPIPS = 5 .0, λGAN = 0 .5, and λmask = 0 .01 .
+
+FPAC Implementation Details. We implement FPAC on top of the distilled few-step Ob-jectClear model without introducing additional trainable parameters. During inference, FPAC reuses features only at the last denoising step, where the attention maps become more sta-ble and provide a more reliable indication of the regions that require modification. Specif-ically, we apply caching to the attention modules with the following feedforward MLP lay-ers in down_blocks.1.attentions , down_blocks.2.attentions , mid_block.attentions ,
+
+up_blocks.0.attentions , and up_blocks.1.attentions . These layers are selected because they contain rich spatial-semantic representations while accounting for a large portion of the U-Net computation. We use the same cache configuration for all experiments. 
+
+## C Additional Results of the Two-Step Model 
+
+In this section, we further provide the qualitative and quantitative results of our distilled two-step model with our proposed region-aware adversarial distillation. Similar to the metrics used in the four-step model test in the main text, we test the two-step model across various quantitative metrics like LPIPS, LPIPS-mask, PSNR, and PSNR-mask, demonstrating the effectiveness and robustness of our distillation method in a more extreme step schedule. 14 Table 3: Implementation details of FlashClear. Left: cache settings of FPAC. Right: key training hyperparameters of RAD. 
+
+(a) FPAC cache settings. 
+
+Cached Module Cached Step 
+
+down_blocks.1.attentions 4
+
+down_blocks.2.attentions 4
+
+mid_block.attentions 4
+
+up_blocks.0.attentions 4
+
+up_blocks.1.attentions 4(b) Key training hyperparameters.                           
+
+> Config. Value Config. Value
+> Base model ObjectClear Mixed precision bfloat16 Initialization ObjectClear LoRA rank 256 Dataset OBER Distillation steps 4Iterations 10K λdiff 1.0 Batch size / GPU 8λLPIPS 5.0 Optimizer AdamW λGAN 0.5 Learning rate 1×10 −5λmask 0.01
+
+C.1 Quantitative Results 
+
+To further evaluate the robustness of our acceleration framework under more aggressive sampling schedules, we additionally train a two-step variant of our model. Compared with the four-step model used in the main paper, the two-step model further reduces the number of denoising steps and therefore provides a more challenging setting for object removal. As shown in Table 4, the two-step model achieves substantially lower computational cost while maintaining competitive perceptual and local restoration quality. Although a slight degradation can be observed compared with the four-step model, the performance drop is relatively moderate considering the significant reduction in sampling steps. This result indicates that the proposed distillation strategy remains effective even under extremely low-step inference. Table 4: Quantitative comparison of the two-step model and the four-step model. The best and second performances are marked in red and orange .                                     
+
+> Method FLOPs(T) ↓Latency ↓LPIPS ↓LPIPS-mask ↓PSNR ↑PSNR-mask ↑
+> ObjectClear 63.6331 2.2901 0.03803 0.1540 32.06 23.34 4steps (ours) 8.6477 0.9476 0.03506 0.1396 33.05 24.12 2steps (ours) 4.3238 0.6210 0.03700 0.1438 32.49 23.27 2steps+FPAC (ours) 3.4442 0.8039 0.04149 0.1640 32.37 23.11
+
+C.2 Qualitative Results 
+
+Figure 10 presents qualitative results of our two-step model on challenging object removal cases. The model can still remove objects from complex scenes and generate visually plausible backgrounds despite using only two denoising steps. In reflection-dominated scenes, such as objects located near water surfaces, the two-step model removes not only the foreground object but also its correlated reflection, leading to coherent background textures. In shadow-related examples, the model sup-presses object-induced dark traces and reconstructs the surrounding surface or grassland with natural appearance. These results suggest that the two-step model preserves the essential removal capability learned from the multi-step teacher, including the ability to eliminate object-associated visual effects rather than merely filling the masked region. 
+
+## D More Results on Ours + HiCache 
+
+In this section, we provide supplementary data and detailed analysis to explain why HiCache is not utilized to accelerate our four-step model in the main text. Specifically, the mathematical formulation of HiCache inherently requires a minimum of four complete steps to accurately calculate the coefficients for its fitting formula. Forcibly applying HiCache to a four-step generation process violates this prerequisite, which leads to a sudden and drastic degradation in overall performance. To empirically demonstrate this limitation, we conduct a comparison between our model accelerated by HiCache and our proposed FPAC method. As detailed in Table 5, the forced integration of HiCache results in significantly inferior quantitative metrics across FLOPs, LPIPS, LPIPS-Local, PSNR, and PSNR-mask when compared to FPAC. 15 Input w/ Mask ObjectClear ours-4steps ours-2steps ours-2steps+FPAC Figure 10: Qualitative comparison of different sampling and acceleration settings. ObjectClear denotes the original 20-step baseline, while the 4-step and 2-step variants correspond to our accelerated models with or without cache. The proposed low-step models preserve visually coherent object removal results, and FPAC further reduces computation while maintaining plausible visual quality. Furthermore, we provide qualitative comparisons in Figure 11 to corroborate these findings. The visual results, showcasing two different cases of object removal, clearly illustrate that forcing the use of HiCache introduces severe foreground object retention and a massive amount of visual artifacts in the unmasked regions. These results firmly validate that HiCache itself is fundamentally incapable of accelerating models that operate in four steps or fewer. Table 5: Quantitative comparison between Ours + HiCache and Ours + FPAC. Forcing HiCache on a four-step model leads to noticeable performance drops across all metrics.                     
+
+> Method FLOPs(T) ↓LPIPS ↓LPIPS-Local ↓PSNR ↑PSNR-mask ↑
+> Ours + HiCache 7.4126 0.08250 0.1575 27.49 23.41 Ours + FPAC 7.7000 0.03623 0.1438 32.48 23.51
+
+## E User Study on Perceptual Removal Quality 
+
+To further evaluate whether the proposed acceleration strategy affects the perceptual quality of object removal, we conduct a user study comparing our accelerated variants with the baseline ObjectClear model. Unlike pixel-level metrics, this study focuses on whether human observers can perceive noticeable degradation in the final removal results. 
+
+Study Design. We design a two-alternative forced-choice user study with an additional tie option. As shown in Figure 12, each question presents one reference image in which the target removal region is highlighted by a green mask, together with two anonymized removal results displayed side by side. 16 (a) Input with Mask (b) HiCache (c) FPAC Figure 11: Visual comparison of HiCache and FPAC on different object removal cases. 
+
+Figure 12: Example interface of the user study. Each question shows the reference image with the target removal region highlighted in green, along with two anonymized removal results. Participants are asked to choose the result with better perceptual removal quality or select “similar” when the two results are visually comparable. Participants are asked to judge which result has better removal quality according to the reference image and the masked target region, or to select “similar” if the two results are visually comparable. The compared methods are anonymized and randomly assigned to the left or right side for each question. Each questionnaire contains 20 questions randomly sampled from a pool of 163 test images. Among them, 10 questions compare FlashClear with ObjectClear, while the other 10 compare FlashClear+FPAC (denoted as FlashClear-C) with ObjectClear. ObjectClear is included in every comparison as the baseline. The sampled images, question order, and left-right positions are independently randomized for each questionnaire to reduce ordering and presentation bias. 17 Table 6: User study results comparing the perceptual removal quality of accelerated methods against ObjectClear. Each questionnaire contains 10 ObjectClear-vs-FlashClear comparisons and 10 ObjectClear-vs-FlashClear+FPAC comparisons. Win, tie, and lose rates are computed from the perspective of the accelerated method. Method #Questions Win Rate Tie Rate Lose Rate FlashClear vs. ObjectClear 200 22.5% 55.5% 22.0% FlashClear-C vs. ObjectClear 200 22.0% 53.5% 24.5% 
+
+Evaluation Protocol. For each comparison, we report the win rate, tie rate, and loss rate of the accelerated method against ObjectClear. A win means that the participant prefers the accelerated method; a tie means that the participant considers the two results visually similar; and a loss means that ObjectClear is preferred. Formally, for a method M ∈ { FlashClear , FlashClear+FPAC }, we compute 
+
+WinRate( M ) = Nwin (M )
+
+Nwin (M ) + Ntie (M ) + Nloss (M ) , (9) 
+
+TieRate( M ) = Ntie (M )
+
+Nwin (M ) + Ntie (M ) + Nloss (M ) , (10) 
+
+LoseRate( M ) = Nloss (M )
+
+Nwin (M ) + Ntie (M ) + Nloss (M ) . (11) A high tie rate, together with a balanced win/loss distribution, indicates that the accelerated method preserves perceptual removal quality relative to ObjectClear. 
+
+Results and Discussion. The user study results are summarized in Table 6. FlashClear obtains a win rate of 22.5%, a tie rate of 55.5%, and a lose rate of 22.0% against ObjectClear. The win and lose rates are nearly balanced, while more than half of the responses fall into the tie category. This suggests that participants usually perceive the removal results of FlashClear and ObjectClear as visually comparable, indicating that the proposed acceleration strategy does not introduce noticeable perceptual degradation. For the more aggressive accelerated variant, FlashClear+FPAC, the preference statistics remain close to those of ObjectClear, with a win rate of 22.0%, a tie rate of 53.5%, and a lose rate of 24.5%. Although FlashClear+FPAC applies a stronger acceleration strategy, its loss rate is only slightly higher than its win rate, and the majority of responses are still ties. These results indicate that FlashClear+FPAC largely preserves the perceptual quality of object removal while further improving inference efficiency. Overall, the user study confirms that our acceleration pipeline maintains removal quality at the perceptual level. Combined with the quantitative acceleration results reported in the main paper, these findings demonstrate that FlashClear achieves a favorable trade-off between inference efficiency and visual quality. 
+
+## F More Visual Results 
+
+As shown in Figures 13, 14, 15, 16, and 17, we provide more visual results as supplements to Section 4.2 and Section 4.3. More evidence demonstrates our methods’ superiority. 
+
+## G Limitations and Possible Impact 
+
+While FlashClear achieves strong object removal quality and efficiency, it still has limitations and potential societal risks. First, it is tailored to object removal and relies on task-specific priors such as localized editing regions and background redundancy. Second, although FlashClear substantially reduces theoretical computation, practical end-to-end speedup can be affected by system-level overhead, since I/O operations and memory communication may occupy a larger fraction of the total runtime when model inference is already lightweight. Beyond technical limitations, FlashClear can benefit interactive editing, photo restoration, privacy-preserving content editing, and on-device applications by making high-quality object removal more efficient and accessible. However, object removal may also be misused to manipulate visual evidence or alter image context in misleading ways. We therefore encourage responsible use of this technology in practical deployment. 18 Image w/ mask 20% step ToCa [67] SiTo [58] HiCache [9] QuantCache [50] FlashClear-C FlashClear 
+
+Figure 13: More qualitative comparison on acceleration methods based on ObjectClear [62]. 19 Input w/ Mask AttentiveEraser [46] RORem [18] OmniEraser [48] OmniPaint [57] FlashClear (ours) 
+
+Figure 14: More visual comparison of ours and other object removal methods on OBER-Wild dataset. 20 Input w/ Mask AttentiveEraser [46] RORem [18] OmniEraser [48] OmniPaint [57] FlashClear (ours) 
+
+Figure 15: More visual comparison of ours and other object removal methods on OBER-Wild dataset. 21 Input w/ Mask AttentiveEraser [46] OmniEraser [48] OmniPaint [57] FlashClear (ours) 
+
+Figure 16: More qualitative comparison of our method and others on CausRem [64 ] reflection dataset. 22 Input w/ Mask AttentiveEraser [46] OmniEraser [48] OmniPaint [57] FlashClear (ours) 
+
+Figure 17: More qualitative comparison of our method and others on CausRem [ 64 ] reflection and shadow dataset. Please zoom in on the image for a better viewing experience. 23

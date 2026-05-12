@@ -1,0 +1,2314 @@
+Title: Normalization Equivariance for Arbitrary Backbones, with Application to Image Denoising
+
+URL Source: https://arxiv.org/pdf/2605.08193v1
+
+Published Time: Tue, 12 May 2026 00:04:00 GMT
+
+Number of Pages: 34
+
+Markdown Content:
+# Normalization Equivariance for Arbitrary Backbones, with Application to Image Denoising 
+
+Youssef Saied 1 Franc ¸ois Fleuret 1 2 
+
+## Abstract 
+
+Normalization Equivariance (NE), equivariance to global contrast and brightness transforms, im-proves robustness to distribution shift in image-to-image prediction. Existing methods enforce this prior by constraining internal layers to NE-compatible families, limiting compatibility with standard components (e.g., attention, LayerNorm) and adding runtime cost. We characterize the full NE function class: a function is NE if and only if it admits a normalize-process-denormalize factor-ization. This turns exact NE enforcement for the ideal wrapper from an internal architectural con-straint into an input-output parameterization prob-lem, allowing a parameter-free wrapper (WNE) to enforce NE around any backbone, including trans-formers. In a single-noise mismatch diagnostic for blind denoising, the wrapper improves CNN and transformer robustness with no measurable GPU overhead; architectural NE baselines incur up to a 1.6× slowdown. 
+
+## 1. Introduction 
+
+Equivariance priors improve robustness to distribution shift in denoising and related image-to-image tasks. Scale equiv-ariance (SE) and the strictly stronger normalization equiv-ariance (NE) are properties shared by many classical denois-ers (Rudin et al., 1992; Buades et al., 2005; Dabov et al., 2007; Gu et al., 2014): SE: f (ay ) = af (y) for a > 0. (1) NE: f (ay + b1) = af (y) + b1 for a > 0, b ∈ R. (2) These equivariances were recently adopted to improve neu-
+
+> 1
+
+Department of Computer Science, University of Geneva, Switzerland 2Meta FAIR. Correspondence to: Youssef Saied 
+
+<youssef.saied@unige.ch >.
+
+Proceedings of the 43 rd International Conference on Machine Learning , Seoul, South Korea. PMLR 306, 2026. Copyright 2026 by the author(s). 
+
+y TNE gθ T −1NE ˆx 
+
+> ˜y
+> μ(y),std( y)
+
+Figure 1. Normalization-equivariant wrapper ( WNE ). Given a noisy input y, we compute instance statistics μ(y) and std( y),normalize to ˜y = TNE (y), apply an arbitrary backbone gθ , and de-normalize with the stored statistics to produce ˆx = std( y) gθ (˜ y) + 
+
+μ(y)1. This enforces input-output normalization equivariance without modifying the backbone. 
+
+ral network robustness in blind denoising, where the noise level is unknown at test time and may differ from train-ing (Mohan et al., 2020; Herbreteau et al., 2023). This robustness has since motivated applications beyond de-noising, including inverse problems and diffusion-style pipelines (Kadkhodaie & Simoncelli, 2021; Hong et al., 2024; Guth et al., 2025; Levac et al., 2025). Existing methods enforce SE in neural networks by remov-ing biases and leaving only positively 1-homogeneous op-erations (Mohan et al., 2020). Enforcing NE additionally requires preserving the affine action y 7 → ay + b1 through every layer, e.g., via affine-constrained convolutions, spe-cial nonlinearities, and affine residuals (Herbreteau et al., 2023). Both approaches rule out standard transformer com-ponents—softmax and LayerNorm do not commute with 
+
+y 7 → ay + b1. The NE-specific layers also add runtime cost (Table 2). Internal-layer constraints are not required to capture the full NE function class. Our main result (Characterization 1) shows that a function is NE if and only if it admits a normalize-process-denormalize factorization. Thus enforc-ing NE at the input-output level is not an approximation or restriction, but an equivalent reparameterization. Using the characterization, we construct a parameter-free wrapper (WNE) that enforces input-output NE around any backbone without modifying it, including transformers (Fig-ure 1). In blind denoising under noise-level mismatch, WNE matches architectural NE trends on DnCNN and extends them to SwinIR with negligible GPU overhead. 1
+
+> arXiv:2605.08193v1 [cs.CV] 5 May 2026 Normalization-Equivariant Wrapper
+
+Our contributions: 
+
+• Method: parameter-free drop-in wrapper enforcing NE on any backbone, including transformers (Sec-tion 3.1). • Theory: characterization showing that normalize-process-denormalize completely parameterizes the NE function class (Section 3.2). • Experiments and analysis: mismatch-robustness gains across CNN and transformer denoisers with neg-ligible runtime cost; a normalized-coordinate analysis explains the trend (Sections 4–5). 
+
+Code: The implementation is available in the repository 
+
+YoussefSaied/normalization equivariance .
+
+## 2. Related Work 
+
+Equivariance priors: scale and normalization equivari-ance. Two related equivariance priors appear in denoising and related tasks. Scale equivariance (SE), or positive 1-homogeneity, requires 
+
+f (ay ) = af (y) for a > 0. Mohan et al. (2020) propose SE bias-free CNN denoisers, inspiring similar bias-free designs in later work (Zhang et al., 2022; Zamir et al., 2022). Scale equivariant denoisers also serve as implicit priors in inverse problems (Kadkhodaie & Simoncelli, 2021) and appear in energy-based probability density and diffusion models (Guth et al., 2025). Normalization equivariance (NE) is strictly stronger than SE, requiring f (ay + b1) = af (y) + b1 for a > 0, b ∈ R. Her-breteau & Kervrann (2024) survey NE properties across su-pervised and self-supervised methods, noting that some clas-sical denoisers (e.g., TV, non-local means) are NE (Rudin et al., 1992; Buades et al., 2005) while others such as BM3D (Dabov et al., 2007) and WNNM (Gu et al., 2014) satisfy SE but not NE. Herbreteau et al. (2023) introduce NE as a robustness prior for denoising, and NE predictors have also been leveraged in plug-and-play MRI reconstruc-tion (Hong et al., 2024) and diffusion-based posterior sam-plers learned from noisy measurements (Levac et al., 2025). 
+
+Enforcing normalization equivariance. For clarity, we describe three levels at which NE can be enforced. ARCHITECTURE -LEVEL : Herbreteau et al. (2023) constrain every internal operation to NE-compatible families (affine-constrained convolutions, sorting nonlinearities, affine resid-uals); this is incompatible with attention and LayerNorm. OBJECTIVE -LEVEL : Levac et al. (2025) embed an approxi-mate NE property into a SURE-based loss to learn diffusion models from noisy measurements alone (no clean targets), enabling denoiser generalization below the measurement noise level. Their setting is self-supervised and complemen-tary to ours. INPUT -OUTPUT -LEVEL : (this work) we enforce NE ana-lytically around an arbitrary backbone. Our if and only if characterization (Characterization 1) shows that normalize-process-denormalize reparameterizes the full NE function class rather than restricting it. 
+
+Canonicalization and normalize-process-denormalize. 
+
+A general recipe for equivariant maps is to canonicalize the input to a group-orbit representative, apply an arbitrary func-tion, and map back (Kaba et al., 2023; Mondal et al., 2023). In our setting, the orbit representative is obtained by remov-ing the global brightness and contrast degrees of freedom. Characterization 1 shows that this construction parameter-izes the full NE function class for the affine image-domain action y 7 → ay +b1, rather than merely giving one sufficient construction. Reversible Instance Normalization (RevIN) uses a similar normalize-process-denormalize template for time-series forecasting under distribution shift (Kim et al., 2022; Liu et al., 2022); our contribution is the if-and-only-if connection to exact image-domain normalization equivari-ance. 
+
+Blind denoising. We use blind denoising as a controlled stress test for robustness to unknown corruption strength. Following Mohan et al. (2020); Herbreteau et al. (2023), we train at a single σtrain and test at σtest ̸ = σtrain , prob-ing out-of-distribution generalization rather than interpola-tion within a trained σ-range. This setting is orthogonal to whether σ is provided at test time. This setting is also prac-tically relevant for plug-and-play reconstruction, where the effective denoiser strength varies across iterations (Zhang et al., 2022; Hong et al., 2024). 
+
+## 3. Method 
+
+Setup and notation. An instance is the tensor passed to the backbone: during training we use patches and at test time we use full images. For an image of size C × H × W ,we view an instance y as a vector in Rd with d = CHW .All definitions below apply per instance for arbitrary spatial sizes H, W . Let 1 ∈ Rd denote the all-ones instance. In all our experiments, backbones are size-agnostic, so gθ is defined for any H, W . All statistics below are computed jointly over all entries (all channels, all pixels). This choice matches the NE group action y 7 → ay + b1, which acts identically on all entries. Pooling statistics per channel would instead correspond to enforcing a larger, channel-wise affine equivariance, which we do not assume. Thus, the pooling domain is part of the equivariance specification, not an implementation convention. 2Normalization-Equivariant Wrapper            
+
+> Noisy training image
+> σ= 10
+> Noisy test image
+> σ= 90
+> Test image denoised by SwinIR
+> Test image denoised by SwinIR-WNE (ours)
+> Figure 2. SwinIR qualitative denoising under noise-level mismatch. Models are trained at σtrain = 10 and evaluated at σtest = 90 , far beyond the training noise. The unwrapped Baseline SwinIR degrades severely, while SwinIR-WNE remains stable.
+
+For any y ∈ Rd, define the empirical mean and standard deviation: 
+
+μ(y) := 1
+
+> dd
+
+X
+
+> i=1
+
+yi, std( y) := 1√d ∥y − μ(y)1∥2. (3) We also define the normalized manifold: 
+
+M := {z ∈ Rd : μ(z) = 0 , std( z) = 1 } (4) 
+
+={z ∈ Span( 1)⊥ : ∥z∥2 = √d}. (5) 
+
+3.1. Normalization-Equivariant Wrapper 
+
+We define the NE normalization map (with a constant-instance guardrail) 
+
+TNE (y) := 
+
+
+
+y − μ(y)1
+
+std( y) if std( y) > 0,
+
+0 if std( y) = 0 ,
+
+(6) so that TNE (y) ∈ M whenever std( y) > 0. Given any backbone gθ : Rd → Rd, our NE-wrapped map is 
+
+f WNE  
+
+> θ
+
+(y) := std( y) gθ
+
+ TNE (y) + μ(y)1. (7) By construction, f WNE  
+
+> θ
+
+is normalization-equivariant: for all 
+
+a > 0 and b ∈ R,
+
+f WNE  
+
+> θ
+
+(ay + b1) = a f WNE  
+
+> θ
+
+(y) + b1, (8) with a short proof in Appendix C.3. This guarantee is in-dependent of the backbone internals because the wrapper removes and re-injects the global shift and scale via μ(y)
+
+and std( y), so gθ is only queried on normalized inputs 
+
+TNE (y) ∈ M (when std( y) > 0). In particular, gθ may use components incompatible with internal-layer NE—softmax attention, LayerNorm, and BatchNorm—without breaking the equivariance identity. An equivalent residual-prediction formulation is given in Appendix F. 
+
+Numerical stability. Our theory assumes the ideal wrap-per with a guardrail for constant inputs ( std( y) = 0 ). For numerical stability, the implementation uses std ϵ(y) := std( y) + ϵ (ϵ = 10 −5). The resulting map is approximately NE: it matches the ideal wrapper whenever std( y) is not close to 0, and differs only in the near-constant regime where stabilization is active. 
+
+Training objective. We train by minimizing raw-space MSE: 
+
+min  
+
+> θ
+
+E∥f WNE  
+
+> θ
+
+(y) − x∥22
+
+. (9) 
+
+Relationship to Instance Normalization. The normaliza-tion TNE (y) = ( y − μ(y)1)/std( y) has the same algebraic form as instance normalization when statistics are pooled over all channels and pixels (as opposed to the common per-channel variant). The key difference is that the wrapper reuses the input instance statistics to analytically invert the transform at the output (7). 
+
+3.2. Characterization of NE Maps 
+
+Our method and analysis rely on the following complete characterization of normalization-equivariant maps. 
+
+Characterization 1 (Characterization of NE maps) . A func-tion f : Rd → Rd is normalization-equivariant if and only if there exists a function g : M → Rd such that, for all y
+
+with std( y) > 0,
+
+f (y) = std( y) g TNE (y) + μ(y)1.
+
+Moreover, for std( y) = 0 one necessarily has f (y) = 
+
+μ(y)1, and g is uniquely determined by f on M.
+
+Proofs are in Appendix C. (Equivalently, an NE map is determined by its restriction to M, together with the forced behavior on constant inputs.) 3Normalization-Equivariant Wrapper 
+
+Table 1. Matched-noise PSNR (dB). Average PSNR on Set12 and BSD68 for AWGN with σ ∈ { 10 , 25 , 50 } (8-bit units). Each model is trained at a single σ and evaluated at the same σ. Our WNE remains competitive while providing robustness under mismatch (Figures 3–4). 
+
+SE-arch and NE-arch are FDnCNN-based architectural variants (no BatchNorm, constrained layers), while WNE wraps the standard backbone. Set12 BSD68 Noise level σ (8-bit) 10 25 50 10 25 50 DnCNN family (Zhang et al., 2017) 
+
+Baseline 34.92 30.50 27.17 33.92 29.19 26.18 
+
+SE-arch 34.41 30.42 27.19 33.51 29.12 26.12 
+
+NE-arch 34.65 30.37 27.20 33.72 29.11 26.18 
+
+WNE (ours) 34.77 30.43 27.22 33.80 29.15 26.20 SwinIR (Liang et al., 2021) Baseline 35.08 30.79 27.61 34.01 29.38 26.46 
+
+WNE (ours) 34.95 30.65 27.47 33.94 29.30 26.37 8 12 16 20 24 28 32 36 
+
+> input PSNR (dB)
+> 8
+> 12
+> 16
+> 20
+> 24
+> 28
+> 32
+> 36
+> output PSNR (dB)
+> Baseline
+> SE-arch
+> NE-arch
+> WNE
+> identity
+
+(a) σtrain = 10 8 12 16 20 24 28 32 36  
+
+> input PSNR (dB)
+> 8
+> 12
+> 16
+> 20
+> 24
+> 28
+> 32
+> 36
+> output PSNR (dB)
+
+(b) σtrain = 25 8 12 16 20 24 28 32 36  
+
+> input PSNR (dB)
+> 8
+> 12
+> 16
+> 20
+> 24
+> 28
+> 32
+> 36
+> output PSNR (dB)
+
+(c) σtrain = 50 
+
+Figure 3. Output PSNR versus input PSNR on Set12 for models trained at a single σtrain (vertical reference line) and tested at varying 
+
+σtest , following Herbreteau et al. (2023). The Baseline is noise-level specific, while equivariance stabilizes performance under mismatch. Our WNE closely matches the mismatch trend of the architectural normalization-equivariant reference (NE-arch, FDnCNN-based), and improves over the architectural scale-equivariant reference (SE-arch) and the unwrapped baseline. Dashed line: no denoising ( ˆx = y). 
+
+## 4. Experimental Results 
+
+We test whether input-output NE enforcement improves generalization away from the training noise level under a single-noise mismatch diagnostic. 
+
+Protocol and metric. We follow the single-noise diagnos-tic of Herbreteau et al. (2023), the single-point limit of the limited-range training used to study mismatch in Mohan et al. (2020). Each model is trained on additive white Gaus-sian noise (AWGN) at a fixed σtrain ∈ { 10 , 25 , 50 } (8-bit units) and evaluated on Set12 over a wide range of σtest . For each test image, we compute input PSNR (noisy y vs. clean 
+
+x) and output PSNR (denoised ˆx vs. x). We then plot output PSNR versus input PSNR (Figures 3 and 4). The vertical line indicates the training noise level: moving away from the vertical line corresponds to testing outside the training noise range. The dashed identity line corresponds to leaving the input unchanged. 
+
+Models and compared variants. We evaluate two widely used reference backbones from distinct families: DnCNN (Zhang et al., 2017) (CNN) and SwinIR (Liang et al., 2021) (transformer-based restoration). We focus on mismatch trends rather than peak PSNR. For each fam-ily, we compare the unmodified backbone (Baseline) to its wrapped counterpart (WNE). Training details and im-plementation in Appendix A and Appendix B. Additional diagnostics in the appendix cover input-only normalization versus the full wrapper (Appendix O), SSIM diagnostics (Appendix J), soft-NE and multi-noise controls with ex-plicit equivariance-defect measurements (Appendices D– E), and robustness beyond AWGN (Appendix P). Breadth checks extend the evaluation to FDnCNN-family controls (Appendix H), Restormer and color denoising (Appen-dices K–L), real sensor noise on SIDD (Appendix M), and a Noise2Noise setting where denoisers are reused for iterative sampling and inverse-problem solving (Appendix N). 
+
+DnCNN family (CNN-based). We compare (i) Baseline, the standard DnCNN implementation (with BatchNorm), and (ii) WNE, our wrapper applied to the same DnCNN backbone. We also report the architectural equivariant refer-ences (iii) SE-arch and (iv) NE-arch from Herbreteau et al. (2023), built on FDnCNN with layer replacements through-out (Appendix A.2). These are architectural references rather than controlled same-backbone ablations: relative to standard DnCNN, they remove BatchNorm and bias, and 4Normalization-Equivariant Wrapper 8 12 16 20 24 28 32 36 
+
+> input PSNR (dB)
+> 8
+> 12
+> 16
+> 20
+> 24
+> 28
+> 32
+> 36
+> output PSNR (dB)
+> Baseline
+> WNE
+> identity
+
+(a) σtrain = 10 8 12 16 20 24 28 32 36  
+
+> input PSNR (dB)
+> 8
+> 12
+> 16
+> 20
+> 24
+> 28
+> 32
+> 36
+> output PSNR (dB)
+
+(b) σtrain = 25 8 12 16 20 24 28 32 36  
+
+> input PSNR (dB)
+> 8
+> 12
+> 16
+> 20
+> 24
+> 28
+> 32
+> 36
+> output PSNR (dB)
+
+(c) σtrain = 50 
+
+Figure 4. Noise-level mismatch on SwinIR. Same diagnostic as Figure 3. The Baseline SwinIR degrades once σtest ̸ = σtrain , while 
+
+SwinIR-WNE stabilizes performance away from the training noise. Dashed line: no denoising ( ˆx = y). 
+
+NE-arch also constrains the admissible filter class. Ap-pendix H brackets this confound with an FDnCNN-family comparison, where WNE-FDnCNN still tracks NE-arch under mismatch. 
+
+SwinIR (transformer-based). For SwinIR, we compare the Baseline and WNE. We include SwinIR as a modern transformer restoration backbone to test whether the wrap-per improves mismatch robustness beyond CNN architec-tures. Appendix K shows the same mismatch-stabilization pattern on Restormer, a second transformer backbone, and Appendix L extends the same construction to color de-noising. For transformers, architectural SE/NE would re-quire modifying attention/LayerNorm; we therefore com-pare Baseline vs. WNE. 
+
+4.1. DnCNN: Input-Output NE Matches Architectural NE Trends 
+
+Across all three training settings σtrain ∈ { 10 , 25 , 50 }, Fig-ure 3 shows that WNE produces mismatch curves that closely match the robustness trend of the architectural normalization-equivariant NE-arch reference. This indi-cates that enforcing NE at the input-output level recovers essentially the same robustness of architectural NE without constraining internal layers. Relative to SE-arch, we observe an asymmetric pattern: when training at higher noise and testing at lower noise (high-to-low), WNE improves over SE-arch; when training at lower noise and testing at higher noise (low-to-high), WNE is comparable to SE-arch. Over-all, the additional shift-equivariance in NE yields consistent gains over SE in the high-to-low regime. 
+
+4.2. SwinIR: Improved Extrapolation for a Transformer Backbone 
+
+Figure 4 shows that SwinIR exhibits pronounced noise-level specificity under single-noise training: the baseline curve flattens once σtest ̸ = σtrain , indicating poor extrapolation outside the training noise. Wrapping SwinIR with WNE stabilizes the mapping, yielding a smoother and more mono-tonic output-PSNR trend across low and high input noise. Figure 2 illustrates this effect in a severe mismatch set-ting: models trained at σtrain = 10 are evaluated at a much higher noise level (e.g., σtest = 90 ). The Baseline SwinIR degrades visibly, while the wrapped model remains qualita-tively stable, consistent with the trend in Figure 4. 
+
+4.3. The Wrapper Does Not Degrade Performance 
+
+At matched noise levels ( σtest = σtrain ), WNE remains close to the unwrapped baseline for both backbones (Table 1). We report results at the final training checkpoint for all models (no early stopping) to keep evaluation consistent across variants; our primary focus is robustness under mismatch (Figures 3 and 4) rather than peak matched-noise PSNR. 
+
+4.4. The Wrapper Has Negligible Overhead on GPU 
+
+Table 2 reports wall-clock seconds per batch for FDnCNN variants. On GPU, the WNE wrapper adds negligible over-head relative to the baseline, since it only introduces per-instance reductions ( μ, std ) and elementwise affine opera-tions around the backbone. The architectural NE reference NE-arch is slower in our benchmark, consistent with the cost of enforcing equivariance throughout internal layers rather than via an outer analytic transform. Similar findings were also reported by Herbreteau et al. (2023). We observe the same behavior for SwinIR: on GPU, WNE matches the base-line within measurement noise ( 1.00 × backward, 1.00 ×
+
+inference; Appendix Table 5). Full GPU/CPU timings and the benchmarking protocol are reported in Appendix B.1. 
+
+4.5. Adaptive-Filter Interpretation Extends to Transformers 
+
+Figure 5 visualizes two Jacobian rows (Jf (y)) i, : of the denoiser f as spatial filters (reshaped to the input grid), following Mohan et al. (2020); Herbreteau et al. (2023). 5Normalization-Equivariant Wrapper σ = 25    
+
+> PSNR: 32.20 dB
+> ρ: 0.250
+> Denoised
+> Σ = 1 .00 Σ = 1 .00
+> Adaptive filters
+> PSNR: 32.10 dB
+> ρ: 0.000
+> Denoised
+> Σ = 1 .00 Σ = 1 .00
+> Adaptive filters
+> σ = 5
+> PSNR: 32.79 dB
+> ρ: 0.053 Σ = 1 .01 Σ = 1 .00
+> PSNR: 36.60 dB
+> ρ: 0.000 Σ = 1 .00 Σ = 1 .00
+> Baseline WNE Noisy
+
+Figure 5. Input-adaptive (affine) filters from the Jacobian. We visualize two rows of Jf (y) as per-output-pixel filters. For WNE ,NE implies positive 1-homogeneity, so at differentiable points f (y) = Jf (y) y and the filters can be read literally (Mohan et al., 2020; Herbreteau et al., 2023). Under mismatch ( σ = 5 ), the Baseline SwinIR shows diffuse filters and oversmoothing, while SwinIR-WNE 
+
+retains structured, edge-aligned filters and improves PSNR. Both networks were trained for Gaussian noise at noise level σ = 25 
+
+exclusively. 
+
+Table 2. Runtime overhead for FDnCNN on GPU (seconds per batch). Timing on inputs of shape 16 × 1 × 128 × 128 with warmup = 3 and timed steps = 10 . “Backward” measures one training iteration (forward + loss + backward), and “Inference” measures forward-only. Values in parentheses are ratios relative to the baseline. Hardware: NVIDIA GeForce RTX 4090 .Variant Backward (s) Inference (s) 
+
+Baseline 0.034 0.011 
+
+NE-arch 0.054 (1.60 ×) 0.019 (1.69 ×)
+
+WNE 0.033 (0.99 ×) 0.011 (1.00 ×)
+
+If f is positively 1-homogeneous and differentiable at y,Euler’s theorem gives 
+
+f (y) = Jf (y) y, (10) so each output pixel f (y)i is exactly the inner product of 
+
+y with its local filter (Jf (y)) i, :, making these rows literal input-adaptive filters. Because WNE enforces NE (hence SE), this interpretation applies to SwinIR despite attention and LayerNorm. Moreover, NE implies shift equivariance, and at differentiable points this yields 
+
+Jf (y) 1 = 1, (11) so each filter has unit sum and the local model is an adaptive affine combination of input pixels. To verify the Euler identity in the displayed examples, we report 
+
+ρ(y) := ∥f (y) − Jf (y) y∥2
+
+∥f (y)∥2
+
+, (12) which is 0 for differentiable positively 1-homogeneous maps (up to numerical error). More broadly, since the wrapper enforces SE/NE at the input-output level independently of the backbone, Jacobian-based analyses developed for bias-free SE denoisers (Mohan et al., 2020; Herbreteau et al., 2023) extend directly to any wrapped architecture. This includes recent generalization analyses based on harmonic structure (Kadkhodaie et al., 2024). 
+
+## 5. Analysis 
+
+We analyze a mechanism that explains the noise-level mis-match robustness of normalization-equivariant (NE) denois-ers. The analysis applies to any NE denoiser (architectural, classical, or wrapped). We focus on (i) the stability of output PSNR under noise-level mismatch and (ii) why performance degrades differently when testing above versus below the training noise level. All statistics reported in this section were computed using training patches (using the same training corpus as Sec-tion 4), corrupted with AWGN at the stated σ.
+
+5.1. NE Reduces Denoising to Normalized Regression 
+
+By Characterization 1, any NE map f : Rd → Rd is entirely determined by a function g : M → Rd via 
+
+f (y) = std( y) g TNE (y) + μ(y)1. (13) The normalization and denormalization steps are fixed ana-lytic operations; only the map g acting on normalized inputs 6Normalization-Equivariant Wrapper 
+
+˜y ∈ M varies across NE maps. This factorization makes the source of robustness (or failure) transparent: cross-noise behavior is governed by how g
+
+performs on normalized pairs (˜ y, ˜x) as σ varies. 
+
+PSNR decomposes into normalized and scale terms. Adirect consequence of the factorization is that PSNR decom-poses into normalized and scale terms. For a clean target x and noisy observation y, define the matched normalized target: 
+
+˜x := TNE (x ; y) := x − μ(y)1
+
+std( y) . (14) Then (Appendix C.5): 
+
+f (y) − x = std( y) g(˜ y) − ˜x, (15) so the raw-space MSE factorizes as: 
+
+∥f (y) − x∥22 = std( y)2 g(˜ y) − ˜x 22 (16) Thus raw-space MSE is equivalent to a weighted regression in normalized coordinates, with weight std( y)2 per instance. Consequently, the raw-space PSNR decomposes as: 
+
+PSNR = 10 log 10 (dR 2)
+
+| {z }
+
+> constant
+
+− 10 log 10 
+
+ ∥g(˜ y) − ˜x∥22
+
+| {z } 
+
+> normalized error Q(˜ y, ˜x)
+
+− 20 log 10 
+
+ std( y)| {z }
+
+> scale
+
+. (17) Where R denotes the pixel dynamic range 1. The scale term depends only on the instance statistic std( y), while the normalized error 
+
+Q(˜ y, ˜x) := −10 log 10 ∥g(˜ y) − ˜x∥22 (18) captures regression quality in normalized coordinates (larger 
+
+Q means smaller normalized squared error). 
+
+5.2. The Geometry of Normalized Coordinates 
+
+In normalized coordinates, the input ˜y = TNE (y) always lies on M (unit standard deviation, zero mean). The target 
+
+˜x = ( x−μ(y)1)/std( y) does not: as noise increases, std( y)
+
+grows, so ˜x shrinks toward the origin. Thus higher noise compresses the target while leaving the input on M.We define the input-target distance in normalized coordi-nates: 
+
+δ := ˜ y − ˜x, ∆ := ∥δ∥2. (19)     
+
+> 1In our experiments images are scaled to [0 ,1] , so R= 1 .
+
+Under AWGN ( y = x + σn , n ∼ N (0 , I d)), 
+
+δ = y − x
+
+std( y) = σ
+
+std( y) n. (20) As σ → ∞ , std( y) ≈ σ and ∆ concentrates near √d; while as σ → 0, ∆ → 0 (Figure 7). 
+
+SNR controls ∆. To understand how ∆ varies with noise level, we relate it to the signal-to-noise ratio. Define the empirical signal variance σ2 
+
+> x
+
+:= 1 
+
+> d
+
+∥x − μ(x)1∥22. For high-dimensional instances, cross-terms concentrate and 
+
+std( y)2 ≈ σ2 
+
+> x
+
++ σ2. (21) Substituting into ∆2 = ∥σn/ std( y)∥22 and taking expecta-tions gives 
+
+E[∆ 2 | x, σ ] ≈ d
+
+1 + SNR , SNR := σ2
+
+> x
+
+/σ 2. (22) 
+
+5.3. Normalized Error Is Largely ∆-Driven Observation 1 (∆ predicts normalized MSE) . We observe that for our model and setup the conditional normalized MSE satisfies 
+
+E∥g(˜ y) − ˜x∥22 | ∆ = r, σ  ≈ ψ(r), (23) with residual dependence on σ that is small compared to variation across r.Intuitively, this collapse may occur because, at fixed ∆, the normalized pairs (˜ y, ˜x) are approximately identically dis-tributed regardless of σ—the backbone faces a statistically similar regression problem across noise levels. A more formal version of this intuition is given in Appendix G. We estimate the conditional trend by binning samples by ∆
+
+and computing the mean and standard deviation of Q(˜ y, ˜x)
+
+within each bin. Figure 6 shows the result: within the central 95% of the training ∆ distribution, curves for different σ
+
+largely collapse onto a single difficulty-indexed trend. An extended analysis comparing Baseline and WNE is given in Appendix I. The Baseline exhibits stronger dependence on 
+
+σ at fixed ∆ (Figure 11), suggesting that the collapse is a consequence of enforcing NE rather than an artifact of the difficulty measure itself. 
+
+5.4. Train-Test Overlap in ∆
+
+Observation 2 (Substantial overlap across noise levels) .
+
+The distribution of ∆ shows substantial overlap across noise levels (Figure 7, Table 3). This overlap reflects the wide variation in σ2 
+
+> x
+
+across natural-image patches (flat regions vs. textured regions). Changing 7Normalization-Equivariant Wrapper 35 40 45 50 55 60   
+
+> Δ = ‖̃ y−̃ x‖2
+> −30
+> −25
+> −20
+> −15
+> −10
+> −5
+> Q(̃ y,̃  x) (dB)
+> σ=10
+> σ=20
+> σ=30
+> σ=40
+> σ=50
+
+Figure 6. Normalized-space error vs difficulty for NE (central 95% range). For each σ we plot Q(˜ y, ˜x) versus ∆ = ∥˜y − ˜x∥2,reporting mean and standard deviation over samples. The x-axis shows the central 95% interval of the training ∆ distribution at 
+
+σtrain = 50 , used as a fixed reference range for all σ. Within this shared difficulty band, curves for different σ show substantial collapse, suggesting that once difficulty is controlled by ∆, the remaining dependence of normalized regression error on σ is small. Model: SwinIR-WNE , trained at σtrain = 50 .
+
+Table 3. Train-test ∆ overlap for the NE wrapper. Entries are empirical coverages m(σtest ; σtrain ) (percent), measured using the central 95% training interval at each σtrain . Overlap is substan-tial but asymmetric: training at low noise covers many higher-noise difficulties, while training at high noise covers only a fraction of very low-noise difficulties. This matches the empirical asymmetry observed in Figure 3. 
+
+σtrain \σtest 50 40 30 20 10 
+
+50 95 87 68 42 19 40 97 95 83 56 24 30 96 96 95 76 34 20 93 95 96 95 56 10 88 90 92 95 95 
+
+σ therefore rescales a broad SNR distribution rather than shifting a point mass, preserving overlap in the induced ∆
+
+values. To quantify the overlap of ∆ across noise levels, for a given 
+
+σtrain we define the central 95% interval of its ∆ distribu-tion: 
+
+I(σtrain ) := q0.025 (σtrain ), q 0.975 (σtrain ) (24) where qp(σ) denotes the empirical p-quantile of ∆ com-puted from samples at noise level σ.For σtest , we empirically estimate the in-range mass as such: 
+
+m(σtest ; σtrain ) := 1
+
+N
+
+> N
+
+X
+
+> i=1
+
+1∆iσtest ∈ I(σtrain ) (25) 0 10 20 30 40 50 60 70          
+
+> Δ = ‖̃ y−̃ x‖2
+> 0.00
+> 0.01
+> 0.02
+> 0.03
+> 0.04
+> 0.05
+> 0.06
+> 0.07
+> Density
+> σ= 10
+> σ= 20
+> σ= 30
+> σ= 40
+> σ= 50
+> √d= 70
+
+Figure 7. NE difficulty distributions. Empirical histograms of 
+
+∆ = ∥˜y− ˜x∥2 at several noise levels σ. As σ increases, mass shifts upward and concentrates near √d, consistent with ∆ ≈ ∥ n∥2
+
+at high noise. Despite this shift, the distributions still overlap substantially across σ. Computed from 10 6 training patches. 
+
+where N is the number of samples. Table 3 shows that this in-range mass remains substantial off-diagonal, so mismatch test samples often query difficulties that are well-represented during training. 
+
+5.5. Mechanism for Robustness and Asymmetry 
+
+Together, Observation 1 and Observation 2 suggest that at fixed ∆, the normalized pairs (˜ y, ˜x) are similar in distribu-tion across σ, so g operates in an interpolation regime even under noise-level mismatch. This collapse suggests that changing σ primarily shifts which difficulties are queried (Figure 7), rather than changing what the backbone sees at a given difficulty. The asymmetry in Figure 3 also follows: training at low noise covers a wide range of higher-noise difficulties (high coverage in the upper triangle of Table 3), while training at high noise covers fewer low-noise difficul-ties (low coverage in the lower triangle). 
+
+## 6. Conclusion 
+
+We prove that normalize-process-denormalize is not merely sufficient but necessary for normalization equivariance: any NE map admits this factorization. This turns exact NE enforcement for the ideal wrapper from an internal-layer design constraint into an input-output parameterization, leav-ing the backbone architecture unrestricted. This perspective yields WNE, a parameter-free wrapper for arbitrary CNN or transformer backbones. In blind denois-ing, WNE improves robustness to noise-level mismatch for DnCNN and SwinIR, remains competitive at matched noise, and adds negligible GPU overhead. Practically, standard 8Normalization-Equivariant Wrapper 
+
+components such as attention, BatchNorm, and LayerNorm can be preserved while still obtaining the input-output equiv-ariance guarantee. Appendix experiments broaden the ev-idence across backbones, metrics, corruptions, color and real-noise settings, and downstream reuse of Noise2Noise-trained denoisers for sampling and inverse problems. In Appendix N, the same mechanism stabilizes reuse of N2N-trained denoisers in iterative sampling and inpainting, reach-ing 23 .87 dB versus 6.08 dB for the unwrapped N2N base-line in a constrained inpainting sampler. The normalized-coordinate view also gives a simple ex-planation for the observed robustness. Because an NE de-noiser is determined by its action on normalized inputs, noise-level mismatch is naturally studied through the nor-malized regression g(˜ y) ≈ ˜x. Empirically, the induced difficulty ∆ = ∥˜y − ˜x∥2 shows substantial train-test overlap across noise levels, and within shared ∆ ranges the normal-ized error varies only weakly with σ. Appendix G gives a conditional justification for this ∆-collapse, with an ex-act per-instance σ-freeness statement and an approximate population-level lift. Thus, under NE, changing σ mainly shifts which normalized difficulties are queried, not the re-gression problem at a fixed difficulty; when train and test 
+
+∆-distributions overlap, WNE often remains in an interpola-tion regime on M. The sampler experiments in Appendix N extend the evidence beyond denoising and point to broader restoration tasks, plug-and-play solvers, and noisy-only ob-jectives as natural directions for future work. 
+
+## Impact Statement 
+
+This paper presents a theoretical characterization and a parameter-free wrapper for enforcing normalization equiv-ariance in image-to-image neural networks. The main in-tended benefit is improved robustness under distribution shift, reducing calibration burden in applications such as photography, medical imaging, and scientific imaging. Po-tential risks are those of stronger image-processing systems in sensitive settings: denoising can alter visual evidence, and benchmark restoration performance does not validate use in medical, forensic, or safety-critical decision pipelines. The method releases no personal data or generative model, and we identify no additional misuse risks beyond these application-level concerns. 
+
+## Acknowledgements 
+
+We thank Marian Lukac, Eleni Kalogirou, and the members of the Machine Learning Group at the University of Geneva for helpful discussions and feedback. This work was sup-ported by the Hasler Foundation under the Responsible AI program. 
+
+## References 
+
+Abdelhamed, A., Lin, S., and Brown, M. S. A high-quality denoising dataset for smartphone cameras. In Proceed-ings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pp. 1692–1700, 2018. Agustsson, E. and Timofte, R. NTIRE 2017 challenge on single image super-resolution: Dataset and study. In 
+
+Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition Workshops , pp. 126–135, 2017. Buades, A., Coll, B., and Morel, J.-M. A review of im-age denoising algorithms, with a new one. Multiscale Modeling & Simulation , 4(2):490–530, 2005. Dabov, K., Foi, A., Katkovnik, V., and Egiazarian, K. Image denoising by sparse 3-d transform-domain collaborative filtering. IEEE Transactions on image processing , 16(8): 2080–2095, 2007. Desai, A. D., Ozturkler, B. M., Sandino, C. M., Boutin, R., Willis, M., Vasanawala, S., Hargreaves, B. A., R ´e, C., Pauly, J. M., and Chaudhari, A. S. Noise2Recon: Enabling SNR-robust MRI reconstruction with semi-supervised and self-supervised learning. Magnetic Res-onance in Medicine , 90(5):2052–2070, 2023. doi: 10. 1002/mrm.29759. Gu, S., Zhang, L., Zuo, W., and Feng, X. Weighted nuclear norm minimization with application to image denoising. In Proceedings of the IEEE conference on computer vi-sion and pattern recognition , pp. 2862–2869, 2014. Guth, F., Kadkhodaie, Z., and Simoncelli, E. Learning normalized image densities via dual score matching. In 
+
+Advances in Neural Information Processing Systems , vol-ume 38, 2025. Hendriksen, A. A., Pelt, D. M., and Batenburg, K. J. Noise2Inverse: Self-supervised deep convolutional de-noising for tomography. IEEE Transactions on Computa-tional Imaging , 6:1320–1335, 2020. doi: 10.1109/TCI. 2020.3019647. Herbreteau, S. and Kervrann, C. On normalization-equivariance properties of supervised and unsuper-vised denoising methods: a survey. arXiv preprint arXiv:2402.15352 , 2024. Herbreteau, S., Moebel, E., and Kervrann, C. Normalization-equivariant neural networks with application to image denoising. Advances in Neural Information Processing Systems , 36:5706–5728, 2023. Hong, T., Xu, X., Hu, J., and Fessler, J. A. Provable precon-ditioned plug-and-play approach for compressed sensing MRI reconstruction. IEEE Transactions on Computa-tional Imaging , 10:1476–1488, 2024. 9Normalization-Equivariant Wrapper 
+
+Huang, P., Zhang, C., Zhang, X., Li, X., Dong, L., and Ying, L. Self-supervised deep unrolled reconstruction using regularization by denoising. IEEE Transactions on Medical Imaging , 43(3):1203–1213, 2024. doi: 10.1109/ TMI.2023.3332614. Ioffe, S. and Szegedy, C. Batch normalization: Accelerating deep network training by reducing internal covariate shift. In Proceedings of the 32nd International Conference on Machine Learning , volume 37 of Proceedings of Machine Learning Research , pp. 448–456. PMLR, 2015. Kaba, S.-O., Mondal, A. K., Zhang, Y., Bengio, Y., and Ra-vanbakhsh, S. Equivariance with learned canonicalization functions. In Proceedings of the 40th International Con-ference on Machine Learning , volume 202 of Proceed-ings of Machine Learning Research , pp. 15546–15566. PMLR, 2023. URL https://proceedings.mlr. press/v202/kaba23a.html .Kadkhodaie, Z. and Simoncelli, E. Stochastic solutions for linear inverse problems using the prior implicit in a denoiser. Advances in Neural Information Processing Systems , 34:13242–13254, 2021. Kadkhodaie, Z., Guth, F., Simoncelli, E. P., and Mallat, S. Generalization in diffusion models arises from geometry-adaptive harmonic representations. In International Con-ference on Learning Representations , 2024. Kim, T., Kim, J., Tae, Y., Park, C., Choi, J.-H., and Choo, J. Reversible instance normalization for accu-rate time-series forecasting against distribution shift. In 
+
+International Conference on Learning Representations ,2022. URL https://openreview.net/forum? id=cGDAkQo1C0p .Kingma, D. P. and Ba, J. Adam: A method for stochastic optimization. In International Conference on Learning Representations , 2015. Lehtinen, J., Munkberg, J., Hasselgren, J., Laine, S., Karras, T., Aittala, M., and Aila, T. Noise2Noise: Learning image restoration without clean data. In Proceedings of the 35th International Conference on Machine Learning ,volume 80 of Proceedings of Machine Learning Research ,pp. 2971–2980. PMLR, 2018. Levac, B., Tamir, J., Pereyra, M., and Tachella, J. Normalization-equivariant diffusion models: Learning posterior samplers from noisy and partial measurements. 
+
+arXiv preprint arXiv:2510.11964 , 2025. Liang, J., Cao, J., Sun, G., Zhang, K., Van Gool, L., and Timofte, R. SwinIR: Image restoration using Swin trans-former. In Proceedings of the IEEE/CVF International Conference on Computer Vision Workshops , pp. 1833– 1844, 2021. Lim, B., Son, S., Kim, H., Nah, S., and Lee, K. M. Enhanced deep residual networks for single image super-resolution. In Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition Workshops , pp. 136–144, 2017. Liu, J., Sun, Y., Eldeniz, C., Gan, W., An, H., and Kamilov, U. S. RARE: Image reconstruction using deep priors learned without groundtruth. IEEE Journal of Selected Topics in Signal Processing , 14(6):1088–1099, 2020. doi: 10.1109/JSTSP.2020.2998402. Liu, Y., Wu, H., Wang, J., and Long, M. Non-stationary transformers: Exploring the stationarity in time series forecasting. Advances in Neural Information Processing Systems , 35:9881–9893, 2022. Liu, Z., Lin, Y., Cao, Y., Hu, H., Wei, Y., Zhang, Z., Lin, S., and Guo, B. Swin transformer: Hierarchical vision transformer using shifted windows. In Proceedings of the IEEE/CVF International Conference on Computer Vision ,pp. 10012–10022, 2021. Ma, K., Duanmu, Z., Wu, Q., Wang, Z., Yong, H., Li, H., and Zhang, L. Waterloo exploration database: New chal-lenges for image quality assessment models. IEEE Trans-actions on Image Processing , 26(2):1004–1016, 2017. Martin, D., Fowlkes, C., Tal, D., and Malik, J. A database of human segmented natural images and its application to evaluating segmentation algorithms and measuring ecological statistics. In Proceedings of the Eighth IEEE International Conference on Computer Vision , volume 2, pp. 416–423. IEEE, 2001. Mohan, S., Kadkhodaie, Z., Simoncelli, E. P., and Fernandez-Granda, C. Robust and interpretable blind im-age denoising via bias-free convolutional neural networks. In International Conference on Learning Representations ,2020. URL https://openreview.net/forum? id=HJlSmC4FPS .Mondal, A. K., Panigrahi, S. S., Kaba, O., Ra-jeswar Mudumba, S., and Ravanbakhsh, S. Equivariant adaptation of large pretrained models. In Advances in Neural Information Processing Systems , volume 36, pp. 50293–50309. Curran Associates, Inc., 2023. Paszke, A., Gross, S., Massa, F., Lerer, A., Bradbury, J., Chanan, G., Killeen, T., Lin, Z., Gimelshein, N., Antiga, L., et al. PyTorch: An imperative style, high-performance deep learning library. Advances in Neural Information Processing Systems , 32:8026–8037, 2019. Rudin, L. I., Osher, S., and Fatemi, E. Nonlinear total variation based noise removal algorithms. Physica D: Nonlinear Phenomena , 60(1–4):259–268, 1992. 10 Normalization-Equivariant Wrapper 
+
+Ulyanov, D., Vedaldi, A., and Lempitsky, V. Instance nor-malization: The missing ingredient for fast stylization. 
+
+arXiv preprint arXiv:1607.08022 , 2016. Wang, Z., Bovik, A. C., Sheikh, H. R., and Simoncelli, E. P. Image quality assessment: from error visibility to struc-tural similarity. IEEE transactions on image processing ,13(4):600–612, 2004. Zamir, S. W., Arora, A., Khan, S., Hayat, M., Khan, F. S., and Yang, M.-H. Restormer: Efficient transformer for high-resolution image restoration. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pp. 5728–5739, 2022. Zhang, K., Zuo, W., Chen, Y., Meng, D., and Zhang, L. Beyond a Gaussian denoiser: Residual learning of deep CNN for image denoising. IEEE Transactions on Image Processing , 26(7):3142–3155, 2017. Zhang, K., Li, Y., Zuo, W., Zhang, L., Van Gool, L., and Timofte, R. Plug-and-play image restoration with deep denoiser prior. IEEE Transactions on Pattern Analysis and Machine Intelligence , 44(10):6360–6376, 2022. 11 Normalization-Equivariant Wrapper 
+
+## A. Description of the Denoising Architectures and Implementation 
+
+A.1. Description of Models DnCNN and FDnCNN: We implement the Denoising CNN (DnCNN) of Zhang et al. (2017), which consists of 20 convolutional layers with 3×3 filters and 64 channels, batch normalization (Ioffe & Szegedy, 2015), and ReLU nonlinearities. To construct the bias-free/BatchNorm-free variant used by prior equivariant baselines, we follow Herbreteau et al. (2023) and use FDnCNN, an unpublished flexible DnCNN variant that removes batch normalization and additive bias. In our experiments, we keep the standard DnCNN backbone unchanged when applying our wrapper (WNE), while FDnCNN serves as the base architecture for the architectural scale-equivariant and normalization-equivariant baselines (SE-arch, NE-arch) where internal-layer equivariance is enforced. 
+
+SwinIR: We use SwinIR (Liang et al., 2021), a transformer-based denoiser built from Swin Transformer blocks (Liu et al., 2021) (windowed self-attention with LayerNorm and MLPs). We use the denoising configuration (no upsampling) and instantiate the lightweight variant in our code: a shallow 3 × 3 convolutional feature extractor, followed by 4 Residual Swin Transformer Blocks (RSTBs) with depths (6 , 6, 6, 6) (total 24 Swin Transformer blocks, embedding dimension 60 ,window size 8, 6 heads, MLP ratio 2; patch size 1 with patch-wise LayerNorm), and a 3 × 3 convolutional reconstruction head. As architectural SE/NE counterparts are not available as drop-in replacements for standard transformer components (e.g., attention and LayerNorm), for SwinIR we compare only the unmodified backbone (Baseline) and its wrapped version (WNE). 
+
+Restormer: We use Restormer (Zamir et al., 2022), a transformer-based denoiser built from Multi-DConv Head Transposed Self-Attention (MDTA) and Gated-Dconv Feed-Forward Network (GDFN) blocks. In our code, we instantiate the denoising variant as a 4-level encoder-decoder with an overlapping 3 × 3 convolutional input embedding, base width 48 , block counts 
+
+(4 , 6, 6, 8) across the encoder/latent levels, attention heads (1 , 2, 4, 8) , FFN expansion factor 2.66 , and 4 refinement blocks at the final resolution. Downsampling and upsampling are implemented with convolution plus PixelUnshuffle/PixelShuffle, and the network predicts the denoised output through a final 3 × 3 convolution with a global residual connection from the noisy input. For the grayscale experiments, the model uses single-channel input/output and is trained on 64 × 64 patches. As architectural SE/NE counterparts are not available as drop-in replacements for the standard attention and normalization blocks, for Restormer we compare only the unmodified backbone (Baseline) and its wrapped version (WNE). 
+
+A.2. Description of Variants Baseline: The Baseline variant is the unmodified reference implementation of each backbone (DnCNN or SwinIR), including its standard use of biases and (when present) internal normalization layers. 
+
+SE-arch: For the DnCNN family, the scale-equivariant baseline SE-arch follows the bias-free ReLU construction of Herbreteau et al. (2023) which is based on the construction from Mohan et al. (2020). Concretely, architectural sources of scale breaking (most notably additive biases, and normalization layers that introduce additive shifts) are removed, leaving only positively 1-homogeneous operations. This enforces scale equivariance f (ay ) = af (y) for all a > 0.
+
+NE-arch: The normalization-equivariant baseline NE-arch follows the architectural construction of Herbreteau et al. (2023). In this design, NE is enforced throughout the network by restricting internal operations to NE-compatible families: (i) Standard convolutions are replaced by affine-constrained convolutions: bias-free convolutions whose weights are constrained so that a constant feature map is mapped to itself, 
+
+Conv w(1) = 1,
+
+which for a multi-channel 3 × 3 convolution is equivalent to requiring, for each output channel c′,
+
+X
+
+> c
+
+X
+
+> i,j
+
+wc′,c,i,j = 1 ,
+
+with reflect padding. 12 Normalization-Equivariant Wrapper 
+
+(ii) ReLU nonlinearities are replaced by SortPool channel-wise sorting patterns, implemented via the two-channel operator 
+
+SortPool( u, v ) =  min( u, v ), max( u, v ),
+
+applied in a fixed pairing scheme across channels. (iii) Classical residual sums are replaced by affine residual connections, where two branches ℓ1 and ℓ2 are combined as 
+
+(1 − t) ℓ1 + t ℓ 2,
+
+with a trainable scalar t.As in Herbreteau et al. (2023), NE-arch is instantiated on FDnCNN (BatchNorm-free), since enforcing NE throughout internal layers is not compatible with BatchNorm. 
+
+Wrapped normalization-equivariant (WNE): Our method WNE enforces input-output NE without modifying internal operations. Given an arbitrary backbone gθ , the wrapped predictor is 
+
+f WNE  
+
+> θ
+
+(y) = std( y) gθ (TNE (y)) + μ(y)1,
+
+as defined in (7) . This yields NE at the input-output level for any backbone gθ , including off-the-shelf DnCNN (with BatchNorm) and SwinIR. 
+
+A.3. Practical Implementation Notes 
+
+Our primary comparisons are within-backbone: Baseline versus WNE for DnCNN and SwinIR, isolating the effect of the outer wrapper on a fixed backbone. For the DnCNN family we also report SE-arch and NE-arch from Herbreteau et al. (2023) as architectural references. These models enforce SE/NE by replacing core operations throughout the network (e.g., constrained convolutions and equivariant nonlinearities), so they constitute a distinct architecture rather than a drop-in modification of standard DnCNN. We include them to place WNE in context relative to established architectural-constraint designs. 
+
+Channel-wise sort pooling (NE-arch). We implement the channel-wise sorting nonlinearity of Herbreteau et al. (2023) using standard pooling primitives. Given a pairing of channels, we compute the per-location maxima and minima for each pair (pooling with kernel size 2 along the channel axis) and concatenate the results. Between successive sort stages, we apply the same fixed channel reindexing as in Herbreteau et al. (2023) to define the next pairing pattern. Since CNN feature channels have no intrinsic ordering, the precise permutation is not semantically meaningful; it simply realizes the prescribed NE-compatible nonlinearity efficiently. 
+
+Affine-constrained convolutions (NE-arch). For the architectural NE baseline (NE-arch), we use the public implementa-tion released by Herbreteau et al. (2023), including their stable reparameterization of affine-constrained convolution kernels. (We do not re-derive or redesign these constrained layers; we reuse their tested implementation to keep the architectural NE baseline faithful.) 
+
+Numerical stability (WNE). For the wrapper, we compute μ(y) and std( y) jointly over all entries (all channels and pixels), matching the NE group action y 7 → ay + b1. All theoretical results (and Proposition 2) assume the idealized wrapper using 
+
+std( y) together with the constant-instance guardrail TNE (y) = 0 when std( y) = 0 . In code, we use std ϵ(y) := std( y) + ϵ
+
+with ϵ = 10 −5 to stabilize normalization when std( y) is very small. This yields an approximately NE implementation: it matches the theoretical wrapper whenever std( y) is not close to 0, and differs only in the near-constant regime where the stabilization is active. 
+
+Code. All models are implemented in PyTorch (Paszke et al., 2019). For NE-arch, we rely on the released code of Herbreteau et al. (2023). Our wrapper (WNE) is implemented as a lightweight normalize-apply-backbone-denormalize module around the chosen backbone. 13 Normalization-Equivariant Wrapper                                              
+
+> Table 4. Training hyperparameters. All runs use on-the-fly patch sampling from the same training corpus and AWGN corruption. For the single-noise diagnostic, σis fixed during training ( σtrain ∈ { 10 ,25 ,50 }) and varied at test time. *indicates that the learning rate is halved every 100,000 iterations. Herbreteau et al. (2023) use a constant learning rate for FDnCNN variants, noting that “speed improvements are certainly possible by adapting the learning rate throughout optimization.” Model / variant Batch Patch PLoss LR Iterations DnCNN (Baseline) 128 70 ℓ11e −4500,000 FDnCNN (SE-arch) 128 70 ℓ11e −4500,000 FDnCNN (NE-arch) 128 70 MSE 1e −4900,000 DnCNN (WNE) 128 70 MSE 1e −4*500,000 SwinIR (Baseline) 32 64 MSE 1e −4500,000 SwinIR (WNE) 32 64 MSE 1e −4*500,000
+
+## B. Description of Datasets and Training Details 
+
+Relation to prior work (protocol). We follow the dataset construction and training protocol of Herbreteau et al. (2023, Appendix B, and implementation notes in Appendix A), which in turn adopts the large training set of Zhang et al. (2022); we use this same training set for all models and experiments. To diagnose noise-level mismatch in a controlled setting, we also consider single-noise training with fixed σtrain , following the single-noise protocol of Herbreteau et al. (2023). 
+
+Datasets. Following Herbreteau et al. (2023), our training set is the standard large-scale denoising training corpus popularized by DRUNet/DPIR-style pipelines. The dataset is composed of 8,694 images: (i) BSD400 (400 images) from the Berkeley Segmentation Dataset (Martin et al., 2001), (ii) the Waterloo Exploration Database (4,744 images) (Ma et al., 2017), (iii) DIV2K (900 images) (Agustsson & Timofte, 2017), (iv) Flickr2K (about 2.6k images) (Lim et al., 2017). We apply random flips and 90 ◦ rotations for data augmentation. We report test results on Set12 and BSD68 (Martin et al., 2001). 
+
+Preprocessing and noise model. All experiments use additive white Gaussian noise (AWGN). Images are processed in grayscale for Set12/BSD68 evaluation. Pixel intensities are normalized to [0 , 1] ; noise levels σ are reported in 8-bit units, so the injected noise standard deviation in [0 , 1] units is σ/ 255 . For the single-noise mismatch diagnostic, we train at a fixed 
+
+σtrain ∈ { 10 , 25 , 50 } and evaluate at a range of σtest values. 
+
+Patch sampling. We train from on-the-fly random crops: each iteration samples a clean training image uniformly, extracts a random P × P patch, and corrupts it with AWGN at the chosen σ. Unless stated otherwise, we use P = 70 (matching Herbreteau et al. (2023)’s FDnCNN/DnCNN setting). 
+
+Optimization. We train with Adam and default β parameters (Kingma & Ba, 2015). Unless stated otherwise, we use an initial learning rate 10 −4. We train for a fixed number of iterations (not tied to epochs); in our code this corresponds to 
+
+num steps iterations. For the NE-arch variants we train for longer following Herbreteau et al. (2023). We use MSE for our NE-enforcing variants (NE-arch and WNE) following Herbreteau et al. (2023). 
+
+Model-specific settings. Table 4 summarizes the training hyperparameters used in our experiments. For DnCNN-family architectural baselines (SE-arch and NE-arch), we follow the corresponding prescriptions from Mohan et al. (2020); Herbreteau et al. (2023). For SwinIR, we use the standard denoising SwinIR backbone (Liang et al., 2021) and train it under the same AWGN patch-based pipeline to keep the comparison controlled. 
+
+Validation. We report results using the final checkpoint rather than early-stopping on validation PSNR, as our focus is mismatch behavior rather than peak matched-noise performance. 14 Normalization-Equivariant Wrapper         
+
+> Table 5. Runtime overhead for SwinIR (seconds per batch). Timing with batch size 32 , spatial size 64 ×64 , warmup = 3 , and timed steps = 10 . “Backward” measures one training iteration (forward + loss + backward), and “Inference” measures forward-only. Values in parentheses are ratios relative to the baseline on the same device.
+
+GPU CPU Variant Backward (s) Inference (s) Backward (s) Inference (s) Baseline 0.271 0.101 16.31 3.52 WNE 0.271 ( 1.00 ×) 0.101 ( 1.00 ×) 18.22 ( 1.12 ×) 3.81 ( 1.08 ×)                      
+
+> Table 6. Runtime overhead for FDnCNN (seconds per batch). Timing on inputs of shape 16 ×1×128 ×128 with warmup = 3 and timed steps = 10 . “Backward” measures one training iteration (forward + loss + backward), and “Inference” measures forward-only. Values in parentheses are ratios relative to the baseline on the same device. Hardware: GPU = NVIDIA GeForce RTX 4090 , CPU =
+> AMD Ryzen Threadripper PRO 5955WX 16-Cores .
+
+GPU CPU Variant Backward (s) Inference (s) Backward (s) Inference (s) Baseline 0.034 0.011 2.53 0.82 WNE 0.033 (0.99 ×) 0.011 (1.00 ×) 2.51 (0.99 ×) 0.83 (1.01 ×)NE-arch 0.054 (1.60 ×) 0.019 (1.69 ×) 3.79 (1.50 ×) 1.57 (1.90 ×)
+
+B.1. Runtime Benchmarking Protocol 
+
+We report wall-clock seconds per batch, averaged over 10 timed iterations after 3 warmup iterations, using the same input shapes across variants. “Backward” corresponds to one training iteration (forward + loss + backward) and “Inference” corresponds to forward-only under the torch.no grad() context. Absolute times depend on hardware and system settings, but ratios are informative because all variants share the same backbone family and are timed using the same harness. For SwinIR, we additionally report timings on inputs of shape 32 × 1 × 64 × 64 , reflecting the transformer’s training batch and patch size in our setup (Table 5). On CPU, we observe a small but nonzero overhead in our current PyTorch implementation; this may be mitigated with more careful CPU benchmarking. Our focus is GPU training and inference, where modern denoisers are typically deployed. 
+
+## C. Mathematical Proofs 
+
+C.1. A Lemma from Herbreteau et al. (2023) 
+
+We reproduce the following lemma from Herbreteau et al. (2023) for completeness; it is not used elsewhere and is equivalent to our characterization via Remark 1. 
+
+Lemma 1 (Lemma 1 in Herbreteau et al. (2023)) . Let f : Rd → Rd satisfy normalization equivariance: 
+
+f (ay + b1) = af (y) + b1 for all a > 0, b ∈ R.
+
+Then f is entirely determined by its restriction to 
+
+Sd−1 ∩ Span( 1)⊥.
+
+Proof. First note that NE implies scale equivariance (SE) by taking b = 0 :
+
+f (ay ) = af (y) (a > 0) .
+
+Fix x ∈ Rd. Decompose x orthogonally as 
+
+x = x1 + x2, x1 ∈ Span( 1)⊥, x2 ∈ Span( 1).
+
+If x1 = 0 , then x = x2 = α1 for some α ∈ R. Using NE with y = 0 gives 
+
+f (α1) = f (0 + α1) = f (0) + α1.
+
+15 Normalization-Equivariant Wrapper 
+
+Also, SE forces f (0) = 0 : f (0) = f (a · 0) = af (0) for all a > 0, so f (0) = 0 . Hence f (α1) = α1. Thus f (x) is determined on Span( 1).Assume x1̸ = 0 . Using NE with the shift x2 ∈ Span( 1),
+
+f (x) = f (x1 + x2) = f (x1) + x2.
+
+Now let z := x1/∥x1∥2. Then z ∈ Sd−1 ∩ Span( 1)⊥, and by SE, 
+
+f (x1) = f (∥x1∥2 z) = ∥x1∥2 f (z).
+
+Therefore 
+
+f (x) = ∥x1∥2 f (z) + x2,
+
+so knowing f on Sd−1 ∩ Span( 1)⊥ determines f (x) for every x ∈ Rd.
+
+Remark 1 (Connection to our normalized manifold M). Recall 
+
+M := {z ∈ Rd : μ(z) = 0 , std( z) = 1 } = {z ∈ Span( 1)⊥ : ∥z∥2 = √d}.
+
+Hence 
+
+M = √d Sd−1 ∩ Span( 1)⊥.
+
+Specifying a function on M is equivalent to specifying it on Sd−1 ∩ Span( 1)⊥, up to the fixed rescaling by √d.
+
+C.2. Affine Identities for μ, std , and TNE 
+
+We include the following proposition for completeness. 
+
+Proposition 1 (Mean and standard deviation under affine transforms) . For all a > 0, b ∈ R, and y ∈ Rd,
+
+μ(ay + b1) = a μ (y) + b, std( ay + b1) = a std( y), TNE (ay + b1) = TNE (y),
+
+where 
+
+TNE (y) := 
+
+
+
+y − μ(y)1
+
+std( y) if std( y) > 0,
+
+0 if std( y) = 0 .
+
+Proof. The mean identity follows from linearity of summation. For the std , note 
+
+ay + b1 − μ(ay + b1)1 = a y − μ(y)1,
+
+so std( ay + b1) = (1 /√d)∥a(y − μ(y)1)∥2 = a std( y).For TNE : If std( y) > 0,
+
+TNE (ay + b1) = a(y − μ(y)1)
+
+a std( y) = TNE (y).
+
+If std( y) = 0 , then y is constant, hence ay + b1 is constant, and both map to 0 by definition. 
+
+C.3. Normalization Equivariance of the Wrapper Proposition 2 (NE of the wrapper) . Let g : Rd → Rd be an arbitrary map and define 
+
+f WNE (y) := std( y) g TNE (y) + μ(y)1.
+
+Then f WNE is normalization equivariant: 
+
+f WNE (ay + b1) = a f WNE (y) + b1 for all a > 0, b ∈ R.
+
+16 Normalization-Equivariant Wrapper 
+
+Proof. Using Proposition 1, 
+
+f WNE (ay + b1) = std( ay + b1) g TNE (ay + b1) + μ(ay + b1)1
+
+= a std( y) g TNE (y) + ( aμ (y) + b)1
+
+= a f WNE (y) + b1.
+
+C.4. Complete Characterization of Normalization Equivariance Characterization 1 (Characterization of NE maps) . A function f : Rd → Rd is normalization-equivariant if and only if there exists a function g : M → Rd such that, for all y with std( y) > 0,
+
+f (y) = std( y) g TNE (y) + μ(y)1.
+
+Moreover, for std( y) = 0 one necessarily has f (y) = μ(y)1, and g is uniquely determined by f on M.Proof. (⇐) Follows directly from Proposition 2. (⇒) Assume f is NE. Define g : M → Rd as the restriction of f to M, i.e., g(z) := f (z) for z ∈ M .If std( y) = 0 , then y = μ(y)1. Scale equivariance (the case b = 0 of NE) implies f (0) = 0 . Applying NE with a = 1 to the input 0 gives 
+
+f (y) = f (μ(y)1) = f (0) + μ(y)1 = μ(y)1.
+
+If std( y) > 0, then by definition 
+
+y = std( y) TNE (y) + μ(y)1, TNE (y) ∈ M .
+
+Applying NE gives: 
+
+f (y) = f  std( y) TNE (y) + μ(y)1 = std( y) f  TNE (y) + μ(y)1 = std( y) g TNE (y) + μ(y)1.
+
+Uniqueness: if g1, g 2 both satisfy the factorization, evaluate at z ∈ M (where μ(z) = 0 , std( z) = 1 ) to obtain 
+
+f (z) = gi(z),
+
+so g1(z) = g2(z) for all z ∈ M .
+
+C.5. Training Objective Identity Proposition 3 (Raw space MSE equals a weighted normalized MSE) . Let ˜y := TNE (y) and define the matched target transform 
+
+TNE (x ; y) := 
+
+
+
+x − μ(y)1
+
+std( y) if std( y) > 0,
+
+0 if std( y) = 0 .
+
+Let ˜x := TNE (x; y). For the wrapped model f WNE  
+
+> θ
+
+(y) = std( y) gθ (˜ y) + μ(y)1, when std( y) > 0,
+
+f WNE  
+
+> θ
+
+(y) − x 22 = std( y)2 gθ (˜ y) − ˜x 22.
+
+Proof. Given std( y) > 0, we write x = std( y)˜ x + μ(y)1. Then 
+
+f WNE  
+
+> θ
+
+(y) − x =  std( y)gθ (˜ y) + μ(y)1 −  std( y)˜ x + μ(y)1
+
+= std( y) gθ (˜ y) − ˜x.
+
+Taking squared norms gives the claim. 17 Normalization-Equivariant Wrapper 
+
+## D. Objective-Level Soft NE Versus Exact Parameterization 
+
+Because WNE is loss-agnostic, it can in principle be paired with either supervised or self-supervised objectives. Levac et al. (2025) consider a different route: in their noisy-only diffusion-learning setting, NE is encouraged through the training objective rather than imposed by parameterization. In Gaussian denoising, they replace ordinary SURE with an affine-augmented objective. For single-operator inverse problems, they add this denoising term to an equivariant-imaging loss that enforces consistency with the measurement model. The comparison to WNE is therefore between objective-level soft enforcement and exact model-level parameterization. Porting that objective-level route to a different regime generally requires specifying a new loss, not merely reusing the objective from Levac et al. (2025) verbatim. For example, a supervised analogue is an orbit-averaged regression objective of the form 
+
+Lorbit := E(x,y ),α,μ fθ (αy + μ1) − (αx + μ1) 22,
+
+which introduces design choices through the sampling law of the affine variables (α, μ ). Different orbit distributions weight different regions of the affine orbit and therefore define different soft-NE objectives. By contrast, WNE leaves the base loss unchanged and enforces the symmetry exactly by construction around the chosen backbone. In noisy-only settings, exact parameterization can replace affine augmentation for enforcing NE, but losses such as SURE or equivariant-imaging terms are still needed to provide the self-supervised training signal. 
+
+Our supervised soft-NE implementation. For the supervised control used here, we instantiate the orbit-averaged objective by sampling a single affine pair (α, μ ) independently for each training image and applying the same transform to both the clean target and its noisy observation: 
+
+x′ = αx + μ1, y′ = αy + μ1.
+
+We then minimize the ordinary supervised regression loss 
+
+LsoftNE = E(x,y ),α,μ 
+
+∥fθ (y′) − x′∥22
+
+ .
+
+In code, this is implemented by redrawing (α, μ ) on each training step, broadcasting each sampled scalar pair over all pixels and channels of the image, and replacing the original pair (x, y ) by (x′, y ′) before evaluating the standard MSE loss. Following Levac et al. (2025), we sample α ∼ U(0 , 1) and μ ∼ U(0 , 1) ; unlike a commutator penalty, this introduces no extra loss weight. 
+
+Control experiments. Figure 8 reports companion PSNR/SSIM curves for two SwinIR controls. The left column compares a multi-noise SwinIR baseline trained on σ ∈ [0 , 55] , matching the blind DnCNN-B range used by Zhang et al. (2017), against WNE across the same test sweep. The right column compares the supervised soft-NE SwinIR baseline at σtrain = 10 
+
+against WNE under the fixed-σtrain mismatch diagnostic. Both controls improve over an unconstrained baseline trained at a single noise level, but neither matches the wrapped model’s flat mismatch behavior as cleanly as exact NE. Broader noise coverage or affine augmentation can improve robustness within the sampled range, but they do not imply the algebraic identity f (ay + b1) = af (y) + b1 for all a > 0 and b ∈ R. The value of WNE is precisely this exact structural guarantee: the affine nuisance is removed analytically rather than approximated from finite orbit coverage. This matters in downstream settings that assume exact NE as part of the algorithmic design, such as the preconditioned PnP analysis of Hong et al. (2024). 
+
+## E. Equivariance-Defect Diagnostics for Multi-Noise and Soft-NE Baselines 
+
+To complement the PSNR/SSIM mismatch plots, we measure an explicit normalization-equivariance defect 
+
+εNE = Ey,a,b 
+
+ ∥f (ay + b1) − (af (y) + b1)∥2
+
+∥af (y) + b1∥2 + τ
+
+
+
+,
+
+where the expectation averages over evaluation images and randomly sampled affine perturbations y 7 → ay + b1, with 
+
+a ∼ U(0 .5, 1.5) and b ∼ U( −0.25 , 0.25) . Lower is better; exact NE gives zero, and the wrapped implementation is visibly zero at plot resolution in these experiments. Accordingly, εNE asks not whether multi-noise or soft-NE can recover some empirical robustness, but whether they recover the structural identity itself. 18 Normalization-Equivariant Wrapper 8 12 16 20 24 28 32 36 
+
+input PSNR (dB) 
+
+8
+
+12 
+
+16 
+
+20 
+
+24 
+
+28 
+
+32 
+
+36 
+
+> output PSNR (dB)
+
+Baseline 
+
+WNE 
+
+identity 
+
+(a) Multi-noise Baseline vs. WNE (PSNR). 8 12 16 20 24 28 32 36 
+
+input PSNR (dB) 
+
+8
+
+12 
+
+16 
+
+20 
+
+24 
+
+28 
+
+32 
+
+36 
+
+> output PSNR (dB)
+
+WNE 
+
+Soft-NE 
+
+identity (b) Soft-NE vs. WNE (PSNR). 0.104 
+
+> 0.119
+> 0.137
+> 0.161
+> 0.193
+> 0.236
+> 0.298
+> 0.394
+> 0.562
+> 0.881
+> 1.0
+
+input SSIM 
+
+0.1 
+
+0.2 
+
+0.3 
+
+0.4 
+
+0.5 
+
+0.6 
+
+0.7 
+
+0.8 
+
+0.9 
+
+1.0 
+
+> output SSIM
+
+Baseline 
+
+WNE 
+
+identity 
+
+(c) Multi-noise Baseline vs. WNE (SSIM). 0.098 
+
+> 0.142
+> 0.199
+> 0.272
+> 0.357
+> 0.454
+> 0.56
+> 0.668
+> 0.719
+> 0.811
+> 0.881
+
+input SSIM 
+
+0.1 
+
+0.2 
+
+0.3 
+
+0.4 
+
+0.5 
+
+0.6 
+
+0.7 
+
+0.8 
+
+0.9 
+
+1.0 
+
+> output SSIM
+
+WNE 
+
+Soft-NE 
+
+identity (d) Soft-NE vs. WNE (SSIM). 
+
+Figure 8. PSNR/SSIM controls for multi-noise and supervised soft-NE baselines on SwinIR. Left column: a SwinIR baseline trained on a range of noise levels σ ∈ [0 , 55] against WNE over the same test sweep. Right column: a supervised orbit-averaged soft-NE SwinIR baseline trained at σtrain = 10 against WNE. Top row uses output PSNR; bottom row uses output SSIM versus input SSIM. In both controls, broader orbit coverage narrows the performance gap, but WNE remains the most stable under mismatch. Figure 9 shows the corresponding explicit equivariance-defect curves. 
+
+19 Normalization-Equivariant Wrapper 
+
+Figure 9 reports two complementary SwinIR controls. In the left panel, a baseline trained on a range of noise levels 
+
+σ ∈ [0 , 55] has smaller defect inside the training range than outside it, but the defect remains visibly nonzero and increases beyond the range; the wrapped model stays visibly at zero across the sweep. In the right panel, a supervised orbit-averaged soft-NE baseline reduces the defect relative to the unconstrained baseline but does not drive it to zero, whereas WNE again stays visibly at zero. 0 10 20 30 40 50 60 70 80 90   
+
+> noise level σ(8-bit)
+> 0.00
+> 0.04
+> 0.08
+> 0.12
+> 0.16
+> εNE
+> Baseline
+> WNE
+
+(a) Multi-noise Baseline vs. WNE (SwinIR). 0 10 20 30 40 50 60 70 80 90    
+
+> noise level σ(8-bit)
+> 0.000
+> 0.006
+> 0.012
+> 0.018
+> 0.024
+> 0.030
+> εNE
+> WNE
+> Soft-NE
+
+(b) Soft-NE vs. WNE (SwinIR, σtrain = 10 ). 
+
+Figure 9. Explicit equivariance-defect diagnostics. Left: for a multi-noise SwinIR baseline trained on σ ∈ [0 , 55] (shaded region), the equivariance defect εNE is lower within the training range but remains visibly nonzero and increases beyond it; WNE stays visibly at zero across the full sweep. Right: for a supervised orbit-averaged soft-NE baseline trained at σtrain = 10 (vertical line), the defect is reduced but remains visibly nonzero, whereas WNE stays visibly at zero. 
+
+## F. Direct Prediction vs Residual Prediction Under the Wrapper 
+
+This appendix records two equivalent implementations that yield a normalization-equivariant end-to-end predictor. 
+
+Direct (clean) prediction. Given gθ , define 
+
+ˆxθ (y) := std( y) gθ
+
+ TNE (y) + μ(y)1.
+
+By Proposition 2, ˆxθ is NE. 
+
+Residual (noise) prediction. Let hθ predict the normalized residual (y − x)/std( y) in normalized coordinates and define 
+
+ˆrθ (y) := 
+
+(std( y) hθ
+
+ TNE (y) if std( y) > 0,
+
+0 if std( y) = 0 .
+
+Output ˆxθ (y) := y − ˆrθ (y). Using Proposition 1, 
+
+ˆrθ (ay + b1) = a ˆrθ (y),
+
+so 
+
+ˆxθ (ay + b1) = ay + b1 − aˆrθ (y) = aˆxθ (y) + b1.
+
+Thus ˆxθ is NE. 
+
+Conversion. If f is NE, then the residual map r(y) := y − f (y) satisfies: (i) scale equivariance r(ay ) = a r (y) for all 
+
+a > 0, and (ii) shift-invariance r(y + b1) = r(y) for all b ∈ R. Conversely, if a map r : Rd → Rd satisfies (i) and (ii), then 
+
+f (y) := y − r(y) is NE since for all a > 0 and b ∈ R,
+
+f (ay + b1) = ay + b1 − r(ay + b1) = ay + b1 − a r (y) = af (y) + b1.
+
+This lets you match direct or residual conventions without changing the end-to-end equivariance guarantee. 20 Normalization-Equivariant Wrapper 
+
+## G. A Conditional Explanation for Observation 1 
+
+We give a two-step explanation for the ∆-driven collapse in Observation 1. Part 1 is an exact per-instance statement. Part 2 lifts it to the population level under one modelling assumption. 
+
+Part 1: Exact per-instance σ-freeness. Recall that under AWGN, 
+
+y = x + σn, n ∼ N (0 , I d),
+
+and that 
+
+˜y := TNE (y), ˜x := x − μ(y)1
+
+std( y) , ∆ := ∥˜y − ˜x∥2.
+
+The normalized input ˜y always lies on the normalized manifold M := {z ∈ Rd : μ(z) = 0 , std( z) = 1 }.
+
+Proposition 4 (Per-instance σ-freeness) . Fix a nonconstant clean instance x. Then conditioning on σ is redundant given 
+
+(x, ˜x, ∆) :
+
+p(˜ y | x, ˜x, ∆ = r, σ ) = p(˜ y | x, ˜x, ∆ = r).
+
+Consequently, for any estimator g,
+
+E∥g(˜ y) − ˜x∥22 | x, ˜x, ∆ = r, σ  = E∥g(˜ y) − ˜x∥22 | x, ˜x, ∆ = r .
+
+Proof. Write a := std( y) and m := μ(y). Since ˜x = ( x − m1)/a , fixing x and the realized ˜x determines a and m:
+
+a = std( x)std(˜ x) , m = μ(x) − a μ (˜ x).
+
+Hence x = a˜x + m1 and y = a˜y + m1. Under AWGN, 
+
+p(y | x, σ ) ∝ exp 
+
+
+
+− ∥y − x∥22
+
+2σ2
+
+
+
+.
+
+Substituting y = a˜y + m1 and x = a˜x + m1 gives 
+
+p(˜ y | x, ˜x, σ ) ∝ exp 
+
+
+
+− a2∥˜y − ˜x∥22
+
+2σ2
+
+
+
+1{˜y ∈ M} ,
+
+with respect to the natural surface measure on M. Conditioning further on ∆ = ∥˜y − ˜x∥2 = r makes the exponential factor constant on 
+
+Sr (x, ˜x) := {z ∈ M : ∥z − ˜x∥2 = r}.
+
+Therefore the conditional law of ˜y given (x, ˜x, ∆ = r, σ ) is the normalized surface measure on Sr (x, ˜x), which does not depend on σ.
+
+High-dimensional simplification. Let 
+
+σx := std( x), ˆx := x − μ(x)1
+
+∥x − μ(x)1∥2
+
+.
+
+In high dimension, 
+
+μ(y) ≈ μ(x), std( y)2 ≈ σ2 
+
+> x
+
++ σ2, ∆2 ≈ d σ 2
+
+σ2 
+
+> x
+
++ σ2 .
+
+Eliminating σ gives std( y)2 ≈ d σ 2
+
+> x
+
+/(d − ∆2), and therefore 
+
+˜x = x − μ(y)1
+
+std( y) ≈ pd − ∆2 ˆx. 
+
+Thus, conditional on (x, ∆ = r), the matched normalized target ˜x is approximately determined, and Proposition 4 yields the approximate per-instance collapse 
+
+E∥g(˜ y) − ˜x∥22 | x, ∆ = r, σ  ≈ ϕg (ˆ x, r ).
+
+21 Normalization-Equivariant Wrapper 
+
+Part 2: Population-level collapse under one assumption. To pass from the per-instance statement to the population-level 
+
+∆-collapse, we must average over the instance distribution and account for how conditioning on (∆ , σ ) changes which clean instances are selected. 
+
+Assumption 1 (Contrast-independence of normalized instance structure) . The normalized instance direction 
+
+ˆx := x − μ(x)1
+
+∥x − μ(x)1∥2
+
+is approximately independent of the empirical contrast σx := std( x), in the sense that the conditional law of ˆx given σx = s
+
+varies only weakly with s over the range relevant to the analysis. Assumption 1 is a modelling assumption, not a closed-form consequence of AWGN. It requires that conditioning on empirical contrast does not substantially change the distribution of normalized structure. This is plausibly motivated by the image formation process: variation in empirical contrast across natural images reflects both scene content and acquisition conditions such as exposure, gain, and illumination. Standard brightness/contrast augmentations implicitly rely on a similar independence. 
+
+Proposition 5 (Population-level ∆-collapse) . Under Assumption 1, in the high-dimensional regime, for any estimator 
+
+g : M → Rd,
+
+E∥g(˜ y) − ˜x∥22 | ∆ = r, σ  ≈ ψg (r),
+
+for some function ψg of r alone. Proof. Apply the tower property: 
+
+E∥g(˜ y) − ˜x∥22 | ∆ = r, σ  = E
+
+h
+
+E∥g(˜ y) − ˜x∥22 | x, ∆ = r, σ  ∆ = r, σ 
+
+i
+
+.
+
+By the high-dimensional simplification above, the inner conditional expectation is approximately ϕg (ˆ x, r ). The relation 
+
+∆2 ≈ dσ 2/(σ2 
+
+> x
+
++ σ2) implies that at fixed (∆ = r, σ ), conditioning selects a narrow band of contrasts σx. Under Assumption 1, selecting instances through this contrast variable does not substantially change the conditional distribution of 
+
+ˆx. Therefore the conditional expectation depends only weakly on σ and can be approximated by a function of r alone. 
+
+Connection to Observation 1. Proposition 5 should be read as a conditional explanation of Observation 1: the ∆-collapse follows exactly at the per-instance level and lifts approximately to the population level under high-dimensional concentration together with Assumption 1. The residual σ-spread visible in Figure 6 can arise from finite-dimensional concentration error and residual dependence of normalized structure on contrast. 
+
+## H. FDnCNN-Family Comparison 
+
+We complement the main-text DnCNN results with an FDnCNN-family comparison in which all four variants share the same FDnCNN base architecture. This brackets one important confound in the main-text comparison: standard DnCNN is used for Baseline and WNE, whereas the architectural SE/NE references are built on FDnCNN. It removes that standard-DnCNN-versus-FDnCNN mismatch while preserving the equivariance-enforcing modifications of the architectural baselines, especially the stronger internal replacements used by NE-arch. 
+
+Protocol. We follow the same fixed-σtrain mismatch diagnostic as in Section 4: for each σtrain ∈ { 10 , 25 , 50 }, models are trained at a single noise level and evaluated on Set12 across varying σtest , plotting output PSNR versus input PSNR. 
+
+Results. Figure 10 and Table 7 show that WNE-FDnCNN is competitive with NE-arch across all three noise levels and that the mismatch curves follow the same qualitative trend as in Figure 3. The comparison does not collapse these methods into the same model class; rather, it shows that after bracketing the standard-DnCNN-versus-FDnCNN mismatch, WNE-FDnCNN still follows a robustness trend close to NE-arch. 22 Normalization-Equivariant Wrapper 8 12 16 20 24 28 32 36 
+
+> input PSNR (dB)
+> 8
+> 12
+> 16
+> 20
+> 24
+> 28
+> 32
+> 36
+> output PSNR (dB)
+> Baseline
+> SE-arch
+> NE-arch
+> WNE
+> identity
+
+(a) σtrain = 10 8 12 16 20 24 28 32 36  
+
+> input PSNR (dB)
+> 8
+> 12
+> 16
+> 20
+> 24
+> 28
+> 32
+> 36
+> output PSNR (dB)
+> Baseline
+> SE-arch
+> NE-arch
+> WNE
+> identity
+
+(b) σtrain = 25 8 12 16 20 24 28 32 36  
+
+> input PSNR (dB)
+> 8
+> 12
+> 16
+> 20
+> 24
+> 28
+> 32
+> 36
+> output PSNR (dB)
+> Baseline
+> SE-arch
+> NE-arch
+> WNE
+> identity
+
+(c) σtrain = 50 
+
+Figure 10. FDnCNN-family comparison under noise-level mismatch. Output PSNR versus input PSNR on Set12 for models trained at a single σtrain and tested at varying σtest . All four variants share the same FDnCNN base architecture. WNE closely matches the architectural normalization-equivariant reference NE-arch and improves over SE-arch and the unwrapped baseline. Dashed line: no denoising ( ˆx = y). 
+
+Table 7. Matched-noise PSNR (dB) on the FDnCNN backbone. Average PSNR on Set12 and BSD68 for AWGN with σ ∈ { 10 , 25 , 50 }
+
+(8-bit units). All four variants share the same FDnCNN base architecture. SE-arch and NE-arch modify internal layers to enforce equivariance, while WNE wraps the unmodified backbone. Set12 BSD68 Noise level σ (8-bit) 10 25 50 10 25 50 
+
+Baseline 34.82 30.51 27.29 33.87 29.21 26.25 
+
+SE-arch 34.41 30.42 27.20 33.51 29.12 26.12 
+
+NE-arch 34.69 30.42 27.26 33.77 29.13 26.21 
+
+WNE (ours) 34.62 30.38 27.23 33.72 29.11 26.19 
+
+## I. Normalized-Space Error Versus Difficulty (Baseline vs WNE) 
+
+In this appendix section, we extend the normalized-coordinate analysis of Section 5 by comparing the unmodified Baseline to the wrapped WNE across multiple training noise levels. Our aim is to test two related hypotheses: (i) whether the normalized regression error is primarily controlled by the difficulty variable ∆ = ∥˜y − ˜x∥2 rather than by the test noise level σtest , and (ii) whether enforcing input-output normalization equivariance strengthens this difficulty-driven behavior. All figures in this section use SwinIR as the backbone. 
+
+Normalized coordinates and difficulty. Given a clean target x ∈ Rd and noisy observation y = x + σn , define 
+
+˜y := TNE (y), ˜x := TNE (x ; y) := x − μ(y)1
+
+std( y) ,δ := ˜ y − ˜x, ∆ := ∥δ∥2.
+
+We interpret ∆ as a one-dimensional index of denoising difficulty in normalized coordinates (Section 5.2). 
+
+A model-agnostic normalized error. To compare Baseline and WNE in the same coordinate system, we re-express any model output ˆx = f (y) using the instance statistics of the input y:
+
+˜ˆx := ˆx − μ(y)1
+
+std( y) .
+
+This does not assume that Baseline is NE; it is a diagnostic that expresses any predictor in the (μ(y), std( y)) -anchored coordinates used by NE. We then measure normalized-space regression quality via 
+
+Qf (˜ y, ˜x) := −10 log 10 ˜ˆx − ˜x 22,
+
+where larger values indicate smaller normalized squared error. For WNE, we have ˜ˆx = gθ (˜ y) by construction, so Qf
+
+coincides with the backbone error in normalized coordinates used in Section 5. For Baseline, Qf evaluates how well the raw-space prediction aligns with the normalized target ˜x after mapping the output into the (μ(y), std( y)) -anchored coordinates. 23 Normalization-Equivariant Wrapper 
+
+Binning and summary curves. For each σtest , we bin samples by ∆ (fixed-width bins) and plot the empirical mean of Qf (˜ y, ˜x) in each bin, with ±1 standard deviation shading. All panels share identical axis limits to make cross-σtest 
+
+comparisons visually consistent. 
+
+Displayed difficulty range (per-curve central mass). In each panel, each σtest curve is displayed only over the central 
+
+95% mass of its own test-time ∆ distribution, that is, 
+
+∆ ∈ q0.025 (σtest ), q 0.975 (σtest ).
+
+We do not interpret tail behavior from these plots. 
+
+Results. Figure 11 reports six plots arranged by training noise level (rows) and model variant (columns). Across σtest ,WNE exhibits an approximate collapse of Qf versus ∆ within the bulk of each curve, indicating that once difficulty is controlled by ∆, the residual dependence of normalized regression error on σtest is small. In contrast, Baseline shows a stronger dependence on σtest at fixed ∆, suggesting that without explicit input-output normalization equivariance, normalized-coordinate behavior is less purely difficulty-driven. Together with the train-test overlap in ∆ (Table 3), these results support the interpretation that improved cross-noise robustness under WNE arises from reduced distribution shift in normalized coordinates and a backbone response that is closer to a difficulty-indexed regression. 
+
+## J. SSIM Under Noise-Level Mismatch 
+
+We report the Structural Similarity Index (SSIM) (Wang et al., 2004) alongside PSNR for the main DnCNN and SwinIR mismatch experiments. The same fixed-σtrain diagnostic is used as in Section 4, but output quality is measured with SSIM instead of PSNR. 
+
+## K. Restormer Backbone Experiments 
+
+We use Restormer to test whether the wrapper’s robustness benefit extends to a second transformer backbone beyond SwinIR. Restormer uses channel-wise self-attention, a substantially different mechanism from SwinIR’s shifted-window attention. 
+
+Protocol. We follow the same fixed-σtrain mismatch diagnostic as in Section 4: for each σtrain ∈ { 10 , 25 , 50 }, models are trained at a single noise level and evaluated on Set12 across varying σtest , plotting output PSNR versus input PSNR. Both variants share the same Restormer backbone described in Appendix A.1, with only the outer WNE wrapper added in the wrapped condition. 
+
+Results. Figure 14 shows the same qualitative mismatch pattern as for DnCNN and SwinIR: the unwrapped baseline is noise-level specific, while WNE yields smoother and more stable extrapolation across test noise levels. Table 8 reports matched-noise PSNR; unlike DnCNN and SwinIR, WNE is fully competitive with the baseline at all three noise levels on this backbone.                               
+
+> Table 8. Matched-noise PSNR (dB) on Restormer (grayscale). Average PSNR on Set12 and BSD68 for AWGN with σ∈ { 10 ,25 ,50 }
+> (8-bit units). Both variants share the same Restormer backbone; WNE wraps the unmodified architecture. Set12 BSD68 Noise level σ(8-bit) 10 25 50 10 25 50
+> Baseline 34.79 30.76 27.65 33.71 29.29 26.42
+> WNE (ours) 35.05 30.79 27.69 34.00 29.38 26.45
+
+## L. Color Denoising (Restormer on CBSD68) 
+
+To test whether the wrapper extends to multi-channel data, we train Restormer with and without WNE on 3-channel color images under the same fixed-σtrain mismatch protocol, evaluating on CBSD68. The wrapper pools μ(y) and std( y) jointly over all channels and pixels, matching the global affine action y 7 → ay + b1 without introducing per-channel statistics. 24 Normalization-Equivariant Wrapper 10 20 30 40 50 60 
+
+Δ = ‖̃ y −̃ x‖2
+
+> −40
+> −35
+> −30
+> −25
+> −20
+> −15
+> −10
+> −5
+> 0
+> Q(̃ y,̃  x) (dB)
+> σ=10
+> σ=20
+> σ=30
+> σ=40
+> σ=50
+
+(a) σtrain = 10 , WNE 10 20 30 40 50 60 
+
+Δ = ‖̃ y −̃ x‖2 
+
+> −40
+> −35
+> −30
+> −25
+> −20
+> −15
+> −10
+> −5
+> 0
+> Q(̃ y,̃  x) (dB)
+
+(b) σtrain = 10 , Baseline 10 20 30 40 50 60 
+
+Δ = ‖̃ y −̃ x‖2
+
+> −40
+> −35
+> −30
+> −25
+> −20
+> −15
+> −10
+> −5
+> 0
+> Q(̃ y,̃  x) (dB)
+
+(c) σtrain = 25 , WNE 10 20 30 40 50 60 
+
+Δ = ‖̃ y −̃ x‖2 
+
+> −40
+> −35
+> −30
+> −25
+> −20
+> −15
+> −10
+> −5
+> 0
+> Q(̃ y,̃  x) (dB)
+
+(d) σtrain = 25 , Baseline 10 20 30 40 50 60 
+
+Δ = ‖̃ y −̃ x‖2
+
+> −40
+> −35
+> −30
+> −25
+> −20
+> −15
+> −10
+> −5
+> 0
+> Q(̃ y,̃  x) (dB)
+
+(e) σtrain = 50 , WNE 10 20 30 40 50 60 
+
+Δ = ‖̃ y −̃ x‖2 
+
+> −40
+> −35
+> −30
+> −25
+> −20
+> −15
+> −10
+> −5
+> 0
+> Q(̃ y,̃  x) (dB)
+
+(f) σtrain = 50 , Baseline 
+
+Figure 11. Normalized-space error versus difficulty (Baseline vs WNE). For each σtrain ∈ { 10 , 25 , 50 } (rows), we plot the normalized regression quality Qf (˜ y, ˜x) versus difficulty ∆ = ∥˜y − ˜x∥2 for multiple test noise levels σtest , comparing WNE (left) to Baseline (right). For readability, each σtest curve is shown only over the central 95% mass of its own test-time ∆ distribution, 
+
+∆ ∈ [q0.025 (σtest ), q 0.975 (σtest )] , and bins outside this range are omitted. 
+
+25 Normalization-Equivariant Wrapper 0.098 
+
+> 0.142
+> 0.2
+> 0.271
+> 0.357
+> 0.454
+> 0.56
+> 0.668
+> 0.719
+> 0.81
+> 0.881
+
+input SSIM 
+
+0.1 
+
+0.2 
+
+0.3 
+
+0.4 
+
+0.5 
+
+0.6 
+
+0.7 
+
+0.8 
+
+0.9 
+
+1.0 
+
+> output SSIM
+
+Baseline 
+
+NE-arch 
+
+SE-arch 
+
+WNE 
+
+identity 
+
+(a) σtrain = 10 0.098 
+
+> 0.142
+> 0.199
+> 0.271
+> 0.357
+> 0.404
+> 0.507
+> 0.614
+> 0.719
+> 0.81
+> 0.881
+
+input SSIM 
+
+0.1 
+
+0.2 
+
+0.3 
+
+0.4 
+
+0.5 
+
+0.6 
+
+0.7 
+
+0.8 
+
+0.9 
+
+> output SSIM
+
+Baseline 
+
+NE-arch 
+
+SE-arch 
+
+WNE 
+
+identity (b) σtrain = 25 0.098 
+
+> 0.142
+> 0.199
+> 0.234
+> 0.313
+> 0.404
+> 0.507
+> 0.614
+> 0.719
+> 0.811
+> 0.881
+
+input SSIM 
+
+0.1 
+
+0.2 
+
+0.3 
+
+0.4 
+
+0.5 
+
+0.6 
+
+0.7 
+
+0.8 
+
+0.9 
+
+> output SSIM
+
+Baseline 
+
+NE-arch 
+
+SE-arch 
+
+WNE 
+
+identity (c) σtrain = 50 
+
+Figure 12. SSIM under noise-level mismatch for DnCNN. Same mismatch diagnostic as Figure 3, but measured with SSIM instead of PSNR. Across all three training noise levels, WNE preserves the robustness trend of normalization-equivariant models under train-test mismatch, while the Baseline remains noise-level specific. 0.098 
+
+> 0.142
+> 0.199
+> 0.271
+> 0.357
+> 0.454
+> 0.56
+> 0.668
+> 0.719
+> 0.81
+> 0.881
+
+input SSIM 
+
+0.1 
+
+0.2 
+
+0.3 
+
+0.4 
+
+0.5 
+
+0.6 
+
+0.7 
+
+0.8 
+
+0.9 
+
+1.0 
+
+> output SSIM
+
+Baseline 
+
+WNE 
+
+identity 
+
+(a) σtrain = 10 0.098 
+
+> 0.142
+> 0.199
+> 0.271
+> 0.357
+> 0.404
+> 0.507
+> 0.614
+> 0.719
+> 0.81
+> 0.881
+
+input SSIM 
+
+0.1 
+
+0.2 
+
+0.3 
+
+0.4 
+
+0.5 
+
+0.6 
+
+0.7 
+
+0.8 
+
+0.9 
+
+> output SSIM
+
+Baseline 
+
+WNE 
+
+identity (b) σtrain = 25 0.098 
+
+> 0.142
+> 0.199
+> 0.234
+> 0.313
+> 0.404
+> 0.507
+> 0.614
+> 0.719
+> 0.81
+> 0.881
+
+input SSIM 
+
+0.1 
+
+0.2 
+
+0.3 
+
+0.4 
+
+0.5 
+
+0.6 
+
+0.7 
+
+0.8 
+
+0.9 
+
+> output SSIM
+
+Baseline 
+
+WNE 
+
+identity (c) σtrain = 50 
+
+Figure 13. SSIM under noise-level mismatch for SwinIR. Same mismatch diagnostic as Figure 4, but measured with SSIM instead of PSNR. The Baseline SwinIR degrades once σtest ̸ = σtrain , while WNE stabilizes structural quality across a broader range of test noise levels. 8 12 16 20 24 28 32 36 
+
+input PSNR (dB) 
+
+8
+
+12 
+
+16 
+
+20 
+
+24 
+
+28 
+
+32 
+
+36 
+
+> output PSNR (dB)
+
+Baseline 
+
+WNE 
+
+identity 
+
+(a) σtrain = 10 8 12 16 20 24 28 32 36 
+
+input PSNR (dB) 
+
+8
+
+12 
+
+16 
+
+20 
+
+24 
+
+28 
+
+32 
+
+36 
+
+> output PSNR (dB)
+
+Baseline 
+
+WNE 
+
+identity (b) σtrain = 25 8 12 16 20 24 28 32 36 
+
+input PSNR (dB) 
+
+8
+
+12 
+
+16 
+
+20 
+
+24 
+
+28 
+
+32 
+
+36 
+
+> output PSNR (dB)
+
+Baseline 
+
+WNE 
+
+identity (c) σtrain = 50 
+
+Figure 14. Noise-level mismatch on Restormer. Same diagnostic as Figures 3–4, applied to a second transformer backbone. The Baseline Restormer degrades under mismatch, while WNE stabilizes performance across test noise levels. Dashed line: no denoising ( ˆx = y). 
+
+26 Normalization-Equivariant Wrapper 8 12 16 20 24 28 32 36 
+
+> input PSNR (dB)
+> 8
+> 12
+> 16
+> 20
+> 24
+> 28
+> 32
+> 36
+> output PSNR (dB)
+> Baseline
+> WNE
+> identity
+
+(a) σtrain = 10 8 12 16 20 24 28 32 36  
+
+> input PSNR (dB)
+> 8
+> 12
+> 16
+> 20
+> 24
+> 28
+> 32
+> 36
+> output PSNR (dB)
+> Baseline
+> WNE
+> identity
+
+(b) σtrain = 25 8 12 16 20 24 28 32 36  
+
+> input PSNR (dB)
+> 8
+> 12
+> 16
+> 20
+> 24
+> 28
+> 32
+> 36
+> output PSNR (dB)
+> Baseline
+> WNE
+> identity
+
+(c) σtrain = 50 
+
+Figure 15. Noise-level mismatch on color Restormer (CBSD68). Same diagnostic as Figures 3–4, now applied to 3-channel color images. The Baseline Restormer degrades under mismatch, while WNE stabilizes performance across test noise levels. Dashed line: no denoising ( ˆx = y). 
+
+Results. Figure 15 shows the same qualitative pattern as the grayscale Restormer experiments: the baseline is noise-level specific, while WNE stabilizes performance under mismatch. Table 9 reports matched-noise PSNR on CBSD68; WNE remains competitive with the baseline at all three noise levels. 
+
+Table 9. Matched-noise PSNR (dB) on color Restormer (CBSD68). Average PSNR on CBSD68 for AWGN with σ ∈ { 10 , 25 , 50 }
+
+(8-bit units). Both variants share the same Restormer backbone trained on color patches; WNE wraps the unmodified architecture with statistics pooled jointly over all channels and pixels. CBSD68 Noise level σ (8-bit) 10 25 50 
+
+Baseline 36.36 31.60 28.33 
+
+WNE (ours) 36.51 31.61 28.36 
+
+## M. Real-Noise Validation on SIDD 
+
+We validate that the wrapper does not degrade performance on real sensor noise by training SwinIR Baseline and SwinIR-WNE on the SIDD sRGB track (Abdelhamed et al., 2018). Unlike the controlled fixed-σtrain AWGN protocol of Section 4, SIDD exhibits sensor-, ISP-, and scene-dependent noise, so this setting complements rather than replicates the mismatch diagnostic: it tests that enforcing NE remains compatible with a realistic noise distribution rather than isolating the NE mechanism. 
+
+Protocol. We train SwinIR Baseline and SwinIR-WNE on pre-extracted SIDD sRGB training patches using the same backbone in both conditions, with only the outer wrapper changed. SIDD training uses random 64 × 64 crops, batch size 32 ,AdamW, and a cosine-decayed learning rate from 3 × 10 −4 to 10 −6 over 400 ,000 updates. Evaluation uses the standard SIDD validation blocks, corresponding to 1280 sRGB blocks in total. For reporting, predictions and targets are quantized to uint8 sRGB. PSNR is computed with the standard 8-bit formula, and SSIM is computed in RGB with Wang-style settings (Wang et al., 2004). 
+
+Table 10. SIDD validation (sRGB). Average PSNR/SSIM over the 1280 official SIDD validation blocks. Both variants use the same SwinIR backbone; WNE only adds the outer normalize-process-denormalize wrapper. PSNR (dB) SSIM 
+
+Baseline 39.27 0.9150 
+
+WNE (ours) 39.26 0.9156 
+
+Results. Table 10 shows that the two SwinIR variants are matched on SIDD validation: WNE is within 0.01 dB of the baseline in PSNR and essentially identical in SSIM. Combined with the AWGN matched-noise results in Table 1, this indicates that the small matched-AWGN trade-off visible for SwinIR on Set12/BSD68 does not persist on real sensor noise. 27 Normalization-Equivariant Wrapper 
+
+## N. Reusing Noise2Noise-Trained Denoisers for Sampling and Inverse Problems 
+
+The normalized-coordinate analysis in Section 5 predicts that exact NE should help single-σ-trained denoisers remain usable across sampler noise schedules: changing raw noise scale primarily shifts which normalized difficulties are queried, rather than changing what the backbone sees at fixed difficulty. We test this prediction by training denoisers with Noise2Noise (N2N) (Lehtinen et al., 2018) at one noise level and reusing the frozen maps for iterative sampling and constrained inverse-problem reconstruction, alongside a one-step mismatch diagnostic. We train the same SwinIR backbone with the N2N objective: given two independently corrupted observations y1 =
+
+x + σtrain η1 and y2 = x + σtrain η2 of the same image, both variants minimize ∥fθ (y1) − y2∥22 at σtrain = 10 . The Baseline-N2N model uses the unwrapped predictor; WNE-N2N wraps the same backbone, changing only the parameterization. This is distinct from N2N-based reconstruction and RED/PnP-style methods that train self-supervised priors for the target inverse problem from split, repeated, or undersampled measurements (Hendriksen et al., 2020; Liu et al., 2020; Desai et al., 2023; Huang et al., 2024); here the learned map is trained only as an ordinary single-step denoiser and then reused unchanged. Unless otherwise stated, AWGN training and denoising noise levels are reported in 8-bit units; for example, σ = 10 means 
+
+10 /255 when images are scaled to [0 , 1] . We evaluate the resulting denoisers in three settings: one-step mismatch across unseen test noise levels, residual-stopped iterative denoising, and constrained random inpainting from sparse observations. The unified sampler used for the two iterative settings is given in Appendix N.1. 
+
+One-step mismatch. Figure 16 applies the same input-output PSNR mismatch diagnostic used in the main experiments to the two N2N-trained models. WNE-N2N is more stable than the unwrapped baseline across the test sweep, including far from σtrain . The mismatch benefit is therefore not tied to clean-target supervision. 8 12 16 20 24 28 32 36 
+
+## input PSNR (dB) 
+
+8
+
+12 
+
+16 
+
+20 
+
+24 
+
+28 
+
+32 
+
+36 
+
+> output PSNR (dB)
+
+Baseline-N2N 
+
+WNE -N2N 
+
+identity      
+
+> Figure 16. Noise2Noise one-step mismatch check on SwinIR. Both models are trained with the N2N objective at σtrain = 10 in 8-bit units and evaluated using the same output-PSNR versus input-PSNR mismatch diagnostic as the main experiments. The wrapped WNE-N2N model is more stable than the unwrapped Baseline-N2N model across the test sweep.
+
+N.1. Iterative Reuse: A Unified Sampler and the Residual-Stopped Case 
+
+Both iterative experiments use the same Kadkhodaie-Simoncelli-style denoiser-residual sampler (Kadkhodaie & Simoncelli, 2021), parameterized by an orthogonal projector P onto an observed measurement subspace. Let R(y) := D(y) − y be the denoiser residual and xc the observed measurement, with P = 0 and xc = 0 for unconstrained denoising and P = M M ⊤,28 Normalization-Equivariant Wrapper 
+
+xc = P x ⋆ for measurement-constrained reconstruction. At iterate yt−1, the update direction and effective noise level are 
+
+ut := ( I − P )R(yt−1) + xc − P y t−1, bσt := ∥ut∥2
+
+√d .
+
+The sampler updates 
+
+yt = yt−1 + htut + γtzt, zt ∼ N (0 , I d),
+
+with step schedule ht = h0t/ (1 + h0(t − 1)) and injected-noise amplitude 
+
+γ2 
+
+> t
+
+= (1 − βh t)2 − (1 − ht)2bσ2 
+
+> t
+
+.
+
+For P = 0 , the direction reduces to ut = R(yt−1) and bσt = ∥R(yt−1)∥2/√d. This is the update used in the residual-stopped denoising experiment below. Equivalently, it is Algorithm 1 with P = 0 , using the denoising initialization y0 = x⋆ + σinit η.For P = I, the denoiser term vanishes and the update becomes a pure data-consistency correction; the random-inpainting experiment below uses the intermediate case. 
+
+Why exact NE helps under iterative reuse. The relevant mechanism is the normalized-coordinate reduction analyzed in Section 5. Under NE, the denoiser factors as 
+
+D(y) = std( y) g(TNE (y)) + μ(y)1.
+
+Changing the raw noise scale therefore does not require learning an unrelated raw-space map; it changes which normalized difficulties ∆ = ∥˜y − ˜x∥2 are queried. Section 5 shows that these difficulty distributions overlap substantially across noise levels and that the normalized error is largely ∆-driven. The N2N sampler experiments stress the same mechanism in an iterative setting: a denoiser trained from noisy pairs at only σtrain = 10 is repeatedly queried across the sampler’s effective noise scales, in the inpainting case starting about 25 × above the training scale. WNE does not make the N2N denoiser Bayes-optimal at every scale; it makes the repeated calls use the same normalized regression g, with the residual and residual-based stopping scale rescaled analytically. The unwrapped denoiser has no corresponding normalized-coordinate reduction when used off scale. 
+
+Residual-stopped iterative denoising. We instantiate the unconstrained case ( P = 0 , β = 1 , so γt = 0 ). Each Set12 image is initialized with AWGN at σinit = 10 , and the trajectory is stopped when bσt ≤ 1/255 . For each trajectory we record the one-pass denoiser PSNR, the best PSNR attained along the trajectory, and the residual-stopped final PSNR. The one-pass PSNR is computed on D(y0), whereas trajectory PSNRs are computed on the sampler states yt. The best PSNR is an oracle diagnostic computed using the clean image; it is not used by the sampler. We summarize trajectory collapse by 
+
+∆stab = PSNR final − PSNR best .
+
+A stable residual stopping rule has ∆stab ≈ 0; a trajectory that peaks early and degrades has a large negative gap. We hold the N2N training regime fixed across both variants: same backbone, same noisy pairs, single noise level. A multi-noise N2N model would require noisy pairs collected or synthesized at multiple noise levels, which is a different data regime. The question is therefore whether exact NE improves off-scale iterative reuse under identical N2N supervision.                                   
+
+> Table 11. Iterative sampling evaluation on Set12 under N2N training at a single noise level. Both models use the same SwinIR backbone and are trained at σtrain = 10 in 8-bit units. The sampler is initialized at σinit = 10 in 8-bit units and stopped when bσt≤1/255 . Values are means over the 12 Set12 images. The initial noisy PSNR is 28 .16 dB for both rows. The best trajectory PSNR is an oracle diagnostic and is not used for stopping. Model One-pass Best traj. Final Final −best Final −one-pass Best/final step Baseline-N2N 35.07 34.20 29.49 −4.71 −5.58 16 .67 /40 .08
+> WNE-N2N 34.96 34.89 34.79 −0.10 −0.16 22 .75 /25 .00
+
+Table 11 shows that the unwrapped baseline is not weaker as a one-step denoiser at the training noise level. Its one-pass PSNR is slightly higher than WNE-N2N ( 35 .07 dB versus 34 .96 dB). However, when reused iteratively, the baseline trajectory peaks early and then collapses under the residual stopping rule, ending 4.71 dB below its best trajectory iterate and 
+
+5.58 dB below its one-pass output. In contrast, WNE-N2N remains stable. The stopped final iterate is only 0.10 dB below the best trajectory iterate and 0.16 dB below the one-pass output. The advantage of WNE here is not better one-step PSNR at σtrain , but predictable global-scale behavior under reuse, consistent with the normalized-coordinate mechanism above. 29 Normalization-Equivariant Wrapper 
+
+N.2. Constrained Random Inpainting 
+
+We instantiate the same sampler with a random-inpainting projector P = M M ⊤ and observation xc = P x ⋆. Algorithm 1 gives the full procedure. The reported sampler parameters are on the [0 , 1] image scale: 
+
+σ0 = 1 , σL = 0 .01 , h0 = 0 .01 , β = 0 .01 .
+
+Images are scaled to [0 , 1] , so in 8-bit units this corresponds to σ0 = 255 and σL = 2 .55 . The maximum budget is 1000 
+
+iterations. 
+
+Algorithm 1 Kadkhodaie-Simoncelli linear inverse sampler 
+
+Require: Denoiser D, projector P , observation xc = P x ⋆, parameters σ0, σ L, h 0, β, T max 
+
+Ensure: Projected reconstruction ˆx 
+
+> 1:
+
+Draw z ∼ N (0 , I d) 
+
+> 2:
+
+y ← xc + 0 .5( I − P )1 + σ0z 
+
+> 3:
+
+for t = 1 , . . . , T max do  
+
+> 4:
+
+u ← (I − P ) D(y) − y + xc − P y  
+
+> 5:
+
+bσ ← ∥ u∥2/√d 
+
+> 6:
+
+if bσ ≤ σL then  
+
+> 7:
+
+break  
+
+> 8:
+
+end if  
+
+> 9:
+
+h ← h0t/ (1 + h0(t − 1))  
+
+> 10:
+
+γ ←
+
+
+
+(1 − βh )2 − (1 − h)21/2
+
+bσ 
+
+> 11:
+
+Draw z ∼ N (0 , I d) 
+
+> 12:
+
+y ← y + hu + γz  
+
+> 13:
+
+end for  
+
+> 14:
+
+return ˆx = xc + ( I − P )y
+
+This setting is deliberately challenging under the fixed N2N training regime. Both denoisers are trained at σtrain = 10 , but the sampler initializes from σ0 = 1 , about 25 × above the training scale. The unwrapped denoiser is therefore queried far outside its training scale at initialization, while WNE normalizes the input and exactly rescales the output residual. We evaluate random inpainting on Set12 with only 10% observed pixels. Final reconstructions are projected onto the measurement affine set before computing PSNR and SSIM, so both methods satisfy the measurements exactly at evaluation time. The one-pass column applies the denoiser once to the sampler initialization y0 and evaluates the projected estimate 
+
+xc + ( I − P )D(y0).           
+
+> (a) Clean x⋆(b) Observed P x ⋆(c) Baseline-N2N (d) WNE-N2N
+> Figure 17. Reusing Noise2Noise-trained denoisers in a constrained inverse-problem sampler. Both SwinIR denoisers are trained from noisy pairs at a single noise level, σtrain = 10 , then reused in a random-inpainting sampler with 10% observed pixels. The Baseline-N2N denoiser stays close to the sparse observation, while WNE-N2N gives a coherent reconstruction.
+
+Table 12 shows that, under this high-noise initialization and fixed sampler configuration, the unwrapped denoiser stays near the observed projection and ends at 6.08 dB. WNE makes the same denoiser usable inside the sampler and reaches 23 .87 
+
+dB, an improvement of about 17 .8 dB using the same backbone, training pairs, and sampler hyperparameters. The result 30 Normalization-Equivariant Wrapper                   
+
+> Table 12. Kadkhodaie-Simoncelli constrained sampler on Set12 random inpainting with 10% observed pixels. Both denoisers are trained with N2N at a single noise level, σtrain = 10 in 8-bit units. The sampler uses σ0= 1 ,σL= 0 .01 ,h0= 0 .01 , and β= 0 .01 . WNE-N2N reaches 23 .87 dB versus 6.08 dB for the unwrapped baseline. Numbers are means over Set12, with standard deviations in parentheses. The column “gap” reports final PSNR minus the best PSNR along the trajectory.
+
+Method One-pass Final SSIM Gap Steps Observed P x ⋆ —
+
+5.92 (0 .93) 0.020 (0 .008) — —Baseline-N2N 
+
+6.87 (0 .28) 6.08 (0 .27) 0.009 (0 .002) 
+
+−0.91 (0 .03) 96 .8(1 .3) 
+
+WNE-N2N 14 .21 (1 .31) 23 .87 
+
+(2 .62) 0.716 
+
+(0 .056) 0.00 
+
+(0 .00) 277 .6(26 .1) 
+
+instantiates the normalized-coordinate mechanism in the inverse-problem regime. The original sampler is a coarse-to-fine procedure initialized at full-scale Gaussian noise: natural for the sampler, but far outside the N2N training scale. Under this initialization, the vanilla denoiser produces an uninformative residual. WNE preserves the same training objective and architecture, but routes every call through the same normalized regression g, so the denoiser can be reused from the high-noise initialization and called across the sampler’s noise schedule without changing the sampler hyperparameters. 
+
+## O. Input-Only Normalization Versus the Wrapper (IN vs WNE) 
+
+In this appendix section we test whether applying an instance-normalization style transform at the input only can replicate the robustness benefits of the full input-output NE wrapper. All figures in this section use a DnCNN backbone and single-noise training at σtrain = 10 . Recall the NE normalization map TNE from Section 3 and let gθ be a standard DnCNN backbone. 
+
+WNE. We use the wrapped predictor 
+
+f WNE  
+
+> θ
+
+(y) := std( y) gθ (TNE (y)) + μ(y)1,
+
+which is normalization-equivariant by construction (Proposition 2). 
+
+IN (input-only). We define the input-only normalization baseline by applying the same normalization at the input and not inverting it: 
+
+f IN θ (y) := gθ (TNE (y)) .
+
+The map TNE (y) = ( y − μ(y)1)/std( y) has the same algebraic form as instance normalization (Ulyanov et al., 2016). Our statistics μ(y) and std( y) are pooled jointly over all entries (all channels and pixels), rather than per-channel, because the NE group action y 7 → ay + b1 acts identically on all entries. 
+
+Structural limitation of IN. Because TNE is invariant to global contrast and brightness, 
+
+TNE (ay + b1) = TNE (y) (a > 0, b ∈ R)
+
+(Proposition 1), the input-only baseline satisfies 
+
+f IN θ (ay + b1) = f IN θ (y),
+
+so it discards global shift and scale information that an NE denoiser must propagate to the output. In contrast, WNE reinjects 
+
+μ(y) and std( y) analytically at the output. 
+
+Protocol. We follow the same noise-level mismatch diagnostic as in Section 4: for each σtest , we plot output PSNR versus input PSNR on Set12. 
+
+Results. Figure 18 shows that IN has lower PSNR than Baseline, including at matched noise ( σtest = σtrain ), while WNE remains stable under mismatch. Figure 19 illustrates the same effect qualitatively. 31 Normalization-Equivariant Wrapper 8 12 16 20 24 28 32 36 
+
+> input PSNR (dB)
+> 8
+> 12
+> 16
+> 20
+> 24
+> 28
+> 32
+> 36
+> output PSNR (dB)
+> Baseline
+> WNE
+> IN
+> identity
+
+Figure 18. DnCNN: input-output PSNR diagnostic at σtrain = 10 (IN vs WNE). Output PSNR versus input PSNR on Set12 as σtest 
+
+varies. The vertical line marks σtrain = 10 . The dashed identity line corresponds to no denoising ( ˆx = y). Input-only normalization (IN) performs poorly even at matched noise and degrades further under mismatch, while WNE remains robust. 
+
+Noisy image 
+
+σ = 10 DnCNN-WNE DnCNN-IN 
+
+Figure 19. DnCNN qualitative comparison (train σtrain = 10 ). The IN baseline applies TNE only at the input (no analytic inverse), discarding global brightness and contrast information, and fails severely. The WNE wrapper reinjects μ(y) and std( y) at the output and remains qualitatively stable. 
+
+32 Normalization-Equivariant Wrapper 
+
+## P. Non-Gaussian Corruptions 
+
+This appendix tests whether the robustness benefits of enforcing NE extend beyond AWGN. We consider three additive non-Gaussian noises (Uniform, Laplace, Rayleigh) and a non-additive corruption (JPEG artifacts), using the same input-output PSNR diagnostic as in Section 4. We evaluate both the DnCNN family and SwinIR. For the DnCNN-family architectural references, FDnCNN is used for SE-arch and NE-arch, while the standard DnCNN backbone is kept for Baseline and WNE. For SwinIR, we compare Baseline versus WNE. 
+
+Noise models. For the additive cases we generate y = x + σε , where ε is scaled to have unit standard deviation and σ
+
+controls corruption strength. Uniform and Laplace noises are zero-mean. For Rayleigh, we do not recenter the noise: it has nonzero mean even after scaling to unit standard deviation. Thus this Rayleigh setting introduces a systematic positive brightness bias in expectation, in addition to pixelwise randomness. JPEG artifacts are produced by compressing and decompressing the image at a chosen quality factor. 
+
+Protocol. For the additive noises, each model is trained at a single corruption strength (vertical reference line) and evaluated at multiple strengths by varying σtest . We plot output PSNR versus input PSNR on Set12; the dashed identity line corresponds to no denoising ( ˆx = y). For JPEG, we plot output PSNR versus quality factor, and we evaluate a simple transfer setting by applying the model trained on Uniform noise to JPEG-corrupted inputs. 8 12 16 20 24 28 32 36 
+
+> input PSNR (dB)
+> 8
+> 12
+> 16
+> 20
+> 24
+> 28
+> 32
+> 36
+> output PSNR (dB)
+> Baseline
+> SE-arch
+> NE-arch
+> WNE
+> identity
+
+(a) Uniform (train σ = 14 )8 12 16 20 24 28 32 36  
+
+> input PSNR (dB)
+> 8
+> 12
+> 16
+> 20
+> 24
+> 28
+> 32
+> 36
+> output PSNR (dB)
+> Baseline
+> SE-arch
+> NE-arch
+> WNE
+> identity
+
+(b) Laplace (train σ = 20 )8 12 16 20 24 28 32 36 
+
+> input PSNR (dB)
+> 8
+> 12
+> 16
+> 20
+> 24
+> 28
+> 32
+> 36
+> output PSNR (dB)
+> Baseline
+> SE-arch
+> NE-arch
+> WNE
+> identity
+
+(c) Rayleigh (train σ = 17 ; not recentered) 5 15 25 35 45 55 65 75 85  
+
+> quality factor
+> 24
+> 28
+> 32
+> 36
+> output PSNR (dB)
+> Baseline
+> SE-arch
+> NE-arch
+> WNE
+> identity
+
+(d) JPEG (quality factor) 
+
+Figure 20. Non-Gaussian corruptions (DnCNN family). Input-output PSNR diagnostic on Set12 for three additive non-Gaussian noises (Uniform, Laplace, Rayleigh) and robustness to JPEG artifacts. All models are blind. For additive noises, the vertical reference line marks the training corruption strength and moving away corresponds to testing at unseen strengths. The dashed identity line is the no-denoising baseline ˆx = y. Rayleigh noise is not recentered in our implementation (nonzero mean), so it also induces an expected brightness bias. For JPEG, we plot output PSNR versus quality factor and evaluate transfer by applying the model trained on Uniform noise to JPEG-corrupted inputs. 
+
+33 Normalization-Equivariant Wrapper 
+
+Results on the DnCNN family. Figure 20 summarizes the DnCNN-family findings. For Uniform and Laplace, WNE closely matches the architectural normalization-equivariant baseline NE-arch and improves over SE-arch and the unwrapped baseline. For JPEG artifacts, WNE also remains competitive and yields a consistent improvement over the baseline across quality factors in this setting. Rayleigh is the only setup where WNE results in a lower PSNR curve than NE-arch. This is also the only noise model here that is not zero-mean in our implementation (we do not recenter the Rayleigh samples). 
+
+Results on SwinIR. Figure 21 shows the same extension on the transformer backbone. Across Uniform, Laplace, Rayleigh, and JPEG corruptions, WNE improves over the SwinIR baseline, consistent with the DnCNN-family results above. 8 12 16 20 24 28 32 36 
+
+> input PSNR (dB)
+> 8
+> 12
+> 16
+> 20
+> 24
+> 28
+> 32
+> 36
+> output PSNR (dB)
+> Baseline
+> WNE
+> identity
+
+(a) Uniform (train σ = 14 )8 12 16 20 24 28 32 36  
+
+> input PSNR (dB)
+> 8
+> 12
+> 16
+> 20
+> 24
+> 28
+> 32
+> 36
+> output PSNR (dB)
+> Baseline
+> WNE
+> identity
+
+(b) Laplace (train σ = 20 )8 12 16 20 24 28 32 36 
+
+> input PSNR (dB)
+> 8
+> 12
+> 16
+> 20
+> 24
+> 28
+> 32
+> 36
+> output PSNR (dB)
+> Baseline
+> WNE
+> identity
+
+(c) Rayleigh (train σ = 17 ; not recentered) 5 15 25 35 45 55 65 75 85  
+
+> quality factor
+> 24
+> 28
+> 32
+> 36
+> output PSNR (dB)
+> Baseline
+> WNE
+> identity
+
+(d) JPEG (quality factor) 
+
+Figure 21. Non-Gaussian corruptions (SwinIR). Same diagnostic as Figure 20, applied to SwinIR Baseline versus SwinIR-WNE. WNE improves over the baseline across all four corruption types, consistent with the DnCNN-family results. 
+
+34

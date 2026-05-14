@@ -1,0 +1,808 @@
+Title: Early Semantic Grounding in Image Editing Models for Zero-Shot Referring Image Segmentation
+
+URL Source: https://arxiv.org/pdf/2605.13122v1
+
+Published Time: Thu, 14 May 2026 00:55:41 GMT
+
+Number of Pages: 16
+
+Markdown Content:
+# Early Semantic Grounding in Image Editing Models for Zero-Shot Referring Image Segmentation 
+
+Jingxuan He 
+
+The University of Sydney 
+
+jihe0215@uni.sydney.edu.au 
+
+Xiyu Wang 
+
+The University of Sydney 
+
+xiyu.wang@sydney.edu.au 
+
+Yunke Wang 
+
+The University of Sydney 
+
+yunke.wang@sydney.edu.au 
+
+Mengyu Zheng 
+
+The University of Sydney 
+
+mzhe4259@uni.sydney.edu.au 
+
+Chang Xu ∗
+
+The University of Sydney 
+
+c.xu@sydney.edu.au 
+
+Abstract 
+
+Instruction-based image editing (IIE) models have recently demonstrated strong capability in modifying specific image regions according to natural language in-structions, which implicitly requires identifying where an edit should be applied. This indicates that such models inherently perform language-conditioned visual semantic grounding. In this work, we investigate whether this implicit grounding can be leveraged for zero-shot referring image segmentation (RIS), a task that requires pixel-level localization of objects described by natural language expres-sions. Through systematic analysis, we reveal that strong foreground-background separability emerges in the internal representations of these models at the earliest denoising timestep, well before any visible image transformation occurs. Building on this insight, we propose a training-free framework that repurposes pretrained image editing models for RIS by exploiting their intermediate representations. Our approach decomposes localization into two complementary components: attention-based spatial priors that estimate where to focus, and feature-based semantic discrimination that determines what to segment. By leveraging feature-space sepa-rability, the framework produces accurate segmentation masks using only a single denoising step, without requiring full image synthesis. Extensive experiments on RefCOCO, RefCOCO+, and RefCOCOg demonstrate that our method achieves superior performance over existing zero-shot baselines. 
+
+1 Introduction 
+
+Instruction-based Image Editing (IIE) has recently witnessed significant progress. By jointly modeling textual and visual signals, modern image editing frameworks [ 52 , 42 , 41 , 17 , 19 , 40 ] demonstrate strong capability in modifying specific regions in accordance with natural language instructions. This ability implicitly requires the model to identify where the edit should be applied, indicating that image editing models inherently perform language-conditioned visual semantic grounding. In this work, we investigate whether this implicit grounding can be directly extracted and repurposed for Referring Image Segmentation (RIS) [ 13 ], a task that requires pixel-level localization of objects described by natural language expressions. 
+
+> ∗Corresponding author. Preprint.
+> arXiv:2605.13122v1 [cs.CV] 13 May 2026
+
+Despite recent progress in fully and weakly supervised RIS, these methods [ 8, 49 , 6, 5] rely on costly pixel-level annotations. Zero-shot RIS provides a more practical alternative, yet existing frameworks typically adopt a multi-stage pipeline that combines the Segment Anything Model (SAM) [ 14 , 4] for mask proposal and the CLIP [ 27 ] model for mask selection. This design suffers from two fundamental limitations. First, SAM is primarily geometry-driven, which lacks an intrinsic vision-language alignment ability to interpret complex referring expressions. Second, recent RIS methods, such as HybridGL [ 21 ] and RefAM [ 15 ], employ intricate linguistic preprocessing to improve localization accuracy by decomposing referring expressions into noun phrases and explicitly modeling spatial relationships, which introduces additional complexity and is prone to error propagation. In contrast, instruction-based image editing models provide a unified framework that jointly models language understanding and visual reasoning. We therefore take a fundamentally different perspective by recasting zero-shot RIS as an image editing problem . However, this reformulation raises a critical question: in what form, and at what stage, does an image editing model establish the localization of the target object? 
+
+Through systematic analysis of latent representations, we uncover a key and previously underexplored property of modern image editing models [ 17 , 19 ]. We find that object-level semantics are encoded in the feature space of clean image tokens , and more importantly, that strong foreground-background separability emerges at the earliest denoising timestep , well before any visible image transformation occurs. It suggests that semantic grounding is established prior to generation, and that subsequent denoising primarily refines visual appearance rather than object-level discrimination. This insight also implies that localization signals can be extracted directly from early representations without requiring full image synthesis. Building on these observations, we propose a training-free framework that repurposes pretrained image editing models for zero-shot referring image segmentation. Rather than performing iterative denoising, we extract internal representations from a single timestep and leverage them for localization. Our approach decomposes the localization process into two complementary components. First, we derive a coarse spatial prior from cross-attention, which captures instruction-conditioned relevance. To improve spatial coherence, we introduce an affinity-based propagation mechanism that diffuses attention responses across semantically related regions. Second, we exploit the strong semantic separability of latent features by constructing foreground and background prototypes, and perform pixel-wise classification via cosine similarity to obtain the final segmentation result. This design explicitly decouples where to look (attention) from what to segment (feature semantics), leading to accurate and robust localization. Extensive experiments on RefCOCO [ 24 ], RefCOCO+ [ 24 ], and RefCOCOg [ 23 ] demonstrate that our method consistently outperforms existing zero-shot baselines. The contributions of this work are summarized as follows: • We reformulate referring image segmentation as an instruction-based image editing problem, show-ing that generative models inherently support discriminative visual grounding without requiring task-specific supervision. • We reveal that modern image editing models exhibit strong foreground-background separability in their internal representations at the earliest denoising timestep. • We propose a training-free framework that decomposes localization into two complementary components: attention-based spatial priors that estimate where to focus, and feature-based semantic discrimination that determines what to segment, resulting in precise and robust localization. • Extensive experiments on RefCOCO, RefCOCO+, and RefCOCOg demonstrate that our method consistently outperforms existing zero-shot baselines, supported by comprehensive ablation studies that validate the effectiveness of each component. 
+
+2 Related Work 
+
+Instruction-based Image Editing. Instruction-based image editing aims to modify images according to natural language instructions while preserving content outside the edited regions. Early methods that employ Stable Diffusion [ 12 , 28 ] achieve text-guided image editing by manipulating cross-attention, as exemplified by InstructPix2Pix [ 2], MagicBrush [ 50 ], UltraEdit [ 53 ], and AnyEdit [ 46 ]. More recent approaches, such as ICEdit [ 51 ], improve synthesis fidelity by fine-tuning stronger Diffusion Transformer (DiT) backbones [ 26 ]. To further enhance instruction following, several state-of-the-art frameworks [ 19 , 40 , 3, 36 ] incorporate multi-modal large language models to strengthen 2cross-modal alignment between textual and visual representations. While these models are primarily designed for generative tasks, their ability to interpret editing instructions implies an inherent capacity for visual grounding. Building on this intuition, we repurpose instruction-based image editing models for referring image segmentation in a zero-shot manner. 
+
+Referring Image Segmentation Referring image segmentation (RIS) is a visual grounding task that aims to segment objects specified by natural language expressions, which requires models to establish fine-grained associations between visual content and linguistic cues. While fully supervised [ 7, 20 , 31 ,32 , 8 , 49 ] and weakly supervised [ 9, 44 , 6 , 5 ] RIS methods have achieved strong performance, they remain heavily reliant on dense pixel-level annotations. Zero-shot referring image segmentation [ 47 ,25 , 34 , 33 , 39 , 21 , 15 ] offers a more scalable alternative by leveraging pretrained foundation models. Global-Local [ 47 ] is an early representative that exploits pretrained FreeSOLO [ 38 ] and CLIP [ 27 ]for mask prediction. CaR [ 33 ] improves upon this by iteratively refining masks through a CLIP-based recurrent framework. TAS [ 34 ] enhances segmentation performance with descriptive captions generated by an auxiliary captioner. More recently, HybridGL [21] introduces a hybrid global-local feature extraction strategy with spatial guidance to mitigate segmentation ambiguity, and RefAM [ 15 ]augments referring expressions with stop words to suppress attention sinks. Despite these advances, existing zero-shot RIS methods remain dependent on SAM [ 14 ] for mask proposals, which often inherits its class-agnostic limitations in resolving referring expressions. In contrast, our framework directly harnesses the semantic grounding capability of pretrained image editing models for referring image segmentation. 
+
+3 Method 
+
+3.1 Preliminaries: Instruction-based Image Editing 
+
+Recent multi-modal image editing models [ 16 , 17 , 19 , 45 ] typically adopt a Large Language Model (LLM) [ 1] to encode editing instructions and a Multi-Modal Diffusion Transformer (MM-DiT) [ 26 ]as a unified generator that jointly models textual and visual signals. Given an editing instruction 
+
+P and a reference image I ∈ RH×W ×3, the LLM encodes P (and I in multi-modal settings) into a sequence of prompt embeddings Zp ∈ RNp×D , where H and W denote the height and width of the reference image, Np is the number of prompt tokens, and D is the embedding dimension. For notational simplicity, we use “tokens” to refer to token embeddings throughout this work. The MM-DiT operates on three types of tokens: prompt tokens, clean image tokens Zv ∈ RNv ×D , and noisy image tokens ˆZ(t) 
+
+> v
+
+∈ RNv ×D at diffusion timestep t, where Nv is the number of image tokens. These tokens are concatenated along the sequence dimension [ 35 ] and passed through a stack of transformer blocks, where the Multi-Modal Self-Attention (MMSA) module enables information exchange across modalities. Specifically, we denote the input to MMSA within the l-th DiT block at timestep t as Z(t,l ) = [ Z(l) 
+
+> p
+
+; ˆZ(t,l ) 
+
+> v
+
+; Z(l) 
+
+> v
+
+] ∈ R(Np+2 Nv )×D . This unified token sequence Z(t,l ) is then transformed into queries Q(t,l ), keys K(t,l ), and values V(t,l ) through linear projection. The MMSA module is formulated as: MMSA 
+
+
+
+Z(t,l )
+
+= A(t,l )V(t,l ), where A(t,l ) = Softmax Q(t,l )K(t,l )⊤
+
+√D
+
+!
+
+. (1) We denote the full attention matrix as A(t,l ) ∈ R(Np+2 Nv )×(Np+2 Nv ). Starting from a Gaussian noise, the noisy image tokens ˆZ(t) 
+
+> v
+
+are iteratively denoised across diffusion timesteps, and the fully denoised tokens are decoded to produce the final edited image. 
+
+3.2 Referring Image Segmentation 
+
+Given an input image I and a referring expression Tref , the goal of referring image segmentation is to produce a binary mask that identifies the referred object in the image. We reformulate this task as an instance of instruction-based image editing, where the referring expression Tref is converted into an editing instruction T by prepending “remove” to the referring expression. We further refine the instructions following a built-in image editing pipeline [45], whose effect is discussed in A3. Although image editing models are primarily designed for image synthesis, their denoising process inherently requires identifying regions relevant to the editing instruction. This suggests that interme-diate representations may already encode object-level localization signals. Motivated by this insight, 3Remove the man reaching towards the woman.  
+
+> Affinity Propagation
+> Masked Pooling
+> Cosine Similarity
+> Refined Attention Map Coarse Attention Map
+> Instruction-based Image Editing
+> Proposed Region MMSA Features Segmentation
+> MMSA Attention
+> Referring Image Segmentation: Attention-based Region Proposal
+> Upsampling Gaussian Noise Input Image
+> Referring Image Segmentation: Feature-based Semantic Localization
+> Prototypes
+> Image to Image
+> Image to Prompt
+> Prompt Tokens Noisy Image Tokens Clean Image Tokens Input Prompt
+> DiT Block
+> Multi-Modal Self-Attention (MMSA)
+> Feature Separability of FLUX.2-klein Feature Separability of Step1X-Edit
+> FG BG
+
+Figure 1: Overview of our framework. We repurpose pretrained instruction-based image editing models for referring image segmentation. In the module of attention-based region proposal, we derive coarse spatial priors through cross-attention and affinity propagation. In the module of feature-based semantic localization, the semantic separability of MMSA output features is exploited under the guidance of the proposed region to produce the final segmentation mask. The quantitative results in boxplots on the left panel show that strong foreground-background discriminability is established as early as the first timestep (denoted as 1%) and remains stable throughout the denoising process. 
+
+we first analyze the foreground-background separability of MMSA features extracted from clean image tokens, and then develop a two-stage framework that combines attention-based spatial priors with feature-based semantic discrimination for precise localization. 
+
+Feature Separability Analysis. Let F(t,l ) ∈ RNv ×D denote MMSA output features of clean image tokens within the l-th DiT block at timestep t, and let Ωfg and Ωbg denote the sets of foreground and background spatial locations, respectively. We compute class-wise means μ(t,l ) 
+
+> fg
+
+, μ (t,l ) 
+
+> bg
+
+and variances 
+
+σ2( t,l ) 
+
+> fg
+
+, σ 2( t,l ) 
+
+> bg
+
+from these features. Inspired by the Fisher discriminant criterion [ 10 ], we define the separability score as: 
+
+J (t,l ) =
+
+μ(t,l ) 
+
+> fg
+
+− μ(t,l )
+
+> bg
+> 2
+
+σ2( t,l ) 
+
+> fg
+
++ σ2( t,l )
+
+> bg
+
+. (2) This metric measures the ratio between inter-class distance and intra-class variance, where larger values indicate stronger feature discriminability. Detailed equations and rationale for this metric are provided in A1. We evaluate J (t,l ) on FLUX.2-klein [ 17 ] and Step1X-Edit [ 19 ] across a range of timesteps t. The DiT block l is set to approximately two-thirds of the model depth. As illustrated in the left panel of Fig. 1, both models exhibit strong feature separability as early as the first denoising timestep, and the separability remains relatively stable throughout the denoising process. This indicates that 
+
+semantic grounding is already established at early timesteps , while subsequent timesteps may focus on fine-grained visual synthesis rather than improving object-level discrimination. 
+
+Attention-based Region Proposal (ARP). Although MMSA features exhibit strong discriminative capability at early timesteps, they do not explicitly capture the spatial extent of the referred object. We therefore first derive a coarse estimate of the target region from attention, which serves as a spatial prior for subsequent feature-based localization. As shown in the top right panel of Fig. 1, the l-th DiT block takes as input the prompt tokens 
+
+Z(l) 
+
+> p
+
+, the clean image tokens Z(l) 
+
+> v
+
+, and the noisy image tokens ˆZ(t,l ) 
+
+> v
+
+at timestep t. After token-wise concatenation, the MMSA module processes the unified token sequence by projecting it into 4queries Q(t,l ), keys K(t,l ), and values V(t,l ), respectively, followed by the standard self-attention operation defined in Eq. (1). Next, as illustrated in the middle right panel of Fig. 1, we extract the image-to-prompt submatrix A(t,l ) 
+
+> v→p
+
+∈ RNv ×Np from the full attention matrix. This submatrix is aggregated across Np prompt tokens and Nl DiT blocks, resulting in the Coarse Attention Map (CAM) A(t) 
+
+> CAM
+
+∈ RNh×Nw :
+
+A(t) 
+
+> CAM
+
+= N
+
+> Nl
+
+X
+
+> l=1
+
+F−1 
+
+A(t,l )
+
+> v→p
+
+1Np
+
+!
+
+, (3) where 1Np denotes an all-ones vector of length Np, F−1(·) reshapes a flattened sequence of length 
+
+Nv into a spatial map of size Nh × Nw, and N (·) denotes min-max normalization. Although the coarse attention map identifies an approximate location of the referred object, it often exhibits fragmented or noisy activations due to the lack of spatial coherence in cross-attention. To alleviate this issue, inspired by [ 43 , 29 ], we introduce an affinity-based propagation mechanism that leverages self-attention to propagate cross-attention responses across semantically related regions. Specifically, we extract the image-to-image submatrix A(t,l ) 
+
+> v→v
+
+∈ RNv ×Nv from the full attention matrix, and interpret it as an affinity matrix that captures pairwise relationships among clean image tokens. We perform row-wise normalization to obtain the stochastic transition matrix T(t,l ) ∈
+
+RNv ×Nv , which is used to compute the Refined Attention Map (RAM) A(t) 
+
+> RAM
+
+∈ RNh×Nw :
+
+A(t) 
+
+> RAM
+
+= N
+
+> Nl
+
+X
+
+> l=1
+
+F−1 
+
+T(t,l )A(t,l )
+
+> v→p
+
+1Np
+
+!
+
+, where T(t,l ) = D
+
+
+
+A(t,l ) 
+
+> v→v
+
+1Nv
+
+−1
+
+A(t,l ) 
+
+> v→v
+
+. (4) Here D(·) constructs a diagonal matrix from its input. This attention propagation design can be interpreted as a random walk [ 22 ] over image tokens, where the stochastic transition matrix defines a Markov process based on pairwise affinities. Attention is therefore diffused to semantically coherent regions, resulting in improved spatial continuity and better alignment with object boundaries. 
+
+Feature-based Semantic Localization (FSL). While attention-based region proposal provides necessary spatial priors, it remains inherently imprecise due to the diffuse nature of attention. In contrast, our early analysis shows that MMSA features exhibit strong foreground-background separability, suggesting that object-level semantics are already well captured in the feature space. We therefore leverage the rich semantics of these features to transform the initial proposal into an accurate localization of the referred object. As depicted in the bottom right panel of Fig. 1, we extract MMSA features of clean image tokens at timestep t′ and DiT block l′. These features are reshaped into a spatial feature map and ℓ2-normalized to lie on the unit hypersphere, yielding ˆF(t′,l ′) ∈ RD×Nh×Nw . We then obtain a binary mask 
+
+M(t) = 1[A(t) 
+
+> RAM
+
+> τ ] by thresholding the refined attention map, which provides a coarse estimate of the object location, where τ is a predefined threshold and 1[·] denotes the indicator function. Foreground and background semantic prototypes, Pfg ∈ RD and Pbg ∈ RD , are constructed via masked average pooling over the normalized features: 
+
+Pfg =
+
+PNh
+
+> h=1
+
+PNw 
+
+> w=1
+
+M(t) 
+
+> h,w
+
+ˆF(t′,l ′):,h,w 
+
+PNh
+
+> h=1
+
+PNw 
+
+> w=1
+
+M(t)
+
+> h,w
+
+,
+
+Pbg =
+
+PNh
+
+> h=1
+
+PNw
+
+> w=1
+
+
+
+1 − M(t)
+
+> h,w
+
+ ˆF(t′,l ′):,h,w 
+
+PNh
+
+> h=1
+
+PNw
+
+> w=1
+
+
+
+1 − M(t)
+
+> h,w
+
+ .
+
+(5) The feature map ˆF(t′,l ′) is subsequently upsampled to the original image resolution, yielding ˆF(t′,l ′)up ∈
+
+RD×H×W . We perform pixel-wise binary classification by computing cosine similarity between each prototype and the upsampled features. Each pixel is assigned to the class whose prototype has higher similarity. The final segmentation mask S ∈ { 0, 1}H×W is obtained as: 
+
+Sh,w = arg max 
+
+> c∈{ fg ,bg }
+
+P⊤ 
+
+> c
+
+ˆF(t′,l ′)up ,:,h,w . (6) 5Table 1: Comparisons with state-of-the-art zero-shot RIS methods on RefCOCO, RefCOCO+, and RefCOCOg . The best and second-best results are highlighted in bold and underlined , respectively. The notation of ∗ indicates the use of additional data beyond the task-specific dataset. The number in parentheses to the right of the model name denotes the parameter count of the corresponding DiT model. Metric Method Vision Backbone Pretrained Model RefCOCO RefCOCO+ RefCOCOg val testA testB val testA testB val test oIoU 
+
+zero-shot methods w/ additional training 
+
+Pseudo-RIS [48] ViT-B SAM, CoCa, CLIP 37.33 43.43 31.90 40.19 46.43 33.63 41.63 43.52 VLM-VG [37] R101 COCO ∗, VLM-VG ∗ 45.40 48.00 41.40 37.00 40.70 30.50 42.80 44.10 
+
+zero-shot methods w/o additional training 
+
+Grad-CAM [30] R50 SAM, CLIP 23.44 23.91 21.60 26.67 27.20 24.84 23.00 23.91 MaskCLIP [54] R50 SAM, CLIP 20.18 20.52 21.30 22.06 22.43 24.61 23.05 23.41 Global-Local [47] R50 FreeSOLO, CLIP 24.58 23.38 24.35 25.87 24.61 25.61 30.07 29.83 Global-Local [47] R50 SAM, CLIP 24.55 26.00 21.03 26.62 29.99 22.23 28.92 30.48 Global-Local [47] ViT-B SAM, CLIP 21.71 24.48 20.51 23.70 28.12 21.86 26.57 28.21 Ref-Diff [25] ViT-B SAM, SD, CLIP 35.16 37.44 34.50 35.56 38.66 31.40 38.62 37.50 TAS [34] ViT-B SAM, BLIP2, CLIP 29.53 30.26 28.24 33.21 38.77 28.01 35.84 36.16 SAM 3 [4] PE SAM 3 38.77 37.43 41.80 31.62 32.44 30.70 35.04 35.81 HybridGL [21] ViT-B SAM, CLIP 41.81 44.52 38.50 35.74 41.43 30.90 42.47 42.97 RefAM [15] DiT SAM, FLUX.1-dev (12B) 46.91 52.30 43.88 38.57 42.66 34.90 45.53 44.45 Ours DiT FLUX.2-klein (9B) 50.13 52.99 46.10 40.17 43.25 36.06 46.90 46.26 Ours DiT Step1X-Edit (12B) 53.94 58.10 49.60 44.38 49.30 40.06 51.23 50.86 
+
+mIoU 
+
+zero-shot methods w/ additional training 
+
+Pseudo-RIS [48] ViT-B SAM, CoCa, CLIP 41.05 48.19 33.48 44.33 51.42 35.08 45.99 46.67 VLM-VG [37] R101 COCO ∗, VLM-VG ∗ 49.90 53.10 46.70 42.70 47.30 36.20 48.00 48.50 
+
+zero-shot methods w/o additional training 
+
+Grad-CAM [30] R50 SAM, CLIP 30.22 31.90 27.17 33.96 25.66 32.29 33.05 32.50 MaskCLIP [54] R50 SAM, CLIP 25.62 26.66 25.17 27.49 28.49 30.47 30.13 30.15 Global-Local [47] R50 FreeSOLO, CLIP 26.70 24.99 26.48 28.22 26.54 27.86 33.02 33.12 Global-Local [47] R50 SAM, CLIP 31.83 32.93 28.64 34.97 37.11 30.61 40.66 40.94 Global-Local [47] ViT-B SAM, CLIP 33.12 36.52 29.58 35.29 39.58 31.89 40.08 40.74 Ref-Diff [25] ViT-B SAM, SD, CLIP 37.21 38.40 37.19 37.29 40.51 33.01 44.02 44.51 TAS [34] ViT-B SAM, BLIP2, CLIP 39.84 41.08 36.24 43.63 49.13 36.54 46.62 46.80 CaR [33] ViT-B and ViT-L CLIP 33.57 35.36 30.51 34.22 36.03 31.02 36.67 36.57 SAM 3 [4] PE SAM 3 34.80 33.36 38.91 26.83 28.30 25.56 32.14 32.08 HybridGL [21] ViT-B SAM, CLIP 49.48 53.37 45.19 43.40 49.13 37.17 51.25 51.59 RefAM [21] DiT SAM, FLUX.1-dev (12B) 57.24 59.78 53.32 43.59 47.28 38.77 47.11 48.35 Ours DiT FLUX.2-klein (9B) 54.02 56.09 50.22 44.15 46.72 40.25 50.62 50.47 Ours DiT Step1X-Edit (12B) 57.56 60.34 53.76 48.50 52.37 44.28 54.52 54.25 
+
+We empirically find that performing attention estimation at t = 0 and feature extraction at t′ = 0 
+
+within a deep DiT block yields optimal performance. This configuration provides both an accurate and efficient solution for referring image segmentation. 
+
+4 Experiments 
+
+4.1 Datasets and Metrics 
+
+Following previous works [ 34 , 39 , 21 , 15 ], we conduct experiments on three standard Referring Image Segmentation (RIS) benchmarks: RefCOCO [ 24 ], RefCOCO+ [ 24 ], and RefCOCOg [ 23 ]. All images in these benchmarks are drawn from the MSCOCO dataset [ 18 ] and are paired with carefully annotated referring expressions that specify target objects. RefCOCO contains relatively concise expressions, many of which include positional cues such as “left” and “right”, while such spatial terms are excluded in RefCOCO+. RefCOCOg is a more challenging benchmark that features longer and more complex expressions. We adopt two commonly used metrics to evaluate segmentation performance: overall Intersection over Union (oIoU) and mean Intersection over Union (mIoU). Specifically, oIoU computes intersections and unions over all samples before taking their ratio, thereby emphasizing performance on larger objects, while mIoU averages IoU scores across individual samples and reflects performance across varying object scales. 
+
+4.2 Implementation Details 
+
+We repurpose two state-of-the-art instruction-based image editing models, FLUX.2-klein [ 17 ] and Step1X-Edit [ 19 ], for zero-shot referring image segmentation. To obtain Coarse Attention Maps (CAMs) and Refined Attention Maps (RAMs), we perform a single denoising step at t = 0 and aggregate attention weights across all DiT blocks. For feature-based semantic localization, we extract MMSA output features at t′ = 0 . Due to differences in model depth, we select features from l′ = 20 
+
+out of 32 DiT blocks for FLUX.2-klein and l′ = 40 out of 57 DiT blocks for Step1X-Edit. All 6kid on left in blue              
+
+> ➜Remove the kid in the blue shirt on the left.
+> left bike
+> ➜Remove the motorcycle on the left.
+> brown cow
+> ➜Remove the brown cow.
+> black vase
+> ➜Remove the black vase.
+> a green vw van
+> ➜Remove the green vw van.
+> white dog laying on couch
+> ➜Remove the white dog laying on the couch.
+> Image & Mask CAM RAM Prediction Image & Mask CAM RAM Prediction
+> FLUX.2 Step1X -Edit FLUX.2 Step1X -Edit FLUX.2 Step1X -Edit
+> RefCOCO RefCOCO+ RefCOCOg
+
+Figure 2: Qualitative examples from RefCOCO, RefCOCO+, and RefCOCOg datasets. “CAM” denotes Coarse Attention Map, “RAM” denotes Refined Attention Map, and “GT” denotes Ground Truth. The first row of text presents the original referring expressions, and the second row presents the corresponding transformed editing instructions. 
+
+experiments are conducted on one NVIDIA A100 GPU. A detailed analysis of inference efficiency is provided in Appendix A2. 
+
+4.3 Comparison with State-of-the-arts 
+
+Table 1 presents quantitative comparisons with state-of-the-art zero-shot referring image segmentation methods on RefCOCO, RefCOCO+, and RefCOCOg. Overall, both FLUX.2-klein and Step1X-Edit variants achieve competitive performance across all three benchmarks, with Step1X-Edit consistently attaining the best results across dataset splits under both oIoU and mIoU metrics. In terms of oIoU, the Step1X-Edit variant surpasses the strongest baseline RefAM [ 15 ] by a clear margin of approximately 5-7 points, while the FLUX.2-klein variant consistently achieves the second-best results. For mIoU, the Step1X-Edit variant outperforms existing approaches across all three benchmarks, indicating more robust segmentation across objects of varying scales. Unlike prior methods that rely on explicit positional modeling or directional bias (e.g., Ref-Diff [ 25 ], MaskCLIP [ 54 ], Global-Local [ 47 ], HybridGL [ 21 ], RefAM [ 15 ]), our approach directly leverages the semantic grounding capability of pretrained image editing models. This also explains the relatively smaller gains of our method on RefCOCO, where expressions frequently depend on directional cues. Although SAM 3 [ 4] is specifically designed for segmentation, it performs suboptimally on the RIS task due to its class-agnostic nature. Additional analysis and qualitative examples of SAM 3 are provided in Appendix A4. 7Table 2: Ablation of modules within our framework .“CAMs”, “RAMs”, and “FSL” denote coarse attention maps, refined attention maps, and feature-based semantic localization, respectively. CAMs RAMs FSL RefCOCO RefCOCO+ RefCOCOg oIoU 
+
+✓ 33.02 26.83 32.82 
+
+✓ ✓ 49.56 40.23 47.24 
+
+✓ ✓ ✓ 53.94 44.38 51.23 
+
+mIoU 
+
+✓ 39.44 32.03 40.11 
+
+✓ ✓ 53.36 43.82 51.04 
+
+✓ ✓ ✓ 57.56 48.50 54.52 
+
+Table 3: Ablation of feature extraction location .“Block”, “AdaLN”, and “MMSA” denote output features of a diffusion transformer block, adaptive layer normalization, and multi-modal self-attention, respectively. Feature RefCOCO RefCOCO+ RefCOCOg oIoU mIoU oIoU mIoU oIoU mIoU Block 52.07 56.67 41.25 45.83 47.93 53.25 AdaLN 53.63 57.34 43.24 47.42 49.89 53.82 MMSA 53.94 57.56 44.38 48.50 51.23 54.52 0 5 10 15 20 25                          
+
+> Timestep Index
+> 25
+> 30
+> 35
+> 40
+> 45
+> 50
+> oIoU
+> RefCOCO
+> 0510 15 20 25
+> Timestep Index
+> 22.5
+> 25.0
+> 27.5
+> 30.0
+> 32.5
+> 35.0
+> 37.5
+> 40.0
+> RefCOCO+
+> 0510 15 20 25
+> Timestep Index
+> 25
+> 30
+> 35
+> 40
+> 45
+> RefCOCOg
+> 0510 15 20 25
+> Timestep Index
+> 30
+> 35
+> 40
+> 45
+> 50
+> mIoU
+> RefCOCO
+> 0510 15 20 25
+> Timestep Index
+> 25.0
+> 27.5
+> 30.0
+> 32.5
+> 35.0
+> 37.5
+> 40.0
+> 42.5
+> RefCOCO+
+> 0510 15 20 25
+> Timestep Index
+> 30
+> 35
+> 40
+> 45
+> 50
+> RefCOCOg
+> CAMs (shallow)
+> RAMs (shallow)
+> CAMs (deep)
+> RAMs (deep)
+> CAMs (all)
+> RAMs (all)
+
+Figure 3: Impact of timesteps and DiT blocks within the ARP module. “shallow” and “deep” refer to ac-cumulating attention weights over double-stream and single-stream DiT blocks, respectively, while “all” sig-nifies attention accumulation over all DiT blocks. 0 5 10 15 20 25                                                                                                                                                                                                              
+
+> Timestep Index
+> 010 20 30 40 50
+> Block Index
+> 13.4 13.5 13.6 13.6 13.8 13.9
+> 23.1 23.3 23.0 22.6 22.1 21.3
+> 37.0 38.0 40.0 41.1 42.2 44.2
+> 48.5 48.7 48.2 47.6 46.9 46.1
+> 53.9 49.6 47.6 46.5 45.8 45.1
+> 45.6 41.0 41.2 41.3 41.0 39.2
+> RefCOCO (oIoU)
+> 0510 15 20 25
+> Timestep Index
+> 010 20 30 40 50
+> 13.3 13.3 13.4 13.4 13.6 13.7
+> 22.8 23.0 22.7 22.4 21.9 21.1
+> 34.4 35.7 37.0 37.6 38.1 38.9
+> 41.9 41.8 41.2 40.5 39.9 39.1
+> 44.4 41.4 39.8 39.0 38.3 37.7
+> 39.0 35.3 35.3 35.4 35.2 34.0
+> RefCOCO+ (oIoU)
+> 0510 15 20 25
+> Timestep Index
+> 010 20 30 40 50
+> 13.7 13.8 13.9 13.8 13.9 14.0
+> 24.4 24.9 24.5 24.0 23.3 22.2
+> 39.1 41.0 42.5 43.2 43.9 44.8
+> 47.7 47.8 47.4 46.8 46.0 45.3
+> 51.2 48.5 46.8 45.7 45.0 44.4
+> 44.7 40.8 40.9 41.0 40.7 39.2
+> RefCOCOg (oIoU)
+> 0510 15 20 25
+> Timestep Index
+> 010 20 30 40 50
+> Block Index
+> 13.8 13.9 14.1 14.1 14.4 14.6
+> 25.3 24.8 24.3 23.8 23.2 22.4
+> 38.5 40.7 43.5 45.2 46.9 50.6
+> 51.2 53.2 53.3 53.2 52.9 52.8
+> 57.6 57.2 56.6 56.1 55.7 55.0
+> 50.2 48.8 49.6 49.8 49.4 46.7
+> RefCOCO (mIoU)
+> 0510 15 20 25
+> Timestep Index
+> 010 20 30 40 50
+> 13.6 13.6 13.8 13.8 14.1 14.3
+> 24.7 24.4 23.9 23.4 22.8 22.0
+> 36.0 38.5 40.6 41.7 42.7 44.6
+> 45.0 46.4 46.1 45.8 45.4 45.0
+> 48.5 48.2 47.7 47.3 47.0 46.4
+> 43.3 41.9 42.4 42.5 42.3 40.3
+> RefCOCO+ (mIoU)
+> 0510 15 20 25
+> Timestep Index
+> 010 20 30 40 50
+> 14.0 14.1 14.2 14.2 14.3 14.5
+> 26.5 26.1 25.5 24.9 24.1 23.0
+> 39.6 42.7 45.0 46.3 47.4 49.8
+> 49.2 50.8 50.9 50.8 50.5 50.4
+> 54.5 54.7 54.2 53.8 53.4 44.4
+> 48.1 46.9 47.7 47.9 47.6 45.0
+> RefCOCOg (mIoU)
+> 15
+> 20
+> 25
+> 30
+> 35
+> 40
+> 45
+> 50
+> 55
+
+Figure 4: Impact of timesteps and DiT blocks within the FSL module. Heatmaps show oIoU (1st row) and mIoU (2nd row) on RefCOCO, RefCOCO+, and Re-fCOCOg datasets. Each cell represents segmentation performance when extracting features from a specific block at a given timestep. 
+
+4.4 Ablation Studies 
+
+To assess the contribution of each module in our framework and the impact of hyperparameters, we conduct comprehensive ablation studies using the Step1X-Edit variant on the val splits of RefCOCO, RefCOCO+, and RefCOCOg. 
+
+Quantitative ablation of modules. We evaluate the contributions of Attention-based Region Proposal (ARP) and Feature-based Semantic Localization (FSL). For ablation experiments, attention maps are binarized into segmentation masks using a fixed threshold of 0.5. As shown in Table 2, CAMs alone yield limited performance, indicating that coarse spatial priors are insufficient for accurate segmentation. Introducing RAMs leads to substantial improvements across all datasets (e.g., around 16-point oIoU gain on RefCOCO). This shows that affinity propagation effectively enhances spatial coherence. Incorporating FSL further improves oIoU and mIoU, which highlights the importance of leveraging semantically separable latent features for precise foreground-background discrimination. Overall, these results demonstrate that accurate segmentation arises from the complementary roles of attention-based spatial priors and feature-based semantic localization. 
+
+Qualitative ablation of modules. We present qualitative examples in Fig. 2. As illustrated, CAMs provide initial but spatially incomplete object localization, while RAMs expand the coverage to more coherent regions via affinity propagation. Guided by the proposed region, FSL produces the segmentation mask that accurately delineate the full extent of the referred object. Notably, when attention maps activate only on salient parts (e.g., the blue shirt of the child in the first row), FSL is able to recover the complete object. In more challenging cases, where attention maps highlight multiple similar instances or exhibit noisy activations (as exemplified in the last row), FSL correctly identifies the referred “green van” between the two candidates and suppresses spurious responses outside the “dog” region. These examples corroborate the quantitative findings: attention provides a coarse spatial prior, while precise localization relies on semantic feature discrimination. 
+
+Impact of denoising timesteps and DiT blocks. For the ARP module, we examine the impact of denoising timesteps and DiT blocks on the quality of CAMs and RAMs. Specifically, we evaluate 8oIoU and mIoU across denoising timesteps t ∈ { 0, 5, 10 , 15 , 20 , 25 }, and analyze the contribution of different DiT components by accumulating attention weights over double-stream (i.e., shallow), single-stream (i.e., deep), and all blocks. The experimental results illustrated in Fig. 3 lead to several key observations. First, RAMs (solid lines) consistently outperform CAMs (dotted lines) across all configurations, which corroborates the effectiveness of affinity propagation observed in Table 2. Second, from an architectural perspective, aggregating attention from shallow blocks (green lines) yields significantly lower performance than using deep blocks (blue lines) or all blocks (orange lines). Notably, accumulation over deep blocks achieves comparable performance with that over all blocks, indicating that semantic cues critical for referring object comprehension are mainly captured in deep layers. Finally, we observe that the initial denoising step ( t = 0 ) yields peak performance across all benchmarks in terms of oIoU and mIoU. This finding supports our design choice of single-step inference without a full iterative denoising process. For the FSL module, we conduct experiments over timesteps t′ ∈ { 0, 5, 10 , 15 , 20 , 25 } and blocks 
+
+l′ ∈ { 0, 10 , 20 , 30 , 40 , 50 } to study the effect of feature extraction configurations. As shown in Fig. 4, the combination of t′ = 0 and l′ = 40 consistently yields the peak segmentation performance across all benchmarks in terms of oIoU and mIoU. These empirical findings resonate with our previous observations: First, the initial timestep ( t′ = 0 ) already provide sufficiently discriminative features for referred object recognition, thereby eliminating the need for subsequent denoising iterations; Second, features extracted from deep layers (approximately two-thirds of the model depth) possess strong semantics that can be leveraged for accurate segmentation of the referred object. 
+
+Ablation of feature extraction location. To determine an effective feature extraction location for the FSL module, we compare representations extracted from three locations within a DiT block: the outputs of Multi-Modal Self-Attention (MMSA), Adaptive Layer Normalization (AdaLN), and the block output. As shown in Table 3, MMSA features consistently achieve the best performance across all benchmarks, outperforming both AdaLN and block features by a clear margin. While prior work [ 11 ] suggests that post-AdaLN features exhibit strong semantic correspondences, our results indicate that such features are less effective for referring image segmentation where precise cross-modal grounding is required. We attribute the advantage of MMSA to its explicit modeling of interactions between textual and visual tokens, which yields more discriminative and semantically aligned representations for the referred object. 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9                    
+
+> Threshold ( )
+> 35
+> 40
+> 45
+> 50
+> 55
+> RefCOCO
+> oIoU
+> mIoU
+> 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9
+> Threshold ( )
+> RefCOCO+
+> oIoU
+> mIoU
+> 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9
+> Threshold ( )
+> RefCOCOg
+> oIoU
+> mIoU
+
+Figure 5: Impact of thresholding within the FSL module . The performance exhibits a steady increase until τ = 0 .8, then a slight performance degradation occurs at τ = 0 .9.
+
+Impact of thresholding. We study the effect of the threshold τ within the FSL module in Fig. 5. As τ increases from 0.1 to 0.8, both oIoU and mIoU scores increase steadily, suggest-ing that higher thresholds help emphasize more discriminative features and promote coherent clustering of semantically similar regions. How-ever, a slight performance degradation occurs at 
+
+τ = 0 .9. This indicates that overly aggressive thresholding may discard useful semantic cues. Based on this trade-off, we adopt τ = 0 .8 for feature-based semantic localization. 
+
+5 Conclusion 
+
+We introduce a fundamentally different perspective on zero-shot referring image segmentation by reformulating it as an instruction-based image editing task. Our analysis reveals that semantically separable representations already emerge at early denoising steps. Building on this insight, we propose a simple yet effective training-free framework that combines attention-derived spatial priors with feature-level semantic separation to directly predict segmentation masks. Extensive experiments demonstrate that our approach achieves state-of-the-art performance while remaining computationally efficient. Our findings challenge the conventional view that object localization in RIS requires explicit spatial modeling, and instead suggest that it can arise naturally from the semantic grounding capability in generative models. We hope this work motivates further exploration of generative representations as a unified foundation for both synthesis and discriminative vision-language tasks. 9References 
+
+[1] Shuai Bai, Keqin Chen, Xuejing Liu, Jialin Wang, Wenbin Ge, Sibo Song, Kai Dang, Peng Wang, Shijie Wang, Jun Tang, et al. Qwen2. 5-vl technical report. arXiv preprint arXiv:2502.13923 , 2025. [2] Tim Brooks, Aleksander Holynski, and Alexei A Efros. Instructpix2pix: Learning to follow image editing instructions. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition ,pages 18392–18402, 2023. [3] Huanqia Cai, Sihan Cao, Ruoyi Du, Peng Gao, Steven Hoi, Zhaohui Hou, Shijie Huang, Dengyang Jiang, Xin Jin, Liangchen Li, et al. Z-image: An efficient image generation foundation model with single-stream diffusion transformer. arXiv preprint arXiv:2511.22699 , 2025. [4] Nicolas Carion, Laura Gustafson, Yuan-Ting Hu, Shoubhik Debnath, Ronghang Hu, Didac Suris, Chaitanya Ryali, Kalyan Vasudev Alwala, Haitham Khedr, Andrew Huang, et al. Sam 3: Segment anything with concepts. arXiv preprint arXiv:2511.16719 , 2025. [5] Xiaofu Chen, Yaxin Luo, Gen Luo, Jiayi Ji, Henghui Ding, and Yiyi Zhou. Dvin: Dynamic visual routing network for weakly supervised referring expression comprehension. In Proceedings of the Computer Vision and Pattern Recognition Conference , pages 14347–14357, 2025. [6] Silin Cheng, Yang Liu, Xinwei He, Sebastien Ourselin, Lei Tan, and Gen Luo. Weakmcn: Multi-task collaborative network for weakly supervised referring expression comprehension and segmentation. In 
+
+Proceedings of the Computer Vision and Pattern Recognition Conference , pages 9175–9185, 2025. [7] Yong Xien Chng, Henry Zheng, Yizeng Han, Xuchong Qiu, and Gao Huang. Mask grounding for referring image segmentation. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pages 26573–26583, 2024. [8] Ming Dai, Wenxuan Cheng, Jiang-jiang Liu, Sen Yang, Wenxiao Cai, Yanpeng Sun, and Wankou Yang. Deris: Decoupling perception and cognition for enhanced referring image segmentation through loopback synergy. arXiv preprint arXiv:2507.01738 , 2025. [9] Qiyuan Dai and Sibei Yang. Curriculum point prompting for weakly-supervised referring image segmenta-tion. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pages 13711–13722, 2024. [10] Ronald A Fisher. The use of multiple measurements in taxonomic problems. Annals of eugenics , 7(2): 179–188, 1936. [11] Chaofan Gan, Yuanpeng Tu, Xi Chen, Tieyuan Chen, Yuxi Li, Mehrtash Harandi, and Weiyao Lin. Unleashing diffusion transformers for visual correspondence by modulating massive activations. arXiv preprint arXiv:2505.18584 , 2025. [12] Jonathan Ho, Ajay Jain, and Pieter Abbeel. Denoising diffusion probabilistic models. Advances in neural information processing systems , 33:6840–6851, 2020. [13] Ronghang Hu, Marcus Rohrbach, and Trevor Darrell. Segmentation from natural language expressions. In 
+
+European conference on computer vision , pages 108–124. Springer, 2016. [14] Alexander Kirillov, Eric Mintun, Nikhila Ravi, Hanzi Mao, Chloe Rolland, Laura Gustafson, Tete Xiao, Spencer Whitehead, Alexander C Berg, Wan-Yen Lo, et al. Segment anything. In Proceedings of the IEEE/CVF international conference on computer vision , pages 4015–4026, 2023. [15] Anna Kukleva, Enis Simsar, Alessio Tonioni, Muhammad Ferjad Naeem, Federico Tombari, Jan Eric Lenssen, and Bernt Schiele. Refam: Attention magnets for zero-shot referral segmentation. arXiv preprint arXiv:2509.22650 , 2025. [16] Black Forest Labs. Flux. https://github.com/black-forest-labs/flux , 2024. [17] Black Forest Labs. FLUX.2: Frontier Visual Intelligence. https://bfl.ai/blog/flux-2 , 2025. [18] Tsung-Yi Lin, Michael Maire, Serge Belongie, James Hays, Pietro Perona, Deva Ramanan, Piotr Dollár, and C Lawrence Zitnick. Microsoft coco: Common objects in context. In European conference on computer vision , pages 740–755. Springer, 2014. [19] Shiyu Liu, Yucheng Han, Peng Xing, Fukun Yin, Rui Wang, Wei Cheng, Jiaqi Liao, Yingming Wang, Honghao Fu, Chunrui Han, et al. Step1x-edit: A practical framework for general image editing. arXiv preprint arXiv:2504.17761 , 2025. 
+
+10 [20] Sihan Liu, Yiwei Ma, Xiaoqing Zhang, Haowei Wang, Jiayi Ji, Xiaoshuai Sun, and Rongrong Ji. Rotated multi-scale interaction network for referring remote sensing image segmentation. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pages 26658–26668, 2024. [21] Ting Liu and Siyuan Li. Hybrid global-local representation with augmented spatial guidance for zero-shot referring image segmentation. In Proceedings of the Computer Vision and Pattern Recognition Conference ,pages 29634–29643, 2025. [22] László Lovász. Random walks on graphs. Combinatorics, Paul erdos is eighty , 2(1-46):4, 1993. [23] Junhua Mao, Jonathan Huang, Alexander Toshev, Oana Camburu, Alan L Yuille, and Kevin Murphy. Generation and comprehension of unambiguous object descriptions. In Proceedings of the IEEE conference on computer vision and pattern recognition , pages 11–20, 2016. [24] Varun K Nagaraja, Vlad I Morariu, and Larry S Davis. Modeling context between objects for referring expression understanding. In European Conference on Computer Vision , pages 792–807. Springer, 2016. [25] Minheng Ni, Yabo Zhang, Kailai Feng, Xiaoming Li, Yiwen Guo, and Wangmeng Zuo. Ref-diff: Zero-shot referring image segmentation with generative models. arXiv preprint arXiv:2308.16777 , 2023. [26] William Peebles and Saining Xie. Scalable diffusion models with transformers. In Proceedings of the IEEE/CVF international conference on computer vision , pages 4195–4205, 2023. [27] Alec Radford, Jong Wook Kim, Chris Hallacy, Aditya Ramesh, Gabriel Goh, Sandhini Agarwal, Girish Sastry, Amanda Askell, Pamela Mishkin, Jack Clark, et al. Learning transferable visual models from natural language supervision. In International conference on machine learning , pages 8748–8763. PmLR, 2021. [28] Robin Rombach, Andreas Blattmann, Dominik Lorenz, Patrick Esser, and Björn Ommer. High-resolution image synthesis with latent diffusion models. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pages 10684–10695, 2022. [29] Lixiang Ru, Yibing Zhan, Baosheng Yu, and Bo Du. Learning affinity from attention: End-to-end weakly-supervised semantic segmentation with transformers. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pages 16846–16855, 2022. [30] Ramprasaath R Selvaraju, Michael Cogswell, Abhishek Das, Ramakrishna Vedantam, Devi Parikh, and Dhruv Batra. Grad-cam: Visual explanations from deep networks via gradient-based localization. In 
+
+Proceedings of the IEEE international conference on computer vision , pages 618–626, 2017. [31] Nisarg A Shah, Vibashan VS, and Vishal M Patel. Lqmformer: Language-aware query mask transformer for referring image segmentation. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pages 12903–12913, 2024. [32] Chao Shang, Zichen Song, Heqian Qiu, Lanxiao Wang, Fanman Meng, and Hongliang Li. Prompt-driven referring image segmentation with instance contrasting. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pages 4124–4134, 2024. [33] Shuyang Sun, Runjia Li, Philip Torr, Xiuye Gu, and Siyang Li. Clip as rnn: Segment countless visual concepts without training endeavor. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pages 13171–13182, 2024. [34] Yucheng Suo, Linchao Zhu, and Yi Yang. Text augmented spatial-aware zero-shot referring image segmentation. arXiv preprint arXiv:2310.18049 , 2023. [35] Zhenxiong Tan, Songhua Liu, Xingyi Yang, Qiaochu Xue, and Xinchao Wang. Ominicontrol: Minimal and universal control for diffusion transformer. In Proceedings of the IEEE/CVF International Conference on Computer Vision , pages 14940–14950, 2025. [36] Meituan LongCat Team, Hanghang Ma, Haoxian Tan, Jiale Huang, Junqiang Wu, Jun-Yan He, Lishuai Gao, Songlin Xiao, Xiaoming Wei, Xiaoqi Ma, et al. Longcat-image technical report. arXiv preprint arXiv:2512.07584 , 2025. [37] Shijie Wang, Dahun Kim, Ali Taalimi, Chen Sun, and Weicheng Kuo. Learning visual grounding from generative vision and language model. In 2025 IEEE/CVF Winter Conference on Applications of Computer Vision (WACV) , pages 8057–8067. IEEE, 2025. [38] Xinlong Wang, Zhiding Yu, Shalini De Mello, Jan Kautz, Anima Anandkumar, Chunhua Shen, and Jose M Alvarez. Freesolo: Learning to segment objects without annotations. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pages 14176–14186, 2022. 
+
+11 [39] Yuji Wang, Jingchen Ni, Yong Liu, Chun Yuan, and Yansong Tang. Iterprime: Zero-shot referring image segmentation with iterative grad-cam refinement and primary word emphasis. In Proceedings of the AAAI Conference on Artificial Intelligence , volume 39, pages 8159–8168, 2025. [40] Chenfei Wu, Jiahao Li, Jingren Zhou, Junyang Lin, Kaiyuan Gao, Kun Yan, Sheng-ming Yin, Shuai Bai, Xiao Xu, Yilei Chen, et al. Qwen-image technical report. arXiv preprint arXiv:2508.02324 , 2025. [41] Chenyuan Wu, Pengfei Zheng, Ruiran Yan, Shitao Xiao, Xin Luo, Yueze Wang, Wanli Li, Xiyan Jiang, Yexin Liu, Junjie Zhou, et al. Omnigen2: Exploration to advanced multimodal generation. arXiv preprint arXiv:2506.18871 , 2025. [42] Shitao Xiao, Yueze Wang, Junjie Zhou, Huaying Yuan, Xingrun Xing, Ruiran Yan, Chaofan Li, Shuting Wang, Tiejun Huang, and Zheng Liu. Omnigen: Unified image generation. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pages 13294–13304, 2025. [43] Lian Xu, Wanli Ouyang, Mohammed Bennamoun, Farid Boussaid, and Dan Xu. Multi-class token transformer for weakly supervised semantic segmentation. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pages 4310–4319, 2022. [44] Zaiquan Yang, Yuhao Liu, Jiaying Lin, Gerhard Hancke, and Rynson Lau. Boosting weakly supervised referring image segmentation via progressive comprehension. Advances in Neural Information Processing Systems , 37:93213–93239, 2024. [45] Fukun Yin, Shiyu Liu, Yucheng Han, Zhibo Wang, Peng Xing, Rui Wang, Wei Cheng, Yingming Wang, Aojie Li, Zixin Yin, et al. Reasonedit: Towards reasoning-enhanced image editing models. arXiv preprint arXiv:2511.22625 , 2025. [46] Qifan Yu, Wei Chow, Zhongqi Yue, Kaihang Pan, Yang Wu, Xiaoyang Wan, Juncheng Li, Siliang Tang, Hanwang Zhang, and Yueting Zhuang. Anyedit: Mastering unified high-quality image editing for any idea. In Proceedings of the Computer Vision and Pattern Recognition Conference , pages 26125–26135, 2025. [47] Seonghoon Yu, Paul Hongsuck Seo, and Jeany Son. Zero-shot referring image segmentation with global-local context features. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pages 19456–19465, 2023. [48] Seonghoon Yu, Paul Hongsuck Seo, and Jeany Son. Pseudo-ris: Distinctive pseudo-supervision generation for referring image segmentation. In European Conference on Computer Vision , pages 18–36. Springer, 2024. [49] Seonghoon Yu, Joonbeom Hong, Joonseok Lee, and Jeany Son. Latent expression generation for referring image segmentation and grounding. In Proceedings of the IEEE/CVF International Conference on Computer Vision , pages 21374–21383, 2025. [50] Kai Zhang, Lingbo Mo, Wenhu Chen, Huan Sun, and Yu Su. Magicbrush: A manually annotated dataset for instruction-guided image editing. Advances in Neural Information Processing Systems , 36:31428–31449, 2023. [51] Zechuan Zhang, Ji Xie, Yu Lu, Zongxin Yang, and Yi Yang. In-context edit: Enabling instructional image editing with in-context generation in large scale diffusion transformer. arXiv preprint arXiv:2504.20690 ,2025. [52] Zechuan Zhang, Ji Xie, Yu Lu, Zongxin Yang, and Yi Yang. Enabling instructional image editing with in-context generation in large scale diffusion transformer. In The Thirty-ninth Annual Conference on Neural Information Processing Systems , 2025. [53] Haozhe Zhao, Xiaojian Ma, Liang Chen, Shuzheng Si, Rujie Wu, Kaikai An, Peiyu Yu, Minjia Zhang, Qing Li, and Baobao Chang. Ultraedit: Instruction-based fine-grained image editing at scale. Advances in Neural Information Processing Systems , 37:3058–3093, 2024. [54] Chong Zhou, Chen Change Loy, and Bo Dai. Extract free dense labels from clip. In European conference on computer vision , pages 696–712. Springer, 2022. 
+
+12 Appendix 
+
+A1 Feature Separability: Definition, Rationale, and Implementation 
+
+Definition. Let F(t,l ) ∈ RNv ×D denote MMSA output features of clean image tokens within the l-th DiT block at timestep t. Given the ground-truth binary mask, we denote the sets of foreground and background token indices as Ωfg and Ωbg , respectively. The class-wise means are defined as: 
+
+μ(t,l ) 
+
+> fg
+
+= 1
+
+|Ωfg |
+
+X
+
+> i∈Ωfg
+
+F(t,l ) 
+
+> i
+
+,μ(t,l ) 
+
+> bg
+
+= 1
+
+|Ωbg |
+
+X
+
+> i∈Ωbg
+
+F(t,l ) 
+
+> i
+
+.
+
+(A1) The corresponding within-class variances are defined as: 
+
+σ2( t,l ) 
+
+> fg
+
+= 1
+
+|Ωfg |
+
+X
+
+> i∈Ωfg
+
+F(t,l ) 
+
+> i
+
+− μ(t,l )
+
+> fg
+> 2
+
+,σ2( t,l ) 
+
+> bg
+
+= 1
+
+|Ωbg |
+
+X
+
+> i∈Ωbg
+
+F(t,l ) 
+
+> i
+
+− μ(t,l )
+
+> bg
+> 2
+
+.
+
+(A2) The feature separability is formulated as: 
+
+J (t,l ) =
+
+μ(t,l ) 
+
+> fg
+
+− μ(t,l )
+
+> bg
+> 2
+
+σ2( t,l ) 
+
+> fg
+
++ σ2( t,l )
+
+> bg
+
+. (A3) 
+
+Connection to Fisher Discriminant. The metric J (t,l ) quantifies the ratio of inter-class separation to intra-class variance, evaluating how effectively foreground and background features are disentangled in the representation space. This formulation is closely related to the classical Fisher discriminant criterion for two classes in multivariate space: 
+
+J = ( μfg − μbg )⊤(Σ fg + Σ bg )−1(μfg − μbg ), (A4) where Σfg and Σbg denote the respective covariance matrices. Our formulation J (t,l ) can be viewed as a simplified isotropic variant. By approximating the covariance matrices as isotropic (i.e., Σ ≈
+
+σ2( t,l )I), the inverse covariance simplifies to a scalar division. This yields a tractable and numerically stable measure that is highly suitable for high-dimensional features. 
+
+Implementation. We evaluate the feature separability metric J (t,l ) on FLUX.2-klein [ 17 ] and Step1X-Edit [ 19 ] across six uniformly sampled timesteps. For both models, we extract features from the DiT block located at approximately two-thirds of the model depth, where semantic representations are typically most pronounced. To obtain the spatial location sets Ωfg and Ωbg , we resize ground-truth segmentation masks to the spatial resolution of clean image tokens. All feature vectors are 
+
+ℓ2-normalized prior to computing J (t,l ) to ensure scale consistency across timesteps. We conduct this evaluation on the RefCOCO [24] val dataset and illustrate the statistics results via boxplots. 
+
+A2 Inference Efficiency Analysis 
+
+Table A1: Inference efficiency of our framework. Latency and peak GPU memory are measured on a single NVIDIA A100 GPU with a batch size of 1. The size level follows the officially recommended settings. Model Size Level Param. Latency (ms) Memory (GB) FLUX.2-klein 1024 9B 1493.02 22.27 Step1X-Edit 512 12B 603.78 25.31 
+
+We evaluate the inference efficiency of our framework in terms of inference latency and memory usage. All measurements are conducted on a single NVIDIA A100 GPU with a batch size of 1. 13 Following the officially recommended settings, we use a size level of 512 for Step1X-Edit and 1024 
+
+for FLUX.2-klein. As shown in Table A1, the DiT backbone of Step1X-Edit achieves an average latency of 603.78 ms with a peak memory usage of 25.31 GB, while FLUX.2-klein requires 1493.02 ms and 22.27 GB. The higher latency of FLUX.2-klein is mainly due to its larger input resolution. Compared with RefAM [ 15 ], our framework is significantly more efficient as it operates using a single denoising step. Specifically, RefAM requires 6-9 seconds for inversion, followed by 16-20 seconds for 28 denoising steps, with additional overhead from the segmentation stage. In contrast, our framework reduces inference time to approximately one second, achieving a speedup of more than 30 × over RefAM. 
+
+A3 Impact of Editing Instruction Refinement 
+
+Table A2: Impact of editing instruction refinement . We compare our method against HybridGL [ 21 ] using both the original and refined referring expressions. Refinement Method RefCOCO RefCOCO+ RefCOCOg oIoU mIoU oIoU mIoU oIoU mIoU                           
+
+> ×HybridGL 41.81 49.48 35.74 43.40 42.47 51.25 Ours (Step1X-Edit) 51.91 55.79 41.06 44.39 48.92 52.43
+> ✓HybridGL 44.14 52.55 38.53 46.78 43.74 52.78 Ours (Step1X-Edit) 53.94 57.56 44.38 48.50 51.23 54.52
+
+We investigate the impact of editing instruction refinement on segmentation performance to understand how instruction clarity influences the model’s internal priors. For a fair comparison, we also evaluate the recent state-of-the-art RIS method HybridGL [ 21 ] using refined expressions with editing keywords (e.g., “remove”) discarded. As shown in Table A2, refining the editing instructions leads to consistent performance gains across all datasets. We attribute this improvement to improved distributional alignment, as the refined prompts more closely match the data distribution seen during training of the image editing model. Although HybridGL also benefits from clearer prompts, our method maintains a substantial performance margin. 
+
+A4 Qualitative Results of SAM 3 
+
+The Segment Anything Model (SAM) 3 [ 4 ] takes concept prompts to retrieve segmentation masks for all matching instances in an image. While SAM 3 demonstrates strong capability in producing high-quality object boundaries, we observe that it exhibits two fundamental limitations when applied to referring image segmentation. First, SAM 3 often fails to predict the presence of the target object conditioned on the referring expression, resulting in a low recall rate. Second, even when the target object is successfully detected, the model tends to segment all instances belonging to the same semantic category, without adhering to instance-level constraints such as spatial relations specified in the referring expression. We present illustrative examples in Fig. A1 to demonstrate these failure modes. As can be seen, SAM 3 frequently misses the target object entirely, resulting in a high proportion of zero-IoU predictions. In the last example, even when the prompt specifies the position of the “giraffe”, the model still produces masks covering all giraffes in the scene. 
+
+A5 Limitations and Discussions 
+
+We identify three main types of failure cases, as illustrated in Fig. A2. The examples in the first row show that the image editing model struggles with fine-grained object boundaries, leading to imprecise segmentation along detailed contours. The second row demonstrates cases where the model fails to distinguish the referred instance and instead activates on all objects of the same category (e.g., all people or all zebras in the image). The third row highlights situations in which the model cannot capture the complete extent of the target object, resulting in partial segmentation. Importantly, these limitations primarily stem from the inherent capabilities of the underlying image editing model rather than our framework design , as the predicted masks remain consistent with the edited regions. 14 person on left side girl to left off frame polka dot person on left 
+
+Ground Truth 
+
+legs on left black pants on bottom leaning black object lower left corner 
+
+lower giraffe can only see neck bottom giraffe further giraffe       
+
+> 26% 0% 0%
+> 0% 35% 0%
+> 0% 15% 15%
+
+Sentence 1 Sentence 2 Sentence 3 Figure A1: Qualitative results of SAM 3 . The referring expression is shown at the bottom of each image. The corresponding IoU score is displayed at the bottom-right corner in each image. a man carrying a young girl 
+
+➜Remove the man holding the young girl. 
+
+the girl in blue 
+
+➜Remove the girl in blue. 
+
+the zebra that is behind the front zebra and the elephant 
+
+➜Remove the zebra behind the front zebra and the elephant. 
+
+a wood chair 
+
+➜Remove the wooden chair. 
+
+little boy standing behind chair 
+
+➜Remove the little boy standing behind the chair. 
+
+a breakfast sandwich with egg 
+
+➜Remove the breakfast sandwich with an egg. 
+
+Seg Result Seg GT Edit Result Seg Result Seg GT Edit Result 
+
+Figure A2: Examples of failure cases . The limitations primarily arise from the inherent capabilities of the underlying image editing model, as the predicted masks closely follow the edited regions. 15 A6 Broader Impact 
+
+This work advances zero-shot referring image segmentation by leveraging the implicit localization capability of instruction-based image editing models. Such capability may benefit applications in visual understanding where language-driven object grounding is required. On the other hand, the underlying image editing models repurposed in this work are capable of synthesizing realistic image manipulations, which raises concerns about potential misuse for generating misleading or harmful visual content. However, our framework exclusively extracts internal representations from these models for localization purposes and does not involve any image generation or modification. We therefore do not introduce additional risks beyond those already associated with the pretrained models themselves. 16

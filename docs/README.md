@@ -6,61 +6,53 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-05-13
-- 运行时间：2026-05-13 20:36:07 UTC
+- 最新运行日期：2026-05-14
+- 运行时间：2026-05-14 20:28:19 UTC
 - 运行状态：成功
-- 本次总论文数：13
-- 精读区：5
+- 本次总论文数：10
+- 精读区：2
 - 速读区：8
 
 ### 今日简报（AI）
-今日精选 13 篇前沿论文，深度解析图像内容极速擦除与光照退化修复的最新突破。
-重点推荐 FlashClear 的高效蒸馏移除技术，以及 ZeroIDIR 利用扩散模型实现的无参考光照修复方案。
-建议关注生成式基础模型在底层视觉任务中的统一趋势，探索高效特征缓存技术在图像编辑中的应用。
-- 详情：[/202605/13/README](/202605/13/README)
+- 今日共生成 10 篇推荐（精读 2 篇，速读 8 篇）
+- 精读：《Amortized Guidance for Image Inpainting with Pretrained Diffusion Models》（10.0/10）, 《HIR-ALIGN: Enhancing Hyperspectral Image Restoration via Diffusion-Based Data Generation》（8.0/10）
+- 速读：《Qwen-Image-2.0 Technical Report》（7.0/10）, 《Leveraging Multimodal Large Language Models for All-in-One Image Restoration via a Mixture of Frequency Experts》（7.0/10）, 《Aligning Network Equivariance with Data Symmetry: A Theoretical Framework and Adaptive Approach for Image Restoration》（7.0/10）
+- 这些结果覆盖了当下较热的方向，建议先看精读区论文的关键问题与方法。
+- 详情：[/202605/14/README](/202605/14/README)
 
 ### 精读区论文标签
-1. [FlashClear: Ultra-Fast Image Content Removal via Efficient Step Distillation and Feature Caching](/202605/13/2605.09003v2-flashclear-ultra-fast-image-content-removal-via-efficient-step-distillation-and-feature-caching)  
-   标签：评分：9.0/10、query:q1
-   evidence：基于扩散模型的物体移除和图像内容消除
-2. [ZeroIDIR: Zero-Reference Illumination Degradation Image Restoration with Perturbed Consistency Diffusion Models](/202605/13/2605.11435v1-zeroidir-zero-reference-illumination-degradation-image-restoration-with-perturbed-consistency-diffusion-models)  
-   标签：评分：9.0/10、query:q3
-   evidence：基于扩散模型的零参考图像修复
-3. [RevealLayer: Disentangling Hidden and Visible Layers via Occlusion-Aware Image Decomposition](/202605/13/2605.11818v1-reveallayer-disentangling-hidden-and-visible-layers-via-occlusion-aware-image-decomposition)  
-   标签：评分：9.0/10、query:q1
-   evidence：遮挡内容的可靠恢复与遮挡补全
-4. [Leveraging Multimodal Large Language Models for All-in-One Image Restoration via a Mixture of Frequency Experts](/202605/13/2605.11444v1-leveraging-multimodal-large-language-models-for-all-in-one-image-restoration-via-a-mixture-of-frequency-experts)  
-   标签：评分：8.0/10、query:q7
-   evidence：用于多种退化的多模态大模型引导图像修复框架
-5. [UniFixer: A Universal Reference-Guided Fixer for Diffusion-Based View Synthesis](/202605/13/2605.12169v1-unifixer-a-universal-reference-guided-fixer-for-diffusion-based-view-synthesis)  
-   标签：评分：8.0/10、query:q1
-   evidence：基于扩散模型的视图合成与修复
+1. [Amortized Guidance for Image Inpainting with Pretrained Diffusion Models](/202605/14/2605.13010v1-amortized-guidance-for-image-inpainting-with-pretrained-diffusion-models)  
+   标签：评分：10.0/10、query:q1
+   evidence：基于预训练扩散模型的图像补全
+2. [HIR-ALIGN: Enhancing Hyperspectral Image Restoration via Diffusion-Based Data Generation](/202605/14/2605.13581v1-hir-align-enhancing-hyperspectral-image-restoration-via-diffusion-based-data-generation)  
+   标签：评分：8.0/10、query:q3
+   evidence：无干净参考的自适应目标增强修复
 
 ### 速读区论文标签
-1. [HiDream-O1-Image: A Natively Unified Image Generative Foundation Model with Pixel-level Unified Transformer](/202605/13/2605.11061v1-hidream-o1-image-a-natively-unified-image-generative-foundation-model-with-pixel-level-unified-transformer)  
+1. [Qwen-Image-2.0 Technical Report](/202605/14/2605.10730v1-qwen-image-20-technical-report)  
    标签：评分：7.0/10、query:q4
-   evidence：统一的图像生成基础模型
-2. [A Mixture Autoregressive Image Generative Model on Quadtree Regions for Gaussian Noise Removal via Variational Bayes and Gradient Methods](/202605/13/2605.11585v1-a-mixture-autoregressive-image-generative-model-on-quadtree-regions-for-gaussian-noise-removal-via-variational-bayes-and-gradient-methods)  
+   evidence：图像生成与精确图像编辑
+2. [Leveraging Multimodal Large Language Models for All-in-One Image Restoration via a Mixture of Frequency Experts](/202605/14/2605.11444v2-leveraging-multimodal-large-language-models-for-all-in-one-image-restoration-via-a-mixture-of-frequency-experts)  
+   标签：评分：7.0/10、query:q3
+   evidence：通过多模态大语言模型进行全能图像修复
+3. [Aligning Network Equivariance with Data Symmetry: A Theoretical Framework and Adaptive Approach for Image Restoration](/202605/14/2605.13744v1-aligning-network-equivariance-with-data-symmetry-a-theoretical-framework-and-adaptive-approach-for-image-restoration)  
    标签：评分：7.0/10、query:q7
-   evidence：用于图像修复和去噪的概率生成模型
-3. [Learning a Delighting Prior for Facial Appearance Capture in the Wild](/202605/13/2605.05636v1-learning-a-delighting-prior-for-facial-appearance-capture-in-the-wild)  
-   标签：评分：6.0/10、query:q7
-   evidence：作为修复类任务先验的去光照网络
-4. [Learning to Perceive "Where": Spatial Pretext Tasks for Robust Self-Supervised Learning](/202605/13/2605.09963v1-learning-to-perceive-where-spatial-pretext-tasks-for-robust-self-supervised-learning)  
-   标签：评分：6.0/10、query:q7
-   evidence：用于自监督学习的空间代理任务
-5. [Beyond the Last Layer: Multi-Layer Representation Fusion for Visual Tokenization](/202605/13/2605.10780v2-beyond-the-last-layer-multi-layer-representation-fusion-for-visual-tokenization)  
+   evidence：图像修复的理论框架和自适应方法
+4. [MoCam: Unified Novel View Synthesis via Structured Denoising Dynamics](/202605/14/2605.12119v2-mocam-unified-novel-view-synthesis-via-structured-denoising-dynamics)  
    标签：评分：6.0/10、query:q4
-   evidence：用于重建和生成的表示自编码器
-6. [FeatMap: Understanding image manipulation in the feature space and its implications for feature space geometry](/202605/13/2605.11203v1-featmap-understanding-image-manipulation-in-the-feature-space-and-its-implications-for-feature-space-geometry)  
-   标签：评分：6.0/10、query:q1
-   evidence：使用生成式图像编辑进行局部掩码和语义操作
-7. [EDGER: EDge-Guided with HEatmap Refinement for Generalizable Image Forgery Localization](/202605/13/2605.12002v1-edger-edge-guided-with-heatmap-refinement-for-generalizable-image-forgery-localization)  
-   标签：评分：6.0/10、query:q1
-   evidence：检测文本引导的修复伪造
-8. [Fast Image Super-Resolution via Consistency Rectified Flow](/202605/13/2605.12377v1-fast-image-super-resolution-via-consistency-rectified-flow)  
+   evidence：具有结构化去噪动力学的生成式新视图合成
+5. [Early Semantic Grounding in Image Editing Models for Zero-Shot Referring Image Segmentation](/202605/14/2605.13122v1-early-semantic-grounding-in-image-editing-models-for-zero-shot-referring-image-segmentation)  
+   标签：评分：6.0/10、query:q3
+   evidence：基于编辑模型的零样本指代图像分割
+6. [EvObj: Learning Evolving Object-centric Representations for 3D Instance Segmentation without Scene Supervision](/202605/14/2605.13152v1-evobj-learning-evolving-object-centric-representations-for-3d-instance-segmentation-without-scene-supervision)  
+   标签：评分：6.0/10、query:q2
+   evidence：用于部分几何结构的无监督物体补全模块
+7. [Unifying Physically-Informed Weather Priors in A Single Model for Image Restoration Across Multiple Adverse Weather Conditions](/202605/14/2605.13158v1-unifying-physically-informed-weather-priors-in-a-single-model-for-image-restoration-across-multiple-adverse-weather-conditions)  
+   标签：评分：6.0/10、query:q7
+   evidence：跨天气条件的统一图像修复模型
+8. [Qwen-Image-VAE-2.0 Technical Report](/202605/14/2605.13565v1-qwen-image-vae-20-technical-report)  
    标签：评分：6.0/10、query:q4
-   evidence：用于图像重建和超分辨率的生成式先验
+   evidence：用于图像重建和潜空间扩散模型的生成式VAE
 
 
 <div class="dpr-home-promo-card">

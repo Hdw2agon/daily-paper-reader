@@ -1,0 +1,1434 @@
+Title: HIR-ALIGN: Enhancing Hyperspectral Image Restoration via Diffusion-Based Data Generation
+
+URL Source: https://arxiv.org/pdf/2605.13581v1
+
+Published Time: Thu, 14 May 2026 01:44:13 GMT
+
+Number of Pages: 20
+
+Markdown Content:
+> JOURNAL OF L ATEX CLASS FILES, VOL. 14, NO. 8, AUGUST 2021 1
+
+# HIR-ALIGN: Enhancing Hyperspectral Image Restoration via Diffusion-Based Data Generation 
+
+Li Pang †, Heng Zhao †, Yijia Zhang, Deyu Meng, and Xiangyong Cao *
+
+Abstract —Hyperspectral image (HSI) restoration is crucial for reliable analysis, as real-world HSIs suffer from degradations like noise, blur, and resolution loss. However, existing models trained on source data often fail when deployed on target domains lacking clean references, a common occurrence in real-world scenarios. To address this issue, we present HIR-ALIGN, which enhances hyperspectral image restoration via augmenting limited training images by generating synthetic data that closely matches the target distribution with no-extra data, a plug-and-play target-adaptive augmentation framework. The framework consists of three stages: (i) proxy generation, where off-the-shelf restoration models are applied to degraded target observations to produce semantics-preserving proxy HSIs that approximate the target-domain clean images; (ii) distribution-adaptive synthesis, where a blur-robust unCLIP diffusion model generates target-aligned RGBs from proxy RGBs, with prompt conditioning and embedding-space noise initialization. Subsequently, a warp-based spectral transfer module synthesizes HSIs by aligning each generated RGB with the proxy RGB, estimating soft patch-wise transport weights, and applying the same weights and learnable local interpolation kernels to the proxy HSI; and (iii) aligned supervised finetuning, where restoration networks pretrained on the source distribution are finetuned using both the proxy HSIs and the synthesized target-aligned HSIs, and are then deployed on degraded target images. We further provide theoretical anal-ysis showing that the proposed augmentation-based finetuning can achieve lower target-domain restoration risk, by jointly improving target distribution coverage and controlling spectral bias. Extensive experiments on both simulated and real datasets across multiple restoration tasks, such as denoising and super-resolution, demonstrate that HIR-ALIGN consistently improves source-only supervised baselines, achieving superior performance to their source-only counterparts and outperform representative unsupervised methods. 
+
+Index Terms —hyperspectral image restoration, diffusion model, data augmentation, domain adaptation 
+
+I. I NTRODUCTION 
+
+Hyperspectral imaging records scene radiance over dozens of narrow spectral bands, providing substantially richer mate-rial and physical information than conventional RGB imaging. Owing to this dense spectral representation, hyperspectral images (HSIs) have been widely used in material identification 
+
+Li Pang is with the School of Mathematics and Statistics, Xi’an Jiaotong University, Xi’an 710049, China. Heng Zhao and Yijia Zhang are with the School of Computer Science and Technology, Xi’an Jiaotong University, Xi’an 710049, China. Deyu Meng is with the School of Mathematics and Statistics and the Ministry of Education Key Laboratory for Intelligent Networks and Network Security, Xi’an Jiaotong University, Xi’an, Shaanxi 710049, China, and also with Pazhou Laboratory (Huangpu), Guangzhou, Guangdong 510555, China. Xiangyong Cao is with the School of Computer Science and Technology and the Ministry of Education Key Laboratory for Intelligent Networks and Network Security, Xi’an Jiaotong University, Xi’an 710049, China. 
+
+Fig. 1. PSNR comparison of models pretrained only on ICVL [10] and the same backbones further finetuned with HIR-ALIGN, evaluated on CAVE [11]. X (Y) denotes the performance of model Y on task X. 
+
+[1], [2], object detection [3]–[5], medical imaging [6], [7], and remote sensing [8], [9]. In practical acquisition, however, HSIs are often corrupted by sensor noise, low spatial resolu-tion, blur, missing bands, occlusions, and mixed degradations caused by hardware limitations or imaging environments. HSI restoration is therefore a prerequisite for reliable downstream analysis. The performance of an image restoration system is mainly determined by three coupled factors: the restoration model, the degradation model, and the training data distribution. The restoration model determines the representation capacity and inference mechanism of the restorer. The degradation model describes how clean HSIs are corrupted during ac-quisition or during synthetic training-data construction, and thus determines whether the learned inverse mapping is con-sistent with the target restoration task. The training data distribution determines whether the learned spatial–spectral priors match the scenes to be restored. While substantial progress has been made in architectures (e.g., traditional low-rank, sparsity, and tensor priors [12]–[15], as well as deep CNN, Transformer, Mamba, and diffusion networks [16]–[21]) and realistic degradation modeling (e.g., non-i.i.d. mixture-of-Gaussians, band-dependent, asymmetric, and mixed noises [22]–[27]), these advancements do not resolve the data-distribution mismatch between training (source) and deployment (target) domains. Shifts in scene content, illu-mination, or spectral statistics render source-learned spatial– spectral priors suboptimal. This distribution-shift problem is particularly severe for HSI restoration. In many real scenarios,  
+
+> arXiv:2605.13581v1 [cs.CV] 13 May 2026 JOURNAL OF L ATEX CLASS FILES, VOL. 14, NO. 8, AUGUST 2021 2
+
+one can easily collect degraded target observations from the deployed sensor, but obtaining the corresponding clean target HSIs is expensive, time-consuming, or physically impossible. Therefore, the central question considered in this paper is: 
+
+how can we transform a small set of degraded target observations into effective target-aligned supervision, such that a source-trained restorer can achieve better restoration on the observed target data and generalize more reliably to unknown samples from the same target domain, without using additional clean target-domain data? 
+
+Although generative diffusion models excel at data aug-mentation, their success has been extensively demonstrated in natural-image synthesis. Representative models, including DDPM [28], DDIM [29], score-based diffusion models [30], [31], ADM [32], GLIDE [33], latent diffusion models [34], unCLIP [35], Imagen [36], and DiT [37], have achieved high-fidelity unconditional, class-conditional, text-conditioned, and image-variation generation on RGB natural images. Neverthe-less, these models mainly learn RGB appearance priors from large-scale natural-image or text–image data and do not di-rectly provide spectrally faithful HSI supervision. Meanwhile, existing remote-sensing and HSI generators (e.g., CRS-Diff [38], AeroGen [39], TerraGen [40], HSIGene [41]) cannot directly solve this target-adaptive problem due to two key limitations:  
+
+> •
+
+Domain and Modality Specificity: Natural-image dif-fusion models mainly operate in the RGB image space and lack explicit spectral-generation constraints, while remote-sensing and HSI generators are constrained to specific domains, layouts, or training corpora. As a result, they struggle to synthesize arbitrary target distributions, such as close-range natural scenes (e.g., CAVE and KAIST), while preserving reliable hyperspectral signa-tures.  
+
+> •
+
+Reliance on High-Quality Data: They typically require clean images, paired supervision, high-quality conditions, or large-scale curated training data. Directly applying these generators to degraded target observations would merely reproduce artifacts (e.g., noise, blur, missing bands) rather than providing clean, target-aligned hyper-spectral supervision. To address these issues, we propose HIR-ALIGN , a target-adaptive augmentation framework for HSI restoration under distribution shift. The framework contains three stages: proxy generation, semantic-guided distribution-adaptive synthe-sis, and aligned supervised finetuning . In the first stage, a source-pretrained restorer is applied to degraded target observations to obtain proxy HSIs. Although these proxies are not perfect ground truth, they remove a large portion of the target degradation and preserve the dominant scene structures and spectral characteristics of the target domain. In the second stage, a blur-robust conditional diffusion model modified from unCLIP [35] is used to generate target-aligned RGB images from the proxy RGBs. Compared with the original unCLIP pipeline, we introduce a degradation-robust CLIP model, prompt conditioning and embedding-space noise initialization to improve the robustness of RGB synthesis when the conditioning proxies still contain residual restoration errors. To convert the generated RGBs into HSIs, we design a warp-based spectral transfer module. Specifically, we first estimate aggregation weights and interpolation kernels by matching each generated RGB to the proxy RGB through patch descriptors, candidate retrieval, soft pixel aggregation, and learnable local interpolation. These estimated parameters are then applied to the proxy HSI. Consequently, the syn-thesized HSI inherits authentic spectra from the proxy HSI while adopting the spatial layout and appearance distribution of the generated RGB. This constrained spectral inheritance increases the diversity of target-domain supervision without freely hallucinating spectra, thereby reducing the risk of spectral drift. In the third stage, both proxy samples and syn-thesized target-aligned samples are used to finetune existing restoration backbones, enabling the adapted models to improve restoration on the observed target images and generalize more reliably to unseen samples from the same target domain. This data-construction strategy improves performance because it simultaneously reduces overfitting to a small observed target set, increases target coverage through semantic-guided views, and suppresses spectral drift through proxy-anchored spectral inheritance. The main contributions of this paper are summarized as follows.  
+
+> •
+
+We propose HIR-ALIGN, a plug-and-play data-distribution alignment framework that improves existing supervised HSI restorers through proxy generation, distribution-adaptive synthesis, and aligned supervised finetuning. The framework emphasizes data distribution as a key factor of restoration performance, complementary to model design and degrada-tion simulation.  
+
+> •
+
+We design a semantic-guided RGB synthesis module based on improved unCLIP for target-domain augmentation. Specifically, we enhance the original unCLIP framework by introducing a degradation-robust CLIP, prompt conditioning and embedding-space noise initialization, which improve the robustness of conditional diffusion to residual degradations and structural inaccuracies in proxy RGBs, and enable the generation of RGB samples that better match the target-domain appearance distribution.  
+
+> •
+
+We propose a warp-based hyperspectral generation module to convert the synthesized RGB images into target-aligned HSIs. Instead of relying on an unconstrained RGB-to-HSI reconstruction network, the proposed module transfers spectra from proxy HSIs to generated RGB layouts through patch matching, sparse candidate aggregation, and shared local interpolation, thereby avoiding spectral hallucination and providing more stable supervision.  
+
+> •
+
+We provide a theoretical analysis to justify our data aug-mentation framework. By formalizing the hyperspectral im-age synthesis process as a sparse stochastic transport, we derive theoretical bounds on the target risk. This analysis rigorously explains that finetuning on a mixture of proxy and generated samples systematically expands target dis-tribution coverage while strictly controlling spectral bias. Consequently, our framework mathematically guarantees a JOURNAL OF L ATEX CLASS FILES, VOL. 14, NO. 8, AUGUST 2021 3
+
+lower generalization risk on the unseen target domain.  
+
+> •
+
+Extensive experiments on both simulated and real datasets across multiple restoration tasks, such as denoising and super-resolution, demonstrate that existing HSI restoration methods enhanced by HIR-ALIGN achieve better perfor-mance than their source-only counterparts and outperform representative unsupervised methods and generative aug-mentation baselines. II. R ELATED WORKS 
+
+A. Hyperspectral Image Restoration 
+
+Hyperspectral image restoration aims to recover clean, high-quality data from degraded observations and is typically stud-ied under unsupervised and supervised paradigms. Classical unsupervised methods mainly rely on manually designed pri-ors. Representative examples include LRTV [42], which com-bines low-rank decomposition with total variation, LRTFL0 [43], which improves edge preservation through L0 gradi-ent regularization, Enhanced-3DTV [44], which alleviates the sparsity limitation of traditional 3DTV by subspace learning, and RCTV [45], which regularizes a representative coefficient matrix for improved efficiency. These methods are attractive because they do not require paired training data, yet their hand-crafted priors are often insufficient to capture the rich and highly nonstationary spatial–spectral structures encoun-tered in real target domains. Consequently, their restoration performance typically falls behind that of supervised meth-ods in in-domain scenarios. Furthermore, these optimization-based approaches generally involve high computational time complexity during the solving process and require laborious hyperparameter tuning. Supervised restoration methods learn powerful spatial– spectral priors directly from data. For denoising, GRNNet [46] models both local and global information, TRQ3DNet [17] bridges CNNs and Transformers for improved feature preservation, SERT [19] enhances spatial–spectral interactions with a tailored Transformer architecture, and SSUMamba [20] adopts the Mamba architecture for efficient long-range modeling. For super-resolution, GDRRN [47], SFCSR [48], and ESSAformer [49] are strong supervised baselines, while diffusion-based variants such as HSR-Diff [50] and ISPDiff [51] further explore stochastic generation. More general-purpose restoration backbones such as PromptIR [52] and MP-HSIR [21] aim to handle multiple degradations with a unified architecture. Despite these advances, most supervised methods are still trained under a closed-world assumption: the training and testing domains are expected to share similar degradation statistics, scene composition, and spectral distribution. This assumption is often violated in practical HSI acquisition. Once the target domain shifts away from the source domain, source-pretrained restorers may exhibit large performance drops, even when their in-domain benchmark results are strong. Our work is complementary to the development of restoration backbones: instead of proposing yet another architecture for a fixed task, HIR-ALIGN provides a front-end target adaptation strategy that can be plugged into existing restorers without modifying their inference networks. 
+
+B. Diffusion Models 
+
+Diffusion models generate data by reversing a forward perturbation process that gradually maps a clean sample x0
+
+to Gaussian noise xt:
+
+q(xt | xt−1) = N
+
+
+
+xt; p1 − βt xt−1, β tI
+
+
+
+, (1) and learn the reverse process 
+
+pθ (xt−1 | xt) = N (xt−1 | xt; μθ (xt, t ), Σθ (xt, t )) . (2) DDPM [28] and its extensions [29]–[32], [34] have made diffusion models a dominant family of generative models. In natural-image synthesis, early score-based and denoising diffusion models [28], [30], [31] established high-quality gen-eration through iterative denoising or reverse-time stochastic dynamics, while DDIM [29] improved sampling efficiency by introducing a non-Markovian sampling process. ADM [32] further improved class-conditional ImageNet synthesis and demonstrated that diffusion models can surpass GAN-based methods in image fidelity. With classifier-free guidance [53] and large-scale text–image pretraining, GLIDE [33], latent diffusion models [34], unCLIP [35], and Imagen [36] enabled photorealistic text-conditioned or image-conditioned generation. More recently, DiT [37] showed that transformer backbones can scale diffusion models effectively for high-quality image synthesis. These natural-image diffusion models provide powerful RGB appearance priors and motivate our use of unCLIP-style image-variation synthesis. The unCLIP framework [35] is particularly attractive for our problem because it conditions image synthesis on CLIP embeddings and can therefore generate semantically related images from visual prompts rather than only from pure text. However, existing natural-image diffusion models, including unCLIP, are designed primarily for RGB image synthesis and do not explicitly model hyperspectral spectral correlations, making their outputs insufficient as spectrally reliable supervision for HSI synthesis. Recent works have also explored diffusion-based generation or augmentation in remote sensing and hyperspectral imag-ing. For example, CRS-Diff [38] studies controllable remote-sensing image generation, AeroGen [39] uses diffusion-driven generation to enhance remote-sensing object detection, and TerraGen [40] focuses on layout-based remote-sensing data augmentation. In the hyperspectral field, HSIGene [41] de-velops a foundation model for HSI generation, and HIR-Diff [54] explores diffusion priors for unsupervised HSI restoration. These methods demonstrate the potential of generative models, but they do not directly solve the target-adaptive restora-tion problem studied here: target adaptation from degraded observations of an arbitrary natural-scene HSI domain. In this setting, simply invoking either an RGB natural-image generator or a domain-specific HSI generator can easily create samples that are visually plausible yet poorly aligned with the target scene distribution or with the degradation-specific semantics contained in the observed target data. JOURNAL OF L ATEX CLASS FILES, VOL. 14, NO. 8, AUGUST 2021 4       
+
+> Fig. 2. Overview of HIR-ALIGN. (a) Proxy generation: source-pretrained HSI restorers produce proxy HSIs and proxy RGBs from degraded target observations. (b) Distribution-adaptive synthesis: improved unCLIP generates target-aligned RGBs, and the proposed pixel-matching spectral transfer module maps proxy spectra to the generated RGB layout by extracting pixel features from patch descriptors, retrieving candidates via neighborhood lookup, and applying soft aggregation with shared local interpolation. (c) Aligned supervised finetuning: re-degraded proxy pairs and synthesized HSI pairs are jointly used to finetune off-the-shelf restoration networks.
+
+III. M ETHOD 
+
+HIR-ALIGN contains three stages: proxy generation, distribution-adaptive synthesis, and aligned supervised fine-tuning. The first stage extracts a stable target-domain anchor from each degraded observation. The second stage enlarges the target support by generating target-aligned RGB views and converting them into HSIs through spectral warping. The third stage transforms these data into supervised training pairs and uses them to finetune an arbitrary restoration backbone. The full workflow is summarized in Fig. 2. 
+
+A. Proxy Generation 
+
+For each degraded target observation xi, we first obtain a proxy HSI pi by applying a source-pretrained restoration model Φsrc :
+
+pi = Φ src (xi). (3) The proxy is not expected to be a fully clean reconstruction. Instead, its role is to provide an initial target-domain esti-mate that preserves the scene layout, object boundaries, and dominant spatial–spectral structures of the latent target image. Therefore, pi serves as a pseudo-clean anchor for constructing target-adaptive training data. Using proxies rather than raw degraded data as synthesis anchors prevents the entanglement of semantics with artifacts by providing a clean data manifold, enabling effective supervised adaptation. To couple the proxy HSI with the RGB diffusion model, we convert pi into a proxy RGB image ri = Γ( pi). This is performed by selecting three visible-wavelength bands corre-sponding to red, green, and blue: 
+
+ri = Γ( pi) = p(bR) 
+
+> i
+
+, p (bG) 
+
+> i
+
+, p (bB )
+
+> i
+
+, (4) where bR, bG, and bB denote the bands centered at, or closest to, 660nm, 550nm, and 470nm, respectively. The resulting pair (pi, r i) is then used as the target-domain anchor in the subsequent synthesis stage. Intuitively, a higher-quality proxy provides a more reliable anchor. However, the proposed framework does not require the proxy to be perfect. The proxy mainly needs to preserve sufficient scene semantics and spatial structure for the RGB generator and the subsequent target-adaptive data construction. Moderate restoration errors in pi do not necessarily destroy this information, because the generation stage is relatively robust to local artifacts and low-level noise. Thus, even a relatively weak proxy can still provide useful target-domain structure for adaptation. Fundamentally, our objective is to achieve superior performance over existing methods. A poor proxy merely indicates that existing methods (e.g., the source-pretrained Φsrc ) struggle to generalize to such complex target degradations. However, our framework is not bottlenecked by this initial limitation. By utilizing the proxy as a bootstrap signal to construct target-aligned training pairs, our method can effectively elevate the performance of these existing baselines, demonstrating that our approach can consistently improve upon existing methods and achieve state-of-the-art results. 
+
+B. Distribution-Adaptive Synthesis 
+
+This stage contains two coupled components: target-aligned RGB generation and warp-based hyperspectral generation. The first component introduces appearance diversity aligned with the target domain. The second component converts each gen-erated RGB into an HSI while preserving spectral consistency with the proxy HSIs, thereby producing more stable and target-aligned supervision for subsequent finetuning. The design of this stage is motivated by the asymmetric availability of generative priors in the RGB and hyperspectral domains. For natural RGB images, large-scale training data and mature generative models are readily available, making it possible to synthesize images that both preserve the main scene content and enlarge appearance diversity. We therefore employ an improved unCLIP model to generate target-aligned JOURNAL OF L ATEX CLASS FILES, VOL. 14, NO. 8, AUGUST 2021 5
+
+RGB images from the proxy RGBs. In contrast, hyperspectral data are far more scarce, and directly learning to generate target-domain HSIs is considerably less reliable. We leverage the generated RGB images as appearance carriers and convert them into HSIs through a spectra-warp strategy. Specifically, the generated RGBs are aligned with the proxy RGB, and the corresponding spectra are inherited from the proxy HSI through constrained warp-based transfer. In this way, the framework benefits from the strong content-preserving and diversity-enlarging capability of existing RGB generative models, while keeping the synthesized spectra tied to the proxy-domain spectral manifold. The process consists of two steps: 
+
+1) Target-Aligned RGB Generation with Improved un-CLIP. Given a proxy RGB image ri ∈ [0 , 1] H×W ×3 for the i-th target sample, where H and W denote the spatial height and width, we adopt unCLIP [35] to generate diverse RGB samples whose spatial appearance matches the target domain. Let zI = Eclip (ri) denote the CLIP image embedding extracted from ri, where Eclip is the CLIP vision encoder. Let 
+
+zT denote the text-conditioning embedding encoded from the fixed prompt guidance. They are fused into a conditioning code 
+
+zC = fcond (zI , zT ), (5) where fcond (·) is the conditioning fusion function and zC
+
+is the final condition used by the reverse diffusion sampler. Following the DDPM formulation [28], the mean of the Gaussian reverse transition is 
+
+μθ (xt, t | zC ) = 1
+
+√αt
+
+
+
+xt − 1 − αt
+
+√1 − ¯αt
+
+ˆϵθ (xt, t | zC )
+
+
+
+. (6) Here, xt is the noisy image latent at diffusion timestep t,
+
+μθ (·) is the predicted mean for sampling xt−1, θ denotes the parameters of the denoising network, ˆϵθ (xt, t | zC ) is the predicted noise conditioned on zC , αt = 1 − βt is determined by the noise variance schedule βt, and ¯αt = Qts=1 αs is the cumulative noise-retention coefficient. Directly using the original unCLIP conditioning is not sufficient because the proxy images may still contain blur, residual noise, or missing details. We therefore introduce three modifications:  
+
+> •
+
+Vision Encoder Fine-tuning: The CLIP vision encoder is fine-tuned to align embeddings of blurred images with those of their clean counterparts. Denoting the encoder by Eclip , we minimize: 
+
+Lclip = ∥Eclip (Iblur ) − Eclip (Iclean )∥22 , (7) where Iblur and Iclean are a blurred image and its clean counterpart, respectively, Lclip is the embedding-alignment loss, and ∥ · ∥ 2 denotes the Euclidean norm. This objective encourages degraded conditions to remain semantically informative in the CLIP embedding space.  
+
+> •
+
+Prompt Guidance: Fixed positive and negative prompts are injected as additional guidance to encourage high-quality details and suppress obvious artifacts. Specifically, 
+
+zT contains the text-side guidance used by the conditional sampler, where the positive prompt strengthens clean and detailed image priors, while the negative prompt suppresses undesired degradations such as blur, noise, and low-quality textures.  
+
+> •
+
+SDEdit-style Initialization: Instead of starting the re-verse diffusion sampling process from pure Gaussian noise, we follow an SDEdit-style initialization [55] by using a noised version of the proxy image latent as the sampling starting point. Let xinit 0 denote the initial clean latent obtained from the proxy RGB, and let t0 be the selected starting timestep of the reverse sampler. We initialize the reverse diffusion trajectory at timestep t0 by 
+
+xinit  
+
+> t0
+
+= p¯αt0 xinit 0 + p1 − ¯αt0 ϵ, (8) where xinit  
+
+> t0
+
+is the initialized sampling state, ϵ ∼ N (0, I)
+
+is standard Gaussian noise, and I is the identity covari-ance matrix. The sampler then denoises from xinit  
+
+> t0
+
+to x0,so the generated image preserves the semantic structure of the proxy while still allowing diverse target-aligned appearance variations. The output of this stage is a set of generated guide RGBs 
+
+{gi,j }Mj=1 for each proxy sample, where M is the number of generated RGB guides per proxy and j indexes the j-th generated guide. These RGB guides are intentionally treated as appearance carriers only. Their role is to provide target-aligned layout and texture statistics that can later be associated with reliable spectra through the warp module. By generating multiple RGB guides from each proxy, the synthesized training set can cover a broader portion of the target-domain appear-ance distribution, which is beneficial for improving adaptation and generalization. They enrich local target-domain variability in texture, illumination, and fine geometry while keeping the scene semantics sufficiently stable for subsequent spectral transfer. 
+
+2) Warp-Based Hyperspectral Generation. The synthe-sized RGB guide provides target-aligned appearance, while the proxy HSI provides the spectral anchor. We therefore synthesize a target-aligned HSI by estimating a sparse RGB-conditioned transport operator from the proxy RGB to the guide RGB and then applying the same operator to the proxy spectra. The process is shown in Figure 3. Let i index a proxy sample and j index one generated RGB guide associated with this proxy. We denote the proxy HSI by pi ∈ RH×W ×B ,where H and W are the spatial height and width and B is the number of spectral bands. The pseudo-RGB image derived from pi is denoted by ri ∈ [0 , 1] H×W ×3, and the generated guide RGB is denoted by gi,j ∈ [0 , 1] H×W ×3. The pixel lattice is Ω = {1, . . . , H } × { 1, . . . , W }, and pixel coordinates are written as u = ( uy , u x) ∈ Ω and v = ( vy , v x) ∈ Ω.
+
+Step1: Descriptor Construction and Candidate Re-trieval. For both the proxy RGB and the guide RGB, we construct local patch descriptors that encode color, chro-maticity, and structural information. Given an RGB image 
+
+I ∈ [0 , 1] H×W ×3, the descriptor at pixel u is defined as 
+
+ψ(I, u ) = Unfold sm
+
+
+
+[I, λ cχ(I), λ g ∇I]
+
+
+
+> u
+
+,χ(I)( u) = I(u)
+
+P3 
+
+> c=1
+
+Ic(u) + ϵ . (9) JOURNAL OF L ATEX CLASS FILES, VOL. 14, NO. 8, AUGUST 2021 6 
+
+> Fig. 3. Details of the warp based spectral transfer process. We first match the generated and proxy RGB images using multi feature patch descriptors and neighbor retrieval. We then optimize soft aggregation weights and local interpolation kernels guided by RGB alignment losses. Finally we apply these shared learned parameters directly to the proxy hyperspectral data to synthesize the target aligned output.
+
+Here, ψ(I, u ) ∈ RDψ is the descriptor vector, Dψ is the descriptor dimension, Unfold sm (·)u extracts and vectorizes an 
+
+sm × sm patch centered at u, Ic(u) is the value of the c-th RGB channel at u, ϵ is a small positive constant for numerical stability, χ(I) is the chroma-normalized RGB image, and ∇I
+
+denotes image-gradient features. The coefficients λc and λg
+
+balance the chroma and gradient components, respectively. The chroma term reduces sensitivity to illumination variation, while the gradient term emphasizes local structural consis-tency. For each guide pixel u, we retrieve a small set of appearance-consistent seed locations from the proxy image by nearest-neighbor search in the descriptor space. This retrieval is performed with FAISS [56], which enables efficient simi-larity search over dense patch descriptors. Formally, the seed locations are defined as 
+
+{qu,m }Ks 
+
+> m=1
+
+= NN Ks (ψ(gi,j , u ), {ψ(ri, v ) | v ∈ Ω}) , (10) where qu,m ∈ Ω is the m-th retrieved proxy seed for guide location u, and NN Ks returns the Ks proxy locations whose descriptors are closest to ψ(gi,j , u ) under the descriptor dis-tance. Each seed is further expanded within a local spatial neighborhood, 
+
+Nρ(q) = {v ∈ Ω | ∥ v−q∥∞ ≤ ρ}, Si,j (u) = 
+
+> Ks
+
+[
+
+> m=1
+
+Nρ(qu,m ),
+
+(11) where ρ is the refinement radius, Nρ(q) is the neighborhood centered at seed q, and Si,j (u) is the resulting candidate pool for guide pixel u. The final candidates are selected from the expanded candidate pool Si,j (u) according to the mean absolute descriptor discrepancy. For each guide pixel u and each proxy candidate v ∈ Si,j (u), we compute 
+
+δψ (u, v ) = 1
+
+Dψ
+
+∥ψ(gi,j , u ) − ψ(ri, v )∥1 , v ∈ S i,j (u).
+
+(12) Therefore, δψ (u, v ) measures the average ℓ1 discrepancy be-tween the guide descriptor at location u and a candidate proxy descriptor at location v drawn from the pool Si,j (u)
+
+in Eq. (11). We retain the K candidates with the smallest descriptor distances: 
+
+Ci,j (u) = {vu, 1, . . . , v u,K } ⊆ Si,j (u), du,k = δψ (u, v u,k ).
+
+(13) Here, vu,k is the k-th retained proxy candidate for guide pixel u, and du,k is its corresponding descriptor distance. For notational simplicity, Ci,j (u) is written as a set, although repeated candidate locations may occur. Such repetitions only reduce the effective support of the sparse transport operator and do not change the formulation. 
+
+Step2: RGB-Guided Estimation of the Sparse Transport Operator. The candidate set Ci,j (u) provides a sparse bank of proxy pixels that are visually compatible with guide location 
+
+u. Rather than selecting a single hard correspondence from 
+
+Ci,j (u), we estimate soft aggregation weights over all retained candidates. Let ℓu,v be the learnable aggregation logit associ-ated with candidate proxy location v ∈ C i,j (u), and let τ > 0
+
+be the softmax temperature. The aggregation weight assigned to candidate v is defined as 
+
+au,v (ℓ) = exp( ℓu,v /τ )
+
+P  
+
+> v′∈C i,j (u)
+
+exp( ℓu,v ′ /τ ) , v ∈ C i,j (u). (14) Here, ℓ = {ℓu,v | u ∈ Ω, v ∈ C i,j (u)} denotes all aggregation logits, and au,v (ℓ) is the normalized contribution of proxy pixel v to guide pixel u. By construction, the weights over the candidate set satisfy P  
+
+> v∈C i,j (u)
+
+au,v (ℓ) = 1 . The pre-interpolation RGB induced by these weights is 
+
+¯ri,j (u; ℓ) = X 
+
+> v∈C i,j (u)
+
+au,v (ℓ) ri(v), X 
+
+> v∈C i,j (u)
+
+au,v (ℓ) = 1 .
+
+(15) where ri(v) ∈ R3 is the RGB vector of the proxy image ri at candidate location v.To reduce local artifacts introduced by discrete candidate aggregation, we further estimate a local interpolation kernel. Let ∆s = {η = ( ηy , η x) | ηy , η x ∈ [−⌊ s/ 2⌋, ⌊s/ 2⌋]} denote an s × s spatial stencil, where η is a local offset. Let mu,η be JOURNAL OF L ATEX CLASS FILES, VOL. 14, NO. 8, AUGUST 2021 7
+
+the interpolation logit for offset η at pixel u. The interpolation weight is 
+
+bu,η (m) = exp( mu,η )
+
+P 
+
+> η′∈∆s
+
+exp( mu,η ′ ) , X
+
+> η∈∆s
+
+bu,η (m) = 1 , (16) where m = {mu,η | u ∈ Ω, η ∈ ∆s} denotes all interpolation logits. The RGB image used for guide alignment is then 
+
+˜ri,j (u; ℓ, m ) = X
+
+> η∈∆s
+
+bu,η (m) ¯ ri,j (π(u + η); ℓ) , (17) where π(·) maps out-of-bound coordinates back to Ω accord-ing to the boundary handling rule. The aggregation weights also define an expected proxy coordinate and a dense dis-placement field: 
+
+ci,j (u; ℓ) = 
+
+> K
+
+X
+
+> k=1
+
+au,k (ℓ) vu,k , di,j (u; ℓ) = ci,j (u; ℓ) − u. 
+
+(18) Here, ci,j (u; ℓ) ∈ R2 is the expected source coordinate in the proxy image, and di,j (u; ℓ) ∈ R2 is the displacement vector from the guide coordinate to the expected proxy coordinate. This representation exposes the synthesis process as a soft spatial warp and enables direct regularization of the coordinate field. The aggregation logits and interpolation logits are estimated by aligning the synthesized RGB with the guide RGB: 
+
+(ℓ⋆, m ⋆) = arg min  
+
+> ℓ,m
+
+Lwarp (ℓ, m ). (19) The objective is 
+
+Lwarp = λ1∥˜ri,j − gi,j ∥1 + λpLpatch (˜ ri,j , g i,j )+ λmi LMI (˜ ri,j , g i,j ) + λssim LSSIM (˜ ri,j , g i,j )+ λ∇∥∇ ˜ri,j − ∇ gi,j ∥1 + λsLsmooth (bci,j )+ λdLdist .
+
+(20) For compactness, ˜ri,j in Eq. (20) denotes ˜ri,j (·; ℓ, m ). The nor-malized coordinate field is bci,j (u) = ( cyi,j (u)/H, c xi,j (u)/W ),where cyi,j (u) and cxi,j (u) are the vertical and horizontal components of ci,j (u). The term Lpatch is an ℓ1 loss be-tween unfolded RGB patches, LMI is a differentiable mutual-information loss, LSSIM = 1 −SSIM is the structural-similarity loss, and Lsmooth penalizes spatial variation of the normalized coordinate field. The descriptor-distance prior is defined as 
+
+Ldist = 1
+
+|Ω|
+
+X
+
+> u∈Ω
+> K
+
+X
+
+> k=1
+
+au,k (ℓ) bdu,k ,
+
+bdu,k = du,k 
+
+> 1
+> |Ω|K
+
+P
+
+> u′∈Ω
+
+PKk′=1 du′,k ′ + ϵ .
+
+(21) Here, |Ω| is the number of pixels, bdu,k is the normalized descriptor distance, and ϵ prevents division by zero. The coefficients λ1, λp, λmi , λssim , λ∇, λs, and λd balance the RGB fidelity, patch consistency, mutual-information align-ment, structural similarity, gradient preservation, coordinate smoothness, and candidate-distance prior terms, respectively. 
+
+Step3: Shared Spectral Transfer and Local Interpo-lation. After estimating the RGB-conditioned transport pa-rameters, we fix the optimized aggregation and interpolation weights as 
+
+a⋆u,v = au,v (ℓ⋆), v ∈ C i,j (u), b⋆u,η = bu,η (m⋆), η ∈ ∆s.
+
+(22) Here, a⋆u,v is the optimized aggregation weight assigned to candidate proxy location v for guide pixel u, and b⋆u,η is the optimized local interpolation weight for spatial offset η.The proxy HSI is then transferred using exactly the same aggregation and interpolation weights estimated from RGB alignment. The pre-interpolation HSI is 
+
+¯yi,j (u) = X 
+
+> v∈C i,j (u)
+
+a⋆u,v pi(v), (23) where pi(v) ∈ RB is the full spectral vector of the proxy HSI 
+
+pi at candidate location v, and B is the number of spectral bands. The final synthesized HSI is 
+
+˜yi,j (u) = X
+
+> η∈∆s
+
+b⋆u,η ¯yi,j (π(u + η)) . (24) This shared-operator design is essential for spectral consis-tency. At each guide location, all spectral bands are transported using the same candidate weights a⋆u,k and the same local interpolation weights b⋆u,η . Therefore, the method does not assign different spatial correspondences to different spectral channels. Once a set of proxy pixels has been selected for a guide location, the entire spectral vector is transferred through a common spatial rule. This common transport rule preserves the proxy-derived spectral structure while adapting the spatial layout to the guide RGB. 
+
+Discussion. Although the implementation of the warp-based generation contains multiple steps, including sparse candidate aggregation and shared local interpolation, these operations can be equivalently composed into a single sparse stochastic warp. Specifically, if Ai,j denotes the soft aggregation matrix and Bi,j denotes the shared local interpolation matrix for the proxy-guide pair (i, j ), then the overall transport can be written as 
+
+Ti,j = Bi,j Ai,j , (25) and the transferred RGB and HSI satisfy 
+
+˜ri,j = Ti,j ri, ˜yi,j = Ti,j pi. (26) Thus, the generated HSI remains interpretable as a one-step sparse stochastic transport of proxy spectra. This formulation makes it suitable for analyzing overlap, sparsity, and noise propagation. The detailed proof of this operator-level equiva-lence, including the nonnegativity, row-stochasticity, and spar-sity of Ti,j , is provided in the supplementary material. The qualitative effect of this design is visualized in Fig. 4 and Fig. 5. The improved unCLIP model produces spatially plausible target-aligned RGBs, while the proposed spectral warp preserves spectral consistency because the transferred spectra always originate from the proxy HSI. In particular, the generated spectra move toward the target distribution without collapsing to a narrow deterministic reconstruction, which provides the controlled diversity needed for target adaptation. JOURNAL OF L ATEX CLASS FILES, VOL. 14, NO. 8, AUGUST 2021 8     
+
+> Fig. 4. t-SNE visualizations of (a) CLIP features derived from RGB images and (b) spectra for degraded, proxy, synthesized, and GT samples. The synthesized samples move toward the target distribution in both spatial and spectral spaces while preserving diversity.
+> Fig. 5. Examples of GT images, proxy images, and synthesized samples. The synthesized RGBs retain the scene semantics of the proxies while introducing target-aligned appearance variations.
+
+C. Aligned Supervised Finetuning 
+
+After proxy and synthesized HSIs are obtained, we convert them into supervised training pairs for adapting the down-stream restoration backbone. Let Dtask (·) denote the task-specific degradation operator, such as the degradation process for denoising or super-resolution. The proxy branch uses the proxy HSI pi as a pseudo-clean target and constructs its corresponding degraded input by applying Dtask :
+
+Tp = {(Dtask (pi), p i)}Ni=1 . (27) The synthesized branch follows the same supervised format: 
+
+Tg = {(Dtask (˜ yi,j ), ˜yi,j )}i=1 ,...,N ; j=1 ,...,M . (28) Here, N is the number of target observations, M is the number of synthesized HSIs generated from each proxy, and ˜yi,j is the synthesized HSI obtained from the warp-based generation module. This construction ensures that each degraded input is paired with the HSI from which it is derived, yielding geometrically and spectrally aligned supervision. Let Φθ denote the restoration network to be adapted, ini-tialized from the source-pretrained model. The finetuning set is formed by combining the proxy and synthesized branches, 
+
+Talign = Tp ∪ T g . (29) The target-adapted parameters are obtained by minimizing the supervised restoration objective 
+
+θ⋆ = arg min 
+
+> θ
+
+1
+
+|T align |
+
+X
+
+> (x,y )∈T align
+
+Lsup (Φ θ (x), y ) , (30) where (x, y ) denotes a degraded-clean training pair, and Lsup 
+
+is the supervised loss used by the corresponding restoration backbone. The term “aligned” emphasizes that the degraded inputs and supervisory targets are generated from the same HSI samples under the task-specific degradation model. This avoids pairing synthesized targets with unrelated degraded observations and keeps the finetuning objective consistent with the restoration task. The proxy branch provides stable supervision anchored to the observed target scenes, while the synthesized branch enlarges the target-domain support with additional spatial and spectral variations. Their combination allows the backbone to benefit from the reliability of proxy supervision and the diversity introduced by distribution-adaptive synthesis. This design is compatible with existing supervised HSI restoration architectures because it only changes the construc-tion of the finetuning data, not the restoration model itself. Consequently, HIR-ALIGN can adapt different restoration backbones using the same aligned supervised formulation. From a learning perspective, the proxy samples reduce the risk of drifting away from the observed target content, whereas the synthesized samples reduce overfitting to the limited target observations. The balance between these two branches provides the practical bias–variance trade-off analyzed in the following theoretical discussion and validated in the synthesis-ratio ablation. 
+
+D. Theoretical Insight 
+
+We provide a conditional analysis to explain why semantic-guided augmentation improves target-domain restoration. Let 
+
+Y ∼ μt denote a clean HSI from the full target distribution, and let Yo ∼ μo denote a clean HSI from the observed target subset used for adaptation. The full target test distribution is 
+
+Pt := L Dtask (Y ), Y . (31) For an observed scene, write the proxy HSI as 
+
+Po = Yo + E, (32) where E is the proxy error. The clean counterpart and the actual proxy branch are 
+
+P ⋆p := L Dtask (Yo), Y o
+
+,Pp := L Dtask (Po), P o
+
+. (33) For the generated branch, the same realized semantic warp T
+
+is frozen when comparing the actual generated pair with its clean counterpart: 
+
+P ⋆g := L Dtask (T Y o), T Y o
+
+,Pg := L Dtask (T P o), T P o
+
+. (34) This construction gives the exact generated-label error identity 
+
+T P o − T Y o = T E .Let ρ denote an ideal family of admissible target-aligned semantic warps, and define the corresponding vicinal distribu-tion 
+
+Pv := L Dtask ( eT Y o), eT Y o
+
+, eT ∼ ρ. (35) The coverage and generator-mismatch quantities are 
+
+∆p := W1(Pt, P ⋆p ),
+
+∆w := W1(Pt, P v ),ew := W1(P ⋆g , P v ).
+
+(36) JOURNAL OF L ATEX CLASS FILES, VOL. 14, NO. 8, AUGUST 2021 9
+
+Here ∆p measures the support gap of the observed proxy scenes, ∆w measures the support gap of the ideal semantic-warp distribution, and ew measures how far the realized warp is from that ideal vicinal family. For a mixture ratio α ∈ [0 , 1] , where α is the fraction of generated samples in finetuning, define the clean and actual mixed training distributions as 
+
+P ⋆α := (1 − α)P ⋆p + αP ⋆g , Pα := (1 − α)Pp + αP g . (37) The clean coverage term and actual-vs-clean perturbation term are ∆α := (1 − α)∆ p + α∆w + αe w,ε(α) := (1 − α)εp + αε g , (38) with 
+
+εp := W1(Pp, P ⋆p ), εg := W1(Pg , P ⋆g ). (39) For any pair distribution Q, let RQ(f ) be the expected supervised risk over Q, and let Rt(f ) := RPt (f ). Throughout this subsection, W1(·, ·) denotes the 1-Wasserstein distance under the pair metric d(( x, y ), (x′, y ′)) = ∥x − x′∥F + ∥y −
+
+y′∥F . Let F ⋆ be the Bayes restorer under Pt, and let f ⋆ 
+
+> F
+
+be a fixed comparator in the chosen hypothesis class F. Define the risk-level bias terms as 
+
+B20 := RP ⋆p (f ⋆ 
+
+> F
+
+) − Rt(F ⋆)
+
+> +
+
+,B2warp := RP ⋆g (f ⋆ 
+
+> F
+
+) − RP ⋆p (f ⋆ 
+
+> F
+
+)
+
+> +
+
+, (40) where [a]+ := max {a, 0}. The first term is the comparator bias on the clean proxy branch, and the second term is the additional positive risk allowance caused by replacing clean observed proxy scenes with clean warped scenes in the generated branch. 
+
+Theorem III.1 (Conditional target-risk bound for HIR-ALIGN) . Assume that Dtask is LD -Lipschitz. Also assume that for every f ∈ F ,
+
+|RP (f ) − RQ(f )| ≤ LW1(P, Q ) (41) 
+
+for any two pair distributions P and Q. If finetuning on the actual mixture distribution returns fα satisfying the effective oracle-type condition 
+
+RPα (fα) ≤ inf   
+
+> f∈F
+
+RPα (f ) + Cv
+
+meff (α) , (42) 
+
+then Rt(fα) ≤ Rt(F ⋆) + B20 + αB 2warp 
+
++ Cv
+
+meff (α) + L∆α + 2 Lε (α). (43) 
+
+Cv is an effective-view complexity constant. Moreover, if the realized warp satisfies T ⊤T ⪯ κI almost surely, then 
+
+εp ≤ (1 + LD ) E∥E∥F ,εg ≤ (1 + LD )
+
+q
+
+κ E∥E∥2 
+
+> F
+
+. (44) Theorem III.1 is the key inequality used to interpret HIR-ALIGN. It separates the target risk into five interpretable quantities: the comparator bias B20 , the warp bias αB 2warp ,the effective-view term Cv /m eff (α), the clean coverage term 
+
+L∆α, and the actual pair-perturbation term 2Lε (α). The sup-plementary material contains the complete proof, including the Wasserstein mixture bound, the actual-vs-clean perturbation bound, and the empirical-risk argument behind Eq. (42). 
+
+Why the mixed distribution improves over source-only training. Let Ps denote the source-domain training distribu-tion and define 
+
+∆s := W1(Pt, P s). (45) Assuming that the source-trained predictor fs satisfies the analogous source-domain effective-oracle condition 
+
+RPs (fs) ≤ inf f ∈F RPs (f ) + Cs/m s, the same argument as in Theorem III.1 yields 
+
+Rt(fs) ≤ Rt(F ⋆) + B2src + Cs
+
+ms
+
++ L∆s, (46) where B2src := RPs (f ⋆ 
+
+> F
+
+) − Rt(F ⋆) 
+
+> +
+
+is the comparator bias associated with the source-trained hypothesis, ms is the effective source training size, and L∆s is the direct source-to-target distribution-shift penalty. The short derivation is given in the supplementary material. In contrast, HIR-ALIGN replaces the source distribution by the target-aligned mixed distribution and obtains 
+
+Rt(fα) ≤ Rt(F ⋆) + B20 + αB 2warp 
+
++ Cv
+
+meff (α) + L∆α + 2 Lε (α), (47) where 
+
+∆α = (1 − α)∆ p + α∆w + αe w. (48) The core advantage of HIR-ALIGN lies in replacing the large source-only gap ∆s with a significantly smaller target-aligned gap ∆α. Subtracting Eq. (47) from Eq. (46) shows that the HIR-ALIGN upper bound is tighter whenever 
+
+L(∆ s−∆α)+ 
+
+ Cs
+
+ms
+
+− Cv
+
+meff (α)
+
+
+
++ B2src −B20
+
+ > αB 2warp +2 Lε (α).
+
+(49) Under the additional bias-ordering condition B2src ≥ B20 ,this reduces to the simpler sufficient condition 
+
+L(∆ s −∆α)+ 
+
+ Cs
+
+ms
+
+− Cv
+
+meff (α)
+
+
+
+> αB 2warp +2 Lε (α). (50) Our algorithmic design ensures this inequality holds via three specific measures:  
+
+> •
+
+Bridging the Gap: The semantic-guided branch 
+
+uses diffusion-based synthesis to create diverse target-compatible layouts. This explicitly expands the training support in the target domain, causing L(∆ s − ∆α) to become a large positive gain that dominates the bound.  
+
+> •
+
+Increasing the Effective Number of Views: The gen-erated samples provide additional target-aligned training views around the observed proxy scenes, which enlarges the effective training support and increase meff (α). 
+
+> •
+
+Bounding the Warp Bias: While generation introduces 
+
+B2warp , our sparse spectral warp constrains the transfer operator Ti,j to be a sparse, row-stochastic combina-tion of observed spectra. This yields convex-combination JOURNAL OF L ATEX CLASS FILES, VOL. 14, NO. 8, AUGUST 2021 10 
+
+spectral transfer, and together with the explicit overlap-control assumption T ⊤T ⪯ κI used in Eq. (44), it keeps the inherited perturbation term controlled. 
+
+Why the mixed distribution improves over using only proxy or generated samples. For proxy-only, generated-only, and mixed finetuning, the nonconstant parts of Eq. (43) are 
+
+Uproxy := B20 + Cv
+
+meff (0) + L∆p + 2 Lε p, (51) 
+
+Ugen := B20 + B2warp + Cv
+
+meff (1) + L(∆ w + ew) + 2 Lε g ,
+
+(52) 
+
+Umix (α) := B20 + αB 2warp + Cv
+
+meff (α) + L∆α + 2 Lε (α).
+
+(53) The proxy-only branch has stable supervision because it is directly derived from observed target scenes. Its perturbation term is controlled by εp, but its coverage remains limited by ∆p because it cannot create target-domain views beyond the observed samples. The generated-only branch improves coverage by replacing ∆p with ∆w + ew and provides more diverse target-compatible views, but it fully depends on gen-erated samples and therefore fully carries B2warp and εg .The mixed distribution keeps the stable proxy anchor while adding generated samples only as an α-weighted branch. As a result, the coverage term becomes the interpolation ∆α, the perturbation becomes the interpolation ε(α), and the warp bias is reduced from B2warp to αB 2warp . This is precisely why HIR-ALIGN uses a proxy-plus-generated mixture, as proxy samples reduce the risk of drifting away from the observed target content, while semantic-guided generated samples enlarge the target support and increase meff (α).
+
+Why semantic-guided augmentation is preferable to ran-dom shuffling. A random shuffle may preserve the norm of the proxy error, but it destroys target-compatible spatial semantics and usually increases the clean coverage gap. Let ∆shuf denote the coverage gap of a randomly shuffled counterpart. The semantic-guided warp improves the coverage term when 
+
+∆w + ew < ∆shuf . (54) Thus, the gain of HIR-ALIGN does not come from simply producing more rearranged samples. It comes from semantic-guided expansion: the generated RGB guides provide target-compatible layouts and appearances, while the sparse spectral warp keeps the synthesized HSIs tied to proxy spectra. 
+
+Remark. The bound shows that the proposed augmentation introduces controllable perturbations from proxy and warp errors, while improving target-domain coverage through addi-tional target-aligned views. Overall, HIR-ALIGN improves restoration performance because the in-distribution gain brought by better target coverage outweighs the controlled errors introduced by semantic-guided augmentation. 
+
+IV. E XPERIMENTS 
+
+A. Datasets 
+
+The main simulated experiments use CAVE [11] and KAIST [57]. CAVE contains 32 HSIs of spatial size 512 × 512 
+
+with 31 spectral bands spanning visible wavelengths from 400 nm to 700 nm. KAIST contains 30 HSIs with 31 bands spanning 420 nm to 720 nm; following common practice, we resize each image to 512 × 512 for training and evaluation. These two datasets are well suited to our study because they represent natural-scene hyperspectral domains with different scene statistics and acquisition characteristics, thus forming a meaningful source-to-target adaptation benchmark. We fur-ther report real-world denoising results on HSIDwrD [58] in Sec. IV-F. 
+
+B. Compared Methods 
+
+We compare HIR-ALIGN with source-only supervised re-storers and unsupervised or optimization-based restoration methods. The supervised restorers are first pretrained on ICVL [10], after which HIR-ALIGN is applied to the same back-bones for target-domain adaptation. These backbones include the general-purpose models MP-HSIR [21] and PromptIR [52], denoising models T3SC [59], SERT [19], and SSUMamba [20], and super-resolution models Bi3DQRNN [60], GDRRN [47], MCNet [61], ESSAformer [49], and SFCSR [48]. The unsupervised or optimization-based baselines include LRTV [42], LRTDTV [62], Enhanced-3DTV [44], RCTV [45], and HIR-Diff [54]. To examine the role of the generation strategy, we also compare with HSIGene [41] in a dedicated ablation study. 
+
+C. Evaluation Protocol 
+
+Our protocol follows the practical source-plus-adaptation setting targeted by HIR-ALIGN. All supervised backbones are first pretrained on ICVL and then adapted using only degraded target-domain observations from the target dataset; no clean target-domain HSIs are used. The source-only results therefore quantify how much performance is lost under dis-tribution shift, while the adapted results quantify how much of that gap can be recovered by the proposed augmentation pipeline. This protocol is also why unsupervised methods remain important baselines: like HIR-ALIGN, they directly operate on degraded target observations, but they do so without any source-pretrained supervised backbone. For most experiments, target images are split according to the standard train/test protocol of the corresponding dataset. In the observed/unobserved generalization study, only a small subset of degraded CAVE images is used to build proxies and synthesized samples, whereas the remaining target images are reserved for testing. The clean-target upper-bound ablation further replaces degraded observed images by clean target HSIs during finetuning to estimate the remaining room for improvement. 
+
+D. Implementation Details 
+
+Degradation simulation. For denoising, we simulate both non-i.i.d. Gaussian noise and complex mixture noise contain-ing impulse corruption, stripe noise, and deadline defects. For super-resolution, we use bicubic 4× downsampling. For band completion, inpainting, and deblurring, the band-missing ratio, JOURNAL OF L ATEX CLASS FILES, VOL. 14, NO. 8, AUGUST 2021 11 
+
+masking ratio, and blur radius are set to 0.3, 0.9, and 15, respectively. During aligned finetuning, the same degradation families are replayed on proxy and synthesized HSIs so that each restoration backbone is trained in a conventional supervised manner. 
+
+Proxy generation. In the first stage, degraded target HSIs are processed by ICVL-pretrained restoration models to ob-tain proxy HSIs. These proxies are the only target-domain supervisory labels used by our framework. Proxy RGBs are constructed from three visible proxy bands centered around 660 nm, 550 nm, and 470 nm. 
+
+Distribution-adaptive RGB synthesis. We fine-tune the CLIP-vision encoder of unCLIP on COCO2017 [63] using synthetic Gaussian blur levels. During RGB generation, we employ fixed positive and negative prompts to encourage detailed, clean outputs and suppress obviously blurry or noisy generations. Reverse diffusion is initialized from Gaussian-perturbed image embeddings rather than from pure noise. Each proxy sample produces three target-aligned RGB guides. 
+
+Warp-based HSI generation. Descriptor extraction uses 
+
+5 × 5 patches, and the gradient and chroma channels are reweighted by 0.5 and 0.25, respectively. For each guide pixel, we first retrieve 16 full-resolution appearance neigh-bors, expand each seed inside a 3 × 3 neighborhood, and retain 16 soft candidates after refinement. A shared 7 × 7
+
+local interpolation kernel is then optimized jointly with the aggregation weights for 200 iterations using a learning rate of 0.05. The softmax temperature is fixed to one in all reported experiments. Importantly, the retrieval is performed directly at the original image resolution and does not use an additional explicit spatial-distance penalty in the reported setting. There-fore the effective forward path is exactly the appearance-driven sparse aggregation plus shared local interpolation described in Sec. III-B. 
+
+Metrics. We report PSNR, SSIM, and SAM throughout the paper. Since our goal is target-aligned supervised adaptation rather than one-off visual enhancement, the metrics are always computed on the restoration outputs of the final finetuned model rather than only on the intermediate synthesized data. 
+
+E. Main Results 
+
+Tables I, II, and III report the primary results on Gaus-sian denoising, complex denoising, and super-resolution. On Gaussian denoising, HIR-ALIGN improves all three ICVL-pretrained denoising backbones on both CAVE and KAIST. For example, SERT increases from 37.40 dB to 40.45 dB on CAVE and from 38.10 dB to 40.62 dB on KAIST, while SSUMamba obtains the best PSNR on CAVE. The adapted supervised models also outperform the unsupervised diffusion baseline and the classical optimization-based methods in most PSNR and SSIM comparisons, showing the advantage of target-aligned supervised adaptation under distribution shift. Similar trends can be observed in the complex denois-ing and super-resolution tasks. In complex denoising, HIR-ALIGN substantially reduces the spectral angle of SERT and SSUMamba, indicating that the adaptation improves spec-tral fidelity rather than only spatial smoothness. In super-resolution, MCNet increases from 36.83 dB to 37.83 dB on                                                                                                                                                              
+
+> TABLE I PERFORMANCE ON THE GAUSSIAN DENOISING TASK ON CAVE AND
+> KAIST. T HE COMPARISON COVERS AN UNSUPERVISED DIFFUSION BASELINE ,CLASSICAL BASELINES , ICVL-PRETRAINED SUPERVISED MODELS ,AND THE CORRESPONDING HIR-ALIGN-ADAPTED VARIANTS .THE BEST AND SECOND -BEST RESULTS ARE SHOWN IN BOLD AND UNDERLINED ,RESPECTIVELY .Dataset CAVE KAIST Method PSNR SSIM SAM PSNR SSIM SAM HIR-Diff [54] 29.17 0.744 25.11 26.56 0.632 26.34 LRTV [42] 31.30 0.854 9.67 31.19 0.861 11.79 LRTDTV [62] 30.92 0.745 15.18 30.82 0.725 17.19 Enhanced-3DTV [44] 31.48 0.903 10.87 31.16 0.880 14.48 RCTV [45] 34.71 0.910 6.99 34.30 0.912 8.52 T3SC (ICVL) [59] 37.39 0.924 12.37 38.41 0.942 9.23 T3SC (Ours) 38.08 0.933 11.46 39.10 0.948 8.09 SERT (ICVL) [19] 39.94 0.964 7.67 40.12 0.965 6.62 SERT (Ours) 40.57 0.967 6.67 40.74 0.967 6.55
+> SSUMamba (ICVL) [20] 41.65 0.995 7.64 41.96 0.995 6.07 SSUMamba (Ours) 42.36 0.995 6.81 42.04 0.996 5.86 TABLE II PERFORMANCE ON THE COMPLEX DENOISING TASK ON CAVE AND
+> KAIST. W E COMPARE CLASSICAL BASELINES , ICVL-PRETRAINED SUPERVISED MODELS ,AND THE CORRESPONDING HIR-ALIGN-ADAPTED VARIANTS . T HE BEST AND SECOND -BEST RESULTS ARE SHOWN IN BOLD
+> AND UNDERLINED ,RESPECTIVELY .Dataset CAVE KAIST Method PSNR SSIM SAM PSNR SSIM SAM LRTV [42] 25.05 0.683 40.22 24.89 0.682 35.09 LRTDTV [62] 33.32 0.815 32.03 33.46 0.811 27.92 Enhanced-3DTV [44] 33.77 0.959 12.09 35.34 0.965 10.50 RCTV [45] 39.40 0.979 4.76 36.99 0.956 6.93
+> T3SC (ICVL) [59] 33.90 0.797 22.03 34.70 0.800 19.07 T3SC (Ours) 35.13 0.841 19.61 35.51 0.823 19.26 SERT (ICVL) [19] 39.46 0.954 14.07 39.98 0.935 8.92 SERT (Ours) 39.96 0.959 9.76 40.59 0.958 8.90 SSUMamba (ICVL) [20] 42.27 0.995 9.48 41.69 0.994 7.79 SSUMamba (Ours) 42.43 0.996 9.31 41.80 0.994 7.54
+
+CAVE and from 34.55 dB to 35.48 dB on KAIST, and SFCSR achieves the best or second-best results across both datasets. These results suggest that the proposed proxy-anchored syn-thesis provides useful in-domain supervision for both degra-dation removal and spatial detail recovery. Table IV further summarizes the remaining restoration tasks together with the three primary tasks using general-purpose restoration backbones. The first rows again report Gaussian denoising, complex denoising, and super-resolution, followed by deblurring, band completion, and inpainting. Every paired comparison between source-only and adapted general-purpose restorers favors HIR-ALIGN, demonstrating that the proposed adaptation mechanism is not tied to a particular architecture or a particular degradation family. Another noteworthy pattern is the consistency across datasets. CAVE and KAIST differ in content, acquisition conditions, and the severity of the source-to-target mismatch, yet the direction of the gain is unchanged. This robustness suggests that HIR-ALIGN is not exploiting a benchmark-specific artifact. Instead, it appears to capture a broadly useful principle: when a restorer trained on a source corpus is exposed to even a small amount of target-domain structure through proxy-anchored synthesis, the resulting supervised JOURNAL OF L ATEX CLASS FILES, VOL. 14, NO. 8, AUGUST 2021 12                                                                             
+
+> TABLE III PERFORMANCE ON THE SUPER -RESOLUTION TASK ON CAVE AND
+> KAIST. T HE COMPARISON COVERS AN UNSUPERVISED DIFFUSION BASELINE ,CLASSICAL BASELINES , ICVL-PRETRAINED SUPERVISED MODELS ,AND THE CORRESPONDING HIR-ALIGN-ADAPTED VARIANTS .THE BEST AND SECOND -BEST RESULTS ARE SHOWN IN BOLD AND UNDERLINED ,RESPECTIVELY .Dataset CAVE KAIST Method PSNR SSIM SAM PSNR SSIM SAM HIR-Diff [54] 31.09 0.852 16.71 30.47 0.849 11.46 Bicubic 34.31 0.932 4.12 32.20 0.926 3.55 Bi3DQRNN [60] 35.72 0.946 6.36 34.60 0.940 5.63 GDRRN [47] 34.39 0.911 7.60 32.35 0.889 7.52 ESSAformer (ICVL) [49] 31.17 0.871 15.79 29.31 0.863 12.57 ESSAformer (Ours) 35.12 0.933 7.54 32.98 0.913 7.08 MCNet (ICVL) [61] 37.27 0.956 3.80 34.92 0.951 3.32 MCNet (Ours) 37.65 0.958 3.76 35.63 0.955 3.16
+> SFCSR (ICVL) [48] 37.38 0.955 3.77 34.83 0.950 3.31 SFCSR (Ours) 37.66 0.958 3.67 35.08 0.952 3.23
+
+finetuning becomes substantially more reliable. 
+
+F. Experiment on Real-World Datasets 
+
+In this section, we conduct denoising experiments on the real-world dataset HSIDwrD [58]. HSIDwrD consists of 59 hyperspectral images, each with dimensions 34 × 696 × 520 .In the experiment, we remove three anomalous channels (0, 11, and 22) that are visibly corrupted in the ground-truth (GT) data and crop the images to 512 × 512 .We validate the performance of our method on three models: T3SC [59], SERT [19], and SSUMamba [20]. We first perform proxy generation using models pretrained on the ICVL [10] dataset, where complex noise is used as the degradation. Then, additional data are synthesized through distribution-adaptive synthesis and combined with the proxies to form the training set. The performance of the trained models, together with several comparative methods, is shown in Table V. Due to the distribution gap between ICVL and HSIDwrD, models trained only on ICVL suffer a performance drop when applied to HSIDwrD. However, the images generated by HIR-ALIGN maintain high spectral and spatial quality and exhibit a distribution similar to that of the GT data in the test set. Consequently, training on this generated dataset enables the model to adapt to the distribution shift, resulting in clear performance improvements. As demonstrated in Table V, HIR-ALIGN enhances the performance of T3SC, SERT, and SSUMamba, indicating that the proposed approach is effective for real-world datasets and further validating its reliability. 
+
+G. Ablation Study 
+
+We conduct ablation experiments to examine the main design choices of HIR-ALIGN, including the composition of the adapted training set, the quality of the proxy spectra, the amount of synthesized data, the RGB synthesis module, the choice of generation source, generalization to unobserved target images, and the remaining gap to clean-target finetuning. 
+
+1) Comparison of Different Training Data: Table VI ver-ifies that proxy-only and generated-only finetuning are both inferior to their combination. Proxy samples provide a stable supervision anchor and keep the finetuned model close to the spectral content actually observed in the target domain. Generated samples, in contrast, enlarge the support of the target-aligned training distribution and expose the restorer to spatial variations that are absent from the small proxy set. Using only one branch leaves one of these benefits unused. This behavior is precisely what Theorem III.1 predicts. Proxy-only training keeps the warp-related terms small but pays the largest target-coverage penalty. Generated-only train-ing improves coverage but relies entirely on synthesized views and is therefore more exposed to warp bias and generator mismatch. Their combination gives the best balance, which explains why the mixed training set consistently performs best in practice. 
+
+2) Effects of Generated Data Volume: As the synthesis ratio increases from 1:1 to 3:1, performance improves because more target-aligned views are introduced and the effective training distribution covers a larger portion of the target domain. This is exactly the regime in which synthesis is most useful: each additional generated sample contributes new appearance variation while still remaining anchored to the proxy spectral manifold. When the ratio further increases to 5:1 and 10:1, the benefit saturates and slightly degrades. This saturation is theoretically meaningful. The coverage term cannot decrease indefinitely, because many generated samples are correlated views derived from the same small proxy set. Beyond a certain point, adding more generated data mainly increases redundancy and exposes the learner more strongly to generator mismatch and warp bias. The interior optimum observed in Table VII therefore matches the corollary derived from our unified risk bound. 
+
+3) Effects of the Improved unCLIP: The ablation in Ta-ble VIII shows that the proposed modifications to unCLIP are essential. Replacing the original unCLIP with the improved version yields clear gains on both inpainting and deblurring, confirming the value of degradation-robust CLIP conditioning, text-prompt guidance, and noise-perturbed initialization. These gains are consistent with the role of the RGB generator in our pipeline: if the RGB guides are poorly aligned with the target domain, the subsequent warp stage must compensate for mismatched appearance, which is both harder and less stable. The improved unCLIP therefore does not need to produce a perfect final image by itself; rather, it needs to produce an RGB guide whose semantics and local appearance are suffi-ciently consistent with the target domain to support reliable spectral warping. The ablation verifies that the three proposed modifications improve exactly this property. 
+
+4) Comparison with HSIGene-generated Training Data: 
+
+Table IX compares two ways of constructing additional HSI supervision while keeping the downstream restoration back-bones fixed. Directly using HSIGene-generated data improves the training distribution to some extent, but the proposed proxy-anchored synthesis yields higher PSNR and SSIM and lower SAM on both CAVE and KAIST. This result indicates that preserving target-domain spectra through semantic warp-ing is more reliable for restoration-oriented adaptation than relying solely on a domain-specific HSI generator. JOURNAL OF L ATEX CLASS FILES, VOL. 14, NO. 8, AUGUST 2021 13 
+
+TABLE IV COMPREHENSIVE COMPARISON BETWEEN MODELS TRAINED ONLY ON ICVL AND THOSE PRETRAINED ON ICVL AND SUBSEQUENTLY ADAPTED WITH 
+
+HIR-ALIGN. W E COMPARE MP-HSIR [21] AND PROMPT IR [52] ON CAVE AND KAIST ACROSS SIX HSI RESTORATION TASKS . T HE FIRST THREE TASK GROUPS CORRESPOND TO GAUSSIAN DENOISING , COMPLEX DENOISING , AND SUPER -RESOLUTION , FOLLOWED BY DEBLURRING , BAND COMPLETION , AND INPAINTING . T HE BEST RESULTS ARE HIGHLIGHTED IN BOLD .Dataset CAVE KAIST Method MP-HSIR PromptIR MP-HSIR PromptIR Task PSNR SSIM SAM PSNR SSIM SAM PSNR SSIM SAM PSNR SSIM SAM GaussianN (ICVL) 38.35 0.960 7.74 37.17 0.948 10.05 38.57 0.956 7.03 37.25 0.946 8.23 GaussianN (Ours) 38.69 0.963 7.55 37.58 0.952 9.30 38.88 0.954 7.26 37.67 0.946 7.65 
+
+ComplexN (ICVL) 38.65 0.953 10.36 35.72 0.940 15.41 38.69 0.945 8.34 35.93 0.929 15.70 ComplexN (Ours) 39.02 0.957 10.60 36.13 0.941 14.79 39.52 0.954 7.69 36.44 0.934 13.13 
+
+SR (ICVL) 32.89 0.928 5.02 31.63 0.914 4.95 30.76 0.920 4.28 29.68 0.906 4.30 
+
+SR (Ours) 33.37 0.931 4.70 31.79 0.916 5.30 31.22 0.924 4.14 29.76 0.907 4.56 Deblur (ICVL) 42.79 0.982 3.47 43.78 0.985 3.54 40.48 0.976 3.03 40.90 0.978 2.98 Deblur (Ours) 42.99 0.982 3.36 44.32 0.986 3.47 40.73 0.977 3.03 41.67 0.980 2.96 
+
+Bandmiss (ICVL) 49.61 0.991 4.95 48.49 0.991 5.37 50.78 0.990 3.88 48.52 0.987 5.69 Bandmiss (Ours) 50.73 0.993 4.25 50.17 0.993 4.77 51.84 0.990 4.39 50.67 0.989 4.73 
+
+Inpainting (ICVL) 39.97 0.967 6.14 35.59 0.939 9.16 39.83 0.964 5.38 36.36 0.935 7.72 Inpainting (Ours) 40.85 0.973 5.77 36.62 0.945 8.28 40.64 0.970 4.78 37.42 0.936 7.36 
+
+TABLE V DENOISING PERFORMANCE ON HSID WR D. W E COMPARE MODELS TRAINED ONLY ON ICVL AND THOSE FURTHER FINE -TUNED ON OUR SYNTHETIC DATASET . T HE BEST AND SECOND -BEST RESULTS ARE SHOWN IN BOLD AND UNDERLINED , RESPECTIVELY .Method PSNR SSIM SAM LRTV [42] 23.81 0.780 7.72 LRTDTV [62] 24.19 0.811 7.94 Enhanced-3DTV [44] 24.24 0.819 7.75 RCTV [45] 24.09 0.807 8.11 T3SC (ICVL) [59] 24.69 0.862 4.10 T3SC (Ours) 24.71 0.863 4.03 SERT (ICVL) [19] 24.67 0.827 4.53 SERT (Ours) 24.72 0.831 4.46 SSUMamba (ICVL) [20] 19.89 0.767 12.37 SSUMamba (Ours) 20.10 0.776 9.67 TABLE VI ABLATION STUDY ON THE EFFECT OF DIFFERENT TRAINING DATA COMBINATIONS .Training set Denoising Super-resolution Proxy Generated PSNR SSIM SAM PSNR SSIM SAM 
+
+✓ 37.39 0.924 12.37 37.38 0.955 3.77 
+
+✓ 38.04 0.922 11.75 37.34 0.952 3.83 
+
+✓ ✓ 38.08 0.933 11.46 37.65 0.958 3.76 
+
+5) Generalization on Unobserved Data: We further eval-uate a realistic adaptation setting in which only 10 degraded CAVE images are treated as observed target samples for data generation and finetuning, while the remaining images are used purely for testing. Table X shows consistent improvements on observed, unobserved, and total sets. The gain on the unobserved split is especially important: it indicates that HIR-ALIGN does not simply memorize the observed samples or overfit to the specific synthesized views generated from them. Instead, the adapted model learns a better approximation of the target distribution . This finding supports the interpretation 
+
+TABLE VII ABLATION ON THE RATIO r OF SYNTHESIZED IMAGES TO OBSERVED TARGET IMAGES . M ODERATE SYNTHESIS IMPROVES COVERAGE ,
+
+> WHEREAS OVERLY LARGE RATIOS LEAD TO SATURATION AND SLIGHT DEGRADATION
+
+.Denoising Super-resolution 
+
+r PSNR SSIM SAM PSNR SSIM SAM 1:1 40.15 0.950 10.10 35.15 0.952 3.31 2:1 40.21 0.948 9.44 35.36 0.953 3.26 3:1 40.59 0.958 8.90 35.63 0.955 3.16 
+
+5:1 40.39 0.956 9.45 35.44 0.954 3.18 10:1 40.46 0.948 8.71 35.30 0.953 3.35 TABLE VIII ABLATION STUDY ON THE EFFECTS OF THE IMPROVED UN CLIP. Inpainting Deblur Training set PSNR SSIM SAM PSNR SSIM SAM ICVL 36.36 0.935 7.72 40.90 0.978 2.98 UnCLIP (Original) 36.92 0.922 7.68 41.10 0.978 2.93       
+
+> UnCLIP (Ours) 37.42 0.936 7.36 41.67 0.980 2.96
+
+of HIR-ALIGN as a data-distribution alignment strategy rather than a sample memorization strategy. The synthesized views enrich the local neighborhood around the observed target samples, and the downstream restorer then leverages these views to improve generalization on new target images that were never used during synthesis. 
+
+6) Clean-Target Upper-Bound Analysis: Table XI reports an upper-bound experiment in which finetuning is performed with clean target HSIs instead of degraded target observations. HIR-ALIGN remains below this oracle setting, as expected, but already closes a substantial fraction of the gap. The remaining difference to the upper bound can be interpreted as the combined effect of proxy noise, imperfect RGB generation, and the structural bias of the sparse warp. In other words, the oracle experiment does not invalidate the proxy-based strategy; instead, it quantifies how much performance is still available if those error sources were further reduced. JOURNAL OF L ATEX CLASS FILES, VOL. 14, NO. 8, AUGUST 2021 14 
+
+TABLE IX ABLATION ON THE GENERATION SOURCE . W E COMPARE TRAINING WITH 
+
+HSIG ENE -GENERATED DATA AND TRAINING WITH THE PROPOSED 
+
+HIR-ALIGN DATA CONSTRUCTION ON CAVE AND KAIST. CAVE KAIST Degradation Method PSNR ↑ SSIM ↑ SAM ↓ PSNR ↑ SSIM ↑ SAM ↓              
+
+> Complex Noise SERT (HSIGene/Ours) 37.15/ 39.91 0.984/ 0.992 13.93/ 9.52 37.77/ 38.77 0.986/ 0.990 13.51/ 10.43
+> Super-resolution MCNet (HSIGene/Ours) 36.92/ 37.83 0.952/ 0.959 5.17/ 3.74 34.47/ 35.48 0.947/ 0.954 4.14/ 3.28
+
+TABLE X ABLATION STUDY ON GENERALIZATION CAPABILITY UNDER OBSERVED AND UNOBSERVED SETS .Tasks Denoising Super-resolution Testsets Training set PSNR SSIM SAM PSNR SSIM SAM Observed Set ICVL 38.13 0.953 12.94 37.36 0.948 3.91 Ours 38.45 0.953 11.04 37.50 0.949 3.89 
+
+Unobserved Set ICVL 39.53 0.957 11.30 36.99 0.958 3.97 Ours 40.13 0.961 9.38 37.03 0.959 3.94 
+
+Total Set ICVL 39.08 0.955 11.83 37.11 0.955 3.95 Ours 39.58 0.958 9.92 37.18 0.956 3.92 
+
+V. C ONCLUSION 
+
+We presented HIR-ALIGN, a plug-and-play target-adaptive augmentation framework for hyperspectral image restoration. The framework first builds proxy HSIs from degraded target observations, then synthesizes target-aligned RGB images with improved unCLIP, and finally generates HSIs through a warp-based spectral transfer module that reuses proxy spectra via sparse matching, soft aggregation, and shared local interpola-tion. The resulting proxy+generated training set substantially improves the generalization of existing restoration backbones under distribution shift. Both the theoretical analysis and the extensive experiments validate the effectiveness of our framework. REFERENCES [1] F. Li, M. K. Ng, and R. J. Plemmons, “Coupled segmentation and denoising/deblurring models for hyperspectral material identification,” 
+
+Numerical Linear Algebra with Applications , vol. 19, no. 1, pp. 153– 173, 2012. [2] G. Healey and D. Slater, “Models and methods for automated material identification in hyperspectral imagery acquired under unknown illumi-nation and atmospheric conditions,” IEEE Transactions on Geoscience and Remote Sensing , vol. 37, no. 6, pp. 2706–2717, 1999. [3] N. Imamoglu, Y. Oishi, X. Zhang, G. Ding, Y. Fang, T. Kouyama, and R. Nakamura, “Hyperspectral image dataset for benchmarking on salient object detection,” in 2018 Tenth International Conference on Quality of Multimedia Experience (QoMEX) . IEEE, 2018, pp. 1–3. [4] J. Liang, J. Zhou, L. Tong, X. Bai, and B. Wang, “Material based salient object detection from hyperspectral images,” Pattern Recognition ,vol. 76, pp. 476–490, 2018. [5] L. Yan, M. Zhao, X. Wang, Y. Zhang, and J. Chen, “Object detection in hyperspectral images,” IEEE Signal Processing Letters , vol. 28, pp. 508–512, 2021. [6] J. Yoon, “Hyperspectral imaging for clinical applications,” BioChip Journal , vol. 16, no. 1, pp. 1–12, 2022. [7] V. Backman, M. B. Wallace, L. Perelman, J. Arendt, R. Gurjar, M. M¨ uller, Q. Zhang, G. Zonios, E. Kline, T. McGillican et al. ,“Detection of preinvasive cancer cells,” Nature , vol. 406, no. 6791, pp. 35–36, 2000. [8] M. Borengasser, W. Hungate, and R. Watkins, Hyperspectral Remote Sensing: Principles and Applications , 12 2007. [9] S.-E. Qian, “Overview of hyperspectral imaging remote sensing from satellites,” Advances in Hyperspectral Image Processing Techniques , pp. 41–66, 2022. [10] B. Arad and O. Ben-Shahar, “Sparse recovery of hyperspectral signal from natural rgb images,” in Computer Vision–ECCV 2016: 14th Eu-ropean Conference, Amsterdam, the Netherlands, October 11–14, 2016, Proceedings, Part VII 14 . Springer, 2016, pp. 19–34. TABLE XI UPPER -BOUND COMPARISON ON CAVE AND KAIST USING ICVL-ONLY TRAINING , HIR-ALIGN, AND CLEAN -TARGET FINETUNING (UB).                
+
+> Degradation Method PSNR ↑SSIM ↑SAM ↓
+> Complex Noise SERT (ICVL/Ours/UB) 39.53/40.13/ 40.99 0.957/0.961/ 0.969 11.30/ 9.38 /9.73 Super-resolution MCNet (ICVL/Ours/UB) 36.99/37.03/ 37.52 0.958/0.959/ 0.971 3.97/3.94/ 3.23
+
+[11] F. Yasuma, T. Mitsunaga, D. Iso, and S. K. Nayar, “Generalized assorted pixel camera: Postcapture control of resolution, dynamic range, and spectrum,” IEEE Transactions on Image Processing , vol. 19, no. 9, pp. 2241–2253, 2010. [12] H. Zhang, W. He, L. Zhang, H. Shen, and Q. Yuan, “Hyperspectral image restoration using low-rank matrix recovery,” IEEE Transactions on Geoscience and Remote Sensing , vol. 52, no. 8, pp. 4729–4743, 2014. [13] Y. Chen, W. He, N. Yokoya, and T.-Z. Huang, “Hyperspectral image restoration using weighted group sparsity-regularized low-rank tensor decomposition,” IEEE Transactions on Cybernetics , vol. 50, no. 8, pp. 3556–3570, 2020. [14] Y. Chen, W. Cao, L. Pang, and X. Cao, “Hyperspectral image denoising with weighted nonlocal low-rank model and adaptive total variation regularization,” IEEE Transactions on Geoscience and Remote Sensing ,vol. 60, pp. 1–15, 2022. [15] Y. Chen, W. Cao, L. Pang, J. Peng, and X. Cao, “Hyperspectral image denoising via texture-preserved total variation regularizer,” IEEE Transactions on Geoscience and Remote Sensing , vol. 61, pp. 1–14, 2023. [16] B. Rasti, Y. Chang, E. Dalsasso, L. Denis, and P. Ghamisi, “Image restoration for remote sensing: Overview and toolbox,” IEEE Geoscience and Remote Sensing Magazine , vol. 10, no. 2, pp. 201–230, 2021. [17] L. Pang, W. Gu, and X. Cao, “Trq3dnet: A 3d quasi-recurrent and transformer based network for hyperspectral image denoising,” Remote Sensing , vol. 14, no. 18, p. 4598, 2022. [18] E. Pan, Y. Ma, X. Mei, F. Fan, J. Huang, and J. Ma, “Progressive hyperspectral image destriping with an adaptive frequencial focus,” IEEE Transactions on Geoscience and Remote Sensing , vol. 61, pp. 1–12, 2023. [19] M. Li, J. Liu, Y. Fu, Y. Zhang, and D. Dou, “Spectral enhanced rectangle transformer for hyperspectral image denoising,” in Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition ,2023, pp. 5805–5814. [20] G. Fu, F. Xiong, J. Lu, and J. Zhou, “Ssumamba: Spatial-spectral selective state space model for hyperspectral image denoising,” IEEE Transactions on Geoscience and Remote Sensing , vol. 62, p. 3446812, 2024. [Online]. Available: https://ui.adsabs.harvard.edu/abs/2024ITGRS. .6246812F [21] Z. Wu, Y. Chen, N. Yokoya, and W. He, “Mp-hsir: A multi-prompt framework for universal hyperspectral image restoration,” arXiv preprint arXiv:2503.09131 , 2025. [22] Y. Chen, X. Cao, Q. Zhao, D. Meng, and Z. Xu, “Denoising hyper-spectral image with non-i.i.d. noise structure,” IEEE Transactions on Cybernetics , vol. 48, no. 3, pp. 1054–1066, 2018. [23] Z. Yue, D. Meng, Y. Sun, and Q. Zhao, “Hyperspectral image restoration under complex multi-band noises,” Remote Sensing , vol. 10, no. 10, p. 1631, 2018. [24] T.-H. Ma, Z. Xu, D. Meng, and X.-L. Zhao, “Hyperspectral image restoration combining intrinsic image characterization with robust noise modeling,” IEEE Journal of Selected Topics in Applied Earth Observa-tions and Remote Sensing , vol. 14, pp. 1628–1644, 2021. [25] S. Xu, X. Cao, J. Peng, Q. Ke, C. Ma, and D. Meng, “Hyperspectral image denoising by asymmetric noise modeling,” IEEE Transactions on Geoscience and Remote Sensing , vol. 60, pp. 1–14, 2022. [26] T.-X. Jiang, L. Zhuang, T.-Z. Huang, and J. M. Bioucas-Dias, “Adaptive hyperspectral mixed noise removal,” in Proceedings of the IEEE Inter-national Geoscience and Remote Sensing Symposium (IGARSS) , 2018, pp. 4035–4038. [27] L. Zhuang and M. K. Ng, “Fasthymix: Fast and parameter-free hy-perspectral image mixed noise removal,” IEEE Transactions on Neural Networks and Learning Systems , vol. 34, no. 8, pp. 4702–4716, 2023. [28] J. Ho, A. Jain, and P. Abbeel, “Denoising diffusion probabilistic models,” 
+
+Advances in Neural Information Processing Systems , vol. 33, pp. 6840– 6851, 2020. [29] J. Song, C. Meng, and S. Ermon, “Denoising diffusion implicit models,” p. arXiv:2010.02502, October 01, 2020 2020, iCLR 2021; updated connections with ODEs at page 6, fixed some typos in the proof. [Online]. Available: https://ui.adsabs.harvard.edu/abs/ 2020arXiv201002502S JOURNAL OF L ATEX CLASS FILES, VOL. 14, NO. 8, AUGUST 2021 15 
+
+[30] Y. Song and S. Ermon, “Generative modeling by estimating gradients of the data distribution,” Advances in Neural Information Processing Systems , vol. 32, 2019. [31] Y. Song, J. Sohl-Dickstein, D. P. Kingma, A. Kumar, S. Ermon, and B. Poole, “Score-based generative modeling through stochastic differential equations,” p. arXiv:2011.13456, November 01, 2020 2020, iCLR 2021 (Oral). [Online]. Available: https://ui.adsabs.harvard.edu/ abs/2020arXiv201113456S [32] P. Dhariwal and A. Nichol, “Diffusion models beat gans on image synthesis,” Advances in Neural Information Processing Systems , vol. 34, pp. 8780–8794, 2021. [33] A. Nichol, P. Dhariwal, A. Ramesh, P. Shyam, P. Mishkin, B. McGrew, I. Sutskever, and M. Chen, “Glide: Towards photorealistic image gen-eration and editing with text-guided diffusion models,” arXiv preprint arXiv:2112.10741 , 2021. [34] R. Rombach, A. Blattmann, D. Lorenz, P. Esser, and B. Ommer, “High-resolution image synthesis with latent diffusion models,” in Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recogni-tion , 2022, pp. 10 684–10 695. [35] A. Ramesh, P. Dhariwal, A. Nichol, C. Chu, and M. Chen, “Hierarchical text-conditional image generation with clip latents,” p. arXiv:2204.06125, April 01, 2022 2022. [Online]. Available: https://ui.adsabs.harvard.edu/abs/2022arXiv220406125R [36] C. Saharia, W. Chan, S. Saxena, L. Li, J. Whang, E. L. Denton, S. K. S. Ghasemipour, B. K. Ayan, S. S. Mahdavi, R. G. Lopes, T. Salimans, J. Ho, D. J. Fleet, and M. Norouzi, “Photorealistic text-to-image diffusion models with deep language understanding,” in Advances in Neural Information Processing Systems , vol. 35, 2022, pp. 36 479– 36 494. [37] W. Peebles and S. Xie, “Scalable diffusion models with transformers,” in Proceedings of the IEEE/CVF International Conference on Computer Vision , 2023, pp. 4195–4205. [38] D. Tang, X. Cao, X. Hou, Z. Jiang, J. Liu, and D. Meng, “Crs-diff: Controllable remote sensing image generation with diffusion model,” 
+
+IEEE Transactions on Geoscience and Remote Sensing , 2024. [39] D. Tang, X. Cao, X. Wu, J. Li, J. Yao, X. Bai, D. Jiang, Y. Li, and D. Meng, “Aerogen: enhancing remote sensing object detection with diffusion-driven data generation,” in Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , 2025, pp. 3614–3624. [40] D. Tang, H. Wang, Y. Xin, H. Qiao, D. Jiang, Y. Li, Z. Yu, and X. Cao, “Terragen: A unified multi-task layout generation framework for remote sensing data augmentation,” arXiv preprint arXiv:2510.21391 , 2025. [41] L. Pang, X. Cao, D. Tang, S. Xu, X. Bai, F. Zhou, and D. Meng, “Hsigene: A foundation model for hyperspectral image generation,” 
+
+arXiv preprint arXiv:2409.12470 , 2024. [42] W. He, H. Zhang, L. Zhang, and H. Shen, “Total-variation-regularized low-rank matrix factorization for hyperspectral image restoration,” IEEE Transactions on Geoscience and Remote Sensing , vol. 54, no. 1, pp. 178–188, 2016. [43] F. Xiong, J. Zhou, and Y. Qian, “Hyperspectral restoration via l0
+
+gradient regularized low-rank tensor factorization,” IEEE Transactions on Geoscience and Remote Sensing , vol. 57, no. 12, pp. 10 410–10 425, 2019. [44] J. Peng, Q. Xie, Q. Zhao, Y. Wang, L. Yee, and D. Meng, “Enhanced 3dtv regularization and its applications on hsi denoising and compressed sensing,” IEEE Transactions on Image Processing , vol. 29, pp. 7889– 7903, 2020. [45] J. Peng, H. Wang, X. Cao, X. Liu, X. Rui, and D. Meng, “Fast noise removal in hyperspectral images via representative coefficient total variation,” IEEE Transactions on Geoscience and Remote Sensing ,vol. 60, pp. 1–17, 2022. [46] X. Cao, X. Fu, C. Xu, and D. Meng, “Deep spatial-spectral global rea-soning network for hyperspectral image denoising,” IEEE Transactions on Geoscience and Remote Sensing , vol. 60, pp. 1–14, 2022. [47] Y. Li, L. Zhang, C. Dingl, W. Wei, and Y. Zhang, “Single hyperspectral image super-resolution with grouped deep recursive residual network,” in 2018 IEEE Fourth International Conference on Multimedia Big Data (BigMM) . IEEE, 2018, pp. 1–4. [48] Q. Wang, Q. Li, and X. Li, “Hyperspectral image superresolution using spectrum and feature context,” IEEE Transactions on Industrial Electronics , vol. 68, no. 11, pp. 11 276–11 285, 2021. [49] M. Zhang, C. Zhang, Q. Zhang, J. Guo, X. Gao, and J. Zhang, “Essaformer: Efficient transformer for hyperspectral image super-resolution,” in 2023 IEEE/CVF International Conference on Computer Vision (ICCV) , 2023, pp. 23 016–23 027. [50] C. Wu, D. Wang, Y. Bai, H. Mao, Y. Li, and Q. Shen, “Hsr-diff: Hyperspectral image super-resolution via conditional diffusion models,” in Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV) , October 2023, pp. 7083–7093. [51] W. Dong, S. Liu, S. Xiao, J. Qu, and Y. Li, “Ispdiff: Interpretable scale-propelled diffusion model for hyperspectral image super-resolution,” 
+
+IEEE Transactions on Geoscience and Remote Sensing , vol. 62, pp. 1–14, 2024. [52] V. Potlapalli, S. W. Zamir, S. Khan, and F. Khan, “Promptir: Prompting for all-in-one image restoration,” in Thirty-seventh Conference on Neural Information Processing Systems , 2023. [53] J. Ho and T. Salimans, “Classifier-free diffusion guidance,” arXiv preprint arXiv:2207.12598 , 2022. [54] L. Pang, X. Rui, L. Cui, H. Wang, D. Meng, and X. Cao, “Hir-diff: Unsupervised hyperspectral image restoration via improved diffusion models,” in Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , 2024, pp. 3005–3014. [55] C. Meng, Y. He, Y. Song, J. Song, J. Wu, J.-Y. Zhu, and S. Ermon, “Sdedit: guided image synthesis and editing with stochastic differential equations,” 2022. [56] J. Johnson, M. Douze, and H. J´ egou, “Billion-scale similarity search with gpus,” IEEE Transactions on Big Data , vol. 7, no. 3, pp. 535–547, 2019. [57] I. Choi, D. S. Jeon, G. Nam, D. Gutierrez, and M. H. Kim, “High-quality hyperspectral reconstruction using a spectral prior,” ACM Transactions on Graphics (Proc. SIGGRAPH Asia 2017) , vol. 36, no. 6, pp. 218:1–13, 2017. [Online]. Available: http://dx.doi.org/10.1145/3130800.3130810 [58] T. Zhang, Y. Fu, and C. Li, “Hyperspectral image denoising with realistic data,” in Proceedings of the IEEE/CVF International Conference on Computer Vision , 2021, pp. 2248–2257. [59] T. Bodrito, A. Zouaoui, J. Chanussot, and J. Mairal, “A trainable spectral-spatial sparse coding model for hyperspectral image restora-tion,” Advances in Neural Information Processing Systems (NeurIPS) ,2021. [60] Y. Fu, Z. Liang, and S. You, “Bidirectional 3d quasi-recurrent neural network for hyperspectral image super-resolution,” IEEE Journal of Selected Topics in Applied Earth Observations and Remote Sensing ,vol. 14, pp. 2674–2688, 2021. [61] Q. Li, Q. Wang, and X. Li, “Mixed 2d/3d convolutional network for hyperspectral image super-resolution,” Remote Sensing , vol. 12, no. 10, 2020. [62] Y. Wang, J. Peng, Q. Zhao, Y. Leung, X.-L. Zhao, and D. Meng, “Hyperspectral image restoration via total variation regularized low-rank tensor decomposition,” IEEE Journal of Selected Topics in Applied Earth Observations and Remote Sensing , vol. 11, no. 4, pp. 1227–1243, 2018. [63] T.-Y. Lin, M. Maire, S. Belongie, J. Hays, P. Perona, D. Ramanan, P. Doll´ ar, and C. L. Zitnick, “Microsoft coco: Common objects in con-text,” in Computer Vision – ECCV 2014 , D. Fleet, T. Pajdla, B. Schiele, and T. Tuytelaars, Eds. Cham: Springer International Publishing, 2014, pp. 740–755. JOURNAL OF L ATEX CLASS FILES, VOL. 14, NO. 8, AUGUST 2021 16 
+
+# Supplementary Material 
+
+S1. S PARSE -W ARP FORMULATION OF HSI G ENERATION 
+
+This section gives only the operator-level derivation needed by the later risk analysis. Let p ∈ RH×W ×B denote a proxy HSI and let r = Γ( p) ∈ RH×W ×3 be its proxy RGB. After flattening the spatial grid Ω with n = HW , write p ∈ Rn×B
+
+and r ∈ Rn×3. For a generated RGB guide g, the warp module retains a sparse candidate set C(u) = {vu, 1, . . . , v u,K } for each guide pixel u, assigns nonnegative aggregation weights 
+
+au,k , and uses nonnegative local interpolation weights bu,δ on an s × s stencil ∆s:
+
+au,k ≥ 0,
+
+> K
+
+X
+
+> k=1
+
+au,k = 1 , bu,δ ≥ 0, X
+
+> δ∈∆s
+
+bu,δ = 1 .
+
+(S1) The same learned weights are applied to the proxy RGB and to all spectral bands of the proxy HSI. Define A ∈ Rn×n 
+
+> +
+
+by 
+
+Auv =
+
+> K
+
+X
+
+> k=1
+
+au,k 1{v = vu,k }. (S2) Then the pre-interpolation RGB and HSI are 
+
+¯r = Ar, ¯y = Ap. (S3) Define B ∈ Rn×n 
+
+> +
+
+by 
+
+Buv = X
+
+> δ∈∆s
+
+bu,δ 1{v = π(u + δ)}, (S4) where π(·) maps boundary locations back to Ω. The final transported RGB and HSI are 
+
+˜r = BAr, ˜y = BAp. (S5) We therefore define the overall warp operator as 
+
+T := BA. (S6) 
+
+Theorem S1.1 (Common sparse-warp representation) . There exists a single sparse operator T = BA such that 
+
+˜r = T r, ˜y = T p. (S7) 
+
+Thus the generated RGB and generated HSI share the same spatial transport weights; they differ only in the proxy modality being transported. Proof. Equation (S3) applies the same aggregation matrix A
+
+to r and p. Equation (S5) then applies the same interpolation matrix B to the two aggregated modalities. Composing the two operations gives ˜r = BAr and ˜y = BAp , proving the claim with T = BA .
+
+Proposition S1.2 (Nonnegativity, stochasticity, and sparsity) .
+
+The matrices A, B, and T = BA are nonnegative and row-stochastic. Each row of A has at most K nonzero entries, each row of B has at most |∆s| = s2 nonzero entries, and each row of T has at most K|∆s| nonzero entries. Proof. The nonnegativity of A and B follows from Eq. (S1). Moreover, 
+
+> n
+
+X
+
+> v=1
+
+Auv =
+
+> K
+
+X
+
+> k=1
+
+au,k = 1 ,
+
+> n
+
+X
+
+> v=1
+
+Buv = X
+
+> δ∈∆s
+
+bu,δ = 1 .
+
+(S8) Hence A and B are row-stochastic, and their product T = BA 
+
+is also nonnegative and row-stochastic. The support bounds follow directly from the definitions of A and B. If multiple candidate paths reach the same proxy pixel, the actual number of distinct nonzeros is smaller, never larger. 
+
+Corollary S1.3 (Convex-combination property) . For every spatial position u and spectral band b, the synthesized value 
+
+˜y(u, b ) is a convex combination of at most K|∆s| proxy spectral values. Proof. By Proposition S1.2, T is row-stochastic. Therefore, 
+
+˜y(u, b ) = 
+
+> n
+
+X
+
+> v=1
+
+Tuv p(v, b ), Tuv ≥ 0,
+
+> n
+
+X
+
+> v=1
+
+Tuv = 1 .
+
+(S9) The support bound follows from the row sparsity of T .
+
+Remark S1.4 (Spectral conservatism) . The generated spectra are produced by transporting proxy spectra through T . No separate RGB-to-HSI reconstruction branch is assumed in the theory. This is why the generated labels remain tied to the proxy spectral manifold. S2. E RROR PROPAGATION THROUGH THE SPARSE WARP 
+
+Let the proxy error be 
+
+E := p − y. (S10) For a fixed realized warp T , the clean counterpart of the generated label is T y , whereas the actual generated label is 
+
+T p . Therefore, 
+
+Eg := T p − T y = T (p − y) = T E. (S11) This identity is central: the generated label error is exactly the proxy error after the same sparse warp. 
+
+Assumption S2.1 (Bounded overlap) . The sparse warp satis-fies 
+
+T ⊤T ⪯ κI n (S12) for some κ ≥ 1. Equivalently, 
+
+∥T Z ∥2 
+
+> F
+
+≤ κ∥Z∥2 
+
+> F
+
+for all Z ∈ Rn×B . (S13) The parameter κ measures how strongly output pixels reuse the same proxy spectra. It is near one when the warp behaves like a permutation and can be larger when many output pixels collapse onto similar proxy locations. 
+
+Lemma S2.2 (Noise inheritance under sparse warping) . De-fine 
+
+Np := 2 E∥E∥2 
+
+> F
+
+, Ng := 2 E∥Eg ∥2 
+
+> F
+
+. (S14) JOURNAL OF L ATEX CLASS FILES, VOL. 14, NO. 8, AUGUST 2021 17 
+
+Under Assumption S2.1, 
+
+Ng ≤ κN p. (S15) 
+
+Proof. Using Eq. (S11) and Assumption S2.1, 
+
+∥Eg ∥2 
+
+> F
+
+= ∥T E ∥2 
+
+> F
+
+≤ κ∥E∥2 
+
+> F
+
+. (S16) Taking expectations and multiplying both sides by 2 yields Eq. (S15). 
+
+Remark S2.3 (Coordinate-wise interpretation) . Because T is row-stochastic, 
+
+Eg (u, b ) = 
+
+> n
+
+X
+
+> v=1
+
+Tuv E(v, b ). (S17) Thus each generated error is an average of proxy errors over the support of row u of T . In particular, 
+
+|Eg (u, b )| ≤ max  
+
+> v∈supp( Tu, :)
+
+|E(v, b )|. (S18) The warp redistributes proxy errors; it does not create uncon-strained spectral values. S3. D ISTRIBUTION -L EVEL SETUP 
+
+We now lift the operator-level results to the distribution level used by aligned finetuning. Throughout this section, W1(P, Q )
+
+denotes the 1-Wasserstein distance under the pair metric 
+
+d (x, y ), (x′, y ′) = ∥x − x′∥F + ∥y − y′∥F . (S19) This notation is unrelated to the image width W .
+
+A. Clean and Actual Training Distributions 
+
+Let Y ∼ μt denote a clean HSI from the full target distribution, and let Yo ∼ μo denote a clean HSI from the observed target subset used for adaptation. The full target test distribution is 
+
+Pt := L Dtask (Y ), Y . (S20) For an observed scene, the proxy is written as Po = Yo + E.The clean counterpart and the actual proxy branch are 
+
+P ⋆p := L Dtask (Yo), Y o
+
+,Pp := L Dtask (Po), P o
+
+. (S21) For the generated branch, let T be the realized sparse warp estimated for the generated guide and then held fixed for the clean-counterpart comparison. We define 
+
+P ⋆g := L Dtask (T Y o), T Y o
+
+,Pg := L Dtask (T P o), T P o
+
+. (S22) Freezing the same T in both distributions makes the identity 
+
+T P o − T Y o = T E exact. Let ρ denote an ideal family of admissible target-aligned semantic warps. The corresponding vicinal distribution is 
+
+Pv := L Dtask ( eT Y o), eT Y o
+
+, eT ∼ ρ. (S23) The coverage and generator-mismatch quantities are 
+
+∆p := W1(Pt, P ⋆p ),
+
+∆w := W1(Pt, P v ),ew := W1(P ⋆g , P v ).
+
+(S24) Here ∆p measures the support gap of the observed target subset, ∆w measures the gap of the ideal semantic-warp distribution, and ew measures how far the realized sparse warp is from the ideal vicinal family. 
+
+B. Mixture Training Distribution 
+
+Let α ∈ [0 , 1] be the fraction of generated samples in the finetuning set. The clean and actual mixed training distribu-tions are 
+
+P ⋆α := (1 − α)P ⋆p + αP ⋆g , (S25) and 
+
+Pα := (1 − α)Pp + αP g . (S26) 
+
+Lemma S3.1 (Coverage of the clean mixed distribution) . The clean mixed distribution satisfies 
+
+W1(Pt, P ⋆α ) ≤ (1 − α)∆ p + α∆w + αe w. (S27) 
+
+Proof. By convexity of the Wasserstein distance in its second argument, 
+
+W1(Pt, P ⋆α ) ≤ (1 − α)W1(Pt, P ⋆p )+ αW1(Pt, P ⋆g ). (S28) By the triangle inequality, 
+
+W1(Pt, P ⋆g ) ≤ W 1(Pt, P v )+ W1(Pv , P ⋆g ) = ∆ w +ew. (S29) Substitution gives Eq. (S27). 
+
+Assumption S3.2 (Lipschitz degradation) . The task degrada-tion operator is LD -Lipschitz: 
+
+∥Dtask (z1) − Dtask (z2)∥F ≤ LD ∥z1 − z2∥F for all z1, z 2.
+
+(S30) For a distribution Q over pairs, define 
+
+RQ(f ) := E(x,y )∼Q
+
+ℓ(f (x), y ), Rt(f ) := RPt (f ).
+
+(S31) 
+
+Assumption S3.3 (Lipschitz loss) . For every hypothesis f in the training class, the loss-induced risk is L-Lipschitz with respect to W1:
+
+|RP (f ) − RQ(f )| ≤ L W1(P, Q ) (S32) for any two pair distributions P and Q.
+
+Lemma S3.4 (Sufficient condition for Assumption S3.3) .
+
+Suppose that for every fixed f ∈ F , the map 
+
+ϕf (x, y ) := ℓ(f (x), y ) (S33) 
+
+is L-Lipschitz under the pair metric (S19) , i.e., 
+
+|ϕf (x, y ) − ϕf (x′, y ′)| ≤ L d  (x, y ), (x′, y ′). (S34) 
+
+Then Assumption S3.3 holds. Proof. Let π be any coupling of P and Q. Then 
+
+|RP (f ) − RQ(f )| = E(( x,y ),(x′,y ′)) ∼π
+
+ϕf (x, y ) − ϕf (x′, y ′)
+
+≤ Eπ |ϕf (x, y ) − ϕf (x′, y ′)|≤ L Eπ d (x, y ), (x′, y ′).
+
+(S35) JOURNAL OF L ATEX CLASS FILES, VOL. 14, NO. 8, AUGUST 2021 18 
+
+Taking the infimum over all couplings π gives 
+
+|RP (f ) − RQ(f )| ≤ L W1(P, Q ). (S36) This is exactly Assumption S3.3. 
+
+Lemma S3.5 (Actual-vs-clean pair perturbation) . Under As-sumptions S3.2 and S2.1, 
+
+W1(Pp, P ⋆p ) ≤ (1 + LD ) E∥E∥F , (S37) 
+
+and W1(Pg , P ⋆g ) ≤ (1 + LD ) E∥T E ∥F
+
+≤ (1 + LD )
+
+q
+
+κ E∥E∥2 
+
+> F
+
+. (S38) 
+
+Proof. For the proxy branch, couple (Dtask (Po), P o) with 
+
+(Dtask (Yo), Y o) using the same observed target scene. Since 
+
+Po − Yo = E,
+
+d (Dtask (Po), P o), (Dtask (Yo), Y o)
+
+= ∥Dtask (Po) − Dtask (Yo)∥F + ∥E∥F
+
+≤ (1 + LD )∥E∥F .
+
+(S39) Taking expectations over this coupling yields Eq. (S37). For the generated branch, couple (Dtask (T P o), T P o) with 
+
+(Dtask (T Y o), T Y o) under the same realized T . Since T P o −
+
+T Y o = T E ,
+
+d (Dtask (T P o), T P o), (Dtask (T Y o), T Y o)
+
+= ∥Dtask (T P o) − Dtask (T Y o)∥F + ∥T E ∥F
+
+≤ (1 + LD )∥T E ∥F .
+
+(S40) Taking expectations gives the first inequality in Eq. (S38). The second follows from Jensen’s inequality and Assumption S2.1: 
+
+E∥T E ∥F ≤
+
+q
+
+E∥T E ∥2 
+
+> F
+
+≤
+
+q
+
+κ E∥E∥2 
+
+> F
+
+. (S41) S4. U NIFIED RISK BOUND 
+
+The following theorem is the detailed version of the theoret-ical statement in the main paper. It is written for the actual su-pervised pairs used by HIR-ALIGN, namely (Dtask (Po), P o)
+
+and (Dtask (T P o), T P o).
+
+A. Comparator and finite-sample terms 
+
+This subsection expands the two ingredients used in the unified risk bound. The first ingredient is a deterministic comparison on the clean mixture. It is not a property of the sparse-warp matrix alone; it follows from a fixed comparator and from how the two risk-level bias terms are defined. The second ingredient is the standard oracle-type excess-risk statement for approximate empirical risk minimization. 
+
+Lemma S4.1 (Clean-mixture comparator and warp bias) . Let 
+
+F ⋆ be the Bayes restorer under the full target distribution Pt.Let f ⋆ 
+
+> F
+
+∈ F be a fixed comparator in the chosen hypothesis class. Define 
+
+B20 := 
+
+h
+
+RP ⋆p (f ⋆ 
+
+> F
+
+) − Rt(F ⋆)
+
+i
+
+> +
+
+,B2warp := 
+
+h
+
+RP ⋆g (f ⋆ 
+
+> F
+
+) − RP ⋆p (f ⋆ 
+
+> F
+
+)
+
+i
+
+> +
+
+,
+
+(S42) 
+
+where [a]+ := max {a, 0}. Then, for any α ∈ [0 , 1] ,
+
+RP ⋆α (f ⋆ 
+
+> F
+
+) ≤ Rt(F ⋆) + B20 + αB 2warp . (S43) 
+
+Proof. By the definition of the clean mixture distribution, 
+
+P ⋆α = (1 − α)P ⋆p + αP ⋆g . (S44) Since risk is an expectation and expectation is linear with respect to mixtures of distributions, for any fixed predictor 
+
+f ,
+
+RP ⋆α (f ) = (1 − α)RP ⋆p (f ) + αR P ⋆g (f ). (S45) Taking f = f ⋆ 
+
+> F
+
+gives 
+
+RP ⋆α (f ⋆ 
+
+> F
+
+) = (1 − α)RP ⋆p (f ⋆ 
+
+> F
+
+) + αR P ⋆g (f ⋆ 
+
+> F
+
+)= RP ⋆p (f ⋆ 
+
+> F
+
+) + α
+
+h
+
+RP ⋆g (f ⋆ 
+
+> F
+
+) − RP ⋆p (f ⋆ 
+
+> F
+
+)
+
+i
+
+. (S46) From Eq. (S42), 
+
+RP ⋆p (f ⋆ 
+
+> F
+
+) ≤ Rt(F ⋆) + B20 , (S47) and 
+
+RP ⋆g (f ⋆ 
+
+> F
+
+) − RP ⋆p (f ⋆ 
+
+> F
+
+) ≤ B2warp . (S48) Substituting Eqs. (S47) and (S48) into Eq. (S46) gives Eq. (S43). 
+
+Remark S4.2 (Meaning of the two bias terms) . The term B20
+
+measures the positive excess risk of the comparator on the clean proxy branch relative to the Bayes target risk. It includes both the mismatch between the observed target subset and the full target distribution, and the possible approximation gap caused by restricting the predictor to F. The term B2warp 
+
+measures the additional positive excess risk incurred when the clean proxy branch is replaced by the clean generated branch. The factor α appears because only an α fraction of the clean mixture comes from the generated branch. This is why B2warp 
+
+should be interpreted as a risk-level structural allowance, not as a norm or algebraic property of the matrix T .Let Sα = {(xi, y i)}Nα 
+
+> i=1
+
+denote the finite mixed finetuning sample whose population distribution is Pα. The empirical risk on this sample is 
+
+bRSα (f ) := 1
+
+NαNαX
+
+> i=1
+
+ℓ(f (xi), y i). (S49) 
+
+Assumption S4.3 (Approximate empirical risk minimization) .
+
+The training algorithm returns fα ∈ F satisfying 
+
+bRSα (fα) ≤ inf  
+
+> f∈F
+
+bRSα (f ) + ηα, (S50) where ηα ≥ 0 is the empirical optimization error. 
+
+Assumption S4.4 (Uniform convergence on the mixed sam-ple) . For the mixed sample Sα, the empirical risk uniformly approximates the population risk over F:
+
+sup  
+
+> f∈F
+
+RPα (f ) − bRSα (f ) ≤ Γα. (S51) Here, Γα denotes the uniform-convergence/generalization er-ror of the mixed sample Sα. This is the standard uniform-convergence condition used in empirical risk minimization and oracle-type excess-risk bounds [1]–[4]. JOURNAL OF L ATEX CLASS FILES, VOL. 14, NO. 8, AUGUST 2021 19 
+
+Lemma S4.5 (Actual-mixture optimization/generalization er-ror) . Under Assumptions S4.3 and S4.4, the learned predictor satisfies 
+
+RPα (fα) ≤ inf   
+
+> f∈F
+
+RPα (f ) + ηα + 2Γ α. (S52) 
+
+By standard ERM uniform-convergence and oracle-inequality theory, the optimization and generalization errors admit a high-probability finite-sample complexity bound [1]–[4] with probability at least 1 − δ,
+
+ηα + 2Γ α ≤ ψδ
+
+ meff (α), F, ℓ . (S53) 
+
+For simplicity, we use an effective-rate specialization of this generic bound and assume that there exists a constant Cv ≥ 0
+
+such that 
+
+ηα + 2Γ α ≤ Cv
+
+meff (α) , (S54) 
+
+where Cv absorbs the dependence on the hypothesis class, loss, confidence level, and sample-dependence structure, while 
+
+meff (α) denotes the effective sample size. Then 
+
+RPα (fα) ≤ inf   
+
+> f∈F
+
+RPα (f ) + Cv
+
+meff (α) . (S55) 
+
+Proof. By Assumption S4.4, applied to fα,
+
+RPα (fα) ≤ bRSα (fα) + Γ α. (S56) By Assumption S4.3, 
+
+bRSα (fα) ≤ inf  
+
+> f∈F
+
+bRSα (f ) + ηα. (S57) Let 
+
+f ⋆α ∈ arg min   
+
+> f∈F
+
+RPα (f ) (S58) be a population-risk minimizer in F. If the minimizer does not exist, the same argument applies to an arbitrarily close ϵ-minimizer and then lets ϵ ↓ 0. Since an infimum is no larger than the value at any particular function, 
+
+inf  
+
+> f∈F
+
+bRSα (f ) ≤ bRSα (f ⋆α). (S59) Again by Assumption S4.4, now applied to f ⋆α,
+
+bRSα (f ⋆α) ≤ RPα (f ⋆α) + Γ α. (S60) Combining Eqs. (S56)–(S60) gives 
+
+RPα (fα) ≤ bRSα (fα) + Γ α
+
+≤ inf  
+
+> f∈F
+
+bRSα (f ) + ηα + Γ α
+
+≤ bRSα (f ⋆α) + ηα + Γ α
+
+≤ RPα (f ⋆α) + ηα + 2Γ α
+
+= inf   
+
+> f∈F
+
+RPα (f ) + ηα + 2Γ α.
+
+(S61) This proves Eq. (S52). Substituting Eq. (S54) gives Eq. (S55). 
+
+Remark S4.6 (Effective sample size) . The quantity meff (α)
+
+is not necessarily the raw number of proxy and generated samples. It represents the number of statistically useful views after accounting for correlation and redundancy among gener-ated examples. Highly correlated generated views can make 
+
+meff (α) much smaller than the raw sample count, while genuinely diverse target-aligned views increase it. The specific decay rate of the statistical error depends on the complexity of F, the loss, and the dependence structure of the generated samples. The form Cv /m eff (α) is therefore used as an oracle-type effective-view term. Define 
+
+∆α := (1 − α)∆ p + α∆w + αe w,ε(α) := (1 − α)εp + αε g , (S62) where 
+
+εp := W1(Pp, P ⋆p ), εg := W1(Pg , P ⋆g ). (S63) 
+
+Theorem S4.7 (Unified target-risk bound) . Under Assump-tions S3.3, S4.3, and S4.4, and under the effective-rate condi-tion in Eq. (S54) ,
+
+Rt(fα) ≤ Rt(F ⋆) + B20 + αB 2warp 
+
++ Cv
+
+meff (α) + L∆α + 2 Lε (α). (S64) 
+
+Moreover, under Assumptions S3.2 and S2.1, 
+
+εp ≤ (1 + LD ) E∥E∥F ,εg ≤ (1 + LD )
+
+q
+
+κ E∥E∥2 
+
+> F
+
+. (S65) 
+
+Proof. By Assumption S3.3, 
+
+Rt(fα) ≤ RPα (fα) + L W1(Pt, P α). (S66) Using Lemma S4.5 and evaluating the infimum at f ⋆ 
+
+> F
+
+gives 
+
+RPα (fα) ≤ RPα (f ⋆ 
+
+> F
+
+) + Cv
+
+meff (α) . (S67) Again by Assumption S3.3, 
+
+RPα (f ⋆ 
+
+> F
+
+) ≤ RP ⋆α (f ⋆ 
+
+> F
+
+) + L W1(Pα, P ⋆α ). (S68) Combining Eqs. (S66)–(S68) yields 
+
+Rt(fα) ≤ RP ⋆α (f ⋆ 
+
+> F
+
+) + Cv
+
+meff (α)+ L W1(Pt, P α) + L W1(Pα, P ⋆α ).
+
+(S69) The triangle inequality gives 
+
+W1(Pt, P α) ≤ W 1(Pt, P ⋆α ) + W1(P ⋆α , P α). (S70) Substituting Eq. (S70) into Eq. (S69) gives 
+
+Rt(fα) ≤ RP ⋆α (f ⋆ 
+
+> F
+
+) + Cv
+
+meff (α)+ L W1(Pt, P ⋆α ) + 2 L W1(P ⋆α , P α).
+
+(S71) Lemma S4.1 bounds the first term on the right. Lemma S3.1 gives 
+
+W1(Pt, P ⋆α ) ≤ ∆α. (S72) By convexity of W1 in each argument, 
+
+W1(P ⋆α , P α) ≤ (1 − α)W1(P ⋆p , P p)+ αW1(P ⋆g , P g )= ε(α).
+
+(S73) Substituting Eqs. (S72) and (S73) into Eq. (S71) proves Eq. (S64). Finally, Eq. (S65) follows directly from Lemma S3.5. JOURNAL OF L ATEX CLASS FILES, VOL. 14, NO. 8, AUGUST 2021 20 
+
+SUPPLEMENTARY REFERENCES [1] V. N. Vapnik and A. Y. Chervonenkis, “On the uniform convergence of relative frequencies of events to their probabilities,” in Measures of complexity: festschrift for alexey chervonenkis . Springer, 2015, pp. 11– 30. [2] S. Shalev-Shwartz and S. Ben-David, Understanding machine learning: From theory to algorithms . Cambridge university press, 2014. [3] M. Mohri, A. Rostamizadeh, and A. Talwalkar, Foundations of machine learning . MIT press, 2018. [4] V. Koltchinskii, Oracle inequalities in empirical risk minimization and sparse recovery problems: Ecole D’Et´ e de Probabilit´ es de Saint-Flour XXXVIII-2008 . Springer, 2011, vol. 2033.

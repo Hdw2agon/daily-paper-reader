@@ -1,0 +1,1047 @@
+Title: Amortized Guidance for Image Inpainting with Pretrained Diffusion Models
+
+URL Source: https://arxiv.org/pdf/2605.13010v1
+
+Published Time: Thu, 14 May 2026 00:44:51 GMT
+
+Number of Pages: 23
+
+Markdown Content:
+# Amortized Guidance for Image Inpainting with Pretrained Diffusion Models 
+
+## Yilie Huang ∗ Xun Yu Zhou †
+
+Abstract 
+
+We study image inpainting with generative diffusion models. Existing methods typically either train dedicated task-specific models, or adapt a pretrained diffusion model separately for each masked image at deployment. We introduce a middle-ground model, termed Amortized Inpainting with Diffusion (AID), which keeps a pretrained diffusion backbone fixed, trains a small reusable guidance module offline, and then reuses it across masked images without per-instance optimization. We formulate it as a deterministic guidance problem with a supervised terminal objective. To make this problem learnable in high dimensions, we derive an auxiliary Gaussian formulation and prove that solving this randomized problem recovers the optimal deterministic guidance field. This bridge yields a principled continuous-time actor–critic algorithm for learning the guidance module in a fully data-driven manner. Empirically, on AFHQv2 and FFHQ under the pixel EDM pipeline and on ImageNet under the latent EDM2 pipeline, AID consistently improves the quality–speed trade-off over strong fixed-backbone and amortized inpainting baselines across multiple mask types, while adding less than one percent trainable overhead. 
+
+# 1 Introduction 
+
+Image inpainting is a conditional generation problem: given a partially observed image (e.g. a damaged photo), the goal is to complete the missing region in a way that is both visually plausible and consistent with the visible pixels. Recent diffusion models [ 9, 33 , 29 , 30 ] have made this task substantially more effective, especially when strong pretrained generative models are available. This makes inpainting a particularly important setting for studying how a powerful pretrained generative model can be adapted to conditional tasks efficiently and accurately. Despite this progress, the current research remains unsatisfactory. Existing approaches are largely split between two directions. One is to train a dedicated inpainting model from scratch or a substantial task-specific adaptation module, as in methods such as LaMa [ 36 ], MAT [ 25 ], Palette [ 32 ], BrushNet [ 17 ], and DAVI [ 23 ]. This direction amortizes inference, but does so by adding large learned components and requiring substantial training time. The other route is to keep a pretrained diffusion model fixed and adapt it separately for each masked image at test time, as in methods such as RePaint [ 27 ], DPS [ 2], and MCG [ 3]. This preserves the pretrained model, but each masked image is still treated as a new inference problem, leading to repeated case-by-case optimization or iterative refinement during deployment. In other words, one direction amortizes well but pays in learned-model complexity, while the other reuses the pretrained model but pays repeatedly at test time. There is a gap in the middle ground. Our answer to this gap is an Amortized Inpainting with Diffusion (AID) model, which keeps the pretrained diffusion model fixed and trains only a small reusable guidance module offline. Once trained, the same module is reused across masked images at test time; so inference no longer requires solving a new optimization problem for every task. AID is built on a controlled-guidance view of inpainting: the guidance deployed for actual tasks is deterministic, while learning uses randomized Gaussian policies. A central contribution of the paper is to prove that this randomized learning problem is optimizer-preserving, making the resulting actor–critic algorithm theoretically grounded rather than heuristic. The main contributions of this paper are as follows: 
+
+> ∗Department of Industrial Engineering and Operations Research, Columbia University, New York, NY 10027, USA. Email: yh2971@columbia.edu.
+> †Department of Industrial Engineering and Operations Research & Data Science Institute, Columbia University, New York, NY 10027, USA. Email: xz2574@columbia.edu.
+
+1
+
+> arXiv:2605.13010v1 [cs.CV] 13 May 2026
+
+• Methodology : We propose AID, a controlled-guidance framework for image inpainting that keeps a pretrained diffusion model fixed and trains offline a lightweight guidance module once. The learned module is then reused across masked images at test time, combining the reuse advantage of pretrained diffusion models with the efficiency of amortized inference. 
+
+• Theory : We develop a rigorous theoretical foundation for AID by establishing a policy-equivalence bridge between the deterministic guidance problem and an auxiliary Gaussian actor–critic formulation. Specifically, we prove both directions of the correspondence: the deterministic optimal guidance is sufficient to construct an optimal auxiliary Gaussian policy, and any optimal auxiliary Gaussian policy must recover this deterministic guidance through its mean. This optimizer-preserving bridge justifies learning with randomized Gaussian policies while deploying the deterministic policy mean. 
+
+• Experiments : We evaluate AID on AFHQv2, FFHQ, and ImageNet under multiple mask types and metrics, with well under 1% trainable overhead relative to the pretrained diffusion model. Across fixed-backbone baselines, the default setting consistently delivers the strongest performance and surpasses RePaint using only about 10% of its sampling budget in both pixel and latent spaces. The same trained guidance module transfers without retraining to unseen masks and to a lower-latency sampler, which further reduces sampling time while still outperforming all non-RePaint baselines and remaining competitive with RePaint. To our best knowledge, AID is the first amortized controlled-guidance framework for image inpainting that keeps the pretrained diffusion backbone frozen, trains only a small reusable guidance module, and provides an exact optimizer-preserving bridge from stochastic actor–critic learning to the deterministic guidance field used at deployment. 
+
+Relevant literature : In addition to the existing inpainting research discussed earlier on two major directions, we mention a related control-based work that largely follows the second direction. [ 24 ] formulates inpainting as a test-time control problem, but it still requires instance-wise iterative optimization and incurs substantial sampling cost. The closest middle-ground comparator is LatentPaint [ 4], a practical propagation-based method for reusable inpainting adaptation. While it shares our goal of amortized adaptation, it is tied to latent-space updates. AID instead learns principled reusable guidance and applies to both pixel-space EDM and latent-space EDM2 backbones. Continuous-time reinforcement learning (CT-RL) provides the methodological foundation for our learning formulation, while the optimizer-preserving Gaussian bridge developed below is specific to AID. Since modern diffusion models for generative AI are naturally described through continuous-time SDEs and ODEs [ 34 ], CT-RL is a particularly natural framework for our problem. This line of work was initiated by Wang et al. [38] and has since developed into a model-free theory based on martingale methods [ 15 , 16 , 37 ], with further results on performance guarantees [ 12 , 13 ]. More recently, CT-RL has also begun to appear in diffusion model training, fine-tuning, and timestep selection [ 7, 41 , 14 ]. A related discrete-time RL-based inpainting work is PrefPaint [ 26 ], which fine-tunes the model using large-scale human preference annotations and thus relies on human-driven, subjective supervision rather than our purely data-driven setting. 
+
+Organization : Section 2 formulates amortized inpainting as a controlled diffusion problem. Section 3 proves the optimizer-preserving Gaussian bridge, and Section 4 turns it into the AID actor–critic solver. Section 5 reports experiments; proofs and additional results are in the appendix. 
+
+# 2 Control Formulation for Amortized Inpainting 
+
+Setup. We first introduce the problem of amortized inpainting over a task distribution. Let x† ∈ Rd denote a clean reference image (from a training set), M ∈ Rd×d be a diagonal binary mask matrix selecting the visible region, and I − M select the missing region. We assume that (x†, M ) is sampled from a task distribution 
+
+ρtask , and define the masked observation by y := M x †. The observable input is then ξ := ( M, y ), while the full supervised tuple is ζ := ( ξ, x †) = ( M, y, x †). Thus, ξ is the information available for a specific inpainting task, whereas ζ is available only during offline training. Throughout, ∥·∥ denotes the Euclidean norm on Rd.The key information structure is that deployment uses only ξ, while offline training may use ζ.Let t ∈ [0 , T ] denote diffusion time, where the forward process follows 
+
+d¯ x(t) = −f (t)¯ x(t) d t + g(t) d w(t), ¯x(0) ∼ p0,
+
+2where p0 is the data distribution of clean images. Let pt denote the law of ¯x(t) and let S(t, x ) = ∇x log pt(x)
+
+be the score. In our setting, S is replaced by a pretrained and fixed approximation ˆS. Then the associated probability-flow ordinary differential equation [34] is 
+
+˙x(t) = b(t, x ), x(0) ∼ pT ,
+
+where the reverse drift is defined by b(t, x ) := f (T − t)x + 12 g2(T − t) ˆS(T − t, x ).
+
+Guided reverse dynamics. The drift b(t, x ) captures the frozen reverse dynamics induced by the pretrained diffusion model. For inpainting, however, this drift alone does not explicitly enforce consistency with the masked observation. Motivated by the general idea of diffusion guidance [ 6, 8, 28 ], we therefore add a task-dependent control term for guidance and consider 
+
+˙x(t) = b(t, x (t)) + u(t, x (t); ξ), x(t0) = x0, (1) where u is the guidance field. The information structure in (1) is that the deployed guidance law may depend on the mask and visible pixels, ξ = ( M, y ), but not on the hidden clean image x†.
+
+Terminal objective. For a supervised tuple ζ = ( M, y, x †), we define the terminal loss by 
+
+Ψ( x; ζ) = αvis ψvis (x; ζ) + αhole ψhole (x; ζ),
+
+where αvis , α hole ≥ 0 balance visible-region fidelity and missing-region fidelity, 
+
+ψvis (x; ζ) := 12 M (x − x†) 2 , ψhole (x; ζ) := 12 (I − M )( x − x†) 2 .
+
+The first term enforces agreement with the observed pixels, while the second supervises the missing region using the clean image x†. Since the deployed guidance law depends only on the observable input ξ = ( M, y ), the corresponding terminal target in the control problem is the conditional expectation ¯Ψ (x; ξ) := E[Ψ( x; ζ) | ξ].During offline training, sampled supervised tuples ζ provide Monte Carlo realizations of this conditional target. 
+
+Control objective. Let U(ξ) denote the class of admissible feedback control fields (t, x ) 7 → u(t, x ; ξ) ∈ Rd.For u ∈ U (ξ), define 
+
+Ju(t, x ; ξ) := ¯Ψ xu(T ; t, x, ξ ); ξ +
+
+Z Tt
+
+β
+
+2 ∥u(r, x u(r; t, x, ξ ); ξ)∥2 dr, (2) where β > 0 is a scalar control weight. The terminal term evaluates final inpainting quality averaged over the supervision with ξ, while the running term penalizes the cumulative strength of the guidance field along the trajectory. The latter reflects the notion that the pretrained reverse dynamics already provide a strong image model, and the additional guidance should intervene only when necessary to enforce consistency with the inpainting task. Although training is over samples from the task distribution, the deployed controller observes the realized masked input ξ to deploy a control. Accordingly, the underlying control problem is formulated conditionally on ξ:
+
+V (t, x ; ξ) := inf  
+
+> u∈U (ξ)
+
+Ju(t, x ; ξ). (3) Under standard regularity assumptions ensuring well-posedness, V is the unique classical solution of 
+
+Vt(t, x ; ξ) + inf 
+
+> u∈Rd
+
+
+
+∇xV (t, x ; ξ)⊤ b(t, x ) + u + β
+
+2 ∥u∥2
+
+
+
+= 0 , (4) with terminal condition 
+
+V (T, x ; ξ) = ¯Ψ( x; ξ). (5) This completes the control formulation of our amortized inpainting diffusion (AID) model. 33 A Theoretical Bridge from Deterministic Guidance to Continuous-Time RL 
+
+Section 2 formulates AID as a deterministic control problem whose optimizer is the guidance used at deployment. The central challenge is that this problem is high dimensional and induced by a highly nonlinear pretrained diffusion model; so the solution is generally not tractable analytically nor feasible numerically. To make this control problem tractable, we introduce an auxiliary randomized control problem with a carefully chosen Gaussian policy class. This auxiliary formulation is useful only if it preserves the original deterministic control target. In particular, randomization should not change the guidance field ultimately deployed for inpainting. This section establishes this relationship: we show that solving the auxiliary randomized problem recovers exactly the deterministic optimal guidance field of AID. Only after this equivalence is established can the randomized formulation serve as the basis for continuous-time RL and actor–critic updates in Section 4. 
+
+## 3.1 Auxiliary Gaussian Formulation 
+
+Motivated by continuous-time relaxed-control formulations with Gaussian randomization [ 11 , 10 ], for each fixed observable input ξ and each λ > 0, let Π(λ)(ξ) denote the class of Gaussian feedback policies of the form 
+
+π(λ)(· | t, x ; ξ) = N
+
+
+
+μπ(λ)
+
+(t, x ; ξ), 2λβd I
+
+
+
+.
+
+Thus, under π(λ), the control is sampled from a Gaussian policy, while the policy mean is the candidate deterministic guidance law. Unlike entropy-regularized exploratory CT-RL, we do not add an entropy term to the objective; the Gaussian randomization is introduced as a learning device whose mean is designed to remain aligned with the deterministic guidance field. Following the relaxed-control formulation of [ 38 ], the corresponding relaxed dynamics under a policy π(λ) are 
+
+˙xπ(λ)
+
+(r) = b r, x π(λ)
+
+(r) +
+
+Z
+
+> Rd
+
+a π (λ)(a | r, x π(λ)
+
+(r); ξ) d a, xπ(λ)
+
+(t) = x, 
+
+while the associated randomized objective is written in centered form 
+
+Jπ(λ)
+
+(t, x ; ξ) := ¯Ψ xπ(λ)
+
+(T ; t, x, ξ ); ξ − λT +
+
+Z Tt
+
+Z 
+
+> Rd
+
+β
+
+2 ∥a∥2 π(λ)(a | r, x π(λ)
+
+(r); ξ) d a
+
+
+
+dr. 
+
+The shift −λT centers the auxiliary value; being policy-independent, it leaves all optimizers unchanged. Next we define 
+
+V (λ)(t, x ; ξ) := inf 
+
+> π(λ)∈Π(λ)(ξ)
+
+Jπ(λ)
+
+(t, x ; ξ). (6) Under the same regularity assumptions as before, V (λ) is the unique classical solution of 
+
+V (λ) 
+
+> t
+
+(t, x ; ξ) + inf 
+
+> μ∈Rd
+
+
+
+∇xV (λ)(t, x ; ξ)⊤ b(t, x ) + μ + β
+
+2 ∥μ∥2 + λ
+
+
+
+= 0 , (7) with terminal condition 
+
+V (λ)(T, x ; ξ) = ¯Ψ( x; ξ) − λT. (8) 
+
+## 3.2 Correspondence between Auxiliary Gaussian Problem and AID 
+
+The auxiliary Gaussian formulation is useful only if it gives rise to the (deterministic) inpainting guidance in the original problem. We first record a value-shift lemma, which aligns the deterministic and auxiliary HJB equations. We then establish the main policy correspondence in two directions: the deterministic AID optimizer is sufficient to construct an optimal auxiliary Gaussian policy, and conversely, any optimal auxiliary Gaussian policy must recover the deterministic optimizer through its mean. Detailed proofs are given in Sections A, B, and C. 4Lemma 3.1 (Centered value shift for the auxiliary problem) . Suppose (4) –(5) and (7) –(8) admit unique classical solutions V and V (λ), respectively. Then, for every fixed observable input ξ,
+
+V (λ)(t, x ; ξ) = V (t, x ; ξ) − λt. 
+
+Lemma 3.1 shows that the auxiliary value differs from the deterministic value only by a known normalization. This value relation is an important alignment step, but by itself it does not yet justify using randomized policies for learning. The next two results establish the stronger policy-level correspondence. 
+
+Theorem 3.2 (Sufficiency: deterministic guidance induces an optimal Gaussian policy) . Under the assump-tions of Lemma 3.1, define 
+
+u∗(t, x ; ξ) := − 1
+
+β ∇xV (t, x ; ξ).
+
+Then the Gaussian policy 
+
+π(λ),∗(· | t, x ; ξ) = N
+
+
+
+u∗(t, x ; ξ), 2λβd I
+
+
+
+(9) 
+
+is optimal for the auxiliary problem (6) within Π(λ)(ξ). Moreover, u∗ solves the AID problem (3) .
+
+Theorem 3.2 shows that passing from the deterministic AID problem to the auxiliary Gaussian problem does not lose the desired control: the deterministic optimizer can be lifted to an optimal randomized policy by using it as the Gaussian mean. For learning, however, the reverse direction is equally important. If the auxiliary problem is solved by a learning algorithm, we must also know that an optimal auxiliary policy cannot have a different mean. This is the necessity direction below. 
+
+Theorem 3.3 (Necessity: auxiliary optimality recovers deterministic guidance) . Under the assumptions of Lemma 3.1, let π(λ),∗ ∈ Π(λ)(ξ) be any optimal feedback policy for the auxiliary Gaussian problem (6) for every initial pair (t, x ). Then its mean field μπ(λ),∗
+
+(t, x ; ξ) is the optimal deterministic guidance field for the original AID problem (3) ; that is, 
+
+μπ(λ),∗
+
+(t, x ; ξ) = u∗(t, x ; ξ).
+
+Together, Lemma 3.1 and Theorems 3.2–3.3 show that the auxiliary Gaussian formulation changes the learning mechanism but not the control target. Sufficiency lifts the deterministic AID optimizer to an optimal Gaussian policy, while necessity rules out auxiliary optima with different means. Hence the actor in Section 4 can be parameterized as the Gaussian mean and deployed deterministically. 
+
+# 4 Amortized Actor–Critic Algorithm 
+
+Lemma 3.1 and Theorems 3.2–3.3 identify the learning target: solving the auxiliary Gaussian problem is equivalent, at the policy-mean level, to learning the deterministic optimal guidance field u∗. This implication is essential, because policy-evaluation and policy-gradient methods in CT-RL rely on stochastic exploration and therefore do not apply directly to the original deterministic control problem. At the same time, our auxiliary Gaussian formulation is not the entropy-regularized exploratory objective studied in [ 15 , 16 ]; the Gaussian variance is fixed to preserve the deterministic optimizer rather than optimized through an entropy reward. We therefore adapt their martingale orthogonality and policy-gradient methodology to the AID-specific Bellman residual, leading to moment conditions and stochastic-approximation updates specialized to our auxiliary problem. 
+
+Parametrization. We parameterize the critic and actor by 
+
+ˆV θ (t, x ; ξ) := N N θ (t, x, ξ ) − λt, ˆμϕ(t, x ; ξ) := N N ϕ(t, x, ξ ).
+
+The associated Gaussian policy is ˆπ(λ),ϕ (· | t, x ; ξ) := N
+
+
+
+ˆμϕ(t, x ; ξ), 2λβd I
+
+
+
+.
+
+5Martingale moment conditions. Let At ∼ π(λ)(· | t, X t; ξ), and let Xt be the state process obtained by rolling out the guided reverse dynamics under this exploratory policy during training. Thus, d ˆV θ (t, X t; ξ)
+
+below denotes the critic increment along this same sampled-action trajectory. For the auxiliary Gaussian formulation, the quantity dV (λ)(t, X t; ξ) + β 
+
+> 2
+
+∥At∥2 dt plays the role of the Bellman residual. Following the continuous-time actor–critic framework, we require this residual to be orthogonal to the critic and actor test functions. This yields the coupled moment conditions 
+
+E
+
+"Z T
+
+> 0
+
+∂θ ˆV θ (t, X t; ξ)
+
+
+
+d ˆV θ (t, X t; ξ) + β
+
+2 ∥At∥2 dt
+
+#
+
+= 0 ,
+
+E
+
+"Z T
+
+> 0
+
+∂ϕ log ˆ π(λ),ϕ (At | t, X t; ξ)
+
+
+
+d ˆV θ (t, X t; ξ) + β
+
+2 ∥At∥2 dt
+
+#
+
+= 0 ,
+
+where the expectation is taken over the sampled task ζ ∼ ρtask , the initial state, and the Gaussian policy randomness. The critic is anchored by the auxiliary terminal condition, implemented below through the terminal target ˆVn,K . The discretized updates below are the corresponding stochastic-approximation discretizations of these two moment conditions. 
+
+Time discretization and updates. The problem is formulated in continuous time because both the diffusion dynamics and the results in Section 3 are inherently continuous-time; time discretization is introduced only for numerical implementation. We implement the method on a time grid 0 = t0 < · · · < t K = T
+
+with ∆tk := tk+1 − tk. At iteration n, we sample ζn = ( Mn, y n, x †
+
+> n
+
+) ∼ ρtask , set ξn = ( Mn, y n), and roll out one trajectory under ˆπ(λ),ϕ n . Writing ˆVn,k := ˆV θn (tk, X n,k ; ξn), ˆμn,k := ˆμϕn (tk, X n,k ; ξn), and 
+
+ˆVn,K := Ψ( Xn,K ; ζn) − λT , we define the one-step residual 
+
+δn,k := ˆVn,k +1 − ˆVn,k + β
+
+2 ∥An,k ∥2 ∆tk,
+
+which is the discretized analogue of a temporal-difference residual. The updates 
+
+θn+1 ← θn + acnK−1X
+
+> k=0
+
+∂θ ˆV θn (tk, X n,k ; ξn) δn,k , (10) 
+
+ϕn+1 ← ϕn − aanK−1X
+
+> k=0
+
+∂ϕ log ˆ π(λ),ϕ n (An,k | tk, X n,k ; ξn) δn,k , (11) are therefore the continuous-time analogues of actor–critic updates in discrete-time RL [ 35 , 22 ]. Moreover, for the Gaussian policy, ∂ϕ log ˆ π(λ),ϕ (A | t, x ; ξ) = βd 
+
+> 2λ
+
+ ∂ϕ ˆμϕ(t, x ; ξ)⊤  A − ˆμϕ(t, x ; ξ) . This also shows why the auxiliary Gaussian formulation is necessary: the stochastic term A − ˆμϕ is exactly what makes the policy-gradient update nondegenerate, whereas under a deterministic policy this score term vanishes and the policy-gradient identity becomes uninformative. Algorithm 1 summarizes the offline training and deployment procedures of AID. The amortization lies in learning shared actor and critic parameters over tasks sampled from ρtask , and then reusing the learned mean guidance law on unseen masked inputs without per-instance optimization. 
+
+# 5 Empirical Results 
+
+Backbones and datasets. We evaluate AID within the official EDM and EDM2 pipelines [ 19 , 21 , 20 ], which are representative modern diffusion backbones designed for strong image quality at low sampling budgets ( K = 18 steps). Specifically, we use AFHQv2 [ 1 ] and FFHQ [ 18 ] with the official EDM backbones, and ImageNet [ 5, 31 ] with the official EDM2 backbone. These are the highest-resolution benchmark settings released in the corresponding official EDM/EDM2 pipelines used here, and together they let us test AID across two different pretrained diffusion families in both a pixel-space regime and a higher-resolution latent-diffusion regime. 6Algorithm 1 Offline Training and Deployment of AID  
+
+> 1:
+
+for n = 1 , . . . , N do  
+
+> 2:
+
+Sample ζn = ( Mn, y n, x †
+
+> n
+
+) ∼ ρtask , set ξn = ( Mn, y n), and initialize Xn, 0 ∼ pT 
+
+> 3:
+
+for k = 0 , . . . , K − 1 do  
+
+> 4:
+
+Compute ˆμn,k = ˆ μϕn (tk, X n,k ; ξn) and sample An,k ∼ N (ˆ μn,k , 2λβd I) 
+
+> 5:
+
+Advance one solver step for the guided reverse dynamics using An,k to obtain Xn,k +1  
+
+> 6:
+
+end for  
+
+> 7:
+
+Update θn and ϕn by (10) and (11)  
+
+> 8:
+
+end for  
+
+> 9:
+
+Deployment: for a new masked input ξ, discard policy noise and use the deterministic mean guidance 
+
+ˆμϕ(tk, X k; ξ) inside the same guided reverse-time solver. 
+
+Baselines and scope. Our comparison set is designed to test the central deployment question: how much can be gained by amortizing a small guidance module while keeping the pretrained diffusion backbone fixed? Full inpainting networks and large learned helper modules, such as LaMa, BrushNet, and DAVI, test a different deployment regime: they amortize inference by training a model-scale component, whereas our goal is to isolate the cost–quality trade-off of a tiny reusable guidance module on a fixed backbone. We compare against representative fixed-model inpainting baselines spanning several major adaptation directions: Unguided, Replacement [ 34 ], MCG [ 3], DPS [ 2], and RePaint [ 27 ]. These baselines cover no conditioning, replacement-based heuristics, manifold-constrained guidance, posterior-gradient guidance, and iterative resampling respectively. In particular, RePaint is a strong and widely used benchmark in this line of work. For the latent EDM2 setting, we also include LatentPaint [ 4], the closest reusable-module competitor available in our latent-backbone setting. We therefore evaluate AID against both strong fixed-model methods and the most relevant latent-space amortized baseline. We report masked-region PSNR together with SSIM [ 39 ] and LPIPS [ 40 ] on the completed image, using two AID operating points: the default setting K = 18 
+
+(AID-18) for best quality and the low-latency setting K = 12 (AID-12) for faster sampling. Importantly, the low-latency setting K = 12 is obtained by directly deploying the same guidance module trained for the default K = 18 setting, without retraining. 
+
+## 5.1 Pixel-Space EDM Benchmarks: AFHQv2 and FFHQ 
+
+We first evaluate on AFHQv2 and FFHQ, the two pixel-space EDM image benchmarks. The main free-form results are summarized in Table 1, the complete frontier is shown in Figure 1, and a visual comparison is presented in Figure 2. On both datasets, AID-18 achieves the strongest performance on every free-form metric among all compared methods while using the same NFE as the standard 35-NFE baselines and only one tenth of RePaint’s sampling budget. The improvement is consistent across fidelity-oriented metrics and perceptual quality, indicating that the learned guidance does not merely improve visible-region matching but also improves the overall completed image. The margins over Replacement, MCG, and DPS are larger still, suggesting that the gain cannot be explained by simple overwrite, projection, or posterior-guidance heuristics. This advantage is not confined to the main free-form benchmark. In Appendix D, we show that AID-18 remains best on all metrics for both center and strip masks on AFHQv2 and FFHQ, implying that the improvement is stable across unseen mask families rather than concentrated on a single setting. The low-latency operating point serves a different purpose: without any retraining, it substantially reduces inference time while still outperforming Unguided, Replacement, MCG, and DPS across these additional mask settings, and remains competitive with RePaint at only 115 of its sampling budget. The same learned guidance module can therefore support both a best-quality regime and a low-latency regime without reverting to per-instance optimization. 
+
+## 5.2 Latent-Space EDM2 Benchmark: ImageNet 
+
+We next evaluate on ImageNet using the pretrained EDM2 latent backbone. This setting is more demanding because the images have higher resolution 512 × 512 , and sampling is performed in latent space whereas 7Table 1: Free-form inpainting results on 1000 test images. Entries report mean ± standard deviation over three seeds; LatentPaint is included only for ImageNet. Data Method NFE Sec. PSNR ↑ SSIM ↑ LPIPS ↓
+
+AFHQv2 
+
+Unguided 35 1.54 4.85 ± 0.06 0.4296 ± 0.0035 0.2716 ± 0.0025 Replace 35 1.55 7.15 ± 0.08 0.5164 ± 0.0052 0.1931 ± 0.0026 MCG 35 1.58 7.08 ± 0.02 0.5172 ± 0.0053 0.1915 ± 0.0015 DPS 35 2.41 10.00 ± 0.02 0.6336 ± 0.0048 0.1257 ± 0.0019 RePaint 350 15.50 10.97 ± 0.03 0.6816 ± 0.0031 0.0879 ± 0.0006 AID-12 23 1.03 11.09 ± 0.04 0.6815 ± 0.0035 0.0955 ± 0.0017 AID-18 35 1.57 13.01 ± 0.09 0.7336 ± 0.0034 0.0772 ± 0.0015 FFHQ 
+
+Unguided 35 1.55 4.65 ± 0.00 0.4607 ± 0.0042 0.2152 ± 0.0030 Replace 35 1.56 6.93 ± 0.08 0.5585 ± 0.0050 0.1532 ± 0.0015 MCG 35 1.59 6.92 ± 0.04 0.5633 ± 0.0049 0.1507 ± 0.0022 DPS 35 2.40 10.41 ± 0.03 0.7028 ± 0.0027 0.0792 ± 0.0011 RePaint 350 15.50 10.88 ± 0.05 0.7276 ± 0.0031 0.0677 ± 0.0013 AID-12 23 1.04 11.96 ± 0.04 0.7306 ± 0.0025 0.0662 ± 0.0011 AID-18 35 1.58 12.87 ± 0.06 0.7598 ± 0.0027 0.0597 ± 0.0009 ImageNet 
+
+Unguided 35 1.84 3.53 ± 0.07 0.4311 ± 0.0025 0.5084 ± 0.0025 Replace 35 1.94 5.34 ± 0.02 0.4669 ± 0.0025 0.4275 ± 0.0028 MCG 35 1.86 5.29 ± 0.08 0.4692 ± 0.0018 0.4242 ± 0.0018 DPS 35 2.50 7.26 ± 0.07 0.5010 ± 0.0024 0.4057 ± 0.0019 LatentPaint 35 2.01 6.47 ± 0.06 0.4874 ± 0.0025 0.3989 ± 0.0028 RePaint 350 19.06 7.56 ± 0.03 0.5204 ± 0.0019 0.3272 ± 0.0026 AID-12 23 1.22 9.67 ± 0.04 0.5491 ± 0.0092 0.3321 ± 0.0009 AID-18 35 1.92 9.79 ± 0.04 0.5498 ± 0.0088 0.3108 ± 0.0006 
+
+the final outputs are decoded by a VAE and evaluated in pixel space. It also provides the most relevant comparison to LatentPaint. As shown in Table 1, on the free-form benchmark, AID-18 improves over RePaint on all three metrics while using only about one tenth as many function evaluations. It also outperforms LatentPaint on every reported metric, despite using a guidance module with less than 45% of the trainable parameters of LatentPaint’s propagation module. See also a visualization in Figure 3. The higher-resolution setting also sharpens the speed-quality story. The low-latency AID-12 operating point already surpasses all non-RePaint baselines and LatentPaint on every metric with significant margins, and it also improves over RePaint on PSNR and SSIM while giving up only a small amount on LPIPS. Across unseen center and strip masks shown in Appendix D, the same pattern remains visible: the default point is the strongest overall configuration, while the low-latency point still improves substantially over the non-RePaint baselines and LatentPaint, and remains competitive with RePaint. The same amortized-guidance principle therefore remains effective when the pretrained model is replaced by the substantially more demanding latent EDM2 backbone at 512 × 512 .
+
+## 5.3 Efficiency and Parameter Overhead 
+
+The quality gains above are accompanied by a favorable deployment profile. The trainable module is tiny relative to the pretrained score model: 409 K parameters on EDM ( 0.66% of the score network) and 411 Kon EDM2 ( 0.33% ). On ImageNet this is also less than 45% the size of LatentPaint’s learned propagation module, while giving better results on every reported metric and mask type. Within each dataset/backbone, the K = 18 operating point has essentially the same wall-clock cost as the 35-NFE baselines, but delivers markedly better quality. Compared with RePaint, it provides roughly a 10 × speedup across all three datasets. 810 0 10 1   
+
+> Time / image (s)
+> 0.05
+> 0.10
+> 0.15
+> 0.20
+> 0.25
+> 0.30
+> Free-form LPIPS
+> Unguided
+> Replace
+> MCG
+> DPS
+> RePaint
+> AID-12
+> AID-18
+> AFHQv2-64
+> 10 010 1
+> Time / image (s)
+> 0.05
+> 0.10
+> 0.15
+> 0.20
+> 0.25
+> Free-form LPIPS
+> Unguided
+> Replace
+> MCG
+> DPS
+> RePaint
+> AID-12
+> AID-18
+> FFHQ-64
+> 10 010 1
+> Time / image (s)
+> 0.25
+> 0.30
+> 0.35
+> 0.40
+> 0.45
+> 0.50
+> 0.55
+> Free-form LPIPS
+> Unguided
+> Replace MCG
+> DPS
+> LatentPaint
+> RePaint
+> AID-12
+> AID-18
+> ImageNet-512
+
+Figure 1: Quality–speed frontier on free-form inpainting. Each panel corresponds to one dataset; ImageNet also includes LatentPaint. Lower LPIPS and lower wall-clock time are better. 
+
+Figure 2: Visual comparisons for pixel-space EDM. Additional results are provided in Appendix E. The K = 12 operating point pushes further along the same frontier and reaches 15 × speedup over RePaint while remaining competitive in quality. Taken together, these results support the main empirical claim of the paper: amortizing the guidance module moves up the entire quality–speed frontier of pretrained diffusion models, rather than merely recovering a different point on the same curve. A visual breakdown of the parameter overhead is deferred to Appendix F. 
+
+# 6 Conclusion 
+
+In this paper we introduce AID, a continuous-time actor–critic framework for image inpainting that keeps the diffusion backbone fixed and learns a small reusable guidance module offline. We formulate amortized inpainting as a deterministic guidance control problem and establish a policy-equivalence bridge to an auxiliary Gaussian formulation, preserving the deterministic guidance field used at deployment. Empirically, across AFHQv2, FFHQ, and ImageNet under the pixel EDM and latent EDM2 pipelines, AID improves the quality–speed trade-off over strong fixed-backbone and amortized inpainting baselines while adding less than one percent trainable overhead. More broadly, this work adds to a recent line of research suggesting that control- and RL-based frameworks can provide a theoretically grounded way to study and improve diffusion models. While this direction is still in its early innings, our results indicate that continuous-time RL underpins not only rigorous analysis but also practical algorithm design in diffusion-based generation. We hope AID can motivate further work on 9Figure 3: Visual comparisons for latent-space EDM2. Additional results are provided in Appendix E. controlled guidance, amortized adaptation, and broader uses of continuous-time RL for generative AI. 
+
+# References 
+
+[1] Yunjey Choi, Youngjung Uh, Jaejun Yoo, and Jung-Woo Ha. StarGAN v2: Diverse image synthesis for multiple domains. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pages 8188–8197, 2020. [2] Hyungjin Chung, Jeongsol Kim, Michael T Mccann, Marc L Klasky, and Jong Chul Ye. Diffusion posterior sampling for general noisy inverse problems. arXiv preprint arXiv:2209.14687 , 2022. [3] Hyungjin Chung, Byeongsu Sim, Dohoon Ryu, and Jong Chul Ye. Improving diffusion models for inverse problems using manifold constraints. Advances in Neural Information Processing Systems , 35: 25683–25696, 2022. [4] Ciprian Corneanu, Raghudeep Gadde, and Aleix M Martinez. LatentPaint: Image inpainting in latent space with diffusion models. In Proceedings of the IEEE/CVF winter conference on applications of computer vision , pages 4334–4343, 2024. [5] Jia Deng, Wei Dong, Richard Socher, Li-Jia Li, Kai Li, and Li Fei-Fei. Imagenet: A large-scale hierarchical image database. In 2009 IEEE conference on computer vision and pattern recognition , pages 248–255. Ieee, 2009. [6] Prafulla Dhariwal and Alexander Nichol. Diffusion models beat gans on image synthesis. Advances in neural information processing systems , 34:8780–8794, 2021. [7] Xuefeng Gao, Jiale Zha, and Xun Yu Zhou. Reward-directed score-based diffusion models via q-learning. 
+
+Journal of Machine Learning Research , 26(302):1–46, 2025. [8] Jonathan Ho and Tim Salimans. Classifier-free diffusion guidance. arXiv preprint arXiv:2207.12598 ,2022. [9] Jonathan Ho, Ajay Jain, and Pieter Abbeel. Denoising diffusion probabilistic models. Advances in neural information processing systems , 33:6840–6851, 2020. [10] Yilie Huang. Continuous-time reinforcement learning for asset–liability management. In Proceedings of the 6th ACM International Conference on AI in Finance , pages 360–368, 2025. [11] Yilie Huang and Xun Yu Zhou. Data-driven exploration for a class of continuous-time indefinite linear–quadratic reinforcement learning problems. arXiv preprint arXiv:2507.00358 , 2025. 10 [12] Yilie Huang, Yanwei Jia, and Xun Yu Zhou. Mean–variance portfolio selection by continuous-time reinforcement learning: Algorithms, regret analysis, and empirical study. arXiv preprint arXiv:2412.16175 ,2024. [13] Yilie Huang, Yanwei Jia, and Xun Yu Zhou. Sublinear regret for a class of continuous-time linear-quadratic reinforcement learning problems. SIAM Journal on Control and Optimization , 63(5):3452–3474, 2025. [14] Yilie Huang, Wenpin Tang, and Xunyu Zhou. Art for diffusion sampling: A reinforcement learning approach to timestep schedule. arXiv preprint arXiv:2601.18681 , 2026. [15] Yanwei Jia and Xun Yu Zhou. Policy evaluation and temporal-difference learning in continuous time and space: A martingale approach. J. Mach. Learn. Res. , 23(154):1–55, 2022. [16] Yanwei Jia and Xun Yu Zhou. Policy gradient and actor-critic learning in continuous time and space: Theory and algorithms. J. Mach. Learn. Res. , 23(154):1–55, 2022. [17] Xuan Ju, Xian Liu, Xintao Wang, Yuxuan Bian, Ying Shan, and Qiang Xu. BrushNet: A plug-and-play image inpainting model with decomposed dual-branch diffusion. In European Conference on Computer Vision , pages 150–168. Springer, 2024. [18] Tero Karras, Samuli Laine, and Timo Aila. A style-based generator architecture for generative adversarial networks. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pages 4401–4410, 2019. [19] Tero Karras, Miika Aittala, Timo Aila, and Samuli Laine. Elucidating the design space of diffusion-based generative models. Advances in neural information processing systems , 35:26565–26577, 2022. [20] Tero Karras, Miika Aittala, Tuomas Kynkäänniemi, Jaakko Lehtinen, Timo Aila, and Samuli Laine. Guiding a diffusion model with a bad version of itself. Advances in Neural Information Processing Systems , 37:52996–53021, 2024. [21] Tero Karras, Miika Aittala, Jaakko Lehtinen, Janne Hellsten, Timo Aila, and Samuli Laine. Analyzing and improving the training dynamics of diffusion models. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pages 24174–24184, 2024. [22] Vijay Konda and John Tsitsiklis. Actor-critic algorithms. Advances in neural information processing systems , 12, 1999. [23] Sojin Lee, Dogyun Park, Inho Kong, and Hyunwoo J Kim. Diffusion prior-based amortized variational inference for noisy inverse problems. In European Conference on Computer Vision , pages 288–304. Springer, 2024. [24] Henry Li and Marcus Pereira. Solving inverse problems via diffusion optimal control. Advances in Neural Information Processing Systems , 37:73549–73571, 2024. [25] Wenbo Li, Zhe Lin, Kun Zhou, Lu Qi, Yi Wang, and Jiaya Jia. MAT: Mask-aware transformer for large hole image inpainting. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pages 10758–10768, 2022. [26] Kendong Liu, Zhiyu Zhu, Chuanhao Li, Hui Liu, Huanqiang Zeng, and Junhui Hou. PrefPaint: Aligning image inpainting diffusion model with human preference. Advances in Neural Information Processing Systems , 37:30554–30589, 2024. [27] Andreas Lugmayr, Martin Danelljan, Andres Romero, Fisher Yu, Radu Timofte, and Luc Van Gool. RePaint: Inpainting using denoising diffusion probabilistic models. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pages 11461–11471, 2022. 11 [28] Chenlin Meng, Yutong He, Yang Song, Jiaming Song, Jiajun Wu, Jun-Yan Zhu, and Stefano Ermon. SDEdit: Guided image synthesis and editing with stochastic differential equations. arXiv preprint arXiv:2108.01073 , 2021. [29] Alexander Quinn Nichol and Prafulla Dhariwal. Improved denoising diffusion probabilistic models. In 
+
+International conference on machine learning , pages 8162–8171. PMLR, 2021. [30] Robin Rombach, Andreas Blattmann, Dominik Lorenz, Patrick Esser, and Björn Ommer. High-resolution image synthesis with latent diffusion models. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pages 10684–10695, 2022. [31] Olga Russakovsky, Jia Deng, Hao Su, Jonathan Krause, Sanjeev Satheesh, Sean Ma, Zhiheng Huang, Andrej Karpathy, Aditya Khosla, Michael Bernstein, et al. Imagenet large scale visual recognition challenge. International journal of computer vision , 115(3):211–252, 2015. [32] Chitwan Saharia, William Chan, Huiwen Chang, Chris Lee, Jonathan Ho, Tim Salimans, David Fleet, and Mohammad Norouzi. Palette: Image-to-image diffusion models. In ACM SIGGRAPH 2022 conference proceedings , pages 1–10, 2022. [33] Jiaming Song, Chenlin Meng, and Stefano Ermon. Denoising diffusion implicit models. arXiv preprint arXiv:2010.02502 , 2020. [34] Yang Song, Jascha Sohl-Dickstein, Diederik P Kingma, Abhishek Kumar, Stefano Ermon, and Ben Poole. Score-based generative modeling through stochastic differential equations. arXiv preprint arXiv:2011.13456 , 2020. [35] Richard S Sutton. Learning to predict by the methods of temporal differences. Machine learning , 3(1): 9–44, 1988. [36] Roman Suvorov, Elizaveta Logacheva, Anton Mashikhin, Anastasia Remizova, Arsenii Ashukha, Aleksei Silvestrov, Naejin Kong, Harshith Goka, Kiwoong Park, and Victor Lempitsky. Resolution-robust large mask inpainting with Fourier convolutions. In Proceedings of the IEEE/CVF winter conference on applications of computer vision , pages 2149–2159, 2022. [37] Wenpin Tang and Xun Yu Zhou. Regret of exploratory policy improvement and q-learning. arXiv preprint arXiv:2411.01302 , 2024. [38] Haoran Wang, Thaleia Zariphopoulou, and Xun Yu Zhou. Reinforcement learning in continuous time and space: A stochastic control approach. Journal of Machine Learning Research , 21(198):1–34, 2020. [39] Zhou Wang, Alan C Bovik, Hamid R Sheikh, and Eero P Simoncelli. Image quality assessment: from error visibility to structural similarity. IEEE transactions on image processing , 13(4):600–612, 2004. [40] Richard Zhang, Phillip Isola, Alexei A Efros, Eli Shechtman, and Oliver Wang. The unreasonable effectiveness of deep features as a perceptual metric. In Proceedings of the IEEE conference on computer vision and pattern recognition , pages 586–595, 2018. [41] Hanyang Zhao, Haoxian Chen, Ji Zhang, David Yao, and Wenpin Tang. Score as Action: Fine tuning diffusion generative models by continuous-time reinforcement learning. In ICML , 2025. 
+
+# A Proof of Lemma 3.1 
+
+Recall that, for a fixed observable input ξ = ( M, y ), the deterministic value function V solves 
+
+Vt(t, x ; ξ) + inf 
+
+> u∈Rd
+
+
+
+∇xV (t, x ; ξ)⊤ b(t, x ) + u + β
+
+2 ∥u∥2
+
+
+
+= 0 , (12) 12 with terminal condition 
+
+V (T, x ; ξ) = ¯Ψ( x; ξ), (13) whereas the centered auxiliary value function V (λ) solves 
+
+V (λ) 
+
+> t
+
+(t, x ; ξ) + inf 
+
+> μ∈Rd
+
+
+
+∇xV (λ)(t, x ; ξ)⊤ b(t, x ) + μ + β
+
+2 ∥μ∥2 + λ
+
+
+
+= 0 , (14) with terminal condition 
+
+V (λ)(T, x ; ξ) = ¯Ψ( x; ξ) − λT. (15) Our goal is to show that 
+
+V (λ)(t, x ; ξ) = V (t, x ; ξ) − λt. 
+
+Proof. Define 
+
+W (t, x ; ξ) := V (t, x ; ξ) − λt. 
+
+Then we have 
+
+Wt(t, x ; ξ) = Vt(t, x ; ξ) − λ, ∇xW (t, x ; ξ) = ∇xV (t, x ; ξ). (16) Substituting (16) into the left-hand side of the auxiliary HJB (14) gives 
+
+Wt(t, x ; ξ) + inf 
+
+> μ∈Rd
+
+
+
+∇xW (t, x ; ξ)⊤ b(t, x ) + μ + β
+
+2 ∥μ∥2 + λ
+
+
+
+= Vt(t, x ; ξ) − λ + inf 
+
+> μ∈Rd
+
+
+
+∇xV (t, x ; ξ)⊤ b(t, x ) + μ + β
+
+2 ∥μ∥2 + λ
+
+
+
+= 0 .
+
+Moreover, 
+
+W (T, x ; ξ) = V (T, x ; ξ) − λT = ¯Ψ( x; ξ) − λT. 
+
+Hence W solves (14) with terminal condition (15) . The conclusion now follows from the uniqueness of classical solutions to (14). 
+
+# B Proof of Theorem 3.2 
+
+Proof. Fix an arbitrary π(λ) ∈ Π(λ)(ξ), and denote its mean by 
+
+μπ (t, x ; ξ) := 
+
+Z
+
+> Rd
+
+a π (λ)(a | t, x ; ξ) d a. 
+
+Since π(λ)(· | t, x ; ξ) has mean μπ (t, x ; ξ) and covariance 2λβd I, we have 
+
+Z
+
+> Rd
+
+β
+
+2 ∥a∥2 π(λ)(a | t, x ; ξ) d a = β
+
+2 ∥μπ (t, x ; ξ)∥2 + λ. (17) Hence the centered auxiliary objective can be rewritten as 
+
+Jπ(λ)
+
+(t, x ; ξ) = ¯Ψ xπ(λ)
+
+(T ; t, x, ξ ); ξ − λT +
+
+Z Tt
+
+ β
+
+2 μπ (r, x π(λ)
+
+(r); ξ) 2
+
++ λ
+
+
+
+dr. (18) Applying the chain rule gives 
+
+ddr V (λ) r, x π(λ)
+
+(r); ξ = V (λ)
+
+> t
+
+ r, x π(λ)
+
+(r); ξ + ∇xV (λ) r, x π(λ)
+
+(r); ξ⊤
+
+b + μπ 
+
+,
+
+where, to lighten notation, we have suppressed the arguments (r, x π(λ)
+
+(r), ξ ) on the right-hand side. Integrating from t to T and using the terminal condition of V (λ), we obtain 
+
+¯Ψ xπ(λ)
+
+(T ); ξ − λT − V (λ)(t, x ; ξ) = 
+
+Z Tt
+
+h
+
+V (λ) 
+
+> t
+
++ ∇xV (λ)⊤(b + μπ )
+
+i
+
+dr. 
+
+13 Adding R Tt
+
+  β 
+
+> 2
+
+∥μπ ∥2 + λ dr to both sides gives 
+
+¯Ψ xπ(λ)
+
+(T ); ξ − λT − V (λ)(t, x ; ξ) + 
+
+Z Tt
+
+ β
+
+2 ∥μπ ∥2 + λ
+
+
+
+dr
+
+=
+
+Z Tt
+
+
+
+V (λ) 
+
+> t
+
++ ∇xV (λ)⊤(b + μπ ) + β
+
+2 ∥μπ ∥2 + λ
+
+
+
+dr. 
+
+By (18), the left-hand side is exactly Jπ(λ)
+
+(t, x ; ξ) − V (λ)(t, x ; ξ). Hence 
+
+Jπ(λ)
+
+(t, x ; ξ) − V (λ)(t, x ; ξ) = 
+
+Z Tt
+
+
+
+V (λ) 
+
+> t
+
++ ∇xV (λ)⊤(b + μπ ) + β
+
+2 ∥μπ ∥2 + λ
+
+
+
+dr. (19) Since V (λ) solves the auxiliary HJB (7), we have 
+
+V (λ) 
+
+> t
+
++ ∇xV (λ)⊤(b + μπ ) + β
+
+2 ∥μπ ∥2 + λ ≥ 0.
+
+Substituting this into (19) yields 
+
+Jπ(λ)
+
+(t, x ; ξ) ≥ V (λ)(t, x ; ξ).
+
+Since π(λ) ∈ Π(λ)(ξ) is arbitrary, this establishes that V (λ) is a lower bound of the value function of the auxiliary problem. Now consider the deterministic Hamiltonian 
+
+H(u) := ∇xV (t, x ; ξ)⊤ b(t, x ) + u + β
+
+2 ∥u∥2 , u ∈ Rd.
+
+This is a strictly convex quadratic function of u, whose unique minimizer is 
+
+u∗(t, x ; ξ) = − 1
+
+β ∇xV (t, x ; ξ). (20) Meanwhile, the auxiliary Hamiltonian is 
+
+H(λ)(μ) := ∇xV (λ)(t, x ; ξ)⊤ b(t, x ) + μ + β
+
+2 ∥μ∥2 + λ, 
+
+whose unique minimizer is 
+
+− 1
+
+β ∇xV (λ)(t, x ; ξ) = − 1
+
+β ∇xV (t, x ; ξ) = u∗(t, x ; ξ),
+
+where the first equality follows from Lemma 3.1. Now consider the specific Gaussian policy slice 
+
+π(λ),∗(· | t, x ; ξ) = N
+
+
+
+u∗(t, x ; ξ), 2λβd I
+
+
+
+.
+
+where u∗ is given by (20) . Because u∗(t, x ; ξ) pointwise minimizes the auxiliary Hamiltonian, along the corresponding state trajectory the integrand on the right-hand side of (19) is constantly zero. Thus 
+
+Jπ(λ),∗
+
+(t, x ; ξ) = V (λ)(t, x ; ξ),
+
+implying that π(λ),∗ is optimal for the auxiliary problem. Finally, u∗(t, x ; ξ) also minimizes the deterministic Hamiltonian; so the same argument gives that it is an optimal deterministic control for the original problem (3). 14 C Proof of Theorem 3.3 
+
+Proof. The proof of Theorem 3.2 establishes that, for any Gaussian policy π(λ),
+
+Jπ(λ)
+
+(t, x ; ξ) − V (λ)(t, x ; ξ) = 
+
+Z Tt
+
+Rπ(λ)  r, x π(λ)
+
+(r; t, x, ξ ); ξ dr, 
+
+where 
+
+Rπ(λ)
+
+(r, z ; ξ) := V (λ) 
+
+> t
+
+(r, z ; ξ) + ∇xV (λ)(r, z ; ξ)⊤ b(r, z ) + μπ(λ)
+
+(r, z ; ξ) + β
+
+2 μπ(λ)
+
+(r, z ; ξ) 2
+
++ λ. 
+
+By the auxiliary HJB (7) , Rπ(λ)
+
+(r, z ; ξ) ≥ 0. Applying this identity to π(λ),∗ and noting Jπ(λ),∗
+
+(t, x ; ξ) = 
+
+V (λ)(t, x ; ξ), we have Z Tt
+
+Rπ(λ),∗  r, x π(λ),∗
+
+(r; t, x, ξ ); ξ dr = 0 .
+
+Since the integrand above is nonnegative, the integral being zero implies that it vanishes almost everywhere along the trajectory. Because the initial pair (t, x ) is arbitrary and the residual is continuous, the residual vanishes pointwise. Hence μπ(λ),∗
+
+(t, x ; ξ) attains the pointwise minimum over μ in (7) . However, the proof of Theorem 3.2 yields that the minimizer is unique and equals u∗(t, x ; ξ) which is the optimal deterministic policy for the original problem. 
+
+# D Additional Quantitative Results 
+
+Table A2 reports the full center-mask results across all three datasets, and Table A3 reports the corresponding strip-mask results. These tables complement the free-form comparison in the main paper and support the robustness discussion in Section 5. 
+
+Runtime note. Wall-clock times are reported as empirical per-image sampling times under the same hardware and software environment for all methods. For each dataset, the reported time is averaged over the free-form, center, and strip mask settings. These numbers are intended as a secondary deployment-time indicator; the primary efficiency measure is NFE, since all methods within the same backbone use the same frozen score network and therefore have comparable per-evaluation cost. Timing values should mainly be interpreted for within-backbone comparisons, since the pixel-space EDM and latent-space EDM2 settings use different pretrained networks and representation spaces. Table A1: Average per-image sampling time across free-form, center, and strip masks. Method NFE AFHQv2 FFHQ ImageNet Unguided 35 1.54 1.55 1.84 Replacement 35 1.55 1.56 1.94 MCG 35 1.58 1.59 1.86 DPS 35 2.41 2.40 2.50 LatentPaint 35 – – 2.01 RePaint 350 15.50 15.50 19.06 AID ( K = 12 ) 23 1.03 1.04 1.22 
+
+AID ( K = 18 ) 35 1.57 1.58 1.92 
+
+Training note. Training the guidance module is lightweight relative to score-model pretraining. On the same Apple M2 Max / MPS environment, AID converges in roughly five hours on AFHQv2 and FFHQ and roughly eight hours on ImageNet, so even the largest reported configuration remains a single overnight run on laptop-class hardware. These numbers refer only to training the small guidance module on top of a fixed pretrained model. For context, the LaMa paper reports that Big LaMa , their larger teaser model rather than 15 the base model family, was trained on eight NVIDIA V100 GPUs for approximately 240 hours [ 36 , p. 6]. LatentPaint is closer in spirit because it also avoids full model retraining, but its learned propagation module is latent-space specific and larger than our EDM2 guidance module; our ImageNet results therefore provide the most direct comparison to this middle-ground baseline. All wall-clock times are measured in the same environment, so the relative comparisons are controlled by the same hardware and implementation stack. On Colab T4 GPU, absolute runtimes change, but the relative ordering is similar because the dominant difference comes from the number of function evaluations. 10 0 10 1
+
+Time / image (s) 
+
+> 4
+> 6
+> 8
+> 10
+> 12
+> 14
+> Free-form PSNR
+> Unguided
+> Replace
+> MCG
+> DPS
+> RePaint
+> AID-12
+> AID-18
+
+AFHQv2-64  
+
+> 10 010 1
+
+Time / image (s) 
+
+> 2
+> 4
+> 6
+> 8
+> 10
+> 12
+> 14
+> Free-form PSNR
+> Unguided
+> Replace
+> MCG
+> DPS
+> RePaint
+> AID-12
+> AID-18
+
+FFHQ-64  
+
+> 10 010 1
+
+Time / image (s)   
+
+> 2
+> 4
+> 6
+> 8
+> 10
+> Free-form PSNR
+> Unguided
+> Replace MCG
+> DPS LatentPaint RePaint
+> AID-12
+> AID-18
+
+ImageNet-512 
+
+Figure A1: Quality–speed frontier on the free-form benchmark measured by PSNR. Higher PSNR and lower wall-clock time are better. 10 0 10 1
+
+Time / image (s) 
+
+> 0.4
+> 0.5
+> 0.6
+> 0.7
+> 0.8
+> Free-form SSIM
+> Unguided
+> Replace
+> MCG
+> DPS
+> RePaint
+> AID-12 AID-18
+
+AFHQv2-64  
+
+> 10 010 1
+
+Time / image (s) 
+
+> 0.4
+> 0.5
+> 0.6
+> 0.7
+> 0.8
+> Free-form SSIM
+> Unguided
+> Replace
+> MCG
+> DPS
+> RePaint AID-12
+> AID-18
+
+FFHQ-64  
+
+> 10 010 1
+
+Time / image (s)  
+
+> 0.400
+> 0.425
+> 0.450
+> 0.475
+> 0.500
+> 0.525
+> 0.550
+> 0.575
+> Free-form SSIM
+> Unguided
+> Replace MCG
+> DPS LatentPaint
+> RePaint
+> AID-12
+> AID-18
+
+ImageNet-512 
+
+Figure A2: Quality–speed frontier on the free-form benchmark measured by SSIM. Higher SSIM and lower wall-clock time are better. 16 Table A2: Center-mask inpainting results across the three datasets (100 test images per dataset). Entries are 
+
+mean ± std over three random seeds. Bold : best. Data Method NFE Sec. PSNR ↑ SSIM ↑ LPIPS ↓
+
+AFHQv2 
+
+Unguided 35 1.54 5.17 ± 0.25 0.8032 ± 0.0016 0.1741 ± 0.0082 Replace 35 1.55 8.42 ± 0.15 0.8559 ± 0.0008 0.0719 ± 0.0013 MCG 35 1.58 8.37 ± 0.39 0.8573 ± 0.0029 0.0698 ± 0.0031 DPS 35 2.41 10.11 ± 0.20 0.8839 ± 0.0016 0.0663 ± 0.0048 RePaint 350 15.50 13.70 ± 0.11 0.9293 ± 0.0026 0.0289 ± 0.0016 AID-12 23 1.03 12.08 ± 0.15 0.9153 ± 0.0004 0.0371 ± 0.0004 AID-18 35 1.57 14.54 ± 0.15 0.9352 ± 0.0016 0.0288 ± 0.0010 FFHQ 
+
+Unguided 35 1.55 7.87 ± 0.08 0.8489 ± 0.0018 0.0986 ± 0.0019 Replace 35 1.56 11.49 ± 0.22 0.9020 ± 0.0027 0.0428 ± 0.0004 MCG 35 1.59 11.78 ± 0.10 0.9068 ± 0.0017 0.0405 ± 0.0009 DPS 35 2.40 14.83 ± 0.21 0.9384 ± 0.0021 0.0244 ± 0.0014 RePaint 350 15.50 15.64 ± 0.07 0.9496 ± 0.0013 0.0188 ± 0.0002 AID-12 23 1.04 15.54 ± 0.03 0.9465 ± 0.0006 0.0220 ± 0.0006 AID-18 35 1.58 16.93 ± 0.11 0.9577 ± 0.0005 0.0184 ± 0.0003 ImageNet 
+
+Unguided 35 1.84 4.93 ± 0.15 0.6144 ± 0.0008 0.2158 ± 0.0018 Replace 35 1.94 6.39 ± 0.09 0.6235 ± 0.0001 0.1829 ± 0.0018 MCG 35 1.86 6.38 ± 0.03 0.6235 ± 0.0005 0.1823 ± 0.0013 DPS 35 2.50 7.34 ± 0.08 0.6169 ± 0.0004 0.2031 ± 0.0022 LatentPaint 35 2.01 7.24 ± 0.17 0.6275 ± 0.0011 0.1762 ± 0.0013 RePaint 350 19.06 7.88 ± 0.10 0.6335 ± 0.0005 0.1622 ± 0.0008 AID-12 23 1.22 9.62 ± 0.02 0.6371 ± 0.0006 0.1656 ± 0.0009 AID-18 35 1.92 9.86 ± 0.01 0.6375 ± 0.0009 0.1598 ± 0.0001 
+
+17 Table A3: Strip-mask inpainting results across the three datasets (100 test images per dataset). Entries are 
+
+mean ± std over three random seeds. Bold : best. Data Method NFE Sec. PSNR ↑ SSIM ↑ LPIPS ↓
+
+AFHQv2 
+
+Unguided 35 1.54 4.94 ± 0.28 0.6976 ± 0.0029 0.2030 ± 0.0078 Replace 35 1.55 7.60 ± 0.16 0.7529 ± 0.0038 0.1040 ± 0.0018 MCG 35 1.58 7.67 ± 0.38 0.7563 ± 0.0070 0.1036 ± 0.0072 DPS 35 2.41 10.17 ± 0.32 0.8071 ± 0.0045 0.0873 ± 0.0066 RePaint 350 15.50 12.37 ± 0.30 0.8654 ± 0.0039 0.0410 ± 0.0023 AID-12 23 1.03 11.42 ± 0.19 0.8452 ± 0.0050 0.0536 ± 0.0030 AID-18 35 1.57 13.91 ± 0.16 0.8837 ± 0.0014 0.0402 ± 0.0007 FFHQ 
+
+Unguided 35 1.55 5.69 ± 0.18 0.7359 ± 0.0018 0.1414 ± 0.0023 Replace 35 1.56 8.73 ± 0.25 0.7972 ± 0.0036 0.0764 ± 0.0052 MCG 35 1.59 8.72 ± 0.19 0.8023 ± 0.0039 0.0751 ± 0.0023 DPS 35 2.40 12.30 ± 0.14 0.8632 ± 0.0051 0.0435 ± 0.0019 RePaint 350 15.50 12.91 ± 0.27 0.8823 ± 0.0027 0.0343 ± 0.0011 AID-12 23 1.04 13.68 ± 0.04 0.8857 ± 0.0023 0.0366 ± 0.0016 AID-18 35 1.58 14.83 ± 0.04 0.9033 ± 0.0008 0.0311 ± 0.0006 ImageNet 
+
+Unguided 35 1.84 4.38 ± 0.14 0.5473 ± 0.0007 0.2981 ± 0.0045 Replace 35 1.94 5.73 ± 0.03 0.5612 ± 0.0007 0.2540 ± 0.0021 MCG 35 1.86 5.69 ± 0.09 0.5615 ± 0.0008 0.2520 ± 0.0022 DPS 35 2.50 6.89 ± 0.11 0.5629 ± 0.0014 0.2718 ± 0.0038 LatentPaint 35 2.01 6.78 ± 0.27 0.5681 ± 0.0012 0.2409 ± 0.0032 RePaint 350 19.06 7.20 ± 0.11 0.5758 ± 0.0005 0.2230 ± 0.0006 AID-12 23 1.22 9.00 ± 0.07 0.5857 ± 0.0005 0.2199 ± 0.0013 AID-18 35 1.92 9.32 ± 0.02 0.5863 ± 0.0003 0.2096 ± 0.0009 
+
+18 E Additional Qualitative Results 
+
+Figure A3: Additional AFHQv2 qualitative comparisons across mask types. Columns follow the same method ordering as Figure 2. 
+
+Figure A4: Additional FFHQ qualitative comparisons across mask types. Columns follow the same method ordering as Figure 2. 19 Figure A5: Additional ImageNet qualitative comparisons across mask types. Columns follow the same method ordering as Figure 3. 
+
+# F Parameter Overhead EDM (AFHQv2 / FFHQ) EDM2 (ImageNet-512) 
+
+10 6
+
+10 7
+
+10 8
+
+> Number of parameters (log scale)
+> 0.66%
+> (409K)
+> 0.33%
+> (411K)
+> 61.8M
+> 124.7M
+> Frozen score model
+> Trainable guidance
+
+Figure A6: Trainable parameter overhead relative to the frozen score model. AID remains below one percent of the score network in both backbone families, which is consistent with the deployment goal of learning a small reusable correction on top of a pretrained model rather than retraining the generative model itself. 20 G Training Details 
+
+We summarize the training protocol used to produce the AID checkpoints in the main paper. 
+
+Network architecture. The actor ˆμϕ and critic ˆV θ are two separate convolutional networks with no shared parameters. Both take (t, x t, ξ ) and process ξ = ( M, y ) through a small conditioning stem (two residual blocks at width 32 ) whose output is concatenated with the state xt and a sinusoidal log σ(t) embedding; a four-block residual trunk at width 64 is then applied. The actor projects the trunk output back to the state dimension; the critic spatially averages it and maps to a scalar. On AFHQv2 and FFHQ both networks operate in pixel space; on ImageNet they operate in the 4-channel 64 × 64 EDM2 latent space. For ImageNet, masks and observations are represented on the EDM2 latent grid during sampling; completed latents are decoded to pixel space for PSNR, SSIM, and LPIPS evaluation using the corresponding pixel-space masks. The critic is used only at training time and is discarded at deployment. The actor has about 409 K trainable parameters on EDM and 411 K on EDM2, corresponding to 0.66% and 0.33% of the respective frozen score networks. 
+
+Frozen score backbones. We use the official pretrained pickles: EDM on AFHQv2 and FFHQ, and EDM2 on ImageNet [ 19 , 21 ]. All score networks are kept frozen throughout training and deployment. For class-conditional ImageNet EDM2, we use the dataset labels associated with the sampled images. 
+
+Solver and time grid. The controlled reverse ODE (1) is discretized with Heun on the EDM σ-schedule (ρ = 7 , σmin = 0 .002 , σmax = 80 ). Training uses K = 18 steps; at deployment we consider K ∈ { 12 , 18 } with the same trained actor. Following the EDM convention, the final solver step is Euler, so the reported NFE is 
+
+2K − 1: 35 for K = 18 and 23 for K = 12 .
+
+Task distribution. During training we sample ζ = ( M, y, x †) ∼ ρtask online, drawing x† from the dataset’s training split and M from a random free-form brush-mask distribution with total missing fraction uniform in 
+
+[0 .2, 0.6] ; the center and strip masks used for evaluation in Appendix D are never seen during training. 
+
+Optimizer. We use Adam for both networks with constant learning rate 10 −4, batch size 2, gradient clipping at norm 1, and no scheduler or EMA. Each run takes on the order of several hours on a single commodity GPU-equivalent device; detailed settings per dataset are provided in the supplementary configuration files. 
+
+Hyperparameter values ( αvis , α hole , β, λ ). Table A4 lists the numerical values used for the released checkpoints. The control weight β is fixed to 10 −3 across all datasets. The exploration temperature is fixed to λ = 10 −3. We did not tune these hyperparameters carefully; the sensitivity study in Appendix H confirms that moderate deviations do not change the ranking against the baselines of Table 1. Table A4: Training hyperparameters used for the released AID checkpoints. Dataset / backbone αvis αhole β λ
+
+AFHQv2 / EDM 2 1 10 −3 10 −3
+
+FFHQ / EDM 2 1 10 −3 10 −3
+
+ImageNet / EDM2 1 1 10 −3 10 −3
+
+Reproducibility. All training and evaluation runs use three random seeds whose specific values are fixed in the supplementary code. The complete training and evaluation configuration for each dataset is provided in the supplementary materials, and all results are fully reproducible. 21 H Ablation Study on AFHQv2 
+
+We ablate the four hyperparameters of the AID training objective: the control weight β, the exploration temperature λ, and the terminal weights αvis and αhole . All ablations are conducted on AFHQv2 with the free-form mask ( 1000 test images, same protocol as Table 1); the deployment setting is AID ( K = 18 )throughout. In each table only the studied hyperparameter is varied, with perturbations at ×2 and ÷2 of its default value; the remaining hyperparameters are held at the defaults of Table A4. For simplicity, we report only the resulting scalar metric values. The default row is consistent with the main AFHQv2 free-form result in Table 1. Throughout the four ablations, AID remains clearly ahead of the strongest baseline, RePaint (AFHQv2 free-form: 10 .97 /0.6816 /0.0879 ), on all three metrics. 
+
+Effect of the control weight β. Table A5 varies β by a factor of two around the default β = 10 −3. A smaller β weakens the quadratic penalty on the guidance field and slightly softens all three metrics; a larger 
+
+β regularizes more strongly and damps the guidance magnitude. Both directions produce only small shifts, indicating that the method is not highly sensitive to β within this range. Table A5: Ablation of the control weight β on AFHQv2 free-form ( αvis = 2 , αhole = 1 , λ = 10 −3). 
+
+β PSNR ↑ SSIM ↑ LPIPS ↓
+
+5 × 10 −4 12.94 0.7321 0.0780 
+
+10 −3 (default) 13.01 0.7336 0.0772 
+
+2 × 10 −3 12.89 0.7306 0.0792 
+
+Effect of the exploration temperature λ. Table A6 varies λ with all other quantities fixed. Through the bridge of Section 3, λ enters the auxiliary policy variance 2λ/ (βd ) and controls the amount of stochastic exploration used during training. A smaller λ reduces exploration, while a larger λ injects additional training-time noise; in both cases the actor remains stable, consistent with the theoretical prediction that the deterministic optimum u∗ is recovered for any λ > 0.Table A6: Ablation of the exploration temperature λ on AFHQv2 free-form ( β = 10 −3, αvis = 2 , αhole = 1 ). 
+
+λ PSNR ↑ SSIM ↑ LPIPS ↓
+
+5 × 10 −4 12.97 0.7328 0.0776 
+
+10 −3 (default) 13.01 0.7336 0.0772 
+
+2 × 10 −3 12.96 0.7325 0.0779 
+
+Effect of the visible-region weight αvis . Table A7 varies αvis at ×2 and ÷2 of the default αvis = 2 ,with αhole = 1 held fixed. Reducing αvis weakens the visible-region supervision and softens PSNR, while doubling it gives a small improvement in PSNR with only minor changes in SSIM and LPIPS. The controller is therefore only mildly sensitive to αvis within this range. Table A7: Ablation of the visible-region weight αvis on AFHQv2 free-form ( αhole = 1 , β = 10 −3, λ = 10 −3). 
+
+αvis PSNR ↑ SSIM ↑ LPIPS ↓
+
+1 12.82 0.7288 0.0800 
+
+2 (default) 13.01 0.7336 0.0772 
+
+4 13.04 0.7330 0.0778 
+
+Effect of the hole-region weight αhole . Table A8 varies αhole at ×2 and ÷2 of the default αhole = 1 , with 
+
+αvis = 2 held fixed. Doubling αhole slightly improves all three metrics, while halving it weakens missing-region supervision and produces the expected small regression. 22 Table A8: Ablation of the hole-region weight αhole on AFHQv2 free-form ( αvis = 2 , β = 10 −3, λ = 10 −3). 
+
+αhole PSNR ↑ SSIM ↑ LPIPS ↓
+
+0.5 12.88 0.7307 0.0790 
+
+1 (default) 13.01 0.7336 0.0772 
+
+2 13.06 0.7342 0.0770 Takeaway. Across all four hyperparameters, AID is only weakly sensitive within the ×2/÷2 ranges considered, and in every perturbed configuration remains clearly ahead of RePaint, the strongest baseline, on AFHQv2 free-form. Several perturbations already match or slightly improve on the default row, which suggests that the method is robust to moderate changes in these training hyperparameters. 23

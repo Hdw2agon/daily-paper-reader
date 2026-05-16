@@ -6,38 +6,35 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-05-15
-- 运行时间：2026-05-15 20:52:49 UTC
+- 最新运行日期：2026-05-16
+- 运行时间：2026-05-16 20:48:45 UTC
 - 运行状态：成功
-- 本次总论文数：6
-- 精读区：2
+- 本次总论文数：5
+- 精读区：1
 - 速读区：4
 
 ### 今日简报（AI）
-今日聚焦图像修复与编辑前沿，深度解析了视觉移除一致性评测及动态分辨率扩散模型等 6 项成果。
-- 详情：[/202605/15/README](/202605/15/README)
+今日聚焦稀疏视角下的室内 3D 重建突破，重点研读了结合全景补全的 3D 高斯
+- 详情：[/202605/16/README](/202605/16/README)
 
 ### 精读区论文标签
-1. [PROVE: A Perceptual RemOVal cohErence Benchmark for Visual Media](/202605/15/2605.14534v1-prove-a-perceptual-removal-coherence-benchmark-for-visual-media)  
+1. [PanoPlane: Plane-Aware Panoramic Completion for Sparse-View Indoor 3D Gaussian Splatting](/202605/16/2605.14135v1-panoplane-plane-aware-panoramic-completion-for-sparse-view-indoor-3d-gaussian-splatting)  
    标签：评分：9.0/10、query:q1
-   evidence：评估物体移除和图像补全的基准
-2. [Image Restoration via Diffusion Models with Dynamic Resolution](/202605/15/2605.14267v1-image-restoration-via-diffusion-models-with-dynamic-resolution)  
-   标签：评分：8.0/10、query:q1
-   evidence：用于各种图像修复任务的扩散模型
+   evidence：全景场景补全及未观测区域的生成过程
 
 ### 速读区论文标签
-1. [HDRFace: Rethinking Face Restoration with High-Dimensional Representation](/202605/15/2605.14821v1-hdrface-rethinking-face-restoration-with-high-dimensional-representation)  
-   标签：评分：7.0/10、query:q4
-   evidence：用于人脸修复的生成式先验
-2. [EditTransfer++: Toward Faithful and Efficient Visual-Prompt-Guided Image Editing](/202605/15/2605.07455v1-edittransfer-toward-faithful-and-efficient-visual-prompt-guided-image-editing)  
+1. [PRISM: Prior Rectification and Uncertainty-Aware Structure Modeling for Diffusion-Based Text Image Super-Resolution](/202605/16/2605.13027v1-prism-prior-rectification-and-uncertainty-aware-structure-modeling-for-diffusion-based-text-image-super-resolution)  
+   标签：评分：6.0/10、query:q1
+   evidence：基于扩散模型的图像超分辨率与修复
+2. [LiWi: Layering in the Wild](/202605/16/2605.14552v1-liwi-layering-in-the-wild)  
    标签：评分：6.0/10、query:q4
-   evidence：基于扩散Transformer的视觉提示引导图像编辑
-3. [Delta-Adapter: Scalable Exemplar-Based Image Editing with Single-Pair Supervision](/202605/15/2605.07940v1-delta-adapter-scalable-exemplar-based-image-editing-with-single-pair-supervision)  
+   evidence：用于图像分解和合成的生成式框架
+3. [Masked Next-Scale Prediction for Self-supervised Scene Text Recognition](/202605/16/2605.14885v1-masked-next-scale-prediction-for-self-supervised-scene-text-recognition)  
+   标签：评分：6.0/10、query:q7
+   evidence：用于结构演化的自监督掩码图像建模
+4. [From Plans to Pixels: Learning to Plan and Orchestrate for Open-Ended Image Editing](/202605/16/2605.15181v1-from-plans-to-pixels-learning-to-plan-and-orchestrate-for-open-ended-image-editing)  
    标签：评分：6.0/10、query:q4
-   evidence：基于单对监督的示例图像编辑
-4. [Beyond the Last Layer: Multi-Layer Representation Fusion for Visual Tokenizatio](/202605/15/2605.10780v1-beyond-the-last-layer-multi-layer-representation-fusion-for-visual-tokenizatio)  
-   标签：评分：6.0/10、query:q4
-   evidence：用于重建和生成质量的表示自编码器
+   evidence：用于开放式图像编辑的生成模型和编排器
 
 
 <div class="dpr-home-promo-card">

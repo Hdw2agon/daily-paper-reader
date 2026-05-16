@@ -1,0 +1,339 @@
+Title: PanoPlane: Plane-Aware Panoramic Completion for Sparse-View Indoor 3D Gaussian Splatting
+
+URL Source: https://arxiv.org/pdf/2605.14135v1
+
+Published Time: Fri, 15 May 2026 00:23:56 GMT
+
+Number of Pages: 18
+
+Markdown Content:
+# PanoPlane: Plane-Aware Panoramic Completion for Sparse-View Indoor 3D Gaussian Splatting 
+
+Adil Qureshi Dongki Jung Jaehoon Choi Dinesh Manocha 
+
+University of Maryland, College Park 
+
+{adilq, jdk9405, kevchoi, dmanocha}@umd.edu 
+
+Figure 1: PanoPlane takes sparse input views of an indoor scene, renders a panoramic image with unobserved regions marked as holes, and completes it using layout anchored attention steering, a training-free mechanism that anchors the panoramic flow-matching model’s internal attention to detected planar surfaces (walls, floors, ceilings). The completed 360° panorama provides globally consistent supervision for 3D Gaussian Splatting, achieving state-of-the-art novel view synthesis. 
+
+## Abstract 
+
+We present PanoPlane, an approach for high-fidelity sparse-view indoor novel view synthesis that reconstructs closed room geometry via panoramic scene comple-tion. Unlike perspective-based methods that generate training views from limited fields of view, PanoPlane leverages 360 ◦ panoramic completion to condition the generative process on the full spatial layout. We propose Layout Anchored Atten-tion Steering, a training-free mechanism that steers attention within the diffusion model’s internal representation toward scene’s detected planar surfaces at infer-ence time. By directing each unobserved region’s attention toward geometrically consistent observed content, our method replaces unconstrained hallucination with grounded surface extrapolation. The resulting panoramic completions provide su-pervision for 3D Gaussian Splatting, enabling accurate novel-view synthesis across unobserved regions from as few as three input views. Experiments on Replica, ScanNet++, and Matterport3D demonstrate state-of-the-art novel view synthesis quality across 3, 6, and 9 input views, achieving up to +17 .8% improvement in PSNR over the current state-of-the-art baseline without any training or fine-tuning of the diffusion model. 
+
+## 1 Introduction 
+
+Reconstructing indoor scenes from sparse viewpoints for novel view synthesis is a critical enabler for various tasks such as scene understanding, embodied robot navigation and spatial computing [21 , 13 , 15 , 62 , 26 ]. 3D Gaussian Splatting (3DGS) [ 22 ] achieves photorealistic novel view synthesis 
+
+> Preprint.
+> arXiv:2605.14135v1 [cs.CV] 13 May 2026
+
+with real-time rendering when dense multi-view coverage of the scene is available [ 36 , 41 , 5, 58 , 43 ]. However, with only a handful of input views, large portions of the scene are never observed, often leading to collapsed or no geometry, floating artifacts, and incoherent surfaces, particularly in indoor environments [56, 66, 28, 38, 50]. Recent methods address sparse-view reconstruction by leveraging diffusion priors to generate ad-ditional training views for 3DGS supervision [ 39 , 37 , 18 , 47 ], employing strategies from repair-and-inpainting pipelines to video diffusion and multi-view outpainting. While these approaches have made significant progress, they remain limited in two key aspects. First, operating within the perspective-view image, each generated view captures only a small portion of the scene due to its restricted field of view. This often introduces geometric inconsistencies across views, such that generating more views can counterintuitively degrade reconstruction quality [ 18 ]. Second, while recent methods attempt to mitigate these inconsistencies through external geometric guidance, depth-conditioned masking [ 37 ], multi-view conditioning with coordinate embeddings [ 18 ], or positional encodings, they cannot directly steer the diffusion model’s internal attention toward structurally relevant observed regions during generation. Consequently, the diffusion process lacks an explicit mechanism to ensure that unobserved regions geometrically align with their assigned structural layout through the model’s own feature interactions. These limitations suggest that panoramic scene completion can provide a natural alternative, as many recent generative world models have increasingly adopted panoramic representations to capture richer global context than narrow perspective images [ 19 , 34 , 55 ]. Panoramas capture the full spatial layout of a scene in a single representation, making them well suited for modeling global structure [ 54 , 45 ]. This is especially advantageous for indoor environments, where dominant planar surfaces such as walls, floors, and ceilings define an enclosed geometric envelope [ 45 , 11 , 25 , 31 , 65 ] that can be captured holistically in a single 360 ◦ panoramic view. 
+
+Main Results: By exposing this omnidirectional global structure to the generative model, panoramic views provide a more coherent context for diffusion-based scene completion. We present PanoPlane, a geometry-aware novel view synthesis approach that uses panoramic representations for sparse-view indoor reconstruction. Starting from sparse input views, we first train an initial plane-aware 2DGS [17] to obtain a coarse geometric reconstruction. A vision-language model [2] detects planar surfaces, such as walls, floors, and ceilings. From this reconstruction, we render a partially observed equirectangular (ERP) panorama at a selected viewpoint, which contains large missing regions due to sparse input coverage. We then complete these panoramas using a panoramic flow-matching model [ 9]that operates in the full latent ERP space to enable global layout awareness during generation. We then guide this completion by our proposed layout anchored attention steering mechanism. To determine where attention should be steered, we perform omnidirectional ray tracing from the panoramic camera center and associate each missing pixel with the detected planar surfaces it intersects in the 3D scene. This allows completion to follow the room’s underlying layout geometry rather than image space proximity alone, leading to more geometrically consistent scene completion. Experiments on Replica [ 44 ], ScanNet++ [ 57 ], and Matterport3D [ 4] show that PanoPlane outper-forms prior methods [ 22 , 66 , 8, 56 , 18 , 37 ]in perceptual quality across 3, 6, and 9 input views, without any training or per scene fine-tuning of the generative model. Our contributions are as follows: • We introduce Layout Anchored Attention Steering, a training-free mechanism for sparse view novel view synthesis that guides panoramic scene completion by anchoring the diffusion model’s internal attention to the scene’s 3D layout. • We propose a semantic-aware plane assignment pipeline that classifies detected planes as layout or non-layout via VLM-based reasoning, then assigns unobserved regions to layout planes, enabling selective geometric steering. • We demonstrate state-of-the-art on three benchmarks with up to +2.71dB PSNR improve-ment (Replica, 3-view setting), establishing that panoramic priors with layout anchoring provide superior supervision for sparse-view indoor reconstruction. 
+
+## 2 Related Work 
+
+Sparse-View 3DGS Early methods regularize 3DGS with monocular depth [ 66 , 28 , 38 ], SfM-based alignment [ 12 ], or epipolar consistency [ 63 ]. Subsequent work extends these constraints to 2frequency-domain regularization [ 59 ], joint depth-normal supervision [ 49 ], and cross-view geometric alignment [ 56 , 8]. Population-level regularization techniques, including stochastic dropout [ 40 ], neural Gaussian priors [ 36 ], and covisibility-aware weighting [ 20 ], reduce overfitting but remain fundamentally limited to constraining observed regions. Unlike generative approaches that synthesize novel training views, these geometric regularization methods cannot produce supervision for unob-served scene areas where no input view exists. PanoPlane bridges this gap by combining geometric regularization in observed regions with generative panoramic completion for unobserved areas. 
+
+Generative Priors for 3DGS To address unobserved regions, recent work injects generative priors into the reconstruction loop. Independent pseudo-view generation [ 33 ] suffers from cross-view inconsistencies, prompting video-diffusion-based approaches [ 64 , 32 ] that provide temporally coherent supervision. RI3D [ 39 ] separates repair from inpainting for extreme viewpoints, while G4SPLAT [ 37 ] lifts monocular depths to metric scale via planar structures. However, methods synthesizing novel camera poses suffer from cumulative drift. OracleGS [ 47 ] mitigates this through geometric validation, and GaMO [ 18 ] expands coverage via multi-view outpainting from existing poses. These methods remain confined to fragmented perspective frustums with soft conditioning. PanoPlane shifts to holistic 360° panoramic completion grounded by the scene’s 3D planar structure. 
+
+Inference-Time Attention Steering Recent literature establishes that manipulating a diffusion model’s internal attention during inference can improve structural coherence without retraining [ 60 ]. Early training-free methods [ 16 , 1 ] rely on the assumption that perturbing attention maps isolates structural features, thereby sharpening details and refining sample quality. Subsequent works [ 14 ]demonstrated that cross-attention governs 2D spatial-to-word relationships, while others [ 48 , 3]exploited self-attention as a driver for transferring 2D pixel compositions across images. Recent advances have sought more granular control: [ 27 ] demonstrated disentangling Key and Value channels to separate 2D spatial configuration from texture and appearance, [ 29 ] extracted source attention patterns for 2D structural transfer, and methods like Attentive Eraser [ 46 ] redirected or masked attention to preserve backgrounds during targeted edits. However these methods lack explicit 3D geometric grounding. To address this limitation, we introduce Layout Anchored attention steering, which upgrades the attention-steering paradigm from 2D image-space heuristics to explicit 3D architectural grounding. Here, we define "layout" strictly as the 3D structural elements of the scene (e.g, walls, floors, and ceilings). Rather than relying on statistical perturbations or 2D spatial masks, our method anchors the self-attention Query-Key interactions directly to analytical plane equations derived from our coarse sparse-view 3DGS reconstruction. We override the model’s default 2D proximity bias by deterministically steering unobserved tokens to attend to observed tokens that share the exact same 3D planar room layout. 
+
+## 3 Our Approach: PanoPlane 
+
+3.1 Preliminaries 3D Gaussian Splatting 3D Gaussian Splatting (3DGS) [ 22 ] represents scenes as collections of anisotropic Gaussian primitives optimized via differentiable alpha-blending. We adopt the 2DGS variant [ 17 ], which uses oriented planar surfels that provide better surface alignment and enable direct depth and normal supervision. In sparse-view settings, the limited training signal causes collapsed geometry and floater artifacts in unobserved regions. 
+
+Flow Matching and Panoramic Diffusion. Flow matching [ 30 ] trains a neural network uθ to approximate a velocity field that transports samples from a noise distribution to the data distribution along deterministic linear paths. Given a clean sample x0 and Gaussian noise ϵ ∼ N (0, I), interme-diate states are defined by the linear interpolation xt = (1 − t)x0 + tϵ, and uθ is trained to regress the target velocity vt = ϵ − x0. At inference time, uθ is frozen and clean samples are recovered by integrating uθ (xt, t ) from t=1 (noise) to t=0 (data). We build on DiT360 [ 9], which instantiates uθ as a Diffusion Transformer adapted from FLUX [ 24 ]for equirectangular panoramic generation. The architecture consists of 19 double-stream blocks, in which text and image tokens attend jointly, followed by 38 single-stream blocks that refine spatial relationships over the fused token sequence. DiT360 applies circular padding at the token level so that the first and last columns of the latent grid are treated as spatially adjacent, allowing self-attention 3Figure 2: Overview of PanoPlane. From sparse input views, we recover layout planes, render partial panoramas with holes, assign hole tokens to planes via ray-plane intersection and boundary based assignment, and steer DiT attention to produce geometrically grounded completions. The completed panoramas are converted into cubemap supervision for refined 2DGS reconstruction. to model the 0◦/360 ◦ longitude seam as a continuous boundary. PanoPlane leaves the pretrained weights of DiT360 entirely unchanged, operating solely by modifying the query ( Q) and key ( K)matrices within each attention layer at inference time. 
+
+3.2 Plane-Aware Scene Initialization Plane Detection and Depth Refinement Our plane detection is built upon [ 37 ]. We initialize dense depth maps using Pi3 [ 52 ]. We extract per-frame plane instances by intersecting SAM [ 23 ]segmentation masks with surface-normal clusters, merge them into globally consistent 3D planes via point cloud covisibility, and fit plane equations via RANSAC [ 10 ]. For pixels assigned to layout surfaces, noisy per-pixel depth estimates are replaced with depths computed from ray-plane intersection, producing geometrically consistent planar surfaces (Fig. 2, Step 1). Specifically, for a ray originating at camera center o ∈ R3 with direction d ∈ R3, the intersection distance with plane 
+
+g, defined by unit normal ng ∈ R3 and offset dg ∈ R is given by 
+
+Lg = − n⊤ 
+
+> g
+
+o + dg
+
+n⊤ 
+
+> g
+
+d , (1) where Lg > 0 indicates a valid intersection in front of the camera. The refined depth for each pixel is then set to Lg of its assigned layout plane. 
+
+Semantic Plane Classification However, not all detected planes should be treated equally during completion of a unobserved scene. We address this by classifying each global plane as layout (walls, floors, ceilings) or non-layout (furniture, objects) using vision-language-model [ 2]. For each plane, we render the input image with the plane region lightly highlighted (Fig. 2, Step 2), then prompt (see Appendix) the VLM to name the surface. Planes identified as wall, floor, or ceiling are labeled layout; all others are non-layout. Per-frame labels are aggregated by majority vote across all views observing each global plane. During scene completion, only layout planes participate in our attention steering. 
+
+3.3 Panoramic Completion 
+
+We complete the scene through 360° panoramic inpainting. This stage proceeds in three steps: we first render ERP panoramas from the coarse 2DGS and select the best candidate for completion; we then determine which layout plane each unobserved region belongs to; finally, we inpaint the panorama using a panoramic flow-matching model with our layout anchored attention steering, guiding the generation of unobserved regions toward the geometric properties of their assigned layout surfaces. 
+
+Panorama Rendering and Selection From the coarse 2DGS, we render six 90 ◦ cubemap faces at each training camera position and stitch them into equirectangular (ERP) panoramas as shown in Fig. 3a. Observed regions are identified by combining the rendered alpha map. The remaining regions form holes that require completion. The detected global planes and their semantic labels obtained 4Figure 3: Panoramic Completion. (a) A partially observed equirectangular panorama rendered from the initial 2DGS, with unobserved regions shown in black. (b) Completion with our layout-anchored steering: unobserved regions are filled as geometrically consistent extensions of the surrounding walls, floor, and ceiling. (c) Naive panoramic inpainting without steering produces hallucinated surfaces that are geometrically inconsistent with the observed room layout (d) Latent space visualization; each shade of gray denotes observed tokens belonging to a distinct layout plane. (e) Latent space visualization: each hole token is assigned to its most probable layout plane via the geometric and boundary methods described in Sec. 3.3, shown here by matching shades. (f) Assignment confidence map: brighter values indicate higher reliability, with confidence peaking near hole boundaries where spatial context is strongest and decaying toward the interior of large unobserved regions. in the previous stage are carried forward into ERP space by projecting (Eq. 3) cubemap faces and stitching the resulting per-face planes into a per-pixel plane map in ERP space that identifies which layout surface each observed region belongs to. This map provides the geometric anchors for our downstream hole-plane assignment and attention steering. To select optimal ERP images for scene completion, we determine scene coverage using a voxel visibility grid following [ 37 ], and rank ERP candidates by balancing three criteria: (i) the number of previously unobserved voxels visible within the hole region, which measures how much new coverage the completion would provide; (ii) the hole-to-observed ratio hi, which should be large enough to contribute meaningful coverage yet small enough to provide sufficient context for steering; and (iii) the number of distinct layout planes Pi in the observed region, which determines how many geometric anchors are available. We combine these as 
+
+Si = Vi · f (hi) · g(Pi), (2) where Vi is the number of unobserved voxels visible in the hole region, f (hi) penalizes panoramas whose hole ratio is either too small, yielding minimal new coverage, or too large, providing insufficient observed context for steering, and g(Pi) rewards layout plane diversity in the observed region. Thus, 
+
+Si favors panoramas with diverse geometric anchors for stronger scene completion guidance. 
+
+Plane Assignment for Hole Tokens. To prepare the panorama for inpainting, we encode the rendered ERP image using the VAE into a 64 ×128 latent grid, where each token corresponds to a 16 ×
+
+16 pixel patch. The latent grid contains two types of tokens: observed tokens , whose corresponding patches contain valid rendered region from the coarse 2DGS, and hole tokens , whose patches fall in unobserved regions that require inpainting. The ERP-resolution plane map is downsampled to this grid via nearest-neighbor interpolation, so that each observed token inherits the plane ID of its corresponding layout surface, while hole tokens remain unassigned. As shown in Fig. 3d, observed tokens sharing the same plane ID (indicated by the same shade of gray) form contiguous regions corresponding to individual layout surfaces. The challenge is to determine which plane each hole token should be associated with before we inpaint using steering. To address this, we employ two complementary strategies and fuse their outputs: geometry based and boundary based assignments. 
+
+Geometry Based Hole Assignment The geometry based assignment assigns through ray–plane intersection in 3D. For a hole token at latent coordinates (r, c ) in a grid of height H and width W ,5we compute a world-space ray direction from the ERP mapping: 
+
+d = R
+
+"cos ϕ sin θ
+
+− sin ϕ
+
+cos ϕ cos θ
+
+#
+
+, θ =
+
+ c + 0 .5
+
+W · 2 − 1
+
+
+
+π, ϕ =
+
+
+
+0.5 − r + 0 .5
+
+H
+
+
+
+π, (3) where R is the camera rotation matrix. This ray is intersected with every layout plane and the intersection distance is computed using Eq. (1) . The token is assigned to the plane with the smallest positive Lg (Eq. (1) ). The geometric confidence cgeo reflects both the proximity of the hit and the margin over competing planes. Let Lbest and Lsecond denote the intersection distances to the closest and second-closest layout planes, respectively and let σL > 0 be a distance scale parameter that normalizes these quantities into a consistent range: 
+
+cgeo = exp 
+
+
+
+− Lbest 
+
+σL
+
+
+
+·
+
+
+
+1 − exp 
+
+
+
+− Lsecond − Lbest 
+
+σL
+
+ 
+
+. (4) 
+
+Boundary Based Hole Assignment The boundary based assignment uses 2D proximity on the latent grid. For each plane, we build a KD-tree over its observed tokens within a few pixels of the hole boundary. Each hole token is assigned to the plane with the nearest boundary tokens in 2D, with confidence defined by the distance and the margin between the closest and second-closest planes: 
+
+cbnd = exp 
+
+
+
+− dbest 
+
+σd
+
+
+
+· dsecond − dbest 
+
+dbest + ϵ , (5) where dbest and dsecond are the 2D euclidean distances to the nearest boundary tokens of the best and second-best planes, respectively and σd controls the distance falloff. This assignment is strongest near hole boundaries, where spatial context is clear, and weakens for tokens deep inside large holes, where 2D proximity becomes less reliable. 
+
+Layout Anchored Attention Steering For each hole token, each assignment method contributes a weighted confidence to its selected plane, and the plane with the highest total score is chosen: 
+
+p∗ 
+
+> i
+
+= arg max 
+
+> g
+
+
+
+wgeo c(g) 
+
+> geo
+
++ wbnd c(g)
+
+> bnd
+
+
+
+, (6) The final confidence (Fig. 3f) for token i is defined as the total weighted score of the winning plane. Non-layout planes are excluded from both assignment methods, so all ray intersections and boundary searches are restricted to the room’s layout envelope. We weight both assignment method equally. Following [ 9], we inpaint the selected panorama and recover the completed image through denoising, while preserving observed region features via token replacement at each step. Our steering mechanism is integrated into this denoising process. In the transformer’s self-attention, each token’s output is a weighted combination of all value vectors, where the weights are determined by the dot products between that token’s query q and all other tokens’ keys k. By shifting a hole token’s query q toward the key k subspace of its assigned plane, we encourage it to attend more strongly to observed tokens from the same surface, thereby promoting structurally consistent completion. For each layout plane g with observed token set Og and hole token set Hg , we compute a plane centroid by averaging the key vectors of the observed tokens. We then apply two complementary modifications: each hole token’s query is shifted toward the plane centroid, and the observed tokens on that plane have their keys reinforced, making them stronger attention targets: 
+
+¯kg = 1
+
+|Og |
+
+X
+
+> j∈Og
+
+kj , qi ← qi + λ ¯kg , i ∈ Hg
+
+kj ← kj + λ ¯kg , j ∈ Og
+
+(7) Steering is applied to single-stream blocks 10–37 of DiT360 [ 9], which empirical analysis shows encode geometric surface structure (Appendix A); double-stream and early blocks are unchanged. Steering is active only when the denoising timestep t exceeds a threshold τ , corresponding to the early phase in which the global spatial layout is established, and is disabled in later steps, when the model refines texture and fine detail. All modifications are applied directly to the Q and K matrices in the attention layer and remain fully compatible with standard FlashAttention [ 6], requiring neither custom attention masks nor additional memory overhead. 63.4 Refinement 
+
+Each completed ERP image (Fig.3b) is decomposed into six 90 ◦ cubemap faces standard ERP-to-cubemap reprojection and added to the training set. The plane-aware pipeline (Sec.3.2) is re-executed over this expanded view set, and the 2DGS model is refined using both sources of supervision. For original input views, we apply the standard photometric loss: 
+
+Linput = (1 − λs) L1( ˆIi, I i) + λs LD-SSIM ( ˆIi, I i). (8) For completed views, the same objective is downweighted by αc = 0 .01 to prevent synthetic supervision from overpowering real observations: 
+
+Lcomplete = αc
+
+h
+
+(1 − λs) L1( ˆCj , C j ) + λs LD-SSIM ( ˆCj , C j )
+
+i
+
+. (9) All views share geometric regularization against the plane-refined depth maps: 
+
+Lgeo = λd Ldepth + λn Lnormal + λκ Lcurv , (10) applied at full strength regardless of view source to keep Gaussian positions anchored to the planar geometry. 
+
+## 4 Results and Experiments 
+
+4.1 Experiments Settings Datasets, Metrics We evaluate on three standard indoor benchmarks spanning different scene complexity, totaling 15 scenes across 21 experimental configurations. Matterport3D [ 4 ] provides building-scale indoor environments captured as panoramic RGB-D views at multiple positions throughout each scene. We extract six 90° cubemap faces from each panoramic viewpoint, producing a pool of perspective images with known camera poses per room. From this pool, we randomly select perspective views as sparse training inputs, ensuring they originate from different panoramic positions. We evaluate on 6 room-level scenes with 6 input views. Held-out perspective views from the same room serve as the test set for evaluation. Replica [ 44 ] provides photorealistic synthetic indoor scenes with ground truth geometry. We evaluate on 3 scenes across 3, 6, and 9 input views. ScanNet++ [ 57 ]provides real-world indoor scans captured with a DSLR camera, featuring challenging lighting and cluttered layouts. From each scene’s image sequence, we randomly select 6 images as sparse training views and a separate set of 100 images as held-out test views. We report three standard novel view synthesis metrics: PSNR, SSIM [ 53 ], and LPIPS [ 61 ]. All metrics are computed on held-out test views that were not used during reconstruction. 
+
+Baselines We compare PanoPlane against six baselines from three categories: 3DGS [ 22 ]; regularization-based methods, including SparseGS [ 56 ], FSGS [ 66 ], and InstantSplat [ 8]; and generative-prior methods, including GaMO [ 18 ] and G4Splat [ 37 ]. All methods use their default settings from the original papers. 
+
+4.2 Main Improvements 
+
+Tables 1 and Figure 4 present quantitative and qualitative comparisons across all three benchmarks. PanoPlane achieves the highest state-of-the-art performance across all datasets and view counts. On primary 6-view setting, PanoPlane outperforms strongest baseline ([ 37 ]) by +2.60dB PSNR on Matterport3D, +1.75dB on Replica and +1.90dB on ScanNet++. These gains are consistent across all three perceptual metrics. Fig.4 illustrates failure modes of existing methods. G4Splat completes unobserved regions but its perspective inpainting introduces color bleeding and texture smoothing into adjacent observed regions, degrading reconstruction quality even where ground-truth supervision is available. GaMO fails to produce coherent reconstructions when input views have wide baselines, and in some cases corrupts already observed regions. In scenes with strong occlusions (Replica), our method resolves hidden surfaces that perspective methods cannot recover. Table 1 also shows results on Replica under 3 and 9 input views. PanoPlane’s advantage is largest under the most extreme sparsity (3 views, +2.71 dB over best baseline), where the global context provided by panoramic completion is most valuable. At 9 views, PanoPlane still achieves the best performance (+0.25 dB over G4Splat), indicating that layout steering provides geometric consistency benefits even when input coverage is relatively dense. 7Table 1: Average comparison on Matterport3D [ 4], Replica [ 44 ], and ScanNet++ [ 57 ]. Best, second best, and third best results are highlighted in red, orange, and yellow, respectively.                                                                                                                             
+
+> Method Matterport3D (6 views) ScanNet++ (6 views) Replica (6 views) Replica (3 views) Replica (9 views)
+> PSNR ↑SSIM ↑LPIPS ↓PSNR ↑SSIM ↑LPIPS ↓PSNR ↑SSIM ↑LPIPS ↓PSNR ↑SSIM ↑LPIPS ↓PSNR ↑SSIM ↑LPIPS ↓
+> 3DGS [22] 13.83 0.46 0.50 13.14 0.55 0.45 16.25 0.67 0.30 10.26 0.43 0.36 18.77 0.71 0.26 FSGS [66] 13.59 0.49 0.51 13.61 0.60 0.48 16.61 0.71 0.31 10.78 0.49 0.38 19.08 0.74 0.30 SparseGS [56] 12.69 0.36 0.55 13.80 0.52 0.48 13.81 0.53 0.45 10.57 0.38 0.49 16.24 0.62 0.40 InstantSplat [8] 12.63 0.45 0.53 12.68 0.59 0.46 14.68 0.64 0.38 7.62 0.23 0.52 16.13 0.69 0.31 GaMO [18] 12.57 0.41 0.59 11.01 0.44 0.58 12.05 0.50 0.56 8.28 0.27 0.66 14.69 0.60 0.44 G4Splat [37] 14.59 0.52 0.51 13.86 0.53 0.51 17.80 0.74 0.37 –––21.81 0.77 0.29
+> PanoPlane 17.19 0.53 0.44 15.76 0.66 0.42 19.55 0.78 0.29 13.49 0.58 0.44 22.06 0.80 0.27
+
+Figure 4: Qualitative comparison on Matterport3D, Replica and ScanNet++ Each row shows a challenging scene with large unobserved regions. Perspective-based methods (3DGS, SparseGS, FSGS, InstantSplat) artifacts in wide baseline views. Generative-prior methods partially recover scenes but still struggle with color bleeding and over-smooth textures. PanoPlane (ours) recovers geometrically consistent surfaces across all unobserved regions, correctly extending walls, floors, and ceilings that other methods fail to reconstruct. 
+
+4.3 Ablation Studies Layout Steering As observed in Table 2, layout steering is the single largest contributor. Removing it entirely and replacing it with naive DiT360 inpainting causes the largest single drop ( −1.02 dB average PSNR), confirming that the Q/K modification described in Eq. 7 is the primary mechanism driving geometric consistency in the completed panoramas. 
+
+Semantic plane classification We observe that semantic plane classification is necessary for steering to work. Row (e) in Table 2 shows that applying boundary-based assignment without semantic filtering achieves 16.05 dB, identical to disabling steering entirely (16.07 dB). This is because naive assignment directs unobserved tokens toward non-layout surfaces (furniture, objects) as often as toward walls and ceilings, causing the steering to hallucinate flat textures rather than enforce geometric consistency. Semantic filtering resolves this by restricting the anchor set to structurally meaningful surfaces. 
+
+Geometric and Boundary-Based Assignments Boundary assignment alone (row c, 16.92 dB) outperforms geometric assignment alone (row d, 16.60 dB), though the two together (row a, 17.09 dB) provide the best result. The benefit of combining both is most pronounced on scenes with large holes spanning multiple layout planes: boundary assignment is reliable near hole edges where spatial context is strong, but degrades toward hole interiors where 2D proximity becomes ambiguous. Geometric ray-plane intersection provides stable assignments in those interior regions, explaining why neither method alone matches their combination. 8Table 2: Ablation Results when each pipeline component is individually removed, averaged over all 15 scenes. LS: Layout Steering, BND: Boundary assignment, GEO: Geometric assignment, SF: Semantic Filtering. Best, second best, and third best results are highlighted in red, orange, and yellow, respectively. Averages computed over the same 15 scenes.                                                                                                                   
+
+> Matterport3D Replica (6-view) ScanNet++ Average
+> LS BND GEO SF PSNR ↑SSIM ↑LPIPS ↓PSNR ↑SSIM ↑LPIPS ↓PSNR ↑SSIM ↑LPIPS ↓PSNR ↑SSIM ↑LPIPS ↓
+> (f) ✗–––16.91 0.53 0.44 17.39 0.75 0.31 14.57 0.63 0.44 16.07 0.613 0.415 (e) ✓✓✗✗16.14 0.53 0.45 19.51 0.78 0.29 14.24 0.62 0.45 16.05 0.616 0.417 (d) ✓✗✓✓16.93 0.53 0.44 18.69 0.77 0.30 15.23 0.64 0.44 16.60 0.623 0.409 (c) ✓✓✗✓16.97 0.53 0.44 19.90 0.78 0.29 15.39 0.65 0.43 16.92 0.629 0.403 (b) ✓✓✓✗17.10 0.53 0.44 19.24 0.71 0.33 15.13 0.65 0.43 16.74 0.613 0.413 (a) ✓✓✓✓17.19 0.53 0.44 19.55 0.78 0.29 15.76 0.66 0.42 17.09 0.632 0.400
+
+Table 3: Q and K Steering             
+
+> Config. PSNR ↑SSIM ↑LPIPS ↓
+> Both Q,K 17.09 0.63 0.40 Q only 16.69 0.65 0.39 K only 15.63 0.61 0.42
+
+Table 4: Run Times (mins)        
+
+> Method Time ↓
+> 3DGS [22] 17 FSGS [66] 24 SparseGS [56] 23 GaMO [18] 38 G4Splat [37] 120
+> Panoplane 39
+
+Figure 5: Analysis PSNR vs steering strength λ on Replica. Performance peaks at λ =0.4; stronger steering over-constrains the model, produc-ing flat textureless comple-tions. 
+
+Steering Strength Figure 5 plots PSNR as a function of λ in Eq. 7 across Replica dataset. Perfor-mance peaks at λ = 0 .4 for Replica scenes. Values above λ > 0.4 causes over-steering of the hole tokens which causes the inpainting to collapse and producing flat, texture less completions. We use 
+
+λ = 0 .4 for all reported results. 
+
+Q and K Steering Table 3 shows that modifying both Q and K outperforms modifying Q alone or K alone across all three datasets. Shifting Q toward the plane centroid encourages the hole token to attend towards its assigned surface. K only steering without Q adjustment yields the largest drop, suggesting that query alignment is the dominant mechanism. 
+
+Discussion Table 2 shows that semantic classification and geometric assignment each improve performance (+0.87dB and +0.53dB respectively), with overlapping benefits yielding a combined gain of +1.02dB. Most revealingly, boundary assignment without semantic filtering (16.05dB) performs on par with disabling steering entirely (16.07dB): naive assignment directs tokens toward non-layout surfaces as often as correct ones, negating any benefit. Geometric assignment is more robust to this failure (16.74dB without filtering), while semantic classification further improves boundary assignment (16.92dB) by excluding non-layout planes. The best result (17.09dB) requires both: semantic classification determines which planes to steer toward, geometric assignment determines where, and steering adds negligible runtime overhead (Table 4). 
+
+## 5 Conclusion, Limitations, and Future Work 
+
+We presented Panoplane, a training-free approach to sparse-view indoor 3DGS reconstruction that anchors panoramic diffusion inpainting to the scene’s 3D planar structure, steering the transformer’s internal attention so that unobserved regions are completed as geometric extensions of detected layout surfaces rather than unconstrained hallucinations. Experiments on three standard benchmarks demonstrate state-of-the-art reconstruction quality without any fine-tuning of the generative model. Our method assumes detectable planar structure and may underperform in scenes dominated by curved surfaces or heavy clutter that occludes the structural envelope; the VLM classification can also misclassify ambiguous surfaces such as built-in shelving or large mirrors. Future directions include adaptive per-head steering strengths matched to each attention head’s geometric sensitivity, direct injection of plane-derived depth into the 3DGS training loss for completed views, and extension to non-planar geometric primitives to handle a broader range of indoor environments. 9References 
+
+[1] Donghoon Ahn, Hyoungwon Cho, Jaewon Min, Wooseok Jang, Jungwoo Kim, SeonHwa Kim, Hyun Hee Park, Kyong Hwan Jin, and Seungryong Kim. Self-rectifying diffusion sampling with perturbed-attention guidance. In European Conference on Computer Vision (ECCV) , pages 1–17. Springer, 2024. doi: 10.1007/978-3-031-73464-9_1. [2] Shuai Bai, Yuxuan Cai, Ruizhe Chen, Keqin Chen, Xionghui Chen, Zesen Cheng, Lianghao Deng, Wei Ding, Chang Gao, Chunjiang Ge, Wenbin Ge, Zhifang Guo, Qidong Huang, Jie Huang, Fei Huang, Binyuan Hui, Shutong Jiang, Zhaohai Li, Mingsheng Li, Mei Li, Kaixin Li, Zicheng Lin, Junyang Lin, Xuejing Liu, Jiawei Liu, Chenglong Liu, Yang Liu, Dayiheng Liu, Shixuan Liu, Dunjie Lu, Ruilin Luo, Chenxu Lv, Rui Men, Lingchen Meng, Xuancheng Ren, Xingzhang Ren, Sibo Song, Yuchong Sun, Jun Tang, Jianhong Tu, Jianqiang Wan, Peng Wang, Pengfei Wang, Qiuyue Wang, Yuxuan Wang, Tianbao Xie, Yiheng Xu, Haiyang Xu, Jin Xu, Zhibo Yang, Mingkun Yang, Jianxin Yang, An Yang, Bowen Yu, Fei Zhang, Hang Zhang, Xi Zhang, Bo Zheng, Humen Zhong, Jingren Zhou, Fan Zhou, Jing Zhou, Yuanzhi Zhu, and Ke Zhu. Qwen3-vl technical report. arXiv preprint arXiv:2511.21631 , 2025. [3] Mingdeng Cao, Xintao Wang, Zhongang Qi, Ying Shan, Xiaohu Qie, and Yinqiang Zheng. Masactrl: Tuning-free mutual self-attention control for consistent image synthesis and editing. In Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV) , pages 22560–22570, 2023. [4] Angel Chang, Angela Dai, Thomas Funkhouser, Maciej Halber, Matthias Niessner, Manolis Savva, Shuran Song, Andy Zeng, and Yinda Zhang. Matterport3d: Learning from rgb-d data in indoor environments. arXiv preprint arXiv:1709.06158 , 2017. [5] Kangjie Chen, Yingji Zhong, Zhihao Li, Jiaqi Lin, Youyu Chen, Minghan Qin, and Haoqian Wang. Quantifying and alleviating co-adaptation in sparse-view 3d gaussian splatting. In 
+
+Advances in Neural Information Processing Systems , 2025. [6] Tri Dao, Daniel Y. Fu, Stefano Ermon, Atri Rudra, and Christopher Ré. Flashattention: Fast and memory-efficient exact attention with io-awareness. In Advances in Neural Information Processing Systems , volume 35, pages 16344–16359, 2022. [7] Bardienus Pieter Duisterhof, Lojze Zust, Philippe Weinzaepfel, Vincent Leroy, Yohann Cabon, and Jerome Revaud. MASt3r-sfm: a fully-integrated solution for unconstrained structure-from-motion. In International Conference on 3D Vision 2025 , 2025. URL https://openreview. net/forum?id=5uw1GRBFoT .[8] Zhiwen Fan, Wenyan Cong, Kairun Wen, Kevin Wang, Jian Zhang, Xinghao Ding, Danfei Xu, Boris Ivanovic, Marco Pavone, Georgios Pavlakos, et al. Instantsplat: Sparse-view gaussian splatting in seconds. arXiv preprint arXiv:2403.20309 , 2024. [9] Haoran Feng, Dizhe Zhang, Xiangtai Li, Bo Du, and Lu Qi. Dit360: High-fidelity panoramic image generation via hybrid training. arXiv preprint arXiv:2510.11712 , 2025. [10] Martin A. Fischler and Robert C. Bolles. Random sample consensus: A paradigm for model fitting with applications to image analysis and automated cartography. Communications of the ACM , 24(6):381–395, 1981. doi: 10.1145/358669.358692. [11] Yasutaka Furukawa, Brian Curless, Steven M. Seitz, and Richard Szeliski. Manhattan-world stereo. In Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition (CVPR) , pages 1422–1429, 2009. doi: 10.1109/CVPRW.2009.5206867. [12] Antoine Guedon, Tomoki Ichikawa, Kohei Yamashita, and Ko Nishino. Matcha gaussians: Atlas of charts for high-quality geometry and photorealism from sparse views. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 6001–6011, June 2025. [13] Wenxuan Guo, Xiuwei Xu, Hang Yin, Ziwei Wang, Jianjiang Feng, Jie Zhou, and Jiwen Lu. Igl-nav: Incremental 3d gaussian localization for image-goal navigation. In Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV) , pages 6808–6817, October 2025. 10 [14] Amir Hertz, Ron Mokady, Jay Tenenbaum, Kfir Aberman, Yael Pritch, and Daniel Cohen-Or. Prompt-to-prompt image editing with cross attention control. In International Conference on Learning Representations (ICLR) , 2023. [15] Kohei Honda, Takeshi Ishita, Yasuhiro Yoshimura, and Ryo Yonetani. Gsplatvnm: Point-of-view synthesis for visual navigation models using gaussian splatting. In 2025 IEEE/RSJ International Conference on Intelligent Robots and Systems (IROS) , pages 20869–20876, 2025. doi: 10.1109/IROS60139.2025.11246997. [16] Susung Hong, Gyuseong Lee, Wooseok Jang, and Seungryong Kim. Improving sample quality of diffusion models using self-attention guidance. In Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV) , pages 7462–7471, 2023. [17] Binbin Huang, Zehao Yu, Anpei Chen, Andreas Geiger, and Shenghua Gao. 2d gaussian splatting for geometrically accurate radiance fields. In SIGGRAPH 2024 Conference Papers .Association for Computing Machinery, 2024. doi: 10.1145/3641519.3657428. [18] Yi-Chuan Huang, Hao-Jen Chien, Chin-Yang Lin, Ying-Huan Chen, and Yu-Lun Liu. Gamo: Geometry-aware multi-view diffusion outpainting for sparse-view 3d reconstruction. arXiv preprint arXiv:2512.25073 , 2025. [19] Team HY-World. Hy-world 2.0: A multi-modal world model for reconstructing, generating, and simulating 3d worlds. arXiv preprint , 2026. [20] Youngkyoon Jang and Eduardo Pérez-Pellitero. Comapgs: Covisibility map-based gaussian splatting for sparse novel view synthesis. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 26779–26788, June 2025. [21] Liren Jin, Xingguang Zhong, Yue Pan, Jens Behley, Cyrill Stachniss, and Marija Popovi´ c. Ac-tiveGS: Active Scene Reconstruction Using Gaussian Splatting. IEEE Robotics and Automation Letters , 10(5):4866–4873, 2025. doi: 10.1109/LRA.2025.3555149. [22] Bernhard Kerbl, Georgios Kopanas, Thomas Leimkühler, and George Drettakis. 3d gaussian splatting for real-time radiance field rendering. ACM Transactions on Graphics , 42(4), 2023. [23] Alexander Kirillov, Eric Mintun, Nikhila Ravi, Hanzi Mao, Chloe Rolland, Laura Gustafson, Tete Xiao, Spencer Whitehead, Alexander C. Berg, Wan-Yen Lo, Piotr Dollár, and Ross Girshick. Segment anything. In Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV) , pages 4015–4026, 2023. doi: 10.1109/ICCV51070.2023.00371. [24] Black Forest Labs, Stephen Batifol, Andreas Blattmann, Frederic Boesel, Saksham Consul, Cyril Diagne, Tim Dockhorn, Jack English, Zion English, Patrick Esser, Sumith Kulal, Kyle Lacey, Yam Levi, Cheng Li, Dominik Lorenz, Jonas Müller, Dustin Podell, Robin Rombach, Harry Saini, Axel Sauer, and Luke Smith. Flux.1 kontext: Flow matching for in-context image generation and editing in latent space, 2025. URL https://arxiv.org/abs/2506.15742 .[25] David C. Lee, Martial Hebert, and Takeo Kanade. Geometric reasoning for single image structure recovery. In Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition (CVPR) , pages 2136–2143, 2009. doi: 10.1109/CVPR.2009.5206872. [26] Xiaohan Lei, Min Wang, Wengang Zhou, and Houqiang Li. Gaussnav: Gaussian splatting for visual navigation. IEEE Transactions on Pattern Analysis and Machine Intelligence , 47(5): 4108–4121, 2025. doi: 10.1109/TPAMI.2025.3538496. [27] Guandong Li and Mengxia Ye. Dual-channel attention guidance for training-free image editing control in diffusion transformers, 2026. URL https://arxiv.org/abs/2602.18022 .[28] Jiahe Li, Jiawei Zhang, Xiao Bai, Jin Zheng, Xin Ning, Jun Zhou, and Lin Gu. Dngaussian: Optimizing sparse-view 3d gaussian radiance fields with global-local depth normalization. In 
+
+Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) ,pages 20775–20785, 2024. 11 [29] Jiang Lin, Xinyu Chen, Song Wu, Zhiqiu Zhang, Jizhi Zhang, Ye Wang, Qiang Tang, Qian Wang, Jian Yang, and Zili Yi. Freecontrol: Efficient, training-free structural control via one-step attention extraction. In Advances in Neural Information Processing Systems , 2025. [30] Yaron Lipman, Ricky T. Q. Chen, Heli Ben-Hamu, Maximilian Nickel, and Matthew Le. Flow matching for generative modeling. In The Eleventh International Conference on Learning Representations (ICLR) , 2023. URL https://openreview.net/forum?id=PqvMRDCJT9t .[31] Chen Liu, Kihwan Kim, Jinwei Gu, Yasutaka Furukawa, and Jan Kautz. PlaneRCNN: 3d plane detection and reconstruction from a single image. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 4450–4459, 2019. doi: 10.1109/CVPR.2019.00458. [32] Fangfu Liu, Wenqiang Sun, Hanyang Wang, Yikai Wang, Haowen Sun, Junliang Ye, Jun Zhang, and Yueqi Duan. Reconx: Reconstruct any scene from sparse views with video diffusion model. 
+
+IEEE Transactions on Image Processing , 35:2305–2319, 2026. doi: 10.1109/TIP.2026.3666733. [33] Xinhang Liu, Jiaben Chen, Shiu-Hong Kao, Yu-Wing Tai, and Chi-Keung Tang. Deceptive-nerf/3dgs: Diffusion-generated pseudo-observations for high-quality sparse-view reconstruction. In Computer Vision – ECCV 2024 , pages 337–355. Springer Nature Switzerland, 2024. doi: 10.1007/978-3-031-72640-8_19. [34] Yuheng Liu, Xin Lin, Xinke Li, Baihan Yang, Chen Wang, Kalyan Sunkavalli, Yannick Hold-Geoffroy, Hao Tan, Kai Zhang, Xiaohui Xie, Zifan Shi, and Yiwei Hu. Omniroam: World wandering via long-horizon panoramic video generation. SIGGRAPH , 2026. [35] Baorui Ma, Huachen Gao, Haoge Deng, Zhengxiong Luo, Tiejun Huang, Lulu Tang, and Xinlong Wang. You see it, you got it: Learning 3d creation on pose-free videos at scale. In 
+
+IEEE/CVF conference on computer vision and pattern recognition , 2025. [36] Marko Mihajlovic, Sergey Prokudin, Siyu Tang, Robert Maier, Federica Bogo, Tony Tung, and Edmond Boyer. Splatfields: Neural gaussian splats for sparse 3d and 4d reconstruction. In Com-puter Vision – ECCV 2024 , pages 313–332. Springer, 2024. doi: 10.1007/978-3-031-72627-9_ 18. [37] Junfeng Ni, Yixin Chen, Zhifei Yang, Yu Liu, Ruijie Lu, Song-Chun Zhu, and Siyuan Huang. G4splat: Geometry-guided gaussian splatting with generative prior. In The Fourteenth Interna-tional Conference on Learning Representations , 2026. [38] Michael Niemeyer, Jonathan T. Barron, Ben Mildenhall, Mehdi S. M. Sajjadi, Andreas Geiger, and Noha Radwan. RegNeRF: Regularizing neural radiance fields for view synthesis from sparse inputs. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 5470–5480, 2022. doi: 10.1109/CVPR52688.2022.00540. [39] Avinash Paliwal, Xilong Zhou, Wei Ye, Jinhui Xiong, Rakesh Ranjan, and Nima Khademi Kalantari. Ri3d: Few-shot gaussian splatting with repair and inpainting diffusion priors. In 
+
+Proceedings of the IEEE/CVF International Conference on Computer Vision , 2025. [40] Hyunwoo Park, Gun Ryu, and Wonjun Kim. Dropgaussian: Structural regularization for sparse-view gaussian splatting. In Proceedings of the Computer Vision and Pattern Recognition Conference , pages 21600–21609, 2025. [41] Gurutva Patle, Nilay Girgaonkar, Nagabhushan Somraj, and Rajiv Soundararajan. Ad-gs: Alternating densification for sparse-input 3d gaussian splatting. In Proceedings of the SIG-GRAPH Asia 2025 Conference Papers . Association for Computing Machinery, 2025. doi: 10.1145/3757377.3763993. [42] L Rout, Y Chen, N Ruiz, C Caramanis, S Shakkottai, and W Chu. Semantic image inversion and editing using rectified stochastic differential equations. In The Thirteenth International Conference on Learning Representations , 2025. URL https://openreview.net/forum? id=Hu0FSOSEyS .12 [43] Meixi Song, Xin Lin, Dizhe Zhang, Haodong Li, Xiangtai Li, Bo Du, and Lu Qi. D2GS: Depth-and-density guided gaussian splatting for stable and accurate sparse-view reconstruction. In International Conference on Learning Representations , 2026. [44] Julian Straub, Thomas Whelan, Lingni Ma, Yufan Chen, Erik Wijmans, Simon Green, Jakob J Engel, Raul Mur-Artal, Carl Ren, Shobhit Verma, et al. The replica dataset: A digital replica of indoor spaces. arXiv preprint arXiv:1906.05797 , 2019. [45] Cheng Sun, Chi-Wei Hsiao, Min Sun, and Hwann-Tzong Chen. HorizonNet: Learning room layout with 1d representation and pano stretch data augmentation. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 1047–1056, 2019. doi: 10.1109/CVPR.2019.00114. [46] Wenhao Sun, Xue-Mei Dong, Benlei Cui, and Jingqun Tang. Attentive eraser: Unleashing dif-fusion model’s object removal potential via self-attention redirection guidance. In Proceedings of the AAAI Conference on Artificial Intelligence , volume 39, pages 20734–20742, 2025. URL 
+
+https://ojs.aaai.org/index.php/AAAI/article/view/34285 .[47] Atakan Topalo˘ glu, Kunyi Li, Michael Niemeyer, Nassir Navab, A. Murat Tekalp, and Federico Tombari. Oraclegs: Grounding generative priors for sparse-view gaussian splatting. In Proceed-ings of the IEEE/CVF Winter Conference on Applications of Computer Vision (WACV) , pages 77–87, March 2026. [48] Narek Tumanyan, Michal Geyer, Shai Bagon, and Tali Dekel. Plug-and-play diffusion features for text-driven image-to-image translation. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 1921–1930, 2023. [49] Matias Turkulainen, Xuqian Ren, Iaroslav Melekhov, Otto Seiskari, Esa Rahtu, and Juho Kannala. Dn-splatter: Depth and normal priors for gaussian splatting and meshing. In Proceed-ings of the IEEE/CVF Winter Conference on Applications of Computer Vision (WACV) , pages 2421–2431, 2025. doi: 10.1109/WACV61041.2025.00241. [50] Guangcong Wang, Zhaoxi Chen, Chen Change Loy, and Ziwei Liu. SparseNeRF: Distilling depth ranking for few-shot novel view synthesis. In Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV) , pages 9065–9076, October 2023. doi: 10.1109/ ICCV51070.2023.00832. [51] Shuzhe Wang, Vincent Leroy, Yohann Cabon, Boris Chidlovskii, and Jerome Revaud. Dust3r: Geometric 3d vision made easy. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 20697–20709, 2024. doi: 10.1109/CVPR52733. 2024.01956. URL https://openaccess.thecvf.com/content/CVPR2024/html/Wang_ DUSt3R_Geometric_3D_Vision_Made_Easy_CVPR_2024_paper.html .[52] Yifan Wang, Jianjun Zhou, Haoyi Zhu, Wenzheng Chang, Yang Zhou, Zizun Li, Junyi Chen, Jiangmiao Pang, Chunhua Shen, and Tong He. π3: Permutation-equivariant visual geometry learning. In International Conference on Learning Representations (ICLR) , 2026. [53] Zhou Wang, Alan C. Bovik, Hamid R. Sheikh, and Eero P. Simoncelli. Image quality assessment: From error visibility to structural similarity. IEEE Transactions on Image Processing , 13(4): 600–612, 2004. doi: 10.1109/TIP.2003.819861. [54] Tianhao Wu, Chuanxia Zheng, and Tat-Jen Cham. PanoDiffusion: 360-degree panorama outpainting via diffusion. In The Twelfth International Conference on Learning Representations ,2024. [55] Ziyi Wu, Daniel Watson, Andrea Tagliasacchi, David J. Fleet, Marcus A. Brubaker, and Saurabh Saxena. 360Anything: Geometry-free lifting of images and videos to 360°. arXiv , 2026. [56] Haolin Xiong, Sairisheek Muttukuru, Rishi Upadhyay, Pradyumna Chari, and Achuta Kadambi. Sparse view synthesis using 3d gaussian splatting. arXiv preprint arXiv:2312.00206 , 2025. doi: 10.48550/arXiv.2312.00206. 13 [57] Chandan Yeshwanth, Yueh-Cheng Liu, Matthias Nießner, and Angela Dai. Scannet++: A high-fidelity dataset of 3d indoor scenes. In Proceedings of the IEEE/CVF International Conference on Computer Vision , pages 12–22, 2023. [58] Ruihong Yin, Vladimir Yugay, Yue Li, Sezer Karaoglu, and Theo Gevers. Fewviewgs: Gaussian splatting with few view matching and multi-stage training. In Advances in Neural Information Processing Systems , volume 37, 2024. [59] Jiahui Zhang, Fangneng Zhan, Muyu Xu, Shijian Lu, and Eric Xing. Fregs: 3d gaussian splatting with progressive frequency regularization. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 21424–21433, 2024. [60] Lvmin Zhang, Anyi Rao, and Maneesh Agrawala. Adding conditional control to text-to-image diffusion models. In Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV) , pages 3836–3847, 2023. [61] Richard Zhang, Phillip Isola, Alexei A. Efros, Eli Shechtman, and Oliver Wang. The unrea-sonable effectiveness of deep features as a perceptual metric. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 586–595, 2018. doi: 10.1109/CVPR.2018.00068. [62] Wancai Zheng, Hao Chen, Xianlong Lu, Linlin Ou, and Xinyi Yu. 3dgsnav: Enhancing vision-language model reasoning for object navigation via active 3d gaussian splatting, 2026. [63] Yulong Zheng, Zicheng Jiang, Shengfeng He, Yandu Sun, Junyu Dong, Huaidong Zhang, and Yong Du. Nexusgs: Sparse view synthesis with epipolar depth priors in 3d gaussian splatting. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , 2025. [64] Yingji Zhong, Zhihao Li, Dave Zhenyu Chen, Lanqing Hong, and Dan Xu. Taming video diffusion prior with scene-grounding guidance for 3d gaussian splatting from sparse inputs. In 
+
+Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) ,pages 6133–6143, 2025. [65] Yichao Zhou, Haozhi Qi, Yuexiang Zhai, Qi Sun, Zhili Chen, Li-Yi Wei, and Yi Ma. Learning to reconstruct 3d manhattan wireframes from a single image. In Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV) , pages 7698–7707, 2019. doi: 10.1109/ ICCV.2019.00779. [66] Zehao Zhu, Zhiwen Fan, Yifan Jiang, and Zhangyang Wang. Fsgs: Real-time few-shot view synthesis using gaussian splatting. In Computer Vision – ECCV 2024 , pages 145–163. Springer, 2024. doi: 10.1007/978-3-031-72933-1_9. 14 Appendix 
+
+In this appendix, we provide additional discussion, experimental results, and technical details: implementation details (Sec. A), Failure cases (Sec. B), and additional qualitative and quantitative results (Sec. D, C). 
+
+## A Implementation Details 
+
+General Configuration All experiments are conducted on a NVIDIA A6000 single GPU. The initial 2DGS [ 17 ] is trained for 7,000 iterations before the panoramic completion, with refinement of 7000 iterations as well. 
+
+VLM Prompting for Plane Classification. We use Qwen3-VL-3B [ 2 ] for semantic plane classifi-cation with chain-of-thought prompting. For each detected plane, we render the input image with a red contour outlining the plane boundary and a numeric identifier at the region’s centroid. The VLM receives the following prompt:     
+
+> Look at the region outlined in red and marked ‘{id}’ in this indoor room photo. Think step by step: 1. What does this region look like? 2. Is this region located on a wall, floor, ceiling or some other surface? 3. Give your final answer as a single word: wall, floor, ceiling, bed, table, shelf, cabinet, window, door, or other.
+
+The model generates up to 200 tokens of reasoning. We parse the response by finding the last 
+
+occurrence of any label keyword; if the final keyword is “wall”, “floor”, or “ceiling”, the plane is labeled layout , otherwise non-layout . Using the last occurrence rather than the first ensures the final conclusion of the chain-of-thought reasoning takes precedence over intermediate mentions. Planes whose bounding box is smaller than 32 × 32 pixels in either dimension are automatically labeled non-layout without querying the VLM. Classification adds approximately 10 seconds per input frame. 
+
+Layer Selection for Steering To determine which transformer layers should receive steering, we compute a per-layer plane affinity ratio. For layer ℓ, we sample a set S of hole tokens and measure how strongly each hole token attends to observed tokens on the same plane versus a different plane: 
+
+rℓ = 1
+
+|S|
+
+X
+
+> i∈S
+
+q⊤ 
+
+> i
+
+¯ksame 
+
+q⊤ 
+
+> i
+
+¯kother + ϵ , (11) where qi is the query vector of hole token i at layer ℓ, ¯ksame is the mean key vector of observed tokens belonging to the same plane as token i, ¯kother is the mean key vector of observed tokens on a randomly selected different plane, and ϵ is a small constant for numerical stability. We evaluate rℓ at multiple denoising timesteps ( t ∈ { 0.2, 0.4, 0.6, 0.8}). Layers 0–9 exhibit unstable rℓ that fluctuates across timesteps, indicating they handle global properties rather than geometric surface grouping. Layers 10–37 consistently produce rℓ > 1.5, confirming they naturally cluster tokens by layout surface. We restrict steering to these layers, amplifying an existing geometric signal rather than imposing a foreign one. 
+
+Panoramic Inpainting We run DiT360 [ 9] with 50 denoising steps per panorama. The observed content is encoded via RF-inversion [ 42 ] with token replacement strength τreplace = 0 .90 and text guidance scale 2.8. A generic text prompt (“This is a panoramic image of an indoor room.”) is used for all scenes. Inpainting a single 512 × 1024 ERP panorama takes approximately 2 minutes. 
+
+Baselines Configurations All baselines are evaluated using their official code repositories and default configurations. 3DGS [22] is trained directly on sparse inputs with default densification and pruning. FSGS [ 66 ] uses its default depth-guided Gaussian unpooling. SparseGS [ 56 ] uses its default depth and appearance regularization. InstantSplat [ 8 ] uses DUSt3R [ 51 ] for stereo initialization with default bundle adjustment. GaMO [ 18 ] uses its default multi-view outpainting with geometry-aware 15 denoising. G4SPLAT [ 37 ] uses MASt3R-SfM [ 7] for chart-aligned depth estimation and See3D [ 35 ]for video diffusion inpainting. No hyperparameter tuning was performed for any baseline. All methods receive the same input images and test views per scene. 
+
+## B Failure Cases and Limitations 
+
+Figure 6: Failure case: When the rendered 2DGS panorama contains significant artifacts, DiT360 fails to produce coherent inpainting and layout-anchored steering worsens the result by reinforcing incorrect plane assignments. While PanoPlane requires no per-scene fine-tuning or training of the diffusion model, it inherits the limitations of the underlying foundation model. DiT360 [ 9] is trained on large-scale panoramic datasets, and its generative quality degrades when the input panorama deviates from its training distribution, producing blurry or semantically incoherent completions regardless of the steering applied. First, rooms with unusual geometry or non-residential environments underrepresented in the training data. Second, when the coarse 2DGS reconstruction contains significant artifacts, incorrect depth, or misaligned planes, the rendered ERP panorama no longer resembles a natural indoor scene. This distribution shift can trigger attention collapse during denoising, where the model’s attention concentrates on a small subset of tokens, producing repetitive textures or flat featureless regions (Fig. 6). Incorrect plane assignments push hole tokens toward the wrong surface, and the joint Q/K modification amplifies the error. 
+
+## C Additional Quantitative Results 
+
+Table 5: Per-scene results on Matterport3D (6 views). Best, second best, and third best are highlighted in red , orange , and yellow .                                                                                                                                                     
+
+> Method 2t7WUuJeKo (2) RPmz2sHmrrY (2) YVUC4YcDtcY
+> PSNR ↑SSIM ↑LPIPS ↓PSNR ↑SSIM ↑LPIPS ↓PSNR ↑SSIM ↑LPIPS ↓
+> 3DGS [22] 13.18 0.46 0.47 12.89 0.49 0.49 13.23 0.37 0.53 SparseGS [56] 11.12 0.31 0.56 11.86 0.36 0.57 12.41 0.29 0.58 FSGS [66] 12.89 0.46 0.47 13.14 0.52 0.51 13.22 0.40 0.54 InstantSplat [8] 11.56 0.45 0.51 11.42 0.48 0.53 11.25 0.33 0.59 GaMO [18] 11.25 0.35 0.60 11.60 0.39 0.61 12.88 0.34 0.60 G4SPLAT [37] 12.65 0.51 0.51 14.83 0.60 0.47 14.18 0.46 0.56
+> PanoPlane (Ours) 14.99 0.53 0.44 14.70 0.57 0.44 13.74 0.41 0.53 Method ZsNo4HB9uLZ RPmz2sHmrrY 2t7WUuJeko7
+> PSNR ↑SSIM ↑LPIPS ↓PSNR ↑SSIM ↑LPIPS ↓PSNR ↑SSIM ↑LPIPS ↓
+> 3DGS [22] 14.63 0.58 0.49 15.35 0.51 0.50 13.67 0.33 0.55 SparseGS [56] 13.20 0.46 0.53 14.25 0.44 0.50 13.31 0.32 0.56 FSGS [66] 14.08 0.65 0.48 15.11 0.55 0.49 13.08 0.34 0.60 InstantSplat [8] 12.54 0.55 0.51 14.89 0.52 0.49 14.10 0.38 0.53 GaMO [18] 11.36 0.52 0.61 15.01 0.55 0.55 13.32 0.31 0.59 G4SPLAT [37] 14.45 0.49 0.48 17.76 0.63 0.41 13.53 0.38 0.58
+> PanoPlane (Ours) 23.01 0.66 0.35 22.09 0.69 0.32 14.62 0.35 0.53
+
+16 D Additional Qualitative Results 
+
+Figure 7: Additional Qualitative Results on Replica, Matterport3D and Scannet++ 17 Figure 8: Additional qualitative results of layout-anchored steering: Without steering (Naive), DiT360 inpaints unobserved regions according to its learned distribution, often hallucinating incorrect geometry such as receding corridors or warped surfaces. With our layout-anchored steering (Ours), the same regions are completed as flat extensions of the detected walls, ceilings, and floors, producing geometrically consistent completions that align with the observed room structure. 
+
+## E Use of Large Language Models 
+
+We employed a large language model for copy editing, including grammar checking, wording refinement, and minor improvements in style and clarity. This was done after we had completed the scientific content, methodology, analyses, and conclusions. 18

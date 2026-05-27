@@ -1,0 +1,515 @@
+Title: UniVL: Unified Vision-Language Embedding for Spatially Grounded Contextual Image Generation
+
+URL Source: https://arxiv.org/pdf/2605.21611v1
+
+Published Time: Fri, 22 May 2026 00:09:25 GMT
+
+Number of Pages: 28
+
+Markdown Content:
+# UniVL: Unified Vision-Language Embedding for Spatially Grounded Contextual Image Generation 
+
+Jiayun Wang Yu Wang Weijie Gan Zhenting Wang Wei Wei Center for Advanced AI, Accenture 
+
+Abstract 
+
+We introduce spatially grounded contextual image generation , a new controllable image generation task, and propose U NI VL (Unified Vision-Language image generation) for it. Instead of supplying a reference image and a global text prompt through two separate encoders (vision and language), U NI VL binds semantics to spatial locations directly from a single unified visual input where the textual instruction is rendered onto the spatial mask, eliminating the standalone text encoder at inference while following the user’s per-region what-goes-where intent. For the task, we propose a framework in which the U NI VL encoder—adapted from an optical-character-recognition-pretrained backbone—reads the unified condition optically, producing a U NI VL embedding fVL that fuses visual and semantic intents to spatial locations, packed as a single token sequence. A two-stage pipeline aligns U NI VL in VAE embedding space and then conditions a pretrained diffusion backbone entirely on U NI VL embeddings, eliminating the standalone text encoder (e.g., T5). The reframing is deliberately minimalist for text, but the empirical payoff is large. On U NI VL-ImgGen, a benchmark of 477 K mask-annotated images that we construct to support training and evaluation, U NI VL achieves superior image quality over text-prompted baselines (FID: 
+
+14 → 11 , PSNR: 16 → 20 ) while eliminating the text encoder entirely , reducing inference TFLOPs by up to 52% and runtime by up to 44%. Additional ablation studies verify components of different parts of the proposed method, paving way for efficient and spatially grounded image generation with unified conditioning paradigm. 
+
+# 1 Introduction 
+
+Text-to-image diffusion models can generate high-fidelity images from natural language prompts [ 7 , 27 ], and recent controllable generation methods add spatial signals such as depth maps or bounding boxes to improve user control [15, 36]. Yet a fundamental issue remains: text prompts are global and carry rich semantics but no spatial grounding, while structural controls carry local and precise geometry but no semantic content. Bridging this gap—specifying what should appear where in a single unified signal—is still an open problem. Such a unified signal has, in fact, already emerged in visual understanding tasks such as document parsing and visual question answering. Recent work on optical context compression [ 30 , 31 ] renders text as pixels and processes it with a vision encoder, producing representations that compress thousands of language tokens into fewer than 256 vision tokens while preserving fine-grained spatial structure. The benefit of this approach is conceptually simple: spatial constraints in document images become semantic constraints at pixel locations. This is precisely the property that controllable generation currently lacks. We therefore ask: can optical compression be reoriented to a unified conditioning signal for controllable generation? We answer it with a new task called spatially grounded contextual image generation . The user provides a reference image, draws one or more mask regions, and supplies a short text label for each region. Our pipeline automatically renders each label as pixels on its mask, producing a single contextual condition image. The model must then generate content matching each rendered text on its mask while preserving the rest of visuals. This formulation has two properties that motivate our approach. First, it co-locates semantics 
+
+1             
+
+> arXiv:2605.21611v1 [cs.CV] 20 May 2026 Existing Ours
+> flower
+> Apainting of a small, plump
+> bird , which is next to vivid
+> flowers in mask region.
+> vision
+> encoder
+> language
+> encoder
+> UniVL
+> encoder
+> diffusion
+> +decoder diffusion
+> +decoder
+> Condition Generated image Condition Generated image
+> Image with mask
+> coordinates
+> Text prompt:
+> Unified conition
+
+Figure 1: Conditioning paradigm for contextual image generation: existing ( left ) vs. our U NI VL ( right ). The user’s intent is the same—inpaint a target region with a desired object. Existing methods require two inputs through two separate domains: a masked image (vision) plus a global text prompt (language), each processed by its own encoder before the diffusion and decoder. In U NI VL, the same intent is captured by a 
+
+single unified visual condition : our pipeline automatically renders the text label as pixels inside the mask. The U NI VL encoder (an OCR-pretrained vision backbone adapted to our task) then reads spatial layout and textual semantics in one pass. The text encoder is eliminated, yet the generated image preserves the same semantic intent (“flower”) at specified spatial locations. 
+
+and spatial position in one input : the text label and the visual context occupy the same image at the same coordinates, so the user can specify what should appear in each region with explicit per-region grounding, and the model can be trained to handle multi-region edits in a single forward pass (Fig.3). Second, it eliminates the standalone text encoder : a single OCR-pretrained vision encoder handles both the visual context and the textual instruction, removing the heavy text encoder like T5 [23] and yielding substantial efficiency gains. We instantiate this task with U NI VL (Unified Vision-Language image generation), a framework built on an inpainting-capable diffusion backbone (FLUX.1-dev [ 8 ]). U NI VL adds two training stages: (1) U NI VL 
+
+embedding alignment , which fine-tunes the U NI VL encoder (adapted from DeepSeek-OCR’s OCR-pretrained encoder [ 30 ]) so its output fVL reconstructs VAE latents of the target image (Fig.2, top) and allows direct uses of VAE decoder; and (2) diffusion fine-tuning , which conditions the diffusion model entirely on U NI VL embeddings (Fig.2, bottom). To support training and evaluation, we construct the U NI VL -ImgGen benchmark of ∼477 K mask-annotated images ( ∼710 K mask-text records). Without any text encoder, U NI VL improves spatial-semantic binding (FID: 13 .5 → 11 .1 over OminiControl) while cutting inference TFLOPs by up to 52% and runtime by up to 44%. An optional U NI VL +text encoder hybrid further closes the small remaining alignment gap, indicating that our reframing is compatible with—and not a replacement for—the standard text+image conditioning paradigm when an extra text encoder is acceptable. We summarize our contributions as follows: (1) A new controllable image generation task with a unified condition : we formalize spatially grounded contextual image generation , which reframes the conditioning interface from two separate domains (vision + language) into a single unified visual input where text is rendered onto the spatial mask. We construct the U NI VL -ImgGen benchmark (477 K training images with mask-text annotations) as a reusable resource. (2) UNI VL: Unified Vision-Language image generation framework : we show that OCR-pretrained optical embeddings can be adapted into effective conditioning signals for diffusion through a two-stage alignment-and-finetune pipeline plus a small set of training-time design choices that we ablate (Section 5.5). (3) Significant efficiency without quality degradation : by eliminating the text encoder, U NI VL reduces token size by up to 98%, encoder parameters by 92% , TFLOPs by up to 52%, and runtime by up to 44% (Table 2), while matching or exceeding prompted baselines on image quality. 22 Related Work 
+
+Diffusion-based image generation and editing. Diffusion models [ 7 , 10 ] and their latent variants [ 24 ] are the dominant text-to-image foundation; region-aware editing has been built on top through inpainting and instruction-tuned variants [ 3, 9, 17 ]. Our difference : rather than supply a separate text prompt alongside a mask, we render the textual instruction directly inside the mask and remove the standalone text encoder. 
+
+Unified vision-language representation learning. Large-scale VL pretraining yields unified image-text embeddings that transfer broadly across tasks [ 14 , 21 ]. A more recent line targets a single backbone that decodes both language and images, including Janus-series [ 6, 32 ], Ming-Omni [ 1] and Omni-Video [ 27 ]. The closest work to ours is DeepSeek-OCR [ 30 ], which compresses text into a unified vision-language representation. Our difference : CLIP-style representations are not driven through to generation; Janus-style unified models retain separate encoders for the input modalities and unify only the decoder; DeepSeek-OCR targets LLM/VLM understanding rather than image generation. U NI VL instead uses a unified encoder as the conditioning interface for image synthesis. 
+
+Spatially grounded controllable generation. Before diffusion, GANs explored spatial control via image-to-image translation [ 37 ], semantic-layout-to-image generation [ 19 ], and high-resolution synthesis [ 12 ], es-tablishing the principle of using auxiliary spatial signals to constrain where content appears. Diffusion models extended these ideas: ControlNet adds structured spatial signals such as edges and depth [ 36 ], GLIGEN grounds generation with layout boxes and class labels [ 15 ], and inpainting-style methods (BrushNet [ 11 ], PowerPaint [ 38 ], FLUX.1 Fill) tackle masked region completion. Subject-driven variants such as AnyDoor [ 5 ]and Paint-by-Example [ 34 ] condition on a reference image, and OmniGen [ 33 ] unifies multiple generative tasks behind one transformer while still retaining a text encoder. Our difference : to our knowledge, U NI VL is the first to use a unified vision encoder as the conditioning interface for diffusion-based controllable generation, encoding both spatial layout and textual semantics from a single visual input. 
+
+Glyph-aware diffusion generation. A complementary line tackles rendering legible text inside generated images: AnyText [ 28 ] introduces an auxiliary text-control branch on top of latent diffusion to synthesize multilingual glyphs at user-specified positions; GlyphDraw [ 18 ] biases attention via glyph-image embeddings; TextDiffuser [ 4] adds a layout transformer that predicts character bounding boxes and conditions on character masks. Our difference : these methods treat the rendered text as the output target —the goal is to produce an image with that text legibly drawn on top; whereas U NI VL treats rendered text as a conditioning interface ,optically compressing a textual instruction into pixels that are read by a vision encoder to drive non-textual content generation inside the masked region. 
+
+# 3 The U NI VL-ImgGen Benchmark 
+
+To support training and evaluation of spatially grounded contextual image generation, we construct U NI VL-ImgGen, a benchmark comprising 477 K unique images and 710 K mask-text records. We first define the task, then describe how the benchmark is built and used for training and evaluation. 
+
+Task definition. We introduce spatially grounded contextual image generation , an inpainting-style controllable task with a unified visual interface. The user provides a source image X ∈ RH×W ×3, draws one or more mask regions {mi}Ki=1 , and supplies a text label ℓi per region. Our pipeline produces a single 
+
+contextual condition CI by masking each region (e.g., filling with black) and rendering its label as pixels inside the mask. The model must then generate an output ˆX that (a) matches ℓi within each mi and (b) preserves the source content outside all masks. Existing paradigms split this signal across two streams—global text prompts [ 22 , 24 ], layout boxes with labels [ 15 ], or structural cues such as edges/depth [ 36 ]—each weakly coupling location and semantics. Our task instead unifies both into a single visual input that the U NI VL encoder reads jointly, naturally supporting multi-region composability ( K ≥ 1) in one forward pass. 3Stage 1: Feature alignment          
+
+> VAE
+> 𝑓 !" 𝑓 !#$
+> ❄UniVL 🔥
+> align
+> condition 𝐶 %target 𝑋
+> flower
+> UniVL
+> 🔥
+> VAE decoder
+> DiT blocks
+> 𝑁 ×
+> flower
+> Stage 2: Image generation with diffusion
+> ❄
+> condition 𝐶 %
+> target 𝑋 CLIP
+> linear adapter
+> UniVL encoder
+> 🔥
+> 🔥
+> VAE ❄
+> 🔥
+> ❄
+> noisy latent 𝑧 &
+
+Figure 2: U NI VL training pipeline. The U NI VL encoder (left, pretrained on OCR tasks) consists of a frozen VAE encoder, a trainable CLIP backbone and a trainable linear adapter; the VAE features bypass CLIP via a skip connection and are mask-aware-fused with the CLIP features (Eq. 1). Stage 1 (Feature alignment): 
+
+the U NI VL encoder takes the contextual condition CI and is trained so its output fVL reconstructs the VAE latent z0 = E(X) of the target image X. Stage 2 (Image generation with diffusion): the U NI VL encoder produces fVL from CI and feeds it (alongside the noisy latent zt) into the DiT; the VAE decoder then yields the target X.
+
+Benchmark overview. UNI VL-ImgGen comprises 710K mask-text records spanning 477 K unique images and 28 K unique class-name phrases, drawn from four sources: a mask category built from a 238K-image LAION-5B subset [ 25 ] via Grounding DINO [ 16 ] detection plus size and CLIP-similarity filtering, and three image-editing categories ( add , replace , extract ) following ImgEdit [ 35 ]. The mask category provides multibox/spatial-localization training; the editing categories provide same-image-different-text pairs that prevent the model from collapsing to image-reconstruction shortcuts. While the benchmark uses rectangular masks for simplicity, our method generalizes to free-form masks (Appendix E.1). Full construction details, augmentation, and class-name statistics are in Appendix F. We hold out 3,000 samples for evaluation (1,500 single-mask and 1,500 multi-mask with N ∈[1 , 5] ); the training/eval split is described in Appendix F. 
+
+# 4 UNI VL: Unified Vision-Language Embedding for Contextual Generation 
+
+4.1 Architecture overview 
+
+We build U NI VL on top of an inpainting-capable diffusion backbone (DiT-based). Inpainting pretraining provides a useful prior for spatially localized generation ( where to generate) before we introduce the semantic signal ( what to generate) via U NI VL conditioning. Rather than train this stage ourselves, we use a pretrained diffusion model [ 8 ] as the starting point and focus on the U NI VL encoder and the two training stages that produce and exploit the U NI VL embedding (Fig.2). 
+
+Diffusion transformers (DiT). Diffusion Transformers [ 20 ] replace the U-Net backbone of latent diffusion models with a transformer operating on patchified latent tokens. Given a latent representation 
+
+z0 = E(X) from a VAE encoder E, the forward process adds Gaussian noise to produce zt at timestep t,and a transformer ϵθ is trained to predict the noise via the standard denoising objective Ldiff = Ez0,ϵ,t 
+
+∥ϵ −
+
+ϵθ(zt, t, c )∥2, where c denotes the conditioning signal. At inference, iterative denoising from zT ∼ N (0 , I )
+
+followed by VAE decoding produces the output image. Recent methods inject spatial control into DiT by concatenating condition tokens with the noisy latent sequence; OminiControl [ 26 ] proposes a unified token-sequence strategy that interleaves condition and image tokens within the transformer. Building upon the DiT architecture with FLUX.1 [ 8], we aim to develop a minimal and controllable generation framework that accepts flexible control signals. 4From two conditioning encoders to one. In standard conditional diffusion frameworks [ 8 , 26 ], the DiT consumes three inputs: an image-conditioning latent CI (the VAE encoding of a reference or masked image), a text-prompt embedding CT (from a separate text encoder such as T5), and the initial noise zt ∼ N (0 , I ).The DiT iteratively denoises zt conditioned on the image and text signals; the resulting clean latent z0
+
+is decoded by the VAE to produce the target image X. UNI VL changes the conditioning interface: it 
+
+eliminates CT and lets the contextual condition CI (the user-provided RGB image with text rendered into the mask, defined in Section 3) carry both the visual context and the textual instruction. The U NI VL encoder (Section 4.2) maps CI to a unified embedding fVL that the DiT consumes alongside zt. Removing the text encoder branch yields the efficiency gains reported in Section 5.4 while keeping the same DiT architecture and training objective. 
+
+4.2 UNI VL encoder architecture 
+
+The U NI VL encoder (green box in Fig.2), adapted from DeepSeek-OCR’s OCR encoder [ 30 ], takes the contextual condition CI and produces a token sequence fVL that conditions the DiT. It has three components: a frozen VAE encoder that extracts low-level visual features fVAE , a trainable CLIP backbone (initialized from DeepSeek-OCR’s OCR-pretrained weights) that extracts high-level semantic features fCLIP , and a small trainable linear adapter that maps token dimensions to match the DiT’s conditioning interface. We follow DeepSeek-OCR’s recipe of pairing a low-level visual encoder with a high-level semantic encoder, but replace SAM with the FLUX VAE for two reasons: (i) the VAE plays the same role as SAM in this stack— encoding low-level visual content of the contextual condition—and (ii) the VAE is the same encoder used by the diffusion backbone, so fVAE is already in the latent space the DiT consumes, simplifying downstream alignment. The frozen VAE decoder can also be directly used for decoding latents. CLIP is retained for its high-level semantic features (especially after OCR pretraining, which adapts CLIP to read rendered text). Because the encoder is initialized from a publicly released OCR-pretrained checkpoint trained on a large and diverse corpus ( 30 M PDF pages, 20 M scene-OCR images, plus chart/formula/geometry parsing data; Appendix C), we do not re-run OCR pretraining—we adapt this encoder for our generation conditioning task in Stage 1 below. Note that the U NI VL encoder does not perform explicit character recognition; rather, OCR pretraining endows it with a learned mapping from text-as-pixels patterns to semantic features, which Stage 1 then aligns with the VAE latent space. 
+
+Mask-aware fusion. The two feature streams are combined by a mask-aware additive operator. Let 
+
+M ∈ { 0, 1}H×W be the binary mask aggregating all user-specified regions ( Mij = 1 inside any masked region, 0 outside). The U NI VL encoder output is 
+
+fVL = fVAE ⊙ (1 − M ) + fCLIP ⊙ M, (1) i.e., outside-mask positions are dominated by VAE features (preserving background context) and inside-mask positions are dominated by CLIP features (carrying the semantic content read from the rendered text). The trainable adapter is then applied on top of fVL .
+
+4.3 Two-stage training 
+
+Stage 1: U NI VL embedding alignment. We adapt the U NI VL encoder to produce a U NI VL embedding 
+
+fVL suitable for conditioning diffusion generation. As shown in Fig.2 (top), the U NI VL encoder processes the contextual condition CI and produces fVL , while the frozen VAE E processes the target image X and produces the latent z0 = E(X). We minimize the feature alignment objective 
+
+Lalign = ∥fVL − z0∥22, (2) 5aligning the U NI VL embedding of the text-on-mask input with the visual representation of the desired output. The VAE encoder is fully frozen; the CLIP backbone is updated through a low-rank LoRA adapter, and the linear adapter on top is trained from scratch in full precision. This combination keeps trainable parameters small (the OCR-pretrained CLIP weights remain largely intact) while still letting the encoder adapt to the natural-image distribution and rendered-text inputs. 
+
+Stage 2: Diffusion fine-tuning with U NI VL conditioning. The U NI VL encoder (initialized from Stage 1) processes the contextual condition CI to produce the U NI VL embedding fVL , which replaces the conventional text embedding as the conditioning signal for the DiT. As shown in Fig.2 (bottom), fVL is injected into the DiT blocks alongside the noisy latent zt, and the model is trained with the standard denoising objective Ldiff = Ez0,ϵ,t 
+
+∥ϵ − ϵθ(zt, t, f VL )∥2, augmented with the auxiliary feature-reconstruction and CLIP terms from Stage 1: 
+
+Lstage-2 = Ldiff + Lalign + λclip-img Lclip-img + λclip-txt Lclip-txt . (3) In addition to the feature alignment objective Lalign , we introduce two auxiliary CLIP-based losses that play a critical role in Stage 2: a CLIP image loss Lclip-img that measures the ℓ2 distance between the U NI VL encoder output fVL and the CLIP vision embedding corresponding to patches within the mask; and a CLIP text loss Lclip-txt that measures the ℓ2 distance between the pooled masked condition and the CLIP text embedding of the class name. Keeping the feature alignment, CLIP image, and CLIP text losses active during diffusion training prevents fVL from drifting away from the visual-semantic space established in Stage 1. In Stage 2 we update the DiT through a LoRA adapter ( r=4 , α=4 ) and continue to update the U NI VL encoder’s CLIP-LoRA and linear adapter (both initialized from Stage 1); the VAE encoder is fully frozen. The training uses condition dropout, which independently drops the entire condition image, the VAE-stream tokens, or the CLIP-stream tokens to enable classifier-free guidance at inference (details in Appendix A.4). The two-stage pipeline introduces additional training overhead relative to end-to-end joint fine-tuning, but yields measurably higher quality (Table 3, “w/o feature alignment”). The Stage 1 + Stage 2 wall-clock is reported in Section 5.1; the efficiency claims in Table 2 concern inference only, where the U NI VL encoder is a single forward pass and Stage 1 contributes no overhead. The training overhead is therefore a one-time cost amortized across all downstream inferences. 
+
+# 5 Experimental Results 
+
+We evaluate U NI VL along four axes: (i) generation quality and alignment against controllable-generation baselines on the U NI VL-ImgGen benchmark (Section 5.2), (ii) qualitative behavior under multi-region conditioning (Section 5.3), (iii) computational efficiency (Section 5.4), and (iv) a series of ablations isolating the contribution of each component (Section 5.5). 
+
+5.1 Experimental Setup 
+
+Training, evaluation and metrics. We train on the U NI VL-ImgGen benchmark (Section 3), which contains 
+
+710 K mask-text records spanning four sources: a mask category derived from a LAION-5B [ 25 ] via Grounding DINO [ 16 ] detection plus filtering, and three image-editing categories (add, replace, extract) following ImgEdit [ 35 ]. The evaluation set consisting of 3,000 samples evenly split between 1,500 single-mask samples (375 each from the four source categories: mask, object addition, replacement, and extraction) and 1,500 multi-mask samples ( N ∈[1 , 5] masks per image). See Appendix F for details. We report metrics in two groups. For image quality, we use FID (distribution-level, lower is better), SSIM, PSNR and MUSIQ [ 13 ](higher is better). For alignment, we report CLIP txt and CLIP img (global text-image and image-image similarity) along with their region-level counterparts region-CLIP txt and region-CLIP img —CLIP similarity 6Ground truth UniVL (ours) OminiControl w/o text Input  
+
+> car
+> face
+> face
+> OminiControl w/ text
+> logo
+
+Figure 3: Qualitative comparison to OminiControl baseline [ 26 ]. “OminiControl w/ text” is only method with text encoder and additional overhead. Row 1 (single mask, “car”): OminiControl with prompt hallucinates a doll over a car, the no-prompt variant collapses into a rock formation, while U NI VL produces a clean prompt-faithful car. Row 3 (zero-shot test on free-form mask): U NI VL respects the user-provided mask boundary and generates content that conforms to its shape, whereas the baselines either ignore the irregular boundary or default to bounding-box-shaped fills (details in Appendix E.1). Input is for U NI VL, see Fig.1 for details. between the cropped generated region and the text label or the ground-truth crop, respectively (higher is better). 
+
+Implementation. All experiments use FLUX.1-dev [ 8] as the base diffusion model, trained with AdamW in bfloat16: Stage 1 (alignment) takes ≈12 .6 hours over 30K steps on 2 ×H100 80GB GPUs, and Stage 2 (diffusion fine-tuning, LoRA r=4 ) takes ≈97 .3 hours over 40K steps on 6 ×H100 80GB GPUs. Auxiliary CLIP-image and CLIP-text losses ( λclip-img =1 .0, λclip-txt =0 .8) are applied during Stage 2; their importance is validated in Appendix D.1. At inference we use 28 denoising steps with guidance scale 1.0 (no classifier-free guidance, since no text prompt is used). Full per-stage hyperparameters and loss details are in Appendix A.1 and Appendix A.2. 
+
+Baselines. Our primary baseline is OminiControl [ 26 ], a state-of-the-art controllable generation method for FLUX that uses token-sequence conditioning for spatial and subject-driven control. We evaluate it in two settings (both finetuned on the same training data as U NI VL for fairness): (1) with its standard T5 text prompt (reference only), and (2) without text prompt, which provides a fair comparison at identical computational cost and input modality to U NI VL. Neither U NI VL nor OminiControl w/o prompt uses a text encoder. FLUX.1 Fill is also finetuned on the same data. 
+
+5.2 Main Results 
+
+Table 1 compares U NI VL against OminiControl [ 26 ], a state-of-the-art controllable generation method for FLUX. We evaluate OminiControl in two settings: with the original T5 text prompt (its standard configuration), and without text prompt (matching our setting where no linguistic text input is provided). The no-prompt variant is the fair comparison: both methods receive identical spatial conditioning and use the same computational budget, with neither having access to a text encoder. 7Table 1: Comparison on the U NI VL-ImgGen benchmark (single and multiple masks), split by whether the method uses a text encoder. The w/o text encoder setting (top) is our primary focus: it provides a fair comparison at identical computational cost and input modality to U NI VL. The w/ text encoder setting (bottom) reports prompted methods for reference. Reported numbers are the mean across 5 inference seeds; best per metric is in bold , second-best underlined. Image Quality Alignment Method FID ↓ SSIM ↑ PSNR ↑ MUSIQ ↑ CLIP txt ↑ CLIP img ↑ region-CLIP txt ↑ region-CLIP img ↑                                                                                
+
+> Without text encoder (primary focus)
+> ControlNet-FLUX 13.98 0.734 18.22 70.50 0.250 0.856 0.249 0.689 OminiControl [26] 20.50 0.719 16.45 72.05 0.249 0.849 0.271 0.742
+> UNI VL (ours) 11.13 0.754 19.61 73.36 0.262 0.886 0.279 0.768
+> With text encoder (reference)
+> BrushNet [11] 18.33 0.611 17.38 73.21 0.272 0.836 0.247 0.757 PowerPaint [38] 29.4 0.519 14.17 63.6 0.266 0.766 0.256 0.699 ControlNet [36] 23.93 0.684 15.30 69.82 0.264 0.859 0.282 0.763 OminiControl [26] 13.50 0.718 16.13 72.81 0.270 0.871 0.298 0.770 ControlNet-FLUX 13.77 0.731 18.02 70.89 0.273 0.863 0.252 0.691 FLUX.1 Fill 12.67 0.734 17.23 68.31 0.280 0.892 0.277 0.767
+> UNI VL (ours) + T5 [23] 10.49 0.752 19.44 73.13 0.295 0.904 0.294 0.793
+
+Without a text encoder, U NI VL outperforms its baseline on all metrics. In the fair (no-text-encoder) setting at the top of Table 1, U NI VL beats OminiControl-w/o-prompt on all 8 metrics, with the largest gains on image quality (FID: 20 .50 → 11 .13 , PSNR: 16 .45 → 19 .61 ). Both methods receive identical spatial conditioning and the same compute budget; the only difference is how that conditioning is encoded. This isolates the contribution of the U NI VL encoder combined with our training pipeline (Section 5.5 ablates each ingredient). The U NI VL-ImgGen evaluation set additionally includes same-image-different-text pairs (the 
+
+add /replace /extract categories), and U NI VL recognizes the differently rendered class labels and produces correspondingly different generations from the same source image—verifying that the model actually reads the rendered text rather than reconstructing the image condition. Note that removing the text encoder yields large efficiency savings (Section 5.4). 
+
+Compared to text-prompt baselines, U NI VL trades a small alignment gap for major efficiency gains; the optional U NI VL+T5 hybrid recovers the gap. On image quality, U NI VL (no T5) is on par with or slightly better than the strongest text-prompt baselines (FID: 11.13 vs. FLUX.1 Fill 12.67 / OminiControl 13.50; PSNR: 19.61 vs. FLUX.1 Fill 17.23 / ControlNet-FLUX 18.02). On alignment, the prompt-equipped methods retain a small edge (CLIP txt 0.270 vs. 0.262; region-CLIP txt 0.298 vs. 0.279)—an expected consequence of conditioning on a single masked text label rather than a full natural-language description, and of T5 embeddings sharing representational geometry with the CLIP text encoder used in these metrics. The gap is small ( ∼3% on global CLIP txt ) and the U NI VL+T5 hybrid (last row of Table 1) closes it: it wins or ties on 7/8 metrics across all prompted baselines while preserving the same architecture. We include U NI VL+T5 strictly as a reference point for fair comparison against text-prompted baselines (which have access to an extra text encoder); our primary configuration remains U NI VL without T5, since adding T5 forfeits the efficiency gains in Section 5.4. 
+
+5.3 Multi-Region Composability 
+
+A key advantage of the proposed spatially grounded contextual generation is natural multi-region compos-ability: multiple labeled masks are encoded jointly in a single forward pass. The main results in Table 1 already include 1,500 multi-mask test samples ( N ∈[1 , 5] masks per image) within the averaged metrics, so the quantitative gains reported there already reflect multi-region performance. Per-mask-count breakdowns are in Fig.4(b)(c), and qualitative demonstrations of both single-step multi-region edits and sequential multi-8Table 2: Computational cost comparison v.s. baseline with text encoder [ 26 ], U NI VL embedding eliminates all text tokens, yielding 6–50% token reduction and 8–44% inference time speedup. The encoder also shrinks by ∼92% in parameter count (T5: 4.92B → UNI VL encoder: 401.6M). Gains increase at lower resolutions where the (resolution-invariant) text-encoder cost dominates. At 512 ×512 , the noisy/image latent has size of 
+
+32 ×32 . Runtimes measure on an H100 with 28 steps.                                                                                                                                          
+
+> 256 ×256 512 ×512 1024 ×1024
+> Metric OminiControl UNI VL Impr. OminiControl UNI VL Impr. OminiControl UNI VL Impr. Tokens/step 1,024 513 49.9% 2,560 2,049 20.0% 8,704 8,193 5.9%
+> ⌞noise tokens 256 256 –1,024 1,024 –4,096 4,096 –
+> ⌞image CItokens 256 256 –1,024 1,024 –4,096 4,096 –
+> ⌞text CTtokens 512 099.8% 512 099.8% 512 099.8% Token size (count ×dim) 2,130,688 36,864 98.3% 2,228,992 135,168 93.9% 2,622,208 528,384 79.8% Params (encoder + transformer) 16.82B 12.30B 26.9% 16.82B 12.30B 26.9% 16.82B 12.30B 26.9%
+> ⌞encoder params 4.92B 401.6M 91.8% 4.92B 401.6M 91.8% 4.92B 401.6M 91.8%
+> ⌞transformer params 11.90B 11.90B 0.0% 11.90B 11.90B 0.0% 11.90B 11.90B 0.0% TFLOPs ( ×1enc. + ×28 DiT) 792.8 382.1 51.8% 2,121.0 1,648.4 22.3% 9,285.1 8,567.1 7.7%
+> ⌞encoder FLOPs ( ×1)10.3 0.5 95.4% 12.0 1.9 83.9% 19.5 10.3 47.2%
+> ⌞transformer FLOPs ( ×28 )782.6 381.6 51.2% 2,109.0 1,646.5 21.9% 9,265.7 8,556.8 7.6% Runtime (s, ×1enc. + ×28 DiT) 1.678 0.936 44.2% 3.620 2.873 20.6% 14.366 13.215 8.0%
+
+step edits are deferred to Appendix E.4 (Fig.8). Baselines that support only single-region control would require K sequential forward passes and suffer from accumulated errors, whereas U NI VL handles all regions simultaneously without architectural changes. 
+
+5.4 Computational Efficiency 
+
+By eliminating the text encoder entirely and encoding all conditioning information through the U NI VL encoder, U NI VL yields substantial reductions in token count, token size, FLOPs, and wall-clock runtime. Table 2 compares baseline OminiControl w/text encoder [ 26 ] vs ours — their only architecture difference is the text encoder. Removing the text encoder yields large gains: token size drops 80–98% (T5’s 4096-dim embeddings dominate total element count), encoder parameters drop ∼92% (4.92B → 401.6M, a 26.9% reduction in total system params), and relative TFLOPs/runtime savings scale inversely with resolution—52%/44% at 
+
+256 2 down to 7.7%/8% at 1024 2, since the resolution-invariant text-encoder cost dominates more when the transformer is small. Fig.4 (a) visualizes these trends. 
+
+5.5 Ablations and Analysis 
+
+We ablate the key design choices of the U NI VL framework. All ablations are evaluated on the U NI VL-ImgGen benchmark at 512 ×512 resolution unless otherwise noted. 
+
+(a) Component ablation. We design four ablations (Table 3), each isolating one design choice: (R1) 
+
+replacing the DeepEncoder (SAM + CLIP) with the bare VAE encoder tests whether the SAM + CLIP architecture matters; (R2) swapping CLIP for SigLIP (SAM retained) tests an alternative image-text-aligned backbone; (R3) keeping CLIP but removing OCR pretraining isolates the OCR-task pretraining contribution; and (R4) dropping Lalign and training encoder+DiT jointly (with loss defined in Eq. 3) tests the two-stage recipe against end-to-end training. 
+
+(R1) The U NI VL architecture is helpful (∆FID +2 .5): a pixel-reconstruction-trained VAE alone is a weaker unified VL encoder than SAM + CLIP. (R2) Substituting SigLIP yields a smaller but nontrivial gap (∆FID +2 .0); we did not adopt SigLIP because no public OCR-pretrained checkpoint exists for it. (R3) 
+
+9256 512 1024 
+
+> Input resolution (square)
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+> Improvement(%)
+> Efficiency gains of UniVL over OminiControl baseline
+> Input size
+> Tokens/step
+> Inference runtime
+
+(a) Efficiency gains 1 2 3 4 5+  
+
+> Number of masks per image
+> 10
+> 15
+> 20
+> 25
+> 30
+> 35
+> FID  ( )
+> Image quality
+> UniVL (ours)
+> OminiControl
+
+(b) FID vs. # masks 1 2 3 4 5+  
+
+> Number of masks per image
+> 0.23
+> 0.24
+> 0.25
+> 0.26
+> 0.27
+> 0.28
+> Region CLIP-T  ( )
+> Alignment
+> UniVL (ours)
+> OminiControl
+
+(c) region-CLIP txt vs. # masks 
+
+Figure 4: (4a) Efficiency gains of U NI VL over the baseline [ 26 ] with text encoder across image resolutions: TFLOPs and runtime savings grow at lower resolutions, from 8% at 1024 ×1024 to 52% TFLOPs / 44% 
+
+runtime at 256 ×256 . (4b)–(4c) Multi-region performance: U NI VL (red) maintains a substantial lead over OminiControl w/o text (blue) at every mask count, both in image quality (FID, lower is better) and in region-level alignment (region-CLIP txt , higher is better). Table 3: Component ablation of U NI VL encoder. Each row removes/replaces a single component (full configuration described in the inline summary above). The first row (our full model) is reproduced from Table 1. Image Quality Alignment Configuration FID ↓ SSIM ↑ PSNR ↑ MUSIQ ↑ CLIP txt ↑ CLIP img ↑ region-CLIP txt ↑ region-CLIP img ↑                                            
+
+> UNI VL (ours) 11.13 0.754 19.61 73.36 0.262 0.886 0.279 0.768
+> (R1) U NI VL encoder →VAE encoder 13.60 0.710 18.34 72.46 0.254 0.810 0.261 0.690 (R2) U NI VL encoder →SigLIP ViT-L 13.13 0.723 18.80 72.64 0.254 0.852 0.271 0.701 (R3) U NI VL encoder w/o OCR pretraining 14.33 0.701 16.33 70.22 0.259 0.814 0.268 0.687 (R4) U NI VL encoder w/o Stage 1 feature align. 13.05 0.698 18.02 73.29 0.257 0.864 0.274 0.763
+
+OCR-task pretraining helps the most (∆FID +3 .2): vanilla CLIP can detect glyphs but parses them less reliably as semantic content. R3 cannot fully separate “OCR-task signal” from “additional pretraining data,” but the smaller R2 gap (SigLIP also lacks OCR pretraining yet uses a comparably scaled image-text corpus) suggests the OCR-task aspect itself contributes a substantial portion. (R4) Two-stage training outperforms end-to-end (∆FID +1 .9): the dedicated alignment stage produces a more stable conditioning representation before the diffusion model is exposed to it. 
+
+(b) Other ablations/analysis. Appendix D reports additional ablations: an auxiliary CLIP-loss study showing both terms are critical (Appendix D.1), CLIP-loss-weight sensitivity sweeps, LoRA rank, per-resolution generation quality, and 5-seed inference stability. U NI VL also outperforms the baselines on free-form masks (Appendix E.1), overlapping masks (Appendix E.2), and zero-shot on COCO val2017 (Ap-pendix E.3); together these confirm that U NI VL’s spatial-semantic binding is a property of the conditioning representation rather than an artifact of the training mask distribution. 
+
+# 6 Summary 
+
+We introduced spatially grounded contextual image generation , a new controllable generation task that reframes the conditioning interface from two domains (vision + language) to a single unified visual input where text is rendered onto spatial masks. Our framework, U NI VL, replaces the text encoder with an OCR-pretrained vision encoder, achieving superior image quality over text-prompted baselines while reducing token size by up to 98%, encoder parameters by 92% , TFLOPs by up to 52%, and runtime by up to 44%. 10 UNI VL efficiently allows specification of what should appear where through a single unified signal. UNI VL has certain limitations. It is trained on rectangular masks; we report zero-shot generalization to free-form masks qualitatively in Appendix E.1, and a quantitative free-form benchmark is left to future work. Limited semantic vocabulary : our current scope targets short phrases of a few words drawn from object-detection and image-editing annotations (1–3 words for 96% of records, with a long tail up to 11 words; see Fig.10); fully compositional natural-language sentences are not yet expressible because they would require correspondingly richer training data, and rendering long sentences inside small masks is itself constrained by mask area size. The U NI VL framework is straightforward to extend along this axis through new data-augmentation pipelines (e.g., richer attribute compositions, longer instructions, or sentence-level annotations from VLM auto-labeling), which we leave to future work. Single-architecture demonstration :we instantiate U NI VL only on FLUX.1-dev; while the design (a frozen VAE-plus-CLIP encoder, a small adapter, and the two-stage training recipe) is in principle backbone-agnostic, demonstrating cross-architecture validity on other DiT-based backbones (e.g., SD3) and on U-Net-based diffusion models is left as future work. Standardized text rendering by design : the user supplies text and our pipeline renders it through a fixed automated procedure (Courier, white-on-black, font size scaled so the rendered text spans the mask width; Appendix A.5). The encoder therefore does not need to handle arbitrary fonts or styles—inputs at training and inference are produced by the same renderer—which is a deliberate design choice rather than an unhandled distribution shift. 11 References 
+
+[1] Inclusion AI. Ming-omni: A unified multimodal model for perception and generation, 2025. URL 
+
+https://arxiv.org/abs/2506.09344 .[2] Lukas Blecher, Guillem Cucurull, Thomas Scialom, and Robert Stojnic. Nougat: Neural optical understanding for academic documents. arXiv preprint arXiv:2308.13418 , 2023. [3] Tim Brooks, Aleksander Holynski, and Alexei A. Efros. Instructpix2pix: Learning to follow image editing instructions. arXiv preprint arXiv:2211.09800 , 2023. [4] Jingye Chen, Yupan Huang, Tengchao Lv, Lei Cui, Qifeng Chen, and Furu Wei. Textdiffuser: Diffusion models as text painters. In NeurIPS , 2023. [5] Xi Chen, Lianghua Huang, Yu Liu, Yujun Shen, Deli Zhao, and Hengshuang Zhao. Anydoor: Zero-shot object-level image customization. In IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , 2024. [6] Xiaokang Chen, Zhiyu Wu, Xingchao Liu, Zizheng Pan, Wen Liu, Zhenda Xie, Xingkai Yu, and Chong Ruan. Janus-pro: Unified multimodal understanding and generation with data and model scaling. arXiv preprint arXiv:2501.17811 , 2025. [7] Prafulla Dhariwal and Alexander Nichol. Diffusion models beat gans on image synthesis. arXiv preprint arXiv:2105.05233 , 2021. [8] Or Greenberg. Demystifying flux architecture. arXiv preprint arXiv:2507.09595 , 2025. [9] Amir Hertz, Ron Mokady, Jay Tenenbaum, Kfir Aberman, Yael Pritch, and Daniel Cohen-Or. Prompt-to-prompt image editing with cross-attention control. arXiv preprint arXiv:2208.01626 , 2022. [10] Jonathan Ho, Ajay Jain, and Pieter Abbeel. Denoising diffusion probabilistic models. arXiv preprint arXiv:2006.11239 , 2020. [11] Xuan Ju, Xian Liu, Xintao Wang, Yuxuan Bian, Ying Shan, and Qiang Xu. Brushnet: A plug-and-play image inpainting model with decomposed dual-branch diffusion. In European Conference on Computer Vision (ECCV) , 2024. [12] Tero Karras, Samuli Laine, and Timo Aila. A style-based generator architecture for generative adversar-ial networks. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition ,pages 4401–4410, 2019. [13] Junjie Ke, Qifei Wang, Yilin Wang, Peyman Milanfar, and Feng Yang. Musiq: Multi-scale image quality transformer. In Proceedings of the IEEE/CVF international conference on computer vision ,pages 5148–5157, 2021. [14] Junnan Li, Dongxu Li, Silvio Savarese, and Steven C. H. Hoi. Blip-2: Bootstrapping language-image pre-training with frozen image encoders and large language models. arXiv preprint arXiv:2301.12597 ,2023. [15] Yuheng Li, Haotian Liu, Qingyang Wu, Fangzhou Mu, Jianwei Yang, Jianfeng Gao, Chunyuan Li, and Yong Jae Lee. Gligen: Open-set grounded text-to-image generation. pages 22511–22521, 2023. 12 [16] Shilong Liu, Zhaoyang Zeng, Tianhe Ren, Feng Li, Hao Zhang, Jie Yang, Chunyuan Li, Jianwei Yang, Hang Su, Jun Zhu, et al. Grounding dino: Marrying dino with grounded pre-training for open-set object detection. arXiv preprint arXiv:2303.05499 , 2023. [17] Andreas Lugmayr, Martin Danelljan, Andres Romero, Fisher Yu, Radu Timofte, and Luc Van Gool. Repaint: Inpainting using denoising diffusion probabilistic models. pages 11461–11471, 2022. [18] Jian Ma, Mingjun Zhao, Chen Chen, Ruichen Wang, Di Niu, Haonan Lu, and Xiaodong Lin. Glyphdraw: Seamlessly rendering text with intricate spatial structures in text-to-image generation. arXiv preprint arXiv:2303.17870 , 2023. [19] Taesung Park, Ming-Yu Liu, Ting-Chun Wang, and Jun-Yan Zhu. Semantic image synthesis with spatially-adaptive normalization. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pages 2337–2346, 2019. [20] William Peebles and Saining Xie. Scalable diffusion models with transformers. In Proceedings of the IEEE/CVF international conference on computer vision , pages 4195–4205, 2023. [21] Alec Radford, Jong Wook Kim, Chris Hallacy, Aditya Ramesh, Gabriel Goh, Sandhini Agarwal, Girish Sastry, Amanda Askell, Pamela Mishkin, Jack Clark, Gretchen Krueger, and Ilya Sutskever. Learning transferable visual models from natural language supervision. arXiv preprint arXiv:2103.00020 , 2021. [22] Aditya Ramesh, Prafulla Dhariwal, Alex Nichol, Casey Chu, and Mark Chen. Hierarchical text-conditional image generation with clip latents. arXiv preprint arXiv:2204.06125 , 1(2):3, 2022. [23] Adam Roberts, Hyung Won Chung, Anselm Levskaya, Gaurav Mishra, James Bradbury, Daniel Andor, Sharan Narang, Brian Lester, Colin Gaffney, Afroz Mohiuddin, Curtis Hawthorne, Aitor Lewkowycz, Alex Salcianu, Marc van Zee, Jacob Austin, Sebastian Goodman, Livio Baldini Soares, Haitang Hu, Sasha Tsvyashchenko, Aakanksha Chowdhery, Jasmijn Bastings, Jannis Bulian, Xavier Garcia, Jianmo Ni, Andrew Chen, Kathleen Kenealy, Jonathan H. Clark, Stephan Lee, Dan Garrette, James Lee-Thorp, Colin Raffel, Noam Shazeer, Marvin Ritter, Maarten Bosma, Alexandre Passos, Jeremy Maitin-Shepard, Noah Fiedel, Mark Omernick, Brennan Saeta, Ryan Sepassi, Alexander Spiridonov, Joshua Newlan, and Andrea Gesmundo. Scaling up models and data with t5x and seqio . arXiv preprint arXiv:2203.17189 ,2022. URL https://arxiv.org/abs/2203.17189 .[24] Robin Rombach, Andreas Blattmann, Dominik Lorenz, Patrick Esser, and Bjorn Ommer. High-resolution image synthesis with latent diffusion models. arXiv preprint arXiv:2112.10752 , 2022. [25] Christoph Schuhmann, Romain Beaumont, Richard Vencu, Cade Gordon, Ross Wightman, Mehdi Cherti, Theo Coombes, Aarush Katta, Clayton Mullis, Mitchell Wortsman, et al. Laion-5b: An open large-scale dataset for training next generation image-text models. Advances in neural information processing systems , 35:25278–25294, 2022. [26] Zhenxiong Tan, Songhua Liu, Xingyi Yang, Qiaochu Xue, and Xinchao Wang. Ominicontrol: Min-imal and universal control for diffusion transformer. In Proceedings of the IEEE/CVF International Conference on Computer Vision , 2025. [27] Zhiyu Tan, Hao Yang, Luozheng Qin, Jia Gong, Mengping Yang, and Hao Li. Omni-video: Democra-tizing unified video understanding and generation. arXiv preprint arXiv:2507.06119 , 2025. [28] Yuxiang Tuo, Wangmeng Xiang, Jun-Yan He, Yifeng Geng, and Xuansong Xie. Anytext: Multilingual visual text generation and editing. arXiv preprint arXiv:2311.03054 , 2023. 13 [29] Haoran Wei, Chenglong Liu, Jinyue Chen, Jia Wang, Lingyu Kong, Yanming Xu, Zheng Ge, Liang Zhao, Jianjian Sun, Yuang Peng, et al. General ocr theory: Towards ocr-2.0 via a unified end-to-end model. arXiv preprint arXiv:2409.01704 , 2024. [30] Haoran Wei, Yaofeng Sun, and Yukun Li. Deepseek-ocr: Contexts optical compression. arXiv preprint arXiv:2510.18234 , 2025. [31] Haoran Wei, Yaofeng Sun, and Yukun Li. Deepseek-ocr 2: Visual causal flow. arXiv preprint arXiv:2601.20552 , 2026. [32] Chengyue Wu, Xiaokang Chen, Zhiyu Wu, Yiyang Ma, Xingchao Liu, Zizheng Pan, Wen Liu, Zhenda Xie, Xingkai Yu, Chong Ruan, et al. Janus: Decoupling visual encoding for unified multimodal understanding and generation. arXiv preprint arXiv:2410.13848 , 2024. [33] Shitao Xiao, Yueze Wang, Junjie Zhou, Huaying Yuan, Xingrun Xing, Ruiran Yan, Chaofan Li, Shuting Wang, Tiejun Huang, and Zheng Liu. Omnigen: Unified image generation. pages 13294–13304, 2025. [34] Binxin Yang, Shuyang Gu, Bo Zhang, Ting Zhang, Xuejin Chen, Xiaoyan Sun, Dong Chen, and Fang Wen. Paint by example: Exemplar-based image editing with diffusion models. In IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , 2023. [35] Yang Ye, Xianyi He, Zongjian Li, Bin Lin, Shenghai Yuan, Zhiyuan Yan, Bohan Hou, and Li Yuan. Imgedit: A unified image editing dataset and benchmark. arXiv preprint arXiv:2505.20275 , 2025. [36] Lvmin Zhang, Anyi Rao, and Maneesh Agrawala. Adding conditional control to text-to-image diffusion models. arXiv preprint arXiv:2302.05543 , 2023. [37] Jun-Yan Zhu, Taesung Park, Phillip Isola, and Alexei A Efros. Unpaired image-to-image translation using cycle-consistent adversarial networks. In Proceedings of the IEEE international conference on computer vision , pages 2223–2232, 2017. [38] Junhao Zhuang, Yanhong Zeng, Wenran Liu, Chun Yuan, and Kai Chen. A task is worth one word: Learning with task prompts for high-quality versatile image inpainting. In European Conference on Computer Vision (ECCV) , 2024. 14 Appendix 
+
+We provide details omitted from the main text in appendix: • Section A(Implementation Details): full training hyperparameters, multi-loss formulas, mask-jittering, condition-dropout schedule, text-rendering details, and multibox training data (extends Section 4). • Section B (Inference Details): denoising-step configuration and a clarification on how CLIP is used for both training and evaluation (extends Section 5.1). • Section C (OCR Encoder Choice): rationale for adapting DeepSeek-OCR’s encoder, methodological comparison against alternative OCR methods, and a summary of the underlying OCR-pretraining corpus. • Section D (Additional Ablations): auxiliary CLIP-loss ablation, LoRA rank, per-resolution generation quality, CLIP-loss-weight sensitivity sweeps, and 5-seed inference-stability table (extends Section 5.5). • Section E (Additional Visualizations and Experiments): zero-shot free-form masks, overlapping-mask behavior, zero-shot generalization to COCO, multi-step / single-step multibox edits, and failure cases. • Section F (U NI VL-ImgGen Benchmark Details): per-category breakdown, augmentation pipeline, class-name vocabulary statistics, and the training/evaluation split (extends Section 3). 
+
+# A Implementation Details 
+
+A.1 Training Hyperparameters 
+
+Table 4 reports the full training configuration for both stages. All training is performed in bfloat16 (Stage 1 on 2×H100 80GB GPUs, Stage 2 on 6 ×H100 80GB GPUs with gradient checkpointing); Stage 1 takes ≈12 .6
+
+hours (30K steps) and Stage 2 takes ≈97 .3 hours (40K steps). The training pool is the U NI VL-ImgGen benchmark described in Section 3 ( ∼477 K unique images, ∼710 K mask-text records); both stages share the same data and 512 ×512 resolution. Table 4: Training hyperparameters for the two U NI VL stages. Hyperparameter Stage 1 (alignment) Stage 2 (diffusion) Base model FLUX.1-dev (frozen DiT) FLUX.1-dev (DiT + LoRA) Trainable params UNI VL encoder (CLIP-LoRA + linear adapter) DiT LoRA + U NI VL encoder (continued from Stage 1) Optimizer AdamW AdamW Learning rate 2×10 −3 1×10 −4                               
+
+> Weight decay 10 −310 −3
+> Batch size 24 42 Max steps 30K 40K Resolution 512 ×512 512 ×512
+> Precision bfloat16 bfloat16 Gradient checkpointing off on
+> λalign (feature alignment) 1.0 1.0
+> λclip-img (CLIP image) 0.5 (warm-up) 1.0
+> λclip-txt (CLIP text) 0.0 (off) 0.8
+> λdiff (diffusion MSE) N/A 1.0 Multibox batch ratio 20% 20% Condition dropout (image / VAE / CLIP) 0.1 / 0.1 / 0.1 0.1 / 0.1 / 0.1 LoRA rank ( r,α)4, 4 (U NI VL encoder) 4, 4 (DiT) + 4, 4 (U NI VL encoder)
+
+15 A.2 Multi-Loss Supervision 
+
+Alongside the primary training objective of each stage— Lalign in Stage 1 and the diffusion MSE Ldiff 
+
+in Stage 2—we apply auxiliary losses to anchor the embedding to the CLIP visual-semantic space. In Stage 1, only Lclip-img is active at a warm-up weight ( λclip-img =0 .5); in Stage 2, both auxiliary CLIP losses (Lclip-img =1 .0, Lclip-txt =0 .8) plus the feature-alignment objective remain active alongside the diffusion MSE: 1. Feature alignment (Lalign , λ=1 .0): per-token spatial fidelity between the U NI VL embedding and the target VAE latent, ∥fVL − z0∥22 where z0 = E(X).2. CLIP image loss (Lclip-img , λ=1 .0): enforces that U NI VL features match CLIP vision patch features within the mask, ∥fVL ⊙ m − fCLIP ⊙ m∥2.3. CLIP text loss (Lclip-txt , λ=0 .8): cosine similarity between the projected pooled masked condition and the CLIP text embedding of the class name, 1 − cos( g(¯ cm), CLIP text (ℓ)) , providing category-level semantic grounding. The L2 loss provides instance-level alignment (reconstruct this specific object ), while the CLIP text loss provides category-level grounding ( this region should be a rose ). Together they bridge the gap between UNI VL visual features and semantic generation. 
+
+A.3 Mask Jittering 
+
+During training, bounding boxes are randomly perturbed: • Scale range: (0 .85 , 1.5) × centered on the bounding box. • Translation: up to 5% of bounding box size in each direction. • Applied to both text rendering coordinates and the normalized bounding box mask. This makes the model robust to mask size variations at inference. Without jittering, we observe a hard quality threshold at approximately 100 tokens, below which generation quality collapses. 
+
+A.4 Condition Dropout 
+
+Three independent dropout mechanisms (each with probability p=0 .1) enable classifier-free guidance at inference: Table 5: Condition dropout modes during training. Dropout mode What is zeroed Inference use Full image dropout Entire condition image Text-only classifier-free guidance Full condition dropout VAE tokens (keep CLIP) image_guidance_scale 
+
+CLIP dropout CLIP tokens (keep VAE) clip_guidance_scale 
+
+CLIP dropout is particularly important: it teaches the model the difference between “with CLIP semantic instruction” and “without,” enabling CLIP-specific classifier-free guidance at inference. Our inference experiments reported in the main paper do not change these guidance scales (we use the default 1.0). 16 A.5 Text Rendering on Mask 
+
+Text rendering is fully automated and standardized: the user provides only the textual instruction, and our pipeline renders it with a fixed font (Courier), white-on-black, with the font size scaled so the rendered text spans the mask width (shrink until text_width ≈ bbox_width ). For larger masks the same line is tiled vertically to maximize text-as-pixels coverage for the U NI VL encoder. Because both training and inference use this single renderer, the U NI VL encoder is never asked to generalize across fonts or styles—a deliberate design choice that lets the encoder specialize on a consistent text-pixel distribution. 
+
+A.6 Multibox Training Data 
+
+20% of training batches use multibox data: images with 2–5 non-overlapping masked regions, each with a different class label. Mask sampling rules: • Each mask area: 4%–40% of image area. • Pairwise IoU < 0.05 between all masks. • If the non-overlapping constraint fails after 5 retries: fall back to 2 masks, then 1. 
+
+# B Inference Details 
+
+At inference, we use 28 denoising steps with guidance_scale=1.0 (no text classifier-free guidance, since no text prompt is used). The default configuration uses image_guidance_scale=1.0 and 
+
+clip_guidance_scale=1.0 (both off), requiring only a single forward pass per step. We did not vary these guidance scales in the paper’s experiments since they yielded no significant performance improvement. 
+
+Metrics clarification. We use CLIP in three places: dataset filtering (Section 3), auxiliary training losses (Lclip-img , Lclip-txt ), and evaluation metrics (CLIP txt , CLIP img , region-CLIP txt , region-CLIP img ). To avoid any concern of an unfair advantage, we note that the CLIP encoder is treated as a frozen function throughout training and evaluation: its parameters are never updated, and it is applied identically to every method we evaluate. As a result, there is no risk of CLIP overfitting to our model in the conventional sense—it is the same fixed metric used to evaluate the baselines. Additionally, half of our reported metrics (FID, SSIM, PSNR, MUSIQ) are CLIP-free and our method also leads on these, suggesting the gains are not specific to CLIP-based scoring. 
+
+# C OCR Encoder Choice 
+
+We provide additional rationale for using the DeepSeek-OCR encoder [ 30 ] as the backbone of U NI VL, and discuss why we did not adopt other OCR-capable vision models. 
+
+Why DeepSeek-OCR. The encoder of DeepSeek-OCR (called DeepEncoder ) combines a SAM-base window-attention block with a CLIP ViT-L global-attention block, separated by a 16 × convolutional com-pressor. This design has three properties we rely on: (i) the CLIP block produces image-text-aligned semantic features, which are important for reading rendered glyphs and binding them to spatial locations; (ii) the SAM block adds dense local perception, which helps with the small text regions inside masks; and (iii) the encoder has been pretrained on a large and diverse OCR corpus ( ∼30 M PDF pages, scene OCR, and general vision data), giving the encoder broad text-as-pixels recognition out of the box. Other components of the original 17 DeepSeek-OCR system (multiple resolution modes, the DeepSeek-3B-MoE decoder) are not needed for our task; we use only the encoder, in a single native-resolution mode, since our masks are natural-image-scale rather than multi-page document scans. A successor system (DeepSeek-OCR2, Wei et al. [31] ) explores larger encoders and richer multi-task pretraining; the conditioning idea in U NI VL is encoder-agnostic and we expect it to apply with stronger encoders, but for this paper we adopt the minimalist DeepSeek-OCR encoder for simplicity and reproducibility. 
+
+Summary of OCR encoder pretraining. For completeness, we summarize the data used to pretrain the DeepSeek-OCR encoder before our feature-reconstruction stage; the original training was performed by Wei et al. [30] and we use their released checkpoint as-is. The pretraining mix is roughly 70% OCR / 20% general vision / 10% text-only . The OCR portion comprises two regimes: • Document OCR (∼33 M pages): ∼30 M PDF pages spanning ∼100 languages ( ∼25 M Chinese, 5M English, plus minority languages), labeled with both coarse text extracted via fitz and fine layout-and-text annotations (2M Chinese + 2M English from PP-DocLayout/MinerU/GOT-OCR2.0; ∼600 Kminority-language patches). An additional ∼3M Word-document pairs cover formulas and HTML tables without layout. • Natural-scene OCR (∼20 M images): 10M Chinese + 10M English from LAION and Wukong, labeled with PaddleOCR. The remaining 20% general-vision data preserves a generic vision interface (caption/detection/grounding) and the 10% text-only data preserves language modeling capability. This pretraining gives the encoder broad text-as-pixels recognition that we then adapt for our generation conditioning task in Stage 1 of our pipeline (Section 4). 
+
+Why not other OCR methods. Two alternative public OCR-capable vision models exist: • Nougat [2 ]: end-to-end OCR method. Pretrained on a much narrower domain (arXiv-style PDFs only) and at smaller scale than DeepSeek-OCR. Adopting Nougat would limit out-of-distribution robustness to the natural-image-scale, freely-rendered text we use in the contextual condition. • GOT-OCR2.0 [ 29 ]: another end-to-end OCR method covering charts, formulas, and document parsing. Comparable scope to DeepSeek-OCR but with a smaller pretraining corpus and a tighter coupling to its decoder. The encoder is less easily decoupled for use as a standalone conditioning encoder, and there is no published encoder-only checkpoint. We chose DeepSeek-OCR primarily for the scale and diversity of its pretraining data, and because its encoder is publicly released as a standalone module, making it convenient to bolt onto FLUX without re-running large-scale OCR pretraining. 
+
+# D Additional Ablations 
+
+We report additional ablations that complement Section 5.5 in the main paper. All experiments use the default configuration (resolution 512 ×512 , LoRA r=4 , λclip-img =1 .0, λclip-txt =0 .8, 40K Stage-2 training steps) unless otherwise noted, and the reference row (“ours”) uses our final model as reported in Table 1. 18 D.1 Auxiliary CLIP Loss 
+
+We study the effect of adding CLIP-based auxiliary losses on top of the feature alignment objective in Stage 1. We compare four configurations: feature alignment only ( Lalign ), adding a CLIP image-space loss (Lalign +Lclip-img ), adding only a CLIP text loss ( Lalign +Lclip-txt ), and adding both ( Lalign +Lclip-img +Lclip-txt ,ours). Results on the U NI VL-ImgGen benchmark are shown in Table 6. Table 6: Auxiliary CLIP loss ablation on top of the Stage 1 feature alignment objective. The full configuration (Lalign + Lclip-img + Lclip-txt , ours) leads on all 8 metrics; the CLIP image and text losses act as complementary regularizers for image quality and region-level alignment, respectively. Best in bold , second-best underlined .Image Quality Alignment Configuration FID ↓ SSIM ↑ PSNR ↑ MUSIQ ↑ CLIP txt ↑ CLIP img ↑ region-CLIP txt ↑ region-CLIP img ↑                                    
+
+> No CLIP loss ( Lalign only) 28.11 0.665 17.97 69.36 0.256 0.791 0.277 0.709
+> +Lclip-img 21.77 0.663 17.12 73.03 0.251 0.840 0.273 0.746
+> +Lclip-txt 12.72 0.724 18.80 72.61 0.253 0.876 0.277 0.751
+> +Lclip-img +Lclip-txt (ours) 11.13 0.754 19.61 73.36 0.262 0.886 0.279 0.768
+
+The two CLIP losses provide complementary regularization. The CLIP image loss adds a perceptual prior (∆FID −6.3, ∆MUSIQ +3 .7 over no-CLIP), preventing the visually flat outputs of pure feature alignment. The CLIP text loss adds a category-level anchor ( ∆FID −15 .4 over no-CLIP, ∆region-CLIP img +0 .04 ), preventing the adapter from drifting to off-category representations. Combining both yields the strongest configuration; notably, +Lclip-txt alone (FID 12 .72 ) already outperforms +Lclip-img alone (FID 21 .77 ). 
+
+D.2 CLIP Image Loss Weight 
+
+We complement Appendix D.1 (which studies the presence of the auxiliary CLIP losses) with a sensitivity analysis on the weight of the CLIP image loss, λclip-img , holding the CLIP text loss weight fixed at λclip-txt =0 .8.Table 7: Sensitivity to the CLIP image loss weight λclip-img .Image Quality Alignment 
+
+λclip-img FID ↓ SSIM ↑ PSNR ↑ MUSIQ ↑ CLIP txt ↑ CLIP img ↑ region-CLIP txt ↑ region-CLIP img ↑
+
+0.1 13.81 0.732 19.42 72.64 0.238 0.851 0.255 0.736 
+
+1.0 11.13 0.754 19.61 73.36 0.262 0.886 0.279 0.768 
+
+2.0 15.72 0.665 17.53 73.36 0.255 0.854 0.274 0.756 Increasing λclip-img pulls the U NI VL adapter too strongly toward pooled CLIP-space similarity at the cost of pixel-level fidelity, while too small a value (0.1) under-regularizes. λclip-img =1 .0 balances feature alignment with semantic regularization from CLIP image space. 
+
+D.3 CLIP Text Loss Weight 
+
+We additionally sweep the CLIP text loss weight λclip-txt across three values, holding λclip-img =1 .0 fixed. The CLIP text loss anchors the pooled masked condition to the CLIP text embedding of the class label, providing category-level semantic grounding. Too small a weight leaves the adapter free to drift away from the labeled category; too large a weight may over-constrain the embedding and reduce sample diversity. 19 Table 8: Sensitivity to the CLIP text loss weight λclip-txt .Image Quality Alignment 
+
+λclip-txt FID ↓ SSIM ↑ PSNR ↑ MUSIQ ↑ CLIP txt ↑ CLIP img ↑ region-CLIP txt ↑ region-CLIP img ↑
+
+0.1 14.43 0.737 19.78 71.75 0.246 0.868 0.261 0.748 
+
+0.8 (ours) 11.13 0.754 19.61 73.36 0.262 0.886 0.279 0.768 
+
+2.0 14.28 0.739 19.74 71.89 0.242 0.859 0.262 0.745 
+
+D.4 LoRA Rank 
+
+We compare LoRA ranks r=4 and r=8 for the DiT fine-tuning stage (Stage 2). Table 9: LoRA rank ablation. Doubling rank from 4 to 8 doubles trainable parameters without improvement across any metric. Best in bold .Params Image Quality Alignment LoRA rank (rel.) FID ↓ SSIM ↑ PSNR ↑ MUSIQ ↑ CLIP txt ↑ CLIP img ↑ region-CLIP txt ↑ region-CLIP img ↑                   
+
+> r=4 (ours) 1×11.13 0.754 19.61 73.36 0.262 0.886 0.279 0.768
+> r=8 2×15.77 0.669 17.62 73.20 0.255 0.855 0.275 0.754
+
+r=4 matches or exceeds r=8 on all metrics, suggesting the bottleneck is not DiT LoRA capacity but the UNI VL adapter, which already produces a sufficiently expressive U NI VL embedding in Stage 1. 
+
+D.5 Generation Quality Across Resolutions 
+
+Table 2 (main paper) quantifies the efficiency gains of U NI VL at 256 ×256 , 512 ×512 , and 1024 ×1024 . To confirm that these gains do not come at the cost of generation quality, we train separate U NI VL models at each resolution and report their generation metrics in Table 10. We emphasize that these rows are not directly comparable: FID, PSNR, SSIM, and CLIP-based metrics all depend on the input resolution (e.g., FID is sensitive to the Inception network’s effective receptive field, and SSIM/PSNR depend on the pixel grid). The table therefore serves as a per-resolution sanity check showing that U NI VL produces reasonable outputs at each scale, not as a cross-resolution comparison. Table 10: Per-resolution generation quality for U NI VL. Each row is evaluated at its own resolution; metrics are not directly comparable across rows (FID, PSNR, and SSIM all depend on input resolution). The purpose of this table is to validate that U NI VL maintains reasonable generation quality at every scale reported in the efficiency analysis (Table 2). Image Quality Alignment Resolution FID ↓ SSIM ↑ PSNR ↑ MUSIQ ↑ CLIP txt ↑ CLIP img ↑ region-CLIP txt ↑ region-CLIP img ↑                         
+
+> 256 ×256 17.55 0.632 17.15 54.66 0.254 0.830 0.277 0.761
+> 512 ×512 (default) 11.13 0.754 19.61 73.36 0.262 0.886 0.279 0.768
+> 1024 ×1024 10.87 0.749 20.57 73.83 0.254 0.855 0.271 0.757
+
+At all three resolutions U NI VL produces outputs with coherent image quality and alignment—confirming that the efficiency gains reported in Table 2 (up to 98% token-size reduction and 52% TFLOPs reduction at 256 ×256 ) are not bought at the cost of broken generations. The 256 ×256 model’s low MUSIQ score is consistent with the resolution itself: fine textures are simply not resolvable at this scale, and this limit applies to any generator, not U NI VL specifically. 20 D.6 Robustness to Inference Seed 
+
+To assess statistical significance of the headline comparison in Table 1, we re-run inference 5 times with different seeds (using the same trained checkpoint and the same 3,000-sample evaluation set) and report the per-cell standard deviations alongside the means in Table 11. The dispersion is small (e.g., σFID ≤ 0.53 
+
+across all rows), and the rankings reported in the main paper are preserved at every metric. Table 11: Mean ± standard deviation across 5 inference seeds on the U NI VL-ImgGen benchmark. Means are identical to Table 1 (reproduced for convenience). Image Quality Alignment Method FID ↓ SSIM ↑ PSNR ↑ MUSIQ ↑ CLIP txt ↑ CLIP img ↑ region-CLIP txt ↑ region-CLIP img ↑                                                                
+
+> Without text encoder
+> ControlNet-FLUX 13.98 ±0.40 0.734 ±0.003 18.22 ±0.14 70.50 ±0.08 0.250 ±0.005 0.856 ±0.005 0.249 ±0.009 0.689 ±0.011 OminiControl [26] 20.50 ±0.36 0.719 ±0.003 16.45 ±0.19 72.05 ±0.15 0.249 ±0.005 0.849 ±0.013 0.271 ±0.006 0.742 ±0.021 UNI VL (ours) 11.13 ±0.33 0.754 ±0.002 19.61 ±0.15 73.36 ±0.09 0.262 ±0.001 0.886 ±0.010 0.279 ±0.006 0.768 ±0.017
+> With text encoder
+> ControlNet [36] 23.93 ±0.53 0.684 ±0.003 15.30 ±0.25 69.82 ±0.13 0.264 ±0.007 0.859 ±0.011 0.282 ±0.010 0.763 ±0.021 OminiControl [26] 13.50 ±0.42 0.718 ±0.003 16.13 ±0.20 72.81 ±0.11 0.270 ±0.005 0.871 ±0.014 0.298 ±0.009 0.770 ±0.031 ControlNet-FLUX 13.77 ±0.31 0.731 ±0.002 18.02 ±0.19 70.89 ±0.07 0.273 ±0.004 0.863 ±0.009 0.252 ±0.011 0.691 ±0.021 FLUX.1 Fill (fine-tuned) 12.67 ±0.36 0.734 ±0.002 17.23 ±0.11 68.31 ±0.08 0.280 ±0.004 0.892 ±0.003 0.277 ±0.007 0.767 ±0.010 UNI VL (ours) + T5 10.49 ±0.41 0.752 ±0.003 19.44 ±0.16 73.13 ±0.11 0.295 ±0.002 0.904 ±0.009 0.294 ±0.008 0.793 ±0.016
+
+# E Additional Visualizations and Experiments 
+
+E.1 Non-Square (Free-Form) Masks 
+
+UNI VL is trained exclusively on axis-aligned rectangular masks, but the underlying task formulation places no architectural constraint on mask shape—the contextual condition CI is just an image with a region masked and a text label rendered inside it. We test U NI VL’s behavior on irregular, free-form masks at inference time 
+
+without any retraining or fine-tuning (zero-shot evaluation). Two findings emerge: (i) the U NI VL encoder reliably reads text rendered inside non-rectangular regions, and (ii) the diffusion model respects the actual mask boundary rather than the bounding rectangle, generating content that conforms to the user’s intended shape. This zero-shot generalization confirms that U NI VL’s design does not assume rectangular masks; extending training to free-form masks is expected to further improve fidelity at irregular boundaries. 
+
+Quantitative evaluation on free-form masks. To complement the qualitative results above, we evaluate all three methods on a held-out free-form mask test set (irregular polygonal masks; same image distribution and prompts as the in-domain set). Table 12 reports the metrics. Table 12: Zero-shot quantitative results on free-form (non-rectangular) masks. U NI VL is best on 5/8 metrics (FID, SSIM, PSNR, CLIP img , region-CLIP img ) and second-best on the two text-alignment metrics. Best in 
+
+bold , second-best underlined. Image Quality Alignment Method FID ↓ SSIM ↑ PSNR ↑ MUSIQ ↑ CLIP txt ↑ CLIP img ↑ region-CLIP txt ↑ region-CLIP img ↑
+
+UNI VL (ours) 8.64 0.8376 23.34 72.82 0.2619 0.9486 0.2872 0.8177 
+
+OminiControl w/o text 10.44 0.7833 21.52 73.20 0.2599 0.9298 0.2867 0.7883 OminiControl w/ text 9.97 0.7838 21.21 73.08 0.2686 0.9375 0.2904 0.8018 21 Ground truth UniVL (ours) OminiControl w/o text Input OminiControl w/ text 
+
+> platform
+> cookies
+> key rings
+> origami rose
+
+Figure 5: Zero-shot test on irregular mask shape. Row 1: UNI VL generates an image whose foreground content fills the irregular mask shape, matching the text label rendered inside the non-rectangular region. 
+
+Row 4: UNI VL respects the round-shape cookie mask and outperforms the OminiControl baseline, which defaults to a bounding-rectangle fill and ignores the irregular boundary. Although U NI VL is trained only on rectangular masks, at inference time it respects both the user-provided mask shape and the semantic instruction, indicating that U NI VL’s spatial-semantic binding is a property of the conditioning representation rather than an artifact of the training mask distribution. Two observations follow. First, U NI VL continues to outperform the OminiControl baseline on free-form masks, even though the model has never seen non-rectangular masks during training: the headline rankings from the in-domain rectangular benchmark (Table 1) are preserved zero-shot. Second, free-form-mask metrics are substantially better than rectangular-mask metrics for UNI VL on image quality —FID drops from 11 .13 → 8.64 , SSIM rises from 0.754 → 0.838 , PSNR from 19 .61 → 23 .34 , and CLIP img from 
+
+0.886 → 0.949 . We hypothesize that the irregular mask shape itself acts as additional conditioning signal (a tighter object outline) compared to a rectangular bounding box, which provides a stronger spatial prior to the diffusion model and reduces the size of the region the model must hallucinate. This is consistent with the finding that the gap is largest on image-quality metrics (which reward background preservation and shape fidelity) and roughly neutral on the text-alignment metrics (which reward only that the right semantic class fills the region). Extending training to free-form masks is therefore likely to widen rather than narrow this advantage. 22 E.2 Overlapping Masks 
+
+We probe U NI VL’s behavior when multiple labeled masks overlap. Fig.6 shows three representative cases. The takeaway: U NI VL handles partially overlapping masks robustly but degrades gracefully when two masks occupy nearly the same pixels—the contextual condition becomes ambiguous because two text labels are rendered into the same region, and disambiguation would require additional cues (e.g., explicit foreground/background ordering) that the current interface does not provide. Ground truth UniVL (ours) OminiControl w/o text Input OminiControl w/ text 
+
+> tree
+> pickup
+> truck
+> wheel
+> wooden
+> stand
+> clothes line
+> white
+> trousers
+> plates
+> plates
+
+food 
+
+Figure 6: Overlapping masks. Row 1: UNI VL works when two masks do not overlap too much—each labeled region is generated as instructed. Row 2 (failure case): when the “food” and “plate” boxes totally overlay, U NI VL cannot disambiguate which label belongs to which region and produces a single fused object. 
+
+Row 3: compared to existing methods, U NI VL follows the “pickup truck” instruction at the desired location, while the baselines either drop the instruction or place it outside the requested region. 
+
+E.3 Results on COCO 
+
+To assess generalization beyond the U NI VL-ImgGen training distribution, we evaluate U NI VL zero-shot on COCO val2017. We randomly sample 3,000 images, use the GT bounding boxes (axis-aligned squares) and class names as the spatial-text condition, and run U NI VL with no fine-tuning. Table 13 compares UNI VL against OminiControl with and without text prompt under identical conditioning, and Fig.7 shows representative qualitative results. UNI VL leads on FID, SSIM, PSNR, and CLIP img over both prompted and unprompted OminiControl. As expected, OminiControl with text prompt retains an alignment edge on text-conditioned metrics (CLIP txt ,region-CLIP txt , region-CLIP img ) since it has access to the natural-language label as a separate signal; U NI VL narrows this gap while operating in the no-text-encoder setting, consistent with the trends on the in-domain UNI VL-ImgGen benchmark (Table 1). 23 Table 13: Zero-shot results on COCO val2017 (3,000 randomly sampled images, square masks). U NI VL outperforms both OminiControl variants on FID, SSIM, PSNR, and CLIP img despite never having seen COCO during training. Best in bold , second-best underlined. Image Quality Alignment Method FID ↓ SSIM ↑ PSNR ↑ MUSIQ ↑ CLIP txt ↑ CLIP img ↑ region-CLIP txt ↑ region-CLIP img ↑                             
+
+> UNI VL (ours) 16.99 0.7592 20.69 71.03 0.2638 0.8791 0.2707 0.7305 OminiControl w/o text 21.37 0.7109 19.50 71.06 0.2609 0.8575 0.2635 0.7129 OminiControl w/ text 17.83 0.7135 19.11 71.73 0.2810 0.8679 0.2814 0.7320 Ground truth UniVL (ours) Input Ground truth Input UniVL (ours)
+> vase
+> vase
+
+# boat 
+
+# truck 
+
+Figure 7: Zero-shot U NI VL on COCO val2017. UNI VL generalizes well to a held-out natural-image distribution despite never having seen COCO during training, producing region-faithful generations across diverse object categories. 
+
+E.4 Multi-Step and Single-Step Multibox Edits 
+
+UNI VL handles two complementary multi-region workflows in a single architecture: (i) sequential multi-step edits , where the user applies one mask at a time and the model’s output from a previous step becomes the source image for the next; and (ii) single-step multibox edits , where multiple labeled masks are placed on the same image and processed jointly in one forward pass. Fig.8 demonstrates both modes on the same source. 
+
+E.5 Failure Cases 
+
+Fig.9 illustrates two systematic failure modes. Both failure modes share a common cause: insufficient signal for the U NI VL encoder to extract a confident semantic instruction. Rare-vocabulary failures reflect a training-distribution gap that can be closed by augmenting the benchmark with longer-tail class phrases (the Summary section discusses this as future work); very-small-mask failures reflect a fundamental resolution limit on text-as-pixels conditioning, which scales with mask area. 24 input image       
+
+> condition 1 condition 2 condition 3
+> result 1 result 2 result 3
+> pillow pillow
+> dresser dresser
+
+Figure 8: Multi-region edit modes. The source image is shown at the bottom-left. Columns 2–3 (multi-step edition): the user applies a “pillow” mask (column 2) and then, on top of that result, a “dresser” mask (column 3); each step is a separate U NI VL forward pass. Column 4 (single-step multibox edit): both “pillow” and “dresser” masks are applied jointly in a single forward pass. U NI VL handles both modes without architectural changes, producing spatially accurate edits while preserving the rest of the scene. 
+
+# F UNI VL-ImgGen Benchmark Details 
+
+F.1 Dataset categories and sources 
+
+UNI VL-ImgGen comprises four source categories that together provide both spatial-localization signal (mask category) and same-image-different-text signal (the three editing categories), preventing the model from collapsing to a pure image-reconstruction shortcut. Table 14 summarizes the per-category statistics. Table 14: U NI VL-ImgGen breakdown by source. The mask category provides multibox spatial training; the three editing categories provide the same image with different text labels, ensuring the model uses the rendered text rather than reconstructing the image condition. Category Records (boxes) Unique images Boxes / image mask 280,900 23,375 12.02 add 122,594 122,594 1.00 replace 217,606 217,606 1.00 extract 131,996 131,996 1.00 Overall 528,376 476,871 1.11 
+
+(1) mask category (multibox spatial training). Following the construction sketched in Section 3, we start from a 238K-image subset of LAION-5B [ 25 ], apply Grounding DINO [ 16 ] to detect objects and obtain bounding boxes with class labels, and apply two filters: (i) a size filter that discards detections whose mask area is less than 4% of the total image area; and (ii) a semantic filter that retains pairs with CLIP similarity 
+
+>0.85 between the cropped mask region and the class name. For each retained sample, the contextual condition is constructed by masking the detected region and rendering the class label as tiled text within it (Appendix A.5). The mask category has many boxes per image (12.02 on average), which we exploit through 25 Ground truth UniVL (ours) OminiControl w/o text OminiControl w/ text Input 
+
+stone 
+
+fountain 
+
+> sign
+
+Figure 9: Failure cases of U NI VL. (a) Rare vocabulary: for uncommon class phrases such as “stone fountain,” the rendered text is read correctly but the diffusion model has limited training signal for that category, producing generic stone-textured fills rather than the intended object. We expect this to improve with broader training-data coverage. (b) Very small mask region: when the mask area is tiny, the rendered text occupies only a few pixels and the U NI VL encoder loses semantic resolution; the generated content drifts toward the background prior. an augmentation step: for each unique image, we sample 5 augmented duplicates with random crop and color jittering, each retaining 2–10 boxes. After augmentation, the mask category contains 233,750 final image instances, and the total number of records across the benchmark is 710,621. 
+
+(2–4) add , replace , and extract categories (image editing). These three categories are constructed fol-lowing ImgEdit [ 35 ], with captions generated by GPT-4o and the corresponding image edits produced by GPT-4o-Image: • Add (122,594 pairs): inserting a new object into a designated region. • Replace (217,606 pairs): editing the masked region with a new text-described object (text-prompt-driven replacement). • Extract (131,996 pairs): an image-reference variant in which the masked region is filled by transferring content from a reference image; following ImgEdit [ 35 ], the class label of the rendered text in this category is the reference image’s label. Each editing-category record corresponds to a single image with one labeled mask, providing a complementary signal to the mask category: by training on many distinct text labels for the same source image (across the three editing categories), the model is encouraged to use the rendered text as a real conditioning signal rather than to reconstruct the image input. 
+
+F.2 Class-name vocabulary statistics 
+
+The class labels rendered onto masks span a long-tail vocabulary of natural-image object descriptions. Table 15 reports the distribution of label phrase length (in words). The vast majority of labels are short (1–3 26 Table 15: Phrase-length distribution of class-name labels in U NI VL-ImgGen. Most labels are short (1–3 words: 96.0% of records) but the benchmark also includes longer multi-word phrases. # words Records % records Unique phrases % unique 1 270,607 51.21% 3,221 11.37% 2 89,675 16.97% 9,687 34.18% 3 146,959 27.81% 10,778 38.03% 4 19,486 3.69% 3,937 13.89% 5 1,253 0.24% 536 1.89% 6 327 0.06% 149 0.53% 7 47 0.01% 23 0.08% 8 13 0.00% 7 0.02% 9 6 0.00% 2 0.01% 11 3 0.00% 1 0.00%  
+
+> (a) Word cloud over all class-name phrases. (b) Top-30 most frequent phrases.
+
+Figure 10: Class-name vocabulary in U NI VL-ImgGen. (10a) Word cloud where font size is proportional to frequency: the most prominent labels are everyday objects and people ( person , car , people , flowers ,
+
+bench , trees ), with a long tail of attribute-modified phrases ( a wooden tray , a black bicycle , a red sports car ). (10b) Frequency chart of the top-30 most frequent phrases. The vocabulary is dominated by natural-image object categories, validating our object-level scope. words: 96 .0% of records), but the benchmark also contains longer multi-word phrases (4 or more words: 4.0%) that test the U NI VL encoder’s ability to read longer rendered text. Across all records there are ∼28 Kunique phrases. Fig.10 visualizes the top-30 most frequent class-name phrases. 
+
+F.3 Training and evaluation splits 
+
+The 710K records form the training pool. To support multi-region training, 20% of training batches use multibox data drawn from the mask category (2–5 non-overlapping masks per image; mask sampling rules in Appendix A.6). For evaluation, we hold out 3,000 samples, evenly split into: • 1,500 single-mask samples : 375 per task type (mask, object addition, replacement, extraction). • 1,500 multi-mask samples : N ∈[1 , 5] non-overlapping masks per image, testing composable multi-region generation. 27 Metrics in Table 1 are computed on the union of these 3,000 samples; per-mask-count breakdowns appear in Fig.4(b)(c). 28

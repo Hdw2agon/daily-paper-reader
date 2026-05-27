@@ -1,0 +1,653 @@
+Title: AIR: Amortized Image Reconstruction Framework for Self-Supervised Feed-Forward 2D Gaussian Splatting
+
+URL Source: https://arxiv.org/pdf/2605.20820v1
+
+Published Time: Thu, 21 May 2026 00:42:11 GMT
+
+Number of Pages: 13
+
+Markdown Content:
+> PREPRINT 1
+
+# AIR: Amortized Image Reconstruction Framework for Self-Supervised Feed-Forward 2D Gaussian Splatting 
+
+Zhaojie Zeng, Yuesong Wang, Yawei Luo, Tao Guan 
+
+Abstract —2D Gaussian splatting provides an efficient explicit representation for image reconstruction, but existing methods still require costly per-image iterative optimization or rely on handcrafted priors for primitive allocation. We present AIR, a self-supervised feed-forward framework that amortizes iterative Gaussian fitting into a single network pass, eliminating per-image test-time optimization. AIR adopts a stage-wise resid-ual architecture that progressively predicts additional Gaussian primitives from reconstruction residuals, together with an explicit Stage Control mechanism that activates new primitives only in under-reconstructed regions. A Predict–Optimize–Distill training strategy stabilizes multi-stage prediction by distilling short-horizon optimized Gaussian increments back into the predictor. The stabilized predictor is then jointly finetuned across stages and equipped with an image-adaptive quantizer for compact Gaussian storage. Experiments on Kodak and DIV2K show that AIR achieves better reconstruction quality than representative Gaussian-based baselines while reducing encoding time to 160– 300 ms. Code: https://github.com/whoiszzj/AIR.git 
+
+Index Terms —image reconstruction, 2D Gaussian splatting, amortized optimization, feed-forward prediction 
+
+I. Introduction 
+
+# IMAGE reconstruction studies how to encode a target image into an alternative representation and recover its visual content through an efficient decoding or rendering process [1], [2]. Instead of treating an image only as a dense grid of pixel values, image reconstruction methods seek compact neural or explicit representations that can faithfully model visual content while supporting efficient storage, rendering, or trans-mission [3]. This makes image reconstruction a fundamental problem for compact visual representation, efficient rendering, and image-based communication. One representative direction is to model images with neural networks, especially coordinate-based implicit neural represen-tations [4], [5]. These methods fit a neural function that maps spatial coordinates to color values and can achieve high-quality reconstruction. However, recovering an image requires dense network evaluation over all pixel locations, which leads to a relatively high decoding cost. Recently, explicit 2D Gaussian representations [6]–[8] have emerged as an efficient alternative. By decomposing an image into a set of Gaussian primitives and rendering them through differentiable splatting, Gaussian-based methods provide fast decoding while maintaining strong reconstruction fidelity.                     
+
+> Zhaojie Zeng, Yuesong Wang, and Tao Guan are with the School of Computer Science and Technology, Huazhong University of Sci-ence and Technology, Wuhan, China (e-mail: {zhaojiezeng, yuesongwang, qd gt }@hust.edu.cn). Yawei Luo is with the School of Software Technology, Zhejiang University, Hangzhou, Zhejiang (e-mail: yaweiluo@zju.edu.cn). Corresponding author: Yuesong Wang (e-mail: yuesongwang@hust.edu.cn).
+> Fig. 1. Comparison of reconstruction time and PSNR on the DIV2K validation set. The x-axis uses a broken logarithmic scale for visualization. AIR achieves better reconstruction quality with substantially lower reconstruction time than GaussianImage, Image-GS, and Instant-GI.
+
+Despite their efficient decoding, existing 2D Gaussian image reconstruction methods are still limited by their reliance on image-specific primitive construction or optimization. Gaus-sianImage [6] optimizes Gaussian primitives independently for each image, which yields high-quality results but incurs costly per-image fitting. Image-GS [7] improves the optimization process, yet still follows the same image-specific optimization paradigm. Instant-GI [9] reduces the encoding cost by learning to predict an initial Gaussian set, but this prediction mainly serves as an initialization. High-fidelity reconstruction still typically requires subsequent per-image refinement, leaving the image-specific optimization process only semi-amortized [10]. In addition, its adaptive prediction of the number of Gaussians and primitive attributes relies on substantial handcrafted priors. Although these priors can help organize the Gaussian layout, they inevitably introduce inductive bias and prevent the overall pipeline from being fully end-to-end. In this paper, we propose AIR , an Amortized Image Re-construction framework for self-supervised feed-forward 2D Gaussian splatting. Our goal is to amortize the image-specific Gaussian fitting process itself, rather than merely learning a better initialization. AIR reconstructs an image through stage-wise residual Gaussian prediction. Starting from an empty Gaussian set, each stage predicts additional Gaussian primi-tives from the current reconstruction residual and accumulates them into the existing set. The final representation is therefore formed progressively, with later stages correcting the residual errors left by earlier stages. Training this feed-forward predictor is non-trivial, since the mapping from image space to Gaussian space is highly under-constrained, and direct supervision with rendering loss  
+
+> arXiv:2605.20820v1 [cs.CV] 20 May 2026 PREPRINT 2
+
+may lead to unstable optimization. We therefore introduce a Predict–Optimize–Distill (POD) training strategy. At each stage, the predictor outputs a stage-specific Gaussian primitive set that is added to the accumulated representation. We create a detached copy of this set and refine only the copy through a few differentiable rendering optimization steps. The refined set is then used as a Gaussian-space regression target to supervise the original prediction and update the predictor parameters. After the POD training strategy stabilizes the multi-stage predictor, AIR is then finetuned with direct rendering su-pervision on the whole Gaussian set and further equipped with an image-adaptive quantizer for compact Gaussian storage without per-image post-optimization. Experiments on Kodak and DIV2K show that AIR achieves higher reconstruction quality than prior 2D Gaussian methods while reducing encoding time to 160–300 ms, without relying on per-image optimization or handcrafted priors. The main contributions are as follows:  
+
+> •
+
+We propose AIR, a self-supervised feed-forward frame-work for amortized 2D Gaussian image reconstruction, which generates Gaussian representations directly at in-ference time without image-specific iterative optimization.  
+
+> •
+
+We formulate image reconstruction as stage-wise residual Gaussian prediction with explicit stage control, progres-sively adding Gaussian primitives only to regions that have not reached the prescribed fidelity target.  
+
+> •
+
+We develop a training strategy tailored to feed-forward Gaussian prediction, where POD pretraining stabilizes Gaussian-space supervision and subsequent rendering finetuning improves the final accumulated reconstruction, while an image-adaptive quantizer enables compact storage without per-image calibration. 
+
+II. Related Work 
+
+A. Implicit Neural Image Representation 
+
+Coordinate-based implicit neural representations (INRs) model visual signals as continuous neural functions, mapping 2D image coordinates to RGB values for image representa-tion [4], [11]–[13] or 3D positions and view directions to radiance fields for novel-view synthesis [14], [15]. To better represent high-frequency details, existing methods introduce positional encoding, Fourier features, periodic activations, or spectral analysis of coordinate networks [5], [16], [17]. Other works improve fitting efficiency and signal fidelity through adaptive coordinate decomposition, multi-resolution feature grids, hash encodings, band-limited coordinate networks, or wavelet-based activations [18]–[21]. INRs have also been explored for compact signal representation and compression, often with meta-learning or sparsification to reduce per-sample fitting cost [22]–[24]. Despite their flexibility, INR-based image representations usually require image-specific optimization, and decoding an image involves dense network evaluation over pixel coordinates. AIR instead adopts an explicit 2D Gaussian representation, which reconstructs images through efficient differentiable splat-ting and further amortizes Gaussian fitting into feed-forward residual prediction. 
+
+B. Gaussian-based Image Representation 
+
+Gaussian splatting provides an explicit and efficient repre-sentation for visual reconstruction. Following the success of 3D Gaussian Splatting [25], GaussianImage [6] introduces 2D Gaussian splatting for image representation and compression, establishing a primitive-based rendering paradigm that achieves fast decoding with strong reconstruction quality. Subsequent works improve this paradigm by introducing better initialization and error-driven allocation strategies [7], [26], [27]. By using image structure or rendering distortion as guidance, these methods allocate Gaussians more effectively across different image regions. However, the allocation still follows a pre-defined number of Gaussians or a densification schedule, and the final representation is obtained through long per-image iterative optimization. Instant-GI [9] takes a further step toward adaptive image representation by predicting an initial Gaussian set with a network and dynamically adjusting the number of Gaussians according to image complexity. Nevertheless, its adaptive primitive allocation relies on PPM pseudo labels generated by a handcrafted initialization pipeline, and high-fidelity reconstruc-tion still typically requires subsequent per-image refinement. In contrast, AIR aims to amortize the Gaussian fitting process itself and predicts Gaussian representations in a self-supervised feed-forward manner. 
+
+C. Amortized Optimization and Iterative Refinement 
+
+AIR is related to amortized optimization and learned iterative refinement. Amortized optimization replaces repeated test-time optimization with a learned predictor [10], while learned iterative refinement progressively corrects an initial prediction using feedback signals [28]–[30]. In Gaussian splatting, [31], [32] follows a related idea by recurrently updating an initial 3D Gaussian representation using rendering errors as feedback. In contrast, AIR focuses on single-image 2D Gaussian reconstruc-tion and predicts residual Gaussian increments stage by stage, adding new primitives to under-reconstructed regions rather than repeatedly updating a fixed Gaussian set. AIR is also inspired by [33], which refines a prediction through short optimization and distills the optimized result back to the predictor. AIR transfers this idea to residual 2D Gaussian reconstruction: each stage predicts a new subset of Gaussian primitives, optimizes a detached copy of this subset with the rendering loss, and uses the optimized subset as a Gaussian-space regression target. 
+
+III. Method 
+
+A. Preliminaries 
+
+Following [6], we consider image reconstruction as an optimization over a set of 2D Gaussians. Let R (·) denote the differentiable renderer function. Given a Gaussian set 𝐺 , the rendered image is defined as 𝐼 𝑟 𝑒𝑛𝑑𝑒𝑟 = R ( 𝐺 ). For a target image 𝐼 𝑔𝑡 , the goal is to estimate the optimal Gaussian set 𝐺 ★
+
+by minimizing the photometric reconstruction loss: 
+
+𝐺 ★ ∈ arg min  
+
+> 𝐺
+
+L𝑟 𝑒𝑛𝑑𝑒𝑟 
+
+ 𝐼 𝑟 𝑒𝑛𝑑𝑒𝑟 , 𝐼 𝑔𝑡 
+
+ , (1) PREPRINT 3
+
+To further account for representation compactness, we seek the smallest Gaussian set that satisfies a prescribed fidelity target: 
+
+𝐺 ★ ∈ arg min  
+
+> 𝐺
+
+|𝐺 | s.t. L𝑟 𝑒𝑛𝑑𝑒𝑟 
+
+ R ( 𝐺 ), 𝐼 𝑔𝑡 
+
+ ≤ 𝜖 . (2) GaussianImage [6] reduces the 3D Gaussian primitive of 3DGS to a purely 2D representation. The 𝑛 -th primitive is parameterized by a 2D center 𝝁 𝑛 ∈ R2, a covariance matrix 
+
+𝚺 𝑛 ∈ R2×2, and an RGB color 𝒄 𝑛 ∈ R3 that absorbs opacity. To ensure positive definiteness, 𝚺 𝑛 is expressed in rotation-scale form: 
+
+𝚺 𝑛 = ( 𝑹 𝑛 𝑺 𝑛 )( 𝑹 𝑛 𝑺 𝑛 )𝑇 , (3) where 𝑹 𝑛 is a 2D rotation matrix determined by an angle 𝜃 𝑛 ,and 𝑺 𝑛 = diag (𝑠 𝑛 1 , 𝑠 𝑛 2 ) controls the Gaussian size. Since all Gaussians are defined on a common image plane, no depth ordering is required, and the color at pixel 𝑝 can be computed as a weighted aggregation: 
+
+𝑪 𝑝 =∑︁  
+
+> 𝑛 ∈ N ( 𝑝 )
+
+𝒄 𝑛 𝛼 𝑛, 𝑝 , 𝛼 𝑛, 𝑝 = exp 
+
+
+
+− 12 𝒅 𝑇 𝑛, 𝑝 𝚺 −1 
+
+> 𝑛
+
+𝒅 𝑛, 𝑝 
+
+
+
+,
+
+(4) where N ( 𝑝 ) is the set of Gaussians covering pixel 𝑝 and 𝒅 𝑛, 𝑝 
+
+is the offset from 𝝁 𝑛 to pixel 𝑝 .To accelerate GaussianImage [6], Instant-GI [9] adopts a semi-amortized [10] formulation with learned initialization: a network predicts an initial Gaussian set, after which only a few optimization steps are required to reach a comparable reconstruction, substantially shortening the encoding time. Despite this acceleration, Instant-GI still has two important limitations. First, to determine where and how many Gaussians to allocate, Instant-GI introduces a Position Probability Map (PPM) and combines it with Floyd–Steinberg dithering [34] to sample Gaussian centers according to local image com-plexity. However, this PPM-based sampling process is non-differentiable, so the network must be trained with pseudo-label supervision rather than directly from the rendering loss, which hinders fully self-supervised training on large image corpora. Second, the pipeline relies on several handcrafted priors, in-cluding quadtree-based density estimation from image gradients and Gaussian initialization through Delaunay triangulation [35] followed by ellipse fitting. Despite these priors, the predicted initialization still falls short of the target image in both SSIM and perceptual quality, and iterative refinement remains necessary to achieve competitive reconstructions. 
+
+B. Overview 
+
+To address the above limitations of Instant-GI, we propose 
+
+AIR , a fully self-supervised feed-forward framework that amortizes the iterative optimization of GaussianImage. First, we design a stage-wise residual Gaussian predictor (Sec. III-C) that progressively predicts Gaussians across stages and uses an explicit stage-control mechanism to determine where additional Gaussians are still needed. This design removes the dependence on both pseudo-label supervision and handcrafted priors in Instant-GI, replacing them with residual signals derived from the current reconstruction, thereby making large-scale self-supervised training practical. Second, considering the Gaussian parameter space is highly under-constrained and training each stage with image-space rendering loss alone is prone to diver-gence, we introduce a Predict–Optimize–Distill (POD) training strategy (Sec. III-D). The newly added Gaussians are first refined by a short-horizon optimizer, and the refined result is then distilled back into the predictor as a better-conditioned regres-sion target, stabilizing end-to-end pretraining. Finally, after the predictor has been stabilized, we further develop a finetuning-and-quantization scheme (Sec. III-E) to refine the reconstruction and directly quantize the predicted Gaussian representation. During finetuning, the costly short-horizon optimization used in POD is removed, and the model is trained with direct image-space supervision, reducing the per-iteration training cost. Meanwhile, learned quantization compresses the Gaussian representation for storage and transmission. The pipeline is illustrated in Fig. 2. 
+
+C. Stage-wise Residual Gaussian Prediction 
+
+One of the key contributions of Instant-GI is its ability to allocate Gaussians adaptively according to local image complexity, which relies on a Position Probability Map super-vised by a pseudo-label. However, generating this pseudo-label already bakes in strong priors, such as gradient-driven quadtree partitioning, and obtaining it requires running GaussianImage for many iterations. Scaling such a pipeline to larger training corpora is therefore expensive and inevitably injects additional inductive bias. To address these drawbacks, we propose a hierarchical network built on residual correction (Sec. III-C1), where each stage predicts new Gaussian primitives from the reconstruction produced by the previous stage. Together with a Stage Control module (Sec. III-C2), the network adaptively al-locates Gaussian primitives under an explicit quality constraint. This follows the constrained reconstruction objective in Eq. 2: using as few Gaussians as possible while satisfying a prescribed fidelity target. 
+
+1) Residual Design: In the rendering formulation of Eq. 4, color parameters are allowed to take signed values and no clamping is applied. Each pixel color is therefore computed as an order-independent sum of the contributions from all covering Gaussians. This makes the renderer R (·) additive over disjoint Gaussian sets. For any two disjoint sets 𝐺 𝑎 and 𝐺 𝑏 , we have 
+
+R ( 𝐺 𝑎 ∪ 𝐺 𝑏 ) = R ( 𝐺 𝑎 ) + R ( 𝐺 𝑏 ). (5) This additivity allows reconstruction to be carried out in a stage-wise, incremental fashion. Let 𝐺 𝑖 be the accumulated Gaussian set after stage 𝑖 , and let Δ𝐺 𝑖 denote the Gaussians newly introduced at this stage. The accumulated set is updated as 
+
+𝐺 𝑖 = 𝐺 𝑖 −1 ∪ Δ𝐺 𝑖 . (6) The rendered image at stage 𝑖 then decomposes as 
+
+𝐼 𝑖 = R ( 𝐺 𝑖 ) = R ( 𝐺 𝑖 −1) + R ( Δ𝐺 𝑖 ) = 𝐼 𝑖 −1 + R ( Δ𝐺 𝑖 ). (7) We exploit this decomposition to formulate reconstruction as a sequence of residual corrections. Instead of regressing the full Gaussian set at once, each stage predicts the Gaussian PREPRINT 4Stage 
+
+> Control
+> Mask
+> 𝑴 𝒊
+
+Predict 
+
+Optimize  
+
+> Differentiable
+> Tile Rasterizer 𝓡
+
+Distill 
+
+𝓛 𝒈𝒂𝒖𝒔𝒔𝒊𝒂𝒏 (∆𝑮 𝒊 , ෢𝚫 𝑮 𝒊 )
+
+𝓡  ෣
+
+𝚫 𝑮 𝒊   
+
+> 𝒕
+> Recurrent 𝐾 𝑖 times
+
+𝓛 𝒓𝒆𝒏𝒅𝒆𝒓  𝑬 𝒊 −𝟏 
+
+> Clone
+
+𝑮 𝒊 
+
+𝑰 𝒈𝒕 
+
+> Final  Get
+
+𝓛 𝒓𝒆𝒏𝒅𝒆𝒓 (𝑰 𝒊 , 𝑰 𝒈𝒕 )
+
+> Flatten
+
+Finetune 
+
+Branch 
+
+𝑮 𝒊 −1 = ራ𝒌 =𝟏 
+
+> 𝒊 −𝟏
+
+∆G𝒌 
+
+> Inherent
+> Union
+
+∆𝑮 𝒊 
+
+෣
+
+𝚫 𝑮 𝒊 
+
+> 𝒕
+
+# AIR
+
+𝑬 𝒊 −𝟏 
+
+∆𝑮 𝒊  ෢𝚫 𝑮 𝒊 
+
+෣
+
+𝚫 𝑮 𝒊  
+
+> 𝒕 +𝟏
+
+= ෣
+
+𝚫 𝑮 𝒊  
+
+> 𝒕
+
+− 𝜼 𝛁 𝓛 𝒓𝒆𝒏𝒅𝒆𝒓 
+
+> Gaussian Head
+
+𝚯 𝒊 
+
+𝑰 𝒊 −𝟏 
+
+# AIR 
+
+> 𝑰 𝒊
+> Differentiable
+> Tile Rasterizer 𝓡
+> Candidate
+> Gaussians
+
+෪∆𝑮 𝒊  
+
+> Stage ii
+
+# AIR
+
+# AIR
+
+𝑰 𝒈𝒕  
+
+> -
+> Residual
+
+# AIR AIR-   
+
+> Residual
+> -
+> Residual
+> -
+> Residual
+> 𝑰 1𝑰 2𝑰 3𝑰 4
+> Final Render
+> Empty Image
+
+𝑮 1 𝑮 2 𝑮 3 𝑮 4∅  
+
+> 𝑰 0=0
+> Stage  11
+> Stage  22
+> Stage  33
+> Stage  44
+
+Fig. 2. Overview of AIR. AIR amortizes the iterative optimization of GaussianImage through self-supervised stage-wise residual prediction. At each stage, the network predicts Gaussian increments from the current reconstruction residual, while an explicit stage-control mechanism activates additional primitives only in under-reconstructed regions. During POD pretraining, a short-horizon optimizer refines a detached copy of each predicted increments and distills the refined increments back as Gaussian-space supervision. After POD stabilizes the predictor, cross-stage rendering finetuning supervises the accumulated reconstructions directly, promoting cross-stage coordination for the final output. 
+
+increment required to explain the remaining error. Given the current reconstruction 𝐼 𝑖 −1, we define the residual as 
+
+𝐸 𝑖 −1 = 𝐼 𝑔𝑡 − 𝐼 𝑖 −1. (8) We initialize the process with 𝐺 0 = ∅ and 
+
+𝐼 0 = R ( 𝐺 0) = 0, (9) which gives 𝐸 0 = 𝐼 𝑔𝑡 . Thus, the first stage directly models the target image, while later stages only model the residual content that has not yet been explained. The network at stage 𝑖 takes this residual as input and predicts additional Gaussian primitives: 
+
+Δ𝐺 𝑖 = 𝑓 𝜃 𝑖 (𝐸 𝑖 −1). (10) The detailed network architecture 𝑓 𝜃 𝑖 is illustrated in Fig. 3, with implementation details provided in Sec. IV-A and the supplementary material. The newly predicted increments are expected to render the residual component itself, leading to the natural residual rendering objective 
+
+L (𝑖 )
+
+𝑟 𝑒𝑠 = L𝑟 𝑒𝑛𝑑𝑒𝑟 (R ( Δ𝐺 𝑖 ), 𝐸 𝑖 −1) . (11) Compared with predicting all Gaussians at once, this formu-lation decomposes the reconstruction problem along the error Gaussian Head  𝑓 𝜃 𝑖 
+
+DINOv3 
+
+Encoder 
+
+Conv 
+
+Stack 
+
+Patch 
+
+Embedding 
+
+Patch Size 
+
+Candidate Gaussians 
+
+෪∆𝑮 𝒊 
+
+[CLS] Token 
+
+Fig. 3. Network architecture for stage-wise residual Gaussian prediction. 
+
+signal itself, so that each 𝑓 𝜃 𝑖 only needs to model the remaining error rather than the full image content. By assigning each stage a smaller and more focused residual target, the formulation reduces the learning burden of individual predictors and makes progressive Gaussian reconstruction easier to optimize. 
+
+2) Stage Control: The residual formulation above provides a dense spatial signal that indicates where the current recon-struction remains insufficient, making it a natural basis for stage-wise primitive allocation. Rather than relying on the non-differentiable PPM pseudo-label used by Instant-GI for Gaussian density allocation, we introduce an explicit quality-constrained Stage Control mechanism that activates new Gaussians accord-ing to the reconstruction quality of each spatial region. PREPRINT 5
+
+At each stage, new Gaussians are introduced only in regions whose reconstruction quality has not yet reached a prescribed fidelity target. This fidelity-guided allocation serves as a greedy approximation to the constrained reconstruction objective in Eq. 2: by skipping primitive allocation in regions that already satisfy the quality target, the mechanism avoids inter-stage redundancy and promotes a more compact representation at the global level. This design is related to content-adaptive re-source allocation in image compression and visual recognition, where coding bits [36], [37] or computational effort [38] are spatially distributed according to local content characteristics. Rather than adapting coding or computational resources, AIR adapts the representation itself, activating additional Gaussian primitives only where the current reconstruction still violates the prescribed fidelity target. Concretely, given the reconstruction 𝐼 𝑖 −1 from the previous stage, we compute both a patch-wise PSNR map and a local SSIM map: 
+
+Q𝑝𝑠𝑛𝑟 𝑖 −1 = Q𝑝𝑠𝑛𝑟 (𝐼 𝑔𝑡 , 𝐼 𝑖 −1), Q𝑠𝑠𝑖𝑚 𝑖 −1 = Q𝑠𝑠𝑖𝑚 (𝐼 𝑔𝑡 , 𝐼 𝑖 −1).
+
+(12) We use PSNR and SSIM as complementary quality measures: PSNR captures patch-wise reconstruction fidelity, while SSIM captures local structural similarity that is more aligned with perceptual image quality [39]. Based on these quality maps, we define the activation mask as 
+
+M𝑖 (𝑢 ) = IQ𝑝𝑠𝑛𝑟 𝑖 −1 (𝑢 ) < 𝜏 𝑝𝑠𝑛𝑟 ∨ Q𝑠𝑠𝑖𝑚 𝑖 −1 (𝑢 ) < 𝜏 𝑠𝑠𝑖𝑚 
+
+ , (13) where 𝑢 denotes a spatial location. Thus, M𝑖 selects spatial regions that fail to meet the prescribed fidelity target, restricting new Gaussian allocation to under-reconstructed areas. To apply this allocation policy, we distinguish the dense Gaussian prediction from the effective activated subset. Since each spatial token produces one Gaussian, let gΔ𝐺 𝑖 denote the dense candidate Gaussian set predicted by stage 𝑖 :
+
+gΔ𝐺 𝑖 = 𝑓 𝜃 𝑖 (𝐸 𝑖 −1). (14) The effective current-stage Gaussian subset is obtained by applying the activation mask: 
+
+Δ𝐺 𝑖 = M𝑖 ⊙ gΔ𝐺 𝑖 , (15) where ⊙ denotes patch-wise masking. As illustrated in Fig. 2, this mechanism activates later-stage Gaussians only at under-reconstructed spatial tokens. In practice, we set 𝜏 𝑝𝑠𝑛𝑟 = 35 dB and 𝜏 𝑠𝑠𝑖𝑚 = 0.95 to define a high-fidelity operating regime. Since new Gaussians are activated only where the quality scores fall below these thresholds, increasing the thresholds imposes a stricter fidelity target and activates more primitives, while decreasing them yields a more compact representation. 
+
+D. Predict–Optimize–Distill Training 
+
+The stage-wise residual formulation in Sec. III-C decomposes reconstruction into incremental corrections, yet directly training each stage with the residual rendering objective in Eq. 11 remains unstable. The difficulty arises because the Gaussian parameterization is highly under-constrained with respect to 12 17 21 26 31 35            
+
+> 10k 20k 30k 40k 50k 60k 70k 80k 90k 100k 110k 120k iteration Valid PSNR
+> POD w/o POD
+> Fig. 4. Comparison of log-scale training curves with and without POD. Direct training with image-space rendering loss is highly unstable and can eventually collapse, while POD yields stable optimization.
+
+image-space supervision. As shown in Eq. 4, the per-pixel color is jointly determined by the center, covariance, and color of each primitive, and these parameters are inherently coupled: changes in spatial extent can be compensated by color magnitude, and shifts in position can be offset by adjusting scale or orientation. The inverse mapping from an image-space residual to Gaussian parameters is therefore far from unique. In the multi-stage setting, this ambiguity is further amplified because the target of stage 𝑖 depends on the reconstruction accumulated by all previous stages. As shown in Fig. 4, directly learning Δ𝐺 𝑖 from residual rendering supervision leads to highly unstable optimization and can eventually diverge or collapse to degenerate solutions. Inspired by [33], we introduce a Predict–Optimize–Distill 
+
+(POD) training strategy. Instead of relying solely on the residual rendering loss to supervise Gaussian prediction, POD starts from the predicted increments Δ𝐺 𝑖 = 𝑓 𝜃 𝑖 (𝐸 𝑖 −1), improves it with a few isolated optimization steps, and then distills the refined result back into the predictor. In this way, the predictor learns to approximate the result of local iterative Gaussian refinement in a single forward pass, which amortizes the optimization process into the feed-forward network. 
+
+a) Predict.: At stage 𝑖 , the residual predictor produces additional Gaussian s from 𝐸 𝑖 −1, and Stage Control selects the effective subset Δ𝐺 𝑖 as defined in Secs. III-C1 and III-C2. This predicted increments serves as the initialization for the subsequent POD refinement. 
+
+b) Optimize.: We refine the predicted increments with a few isolated optimization steps. Starting from a detached trainable copy, 
+
+cΔ𝐺 (0) 
+
+> 𝑖
+
+= copy (Δ𝐺 𝑖 ), (16) The copied increments is then updated for 𝐾 𝑖 steps: 
+
+cΔ𝐺 (𝑡 +1) 
+
+> 𝑖
+
+= cΔ𝐺 (𝑡 ) 
+
+> 𝑖
+
+− 𝜂 ∇dΔ𝐺 (𝑡 )
+
+> 𝑖
+
+L (𝑖 )
+
+> 𝑟 𝑒𝑛𝑑𝑒𝑟
+
+
+
+R
+
+ cΔ𝐺 (𝑡 )
+
+> 𝑖
+
+
+
+, 𝐸 𝑖 −1
+
+
+
+, (17) where 𝑡 = 0, . . . , 𝐾 𝑖 − 1, 𝜂 is the learning rate, and L (𝑖 )
+
+> 𝑟 𝑒𝑛𝑑𝑒𝑟
+
+denotes the residual rendering objective used for local re-finement. 1 Further implementation details are provided in the                   
+
+> 1In practice, the SSIM component of L𝑟𝑒𝑛𝑑𝑒𝑟 is evaluated on the accu-mulated rendering R ( 𝐺 𝑖 −1∪dΔ𝐺 (𝑡 )
+> 𝑖 )against 𝐼 𝑔𝑡 , since the residual 𝐸 𝑖 −1may contain negative values. Previous-stage Gaussians are kept fixed so that gradients flow only to dΔ𝐺 (𝑡 )
+> 𝑖 .PREPRINT 6
+
+supplementary material. After 𝐾 𝑖 steps, we obtain the refined increments cΔ𝐺 𝑖 = cΔ𝐺 (𝐾 𝑖 ) 
+
+> 𝑖
+
+. (18) This refined increments are then detached and used as the final regression target for distillation. 
+
+c) Distill.: We use the refined result cΔ𝐺 𝑖 as a fixed target to supervise the original prediction Δ𝐺 𝑖 with a Gaussian-space regression loss: 
+
+L (𝑖 ) 
+
+> 𝑔𝑎𝑢𝑠𝑠𝑖𝑎𝑛
+
+= L𝑔𝑎𝑢𝑠𝑠𝑖𝑎𝑛 
+
+
+
+Δ𝐺 𝑖 , cΔ𝐺 𝑖 
+
+
+
+. (19) Because cΔ𝐺 𝑖 is obtained by locally refining the current pre-diction, it provides a better-aligned target than image-space rendering supervision alone. This reduces the reliance on unstable image-space gradients and leads to more stable stage-wise training in practice, as shown in Fig. 4. The overall POD pretraining objective is 
+
+L𝑃𝑂𝐷 =
+
+> 𝑆
+
+∑︁ 
+
+> 𝑖 =1
+
+𝜆 𝑖 L (𝑖 )
+
+> 𝑔𝑎𝑢𝑠𝑠𝑖𝑎𝑛
+
+, (20) where 𝑆 is the number of stages and 𝜆 𝑖 balances the contribution of each stage. POD can be viewed as a distillation-based amortized opti-mization procedure [10]. As discussed above, residual rendering supervision alone is under-constrained, and its image-space gradients do not always provide a stable or consistent direction in Gaussian parameter space. Rather than forcing the predictor to resolve this ambiguity directly, POD mediates the image-space objective through a short optimization followed by distillation. Starting from the current prediction, the optimizer arrives at a locally refined solution within the same parameter neighborhood. This refinement preserves one-to-one primitive correspondence with the original prediction, ensuring that the Gaussian-space regression loss used for distillation remains well-defined. Moreover, the refined solution has been explicitly validated by the residual rendering objective, making it a more reliable on-the-fly supervision target than raw image-space gradients. By imitating this target, the predictor gradually absorbs the effect of iterative Gaussian refinement into a single feed-forward pass. 
+
+E. Finetune and Quantization 1) Finetune Training: POD training provides a reliable initialization for the stage-wise predictor by distilling locally refined Gaussian targets. To further improve reconstruction quality without the cost of repeated local refinement, we switch to a lightweight finetuning phase. During finetuning, the short optimization used in POD is removed, and the entire multi-stage predictor is optimized directly with image-space rendering supervision. This reduces the per-iteration training cost and enables joint optimization across stages for the final reconstruction. The stage-wise prediction process remains unchanged during finetuning. At stage 𝑖 , the network predicts the Gaussian increments Δ𝐺 𝑖 from the residual 𝐸 𝑖 −1 with the Stage Control mechanism in Sec. III-C2, producing the accumulated set 
+
+𝐺 𝑖 = 𝐺 𝑖 −1 ∪ Δ𝐺 𝑖 and its rendering 𝐼 𝑖 = R ( 𝐺 𝑖 ).Finetuning removes the short local optimization and the corresponding Gaussian-space distillation targets used in POD. Instead, each accumulated reconstruction is directly supervised against the ground-truth image: 
+
+L (𝑖 ) 
+
+> ft
+
+= L𝑟 𝑒𝑛𝑑𝑒𝑟 (𝐼 𝑖 , 𝐼 𝑔𝑡 ). (21) The overall finetuning objective is 
+
+Lft =
+
+> 𝑆
+
+∑︁ 
+
+> 𝑖 =1
+
+𝜆 𝑖 L (𝑖 ) 
+
+> ft
+
+. (22) Unlike POD pretraining, where each stage is supervised by its own refined Gaussian target, finetuning applies image-space supervision to every intermediate accumulated reconstruction 
+
+𝐼 𝑖 . This design serves two purposes: first, because the rendering loss at stage 𝑖 involves all preceding increments, gradients can propagate back to earlier stages, enabling joint optimization rather than requiring later stages to compensate for upstream errors alone; second, supervising every prefix 𝐺 𝑖 preserves the progressive nature of AIR, ensuring that each partial reconstruction remains valid on its own while later stages further reduce the residual error. 
+
+2) Quantization: AIR also supports compact storage of the predicted Gaussian representation. Following Gaussian-Image [6], we apply uniform quantization to the Gaussian parameters. The detailed bit allocation and decoding rules are provided in the supplementary material. A key challenge in direct quantization is how to set an appro-priate quantization range for each image. Existing optimization-based pipelines can derive this range from image-specific iterative fitting. However, this strategy is not suitable for our feed-forward setting, since it would reintroduce per-image post-optimization after prediction. To avoid this, we combine a global base quantizer with image-adaptive offsets predicted from the ViT [40] [CLS] token 𝑧 cls .For each Gaussian parameter, we maintain a learnable base scale ¯𝛼 and shift ¯ 𝛽 , and predict bounded image-dependent offsets: 
+
+[Δ𝛼, Δ𝛽 ] = 𝑔 (𝑧 cls ). (23) The effective quantization range is then parameterized by 
+
+𝛼 = ¯𝛼 + Δ𝛼, 𝛽 = ¯𝛽 + Δ𝛽, (24) allowing the quantizer to adapt to each image without iterative range calibration. During training, we adopt the straight-through estimator (STE) [41] for gradients through the non-differentiable rounding operator. In the finetuning phase, quantization is enabled only on the final-stage Gaussian set 𝐺 𝑆 . We keep the original stage-wise reconstruction supervision and add a quantization-aware rendering loss on the quantized output: 
+
+L𝑞 = L𝑟 𝑒𝑛𝑑𝑒𝑟 
+
+ R ( 𝑄 (𝐺 𝑆 )) , 𝐼 𝑔𝑡 
+
+ + 𝛾 L𝑒𝑟𝑟 , (25) where 𝑄 (·) denotes the quantizer and L𝑒𝑟𝑟 penalizes the quan-tization error. This trains both the predictor and the quantizer to account for the distortion introduced by quantization. At inference, the entire pipeline remains feed-forward, while the quantization range is adjusted adaptively for each image. PREPRINT 7
+
+IV. Experiments 
+
+A. Experimental Setup 
+
+Datasets and Evaluation Metrics. We first pretrain AIR on ImageNet [42] and then finetune it on DIV2K [43]. ImageNet provides large-scale natural image diversity for learning a general feed-forward mapping from image residuals to Gaussian primitives, while DIV2K provides high-resolution images for adapting the model to fine-grained reconstruction. We evaluate reconstruction performance on the DIV2K validation set and the Kodak dataset. We report standard full-reference image quality metrics, including PSNR and MS-SSIM [44], and use LPIPS [45] with the VGG [46] backbone to measure perceptual distortion. To evaluate representation compactness and efficiency, we also report the number of activated Gaussian primitives and the reconstruction time. 
+
+Implementation. All stages adopt the same predictor archi-tecture. Given the residual image 𝐸 𝑖 −1, a DINOv3 ViT-Base encoder [47] extracts multi-level features from both shallow and deep transformer layers. Specifically, we take intermediate features from the 5th and 11th transformer layers and project the encoder output to a 1024-dimensional representation. A lightweight convolutional head, inspired by MoGe [48], [49], fuses these features into a 32-channel spatial feature map. We then apply a patch embedding module with patch size 
+
+𝑝 . It partitions the spatial feature map into local patches and maps each patch to a 64-dimensional token. Each token predicts a Gaussian candidate, forming the dense candidate set 
+
+gΔ𝐺 𝑖 . The Stage Control mask is then applied to obtain the effective increments Δ𝐺 𝑖 . Therefore, the patch size 𝑝 directly controls the spatial granularity and the maximum number of candidate Gaussians at each stage. Smaller patches provide denser prediction sites, while larger patches lead to a more compact representation. We evaluate several settings, including patch sizes of 5, 6, 7, and 14. For image-space rendering supervision, we follow Instant-GI and use a weighted combination of pixel-wise distortion and structural similarity: 
+
+L𝑟 𝑒𝑛𝑑𝑒𝑟 = 0.7 L1 + 0.3 (1 − SSIM ). (26) We set the stage weights 𝜆 𝑖 uniformly across stages. In POD pretraining, the Gaussian-space distillation loss is multiplied by a coefficient of 100 to match the gradient scale of Gaus-sian parameter regression. During finetuning, the image-space reconstruction loss is used with a coefficient of 1. Further implementation details are provided in the supplementary material. 
+
+Training Details. The encoder is initialized with pretrained DINOv3 weights. We first train the patch-size-7 model on ImageNet with standard image augmentations. The model is optimized using AdamW [50] with a warmup schedule followed by StepLR decay. We begin with POD pretraining, which is used to stabi-lize multi-stage residual Gaussian prediction. This phase is conducted for 120k iterations with a batch size of 20. The prediction stages are progressively activated at milestones 
+
+[0, 20 𝑘, 40 𝑘, 60 𝑘 ]. When a new stage is activated, its parameters                                                                                                     
+
+> TABLE I
+> Quantitative comparison on Kodak with different numbers of Gaussians.
+> Method #Gaussians PSNR ↑MS-SSIM ↑LPIPS ↓Time (ms) ↓
+> GaussianImage 28k 26.98 0.914 0.401 1471 37k 29.20 0.947 0.317 1463 52k 30.90 0.965 0.253 1499 Image-GS 28k 30.79 0.974 0.221 2494 37k 31.29 0.978 0.201 2520 52k 31.90 0.982 0.179 2749 Instant-GI 25k 28.52 0.948 0.315 191 43k 29.67 0.957 0.273 261
+> Ours
+> 28k 30.93 0.978 0.209 157 37k 31.47 0.982 0.184 159 52k 32.17 0.985 0.158 162
+> TABLE II
+> Quantitative comparison on DIV2K with different numbers of Gaussians.
+> Method #Gaussians PSNR ↑MS-SSIM ↑LPIPS ↓Time (ms) ↓
+> GaussianImage 46k 26.90 0.908 0.373 1879 61k 28.98 0.939 0.310 1955 86k 30.77 0.958 0.258 2047 ImageGS 46k 30.31 0.981 0.187 3144 61k 30.80 0.984 0.169 3254 86k 31.36 0.986 0.149 3323 Instant-GI 45k 28.78 0.964 0.263 343 77k 29.66 0.970 0.229 503
+> Ours
+> 46k 30.76 0.984 0.193 292 61k 31.30 0.987 0.171 294 86k 32.02 0.989 0.145 300
+
+are initialized by copying those from the previous stage, providing a stable starting point for predicting the next residual Gaussian increments. After POD pretraining, we conduct finetuning and quantiza-tion training for 300k iterations in total, with a batch size of 16. The first 100k iterations perform finetuning without quan-tization, and the following 200k iterations enable quantization only on the final accumulated Gaussian set 𝐺 𝑆 as described in Sec. III-E2. Starting from the patch-size-7 checkpoint, we adapt the model to other patch-size settings, including 5, 6, and 14. These patch-size-specific finetuning runs are conducted for 100k iterations with a batch size of 20. This adaptation changes the prediction granularity while reusing the pretrained representation, avoiding retraining the full model from scratch. To better handle high-resolution images, we further finetune the model on the DIV2K training set. More training details are provided in the supplementary material. 
+
+B. Main Results 
+
+Since AIR targets the explicit 2D Gaussian rendering paradigm, we compare with representative methods in this category, including GaussianImage [6], Image-GS [7], and Instant-GI [9]. For GaussianImage and Image-GS, we use the same number of Gaussians as AIR. Since Instant-GI adaptively determines its primitive allocation, we report its original number of Gaussians without forcing it to match ours. GaussianImage and Image-GS are per-image optimization methods that can yield higher reconstruction quality when PREPRINT 8GT GaussianImage Image-GS Instant-GI AIR 
+
+> kodim03
+> PSNR/MS-SSIM/LPIPS/TIME
+> #Gaussians
+> 30.68/0.943/0.426/1529ms
+> G=36528
+> 35.17/0.931/0.176/2560ms
+> G=36528
+> 31.55/0.959/0.334/176ms
+> G=23300
+> 36.09/0.989/0.184/173ms
+> G=36528
+> 0898x2
+> PSNR/MS-SSIM/LPIPS/TIME
+> #Gaussians
+> 27.01/0.847/0.382/1825ms
+> G=51851
+> 34.65/0.948/0.249/3630ms
+> G=51851
+> 31.35/0.965/0.358/319ms
+> G=43548
+> 34.75/0.991/0.208/316ms
+> G=51851
+> 0810x2
+> PSNR/MS-SSIM/LPIPS/TIME
+> #Gaussians
+> 32.81/0.986/0.230/1962ms
+> G=82650
+> 29.80/0.896/0.237/3650ms
+> G=82650
+> 29.30/0.968/0.267/565ms
+> G=84778
+> 30.70/0.988/0.182/372ms
+> G=82650
+
+Fig. 5. Qualitative comparison on Kodak and DIV2K. AIR preserves structural details and perceptual quality with a single feed-forward prediction. 
+
+given sufficient optimization iterations, as reported in their original papers. However, such extended optimization incurs substantial encoding time, making it impractical for time-sensitive applications. To provide a fair comparison under realistic time constraints, we limit GaussianImage to 800 iterations on Kodak and 1000 iterations on DIV2K, and Image-GS to 600 iterations on both datasets with an additional densification step after 300 iterations. For Instant-GI, we report the quality of its direct network initialization without subsequent refinement. We emphasize that this evaluation is not intended to undermine the capability of these methods, but rather to assess the reconstruction quality each approach can achieve under practical encoding-time constraints. Tables I and II report the quantitative results. Under this setting, GaussianImage and Image-GS demon-strate that 2D Gaussian primitives can effectively represent images, yet their quality remains bounded by the limited number of optimization iterations. AIR amortizes the fitting process into a feed-forward predictor and reconstructs images within 160–300 ms, eliminating the need for iterative per-image optimization entirely. Under the same number of Gaussians, AIR reaches comparable or better reconstruction quality than these optimization-based baselines. The most direct comparison is with Instant-GI, since both methods use network prediction to avoid long per-image optimization. Instant-GI provides fast initialization with an adaptive number of Gaussians, but it still relies on handcrafted geometric priors to construct the initial Gaussians. These priors help organize the primitives, but may also limit direct reconstruction quality and make further refinement necessary. In contrast, AIR uses stage-wise residual prediction and Stage Control to adaptively activate Gaussians in under-reconstructed regions without prior-driven geometric construction. As shown 
+
+Fig. 6. Comparison of Gaussian density maps between AIR and Instant-GI. AIR produces adaptive, structure-aware Gaussian allocation without PPM pseudo labels. The bottom row shows density profiles along the dashed horizontal line. 
+
+in Tables I and II, AIR consistently outperforms Instant-GI by a significant margin across all metrics on both datasets, demonstrating stronger pixel-level accuracy as well as better structural and perceptual fidelity. Fig. 6 further compares the Gaussian density distributions of the two methods. Instant-GI achieves adaptive primitive allocation through an explicit position probability map (PPM) followed by dithering. Although AIR does not use PPM pseudo labels, it still produces a similarly structure-aware density dis-tribution: more Gaussians are allocated to complex foreground PREPRINT 9
+
+TABLE III 
+
+Comparison between one-shot and progressive stage-wise prediction.                                       
+
+> Prediction Mode Setting PSNR ↑MS-SSIM ↑LPIPS ↓#Gaussians Time (ms) ↓
+> One-shot (𝑝𝑠 =7) stage=1 26.58 0.950 0.336 14528 74 Stage-wise (𝑝𝑠 =14) stage=1 21.91 0.823 0.512 3658 73 stage=2 23.91 0.897 0.440 6808 146 stage=3 25.25 0.926 0.385 9819 219 stage=4 26.54 0.947 0.348 12690 293
+
+regions, while fewer are assigned to smooth background areas. The density profiles along the sampled scanline show that AIR responds to image structure in a manner comparable to Instant-GI. This suggests that adaptive Gaussian allocation can be learned directly from reconstruction supervision, without relying on PPM pseudo labels that require lengthy pre-training to construct and inevitably encode the inductive bias of their underlying density estimator. The qualitative results in Fig. 5 are consistent with the quantitative trends in Tab. I and Tab. II. Optimization-based baselines may still show under-optimized details under limited iterations, while Instant-GI tends to miss fine structures in challenging regions. AIR produces more faithful feed-forward reconstructions, achieving a favorable balance among recon-struction quality, Gaussian compactness, and runtime efficiency. 
+
+C. Ablation Study 
+
+We conduct ablation studies to evaluate the effect of the proposed design and training strategy. 
+
+1) One-shot vs. Progressive Stage-wise Prediction: We compare the proposed progressive stage-wise predictor with a one-shot baseline on DIV2K under a comparable number of Gaussians. The one-shot baseline uses a patch size of 7 and predicts the Gaussian representation in a single stage. We report its POD-pretrained checkpoint, as it provides a stronger standalone Stage-1 result than the finetuned checkpoint. The stage-wise model uses a patch size of 14 and progressively accumulates Gaussian primitives, reaching a similar number of Gaussians at the final stage. As shown in Tab. III, the stage-wise predictor provides a controllable trade-off between reconstruction quality and representation compactness. As more stages are activated, the reconstruction quality improves consistently, with PSNR increasing from 21.91 dB to 26.54 dB from Stage-1 to Stage-4. Meanwhile, the number of Gaussians increases progressively rather than being allocated all at once. This trend indicates that later stages effectively compensate for the residual errors left by previous stages. Compared with the one-shot baseline, the final stage-wise result achieves comparable reconstruction quality, with 26.54 dB PSNR versus 26.58 dB, while using fewer Gaussians, 12690 versus 14528. Although the residual stage-wise design does not clearly improve the final reconstruction quality over one-shot prediction, it enables explicit control over the number of activated Gaussians. This allows AIR to adjust the representation size progressively according to the desired quality–compactness trade-off. One  -Shot            
+
+> 35.19 / 0.982 / 0.234
+> G=14162
+> Stage 1
+> 28.31 / 0.944 / 0.358
+> G=3577
+> Stage 2
+> 30.38 / 0.967 / 0.291
+> G=5594
+> Stage 3
+> 32.67 / 0.978 / 0.248
+> G=7194
+> Stage 4
+> 34.85 / 0.983 / 0.229
+> G=8346
+> MSE Maps Before Every Stage GT Image
+> Mean MSE : 0.6255 Mean MSE : 0.0015 Mean MSE :0.0009 Mean MSE :0.0005
+
+Fig. 7. Visualization of progressive stage-wise prediction. The top row shows the ground-truth image and the pre-stage MSE maps before each stage. The bottom row compares the one-shot reconstruction with intermediate reconstructions produced by different stages. TABLE IV 
+
+Ablation of stage-control activation criteria.                                          
+
+> PSNR Target SSIM Target PSNR ↑MS-SSIM ↑LPIPS ↓#Gaussians Utilization ↓
+> ––30.89 0.985 0.169 58114 1.00 35 dB –30.60 0.982 0.214 40163 0.69 –0.95 30.29 0.983 0.199 43750 0.75
+> 35 dB 0.95 30.76 0.984 0.193 46001 0.79 40 dB 0.98 30.87 0.985 0.177 52318 0.90 0.55 0.65 0.75 0.85 0.95 1.00 0.16 0.18 0.20 0.22 0.24
+
+Utilization LPIPS 
+
+> 35 dB / 0.95
+> Quadratic fit Ablation results
+
+Fig. 8. Gaussian utilization and LPIPS under different PSNR/SSIM stage-control thresholds. 
+
+Fig. 7 visualizes the progressive behavior of the proposed stage-wise predictor. As more stages are activated, the recon-struction is gradually refined, and the pre-stage MSE maps show that residual errors decrease consistently. The remaining errors become increasingly concentrated around high-frequency structures and object boundaries, indicating that later stages mainly focus on under-reconstructed regions. Although the final stagewise result does not clearly outperform the one-shot baseline in this example, it provides a controllable, progressive reconstruction process by gradually increasing the number of activated Gaussians, achieving a similar visual performance with fewer Gaussians. 
+
+2) Stage Control Strategy: We further ablate the proposed stage control strategy. All variants are evaluated under the same training and inference setting, and differ only in the activation criteria used for stage control. Here, “-” denotes that no filtering mask is applied. The utilization ratio measures the proportion of activated Gaussians among all candidate Gaussians, i.e., 4 ×PREPRINT 10          
+
+> TABLE V
+> Ablation of POD for training stability.
+> Training Strategy Best PSNR ↑Final PSNR ↑Collapse Iteration Direct Supervision 32.13 16.22 80k
+> POD 33.44 33.41 N/A
+
+𝐻 /𝑝 × 𝑊 /𝑝 .As shown in Tab. IV, the no-mask setting gives the best reconstruction quality by activating all candidate Gaussians, but also uses the most primitives. In contrast, stage control follows a quality-constrained allocation principle: it activates new Gaussians only where the current reconstruction fails to meet the prescribed fidelity targets, thereby reducing unnecessary primitives under a controlled distortion level. The PSNR and SSIM targets provide complementary cues for stage control. The PSNR target detects regions with large local reconstruction errors, while the SSIM target captures structural distortions that are not fully reflected by pixel-wise error. Using either target alone therefore gives an incomplete quality criterion. Combining them allows the activation mask to cover both pixel-level errors and structural degradation, which explains why the joint setting improves over the MSE-only and SSIM-only variants in Tab. IV. Fig. 8 further explains our choice of thresholds. As the thresholds become stricter, more Gaussians are activated and better LPIPS is achieved. However, the perceptual gain becomes smaller when utilization continues to increase. The operating point of 35 dB PSNR and 0.95 SSIM keeps the utilization at a moderate level while maintaining competitive perceptual quality, making it a reasonable default choice for stage control. 
+
+3) Training Strategy: To validate the effectiveness of the proposed training strategy, we analyze POD pretraining and the subsequent finetuning phase. POD pretraining first stabilizes multi-stage residual Gaussian prediction and prevents training collapse. The finetuning phase then builds on this stable ini-tialization and further improves reconstruction quality through cross-stage coordination under image-space supervision. As shown in Table V and Fig. 4, direct supervision with the rendering loss is not completely ineffective. Direct Supervision reaches a best PSNR of 32.13 dB during training, indicating that the mapping from residual images to Gaussian parameters can be partially learned in the short term. However, its final PSNR drops sharply to 16.22 dB, and the training collapses at iteration 80k. This result suggests that direct supervision can temporarily find a reasonable solution, but the training process is unstable. This instability is consistent with the analysis in Sec. III-D. Direct image-space supervision faces a non-unique inverse mapping from residual images to Gaussian parameters, and this ambiguity is amplified across stages through error accumulation and parameter compensation. In contrast, Full POD reaches a higher best PSNR of 33.44 dB and remains stable, with a final PSNR of 33.41 dB and no collapse. This indicates that POD mainly improves training stability rather than only increasing the peak reconstruction quality. By distilling the short-horizon optimized Gaussian increments, POD provides a more reliable regression target for Stage 1                     
+
+> 28.09% / 22.10% / 14.47%
+> Stage 4
+> 43.55% / 13.89% / 11.08%
+> POD
+> Stage 1
+> 55.18% / 12.94% / 8.43%
+> Stage 4
+> 39.20% / 20.94% / 10.00%
+> POD + Finetune
+> Stage 1
+> 56.42% / 12.96% / 9.32%
+> Stage 4
+> 39.02% / 17.58% / 10.85%
+> w/o POD Best
+> Stage 1
+> 98.35% / 1.56% / 0.07%
+> Stage 4
+> 71.13% / 14.99% / 7.38%
+> w/o POD C ollapse
+> Fig. 9. PCA visualization of stage features under different training strategies. For each feature map, the first three principal components are visualized as RGB channels, and the values indicate their explained variance ratios. TABLE VI
+> Ablation of the finetuning phase.
+> Training Strategy After Stage 1 ↑After Stage 2 ↑After Stage 3 ↑After Stage 4 ↑
+> Only POD 26.58 28.29 29.07 29.48
+> POD+finetune 25.58 27.89 29.52 30.76
+> Δ-1.00 -0.40 +0.45 +1.28
+
+the predictor and reduces the amortization gap between feed-forward prediction and iterative fitting. Fig. 9 further supports the stabilizing effect of POD at the feature level. In the w/o POD Collapse case, the Stage-1 feature is almost dominated by a single principal component, which explains 98.35% of the variance. This near one-dimensional feature space is consistent with the training collapse observed in Tab. V. By contrast, POD produces a more balanced feature distri-bution, with the first three principal components explaining 28.09%, 22.10%, and 14.47% of the variance. The correspond-ing PCA maps retain clearer spatial structures, indicating that POD helps preserve informative features for residual Gaussian prediction. This supports the claim that POD stabilizes training not only at the reconstruction level, but also at the representation level. After POD pretraining, we further examine the effect of the finetuning phase. As shown in Tab. VI, POD+finetune slightly lowers the cumulative PSNR after the first two stages, but improves the later-stage results, especially the final Stage-4 reconstruction. This indicates that finetuning does not simply strengthen each stage independently. Instead, it redistributes the reconstruction burden across stages and improves the final multi-stage output. This behavior reflects the difference between stage-wise local fitting and cross-stage joint optimization. With Only POD, each stage is trained to match its own optimized residual PREPRINT 11                                    
+
+> TABLE VII
+> Quantization ablation and comparison on DIV2K.
+> Quantizer PSNR ↑MS-SSIM ↑LPIPS ↓bpp ↓Time(ms) ↓
+> GaussianImage 26.42 0.900 0.391 3.51 4446 Image-GS 30.17 0.979 0.193 6.04 3091 AIR + Per-image Range 29.37 0.973 0.234 3.14 298 AIR + Learned Global Range 29.17 0.975 0.223 3.21 298
+> AIR + Adaptive Range 30.23 0.979 0.214 3.28 300 AIR w/o Quantization 30.76 0.984 0.193 –292
+
+target, which favors strong intermediate reconstructions but limits coordination across stages. During the finetuning phase, the model is supervised by the cumulative rendering result, allowing the reconstruction burden to be redistributed across stages. Therefore, early stages may sacrifice some standalone PSNR to provide a better basis for later residual correction. This leads to lower PSNR after Stage-1 and Stage-2, but higher final reconstruction quality after Stage-4. This trend is also reflected in the PCA visualization [51] in Fig. 9. After finetuning, the Stage-1 feature shows clearer structural patterns, while the Stage-4 feature contains more high-frequency residual responses. This suggests that finetuning encourages different stages to take more specialized roles for the final accumulated reconstruction. Overall, POD and the finetuning phase address two successive training issues. POD stabilizes residual Gaussian prediction and prevents collapse, while the finetuning phase promotes cross-stage coordination and improves the final accumulated reconstruction quality. 
+
+4) Quantization: We evaluate the proposed quantization scheme on DIV2K with a patch size of 7. We compare with GaussianImage and Image-GS under a comparable number of Gaussians. GaussianImage follows its original quantization settings and applies 300 iterations of refinement on the con-verged full-precision representation. Image-GS is optimized from scratch for 600 iterations, with per-attribute bit-widths of 16 for position and scale and 8 for rotation and color. Since Instant-GI does not provide a feed-forward quantization mechanism and its compressed representation still depends on subsequent GaussianImage-style refinement, it is excluded from this comparison. For AIR, we further compare three quantization variants with the same bit allocation: Per-image Range , which directly uses the parameter range of each predicted Gaussian set; 
+
+Learned Global Range , which learns a fixed global quantization range for all images; and the proposed Adaptive Range , which further adjusts the global range with image-dependent offsets. As shown in Table VII, AIR with Adaptive Range achieves competitive reconstruction quality with substantially lower reconstruction time compared with GaussianImage and Image-GS. It reaches 30.23 dB PSNR, comparable to Image-GS (30.17 dB), while using a significantly lower bitrate (3.28 vs. 6.04 bpp) and avoiding per-image iterative fitting. Instead of optimizing a full-precision Gaussian representation before compression, AIR directly quantizes the feed-forward predicted Gaussian set, preserving the fully feed-forward pipeline. We further compare different AIR quantization strategies. Per-image Range achieves slightly higher PSNR than Learned Global Range, suggesting that image-dependent parameter dis-tributions should be considered during quantization. However, directly using the raw per-image range can be affected by outliers in the predicted parameters and is not optimized for final reconstruction quality. Learned Global Range introduces learnable quantization parameters, but a single fixed range is insufficient to handle both cross-dataset domain shift and image-level distribution variations. In contrast, the proposed Adaptive Range combines a learned global range with image-dependent offsets. It improves PSNR from 29.17 dB to 30.23 dB over Learned Global Range, with consistent improvements in MS-SSIM and LPIPS. Com-pared with the unquantized result (30.76 dB), Adaptive Range introduces only a 0.53 dB drop, indicating that the feed-forward predicted Gaussians are amenable to direct parameter quantization. Although Adaptive Range slightly increases bpp relative to the other two variants, this is consistent with the entropy-coding behavior that a less concentrated distribution of quantized symbols may require a higher bitrate. This small bitrate increase is therefore a reasonable trade-off for preserving finer Gaussian attribute variations and reducing quantization-induced distortion. 
+
+V. Conclusion 
+
+In this paper, we presented AIR, a self-supervised feed-forward framework for amortized 2D Gaussian image recon-struction. AIR replaces costly per-image Gaussian optimization with direct network prediction, enabling efficient reconstruction without test-time iterative fitting. To support adaptive primitive allocation, AIR introduces a stage-wise residual prediction framework with explicit stage control, where new Gaussians are progressively added only to under-reconstructed regions. Predict–Optimize–Distill training stabilizes each residual pre-diction stage, while subsequent multi-stage finetuning improves the final accumulated reconstruction. AIR also incorporates a lightweight adaptive quantization module for compact storage of the predicted Gaussian primitives. Experiments on Kodak and DIV2K show that AIR achieves high-quality reconstruction with short feed-forward inference time. Compared with optimization-based Gaussian reconstruction methods, AIR avoids iterative fitting; compared with Instant-GI, it improves direct reconstruc-tion quality without PPM pseudo labels or handcrafted priors. A current limitation is that different stages use separate model parameters, which introduces redundancy and leaves room for more stage-agnostic architectures. In addition, our quantization module adopts a relatively simple uniform quantization scheme, and more advanced entropy coding or learned compression strategies could further improve the storage efficiency of the predicted Gaussian representation. 
+
+Acknowledgment 
+
+This work is supported by the Natural Science Foundation of China under Grant 62302174. The computation is completed in the HPC Platform of Huazhong University of Science and Technology. We also thank Farsee2 Technology Ltd for providing devices to support the validation of our method. PREPRINT 12 
+
+References 
+
+[1] G. Ongie, A. Jalal, C. A. Metzler, R. G. Baraniuk, A. G. Dimakis, and R. Willett, “Deep learning techniques for inverse problems in imaging,” 
+
+IEEE Journal on Selected Areas in Information Theory , vol. 1, no. 1, pp. 39–56, 2020. [2] Y. Xie, T. Takikawa, S. Saito, O. Litany, S. Yan, N. Khan, F. Tombari, J. Tompkin, V. Sitzmann, and S. Sridhar, “Neural fields in visual computing and beyond,” in Computer graphics forum , vol. 41, no. 2. Wiley Online Library, 2022, pp. 641–676. [3] A. Essakine, Y. Cheng, C.-W. Cheng, L. Zhang, Z. Deng, L. Zhu, C.-B. Sch¨ onlieb, and A. I. Aviles-Rivero, “Where do we stand with implicit neural representations? a technical and performance survey,” 
+
+arXiv preprint arXiv:2411.03688 , 2024. [4] S. Klocek, L. Maziarka, M. Wo lczyk, J. Tabor, J. Nowak, and M. ´ Smieja, “Hypernetwork functional image representation,” in International Con-ference on Artificial Neural Networks . Springer, 2019, pp. 496–510. [5] V. Sitzmann, J. N. P. Martel, A. W. Bergman, D. B. Lindell, and G. Wetzstein, “Implicit neural representations with periodic activation functions,” in Advances in Neural Information Processing Systems ,vol. 33, 2020, pp. 7462–7473. [6] X. Zhang, X. Ge, T. Xu, D. He, Y. Wang, H. Qin, G. Lu, J. Geng, and J. Zhang, “Gaussianimage: 1000 fps image representation and compression by 2d gaussian splatting,” in European Conference on Computer Vision . Springer, 2024, pp. 327–345. [7] Y. Zhang, B. Li, A. Kuznetsov, A. Jindal, S. Diolatzis, K. Chen, A. Sochenov, A. Kaplanyan, and Q. Sun, “Image-gs: Content-adaptive image representation via 2d gaussians,” in Proceedings of the Special Interest Group on Computer Graphics and Interactive Techniques Con-ference Conference Papers , 2025, pp. 1–11. [8] L. Zhu, G. Lin, J. Chen, X. Zhang, Z. Jin, Z. Wang, and L. Yu, “Large images are gaussians: High-quality large image representation with levels of 2d gaussian splatting,” in Proceedings of the AAAI Conference on Artificial Intelligence , vol. 39, no. 10, 2025, pp. 10 977–10 985. [9] Z. Zeng, Y. Wang, T. Guan, C. Yang, and L. Ju, “Instant gaussianimage: A generalizable and self-adaptive image representation via 2d gaussian splatting,” in Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV) , October 2025, pp. 27 896–27 905. [10] B. Amos, “Tutorial on amortized optimization,” Foundations and Trends in Machine Learning , vol. 16, no. 5, pp. 592–732, 2023. [11] Y. Chen, S. Liu, and X. Wang, “Learning continuous image representation with local implicit image function,” in Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , 2021, pp. 8628– 8638. [12] E. Dupont, A. Goli´ nski, M. Alizadeh, Y. W. Teh, and A. Doucet, “COIN: COmpression with implicit neural representations,” arXiv preprint arXiv:2103.03123 , 2021. [13] E. Dupont, H. Loya, M. Alizadeh, A. Goli´ nski, Y. W. Teh, and A. Doucet, “COIN++: Neural compression across modalities,” 
+
+Transactions on Machine Learning Research , 2022. [Online]. Available: https://openreview.net/forum?id=NXB0rEM2Tq [14] B. Mildenhall, P. P. Srinivasan, M. Tancik, J. T. Barron, R. Ramamoorthi, and R. Ng, “Nerf: Representing scenes as neural radiance fields for view synthesis,” Communications of the ACM , vol. 65, no. 1, pp. 99–106, 2021. [15] J. T. Barron, B. Mildenhall, D. Verbin, P. P. Srinivasan, and P. Hedman, “Mip-nerf 360: Unbounded anti-aliased neural radiance fields,” CVPR ,2022. [16] M. Tancik, P. Srinivasan, B. Mildenhall, S. Fridovich-Keil, N. Raghavan, U. Singhal, R. Ramamoorthi, J. Barron, and R. Ng, “Fourier features let networks learn high frequency functions in low dimensional domains,” 
+
+Advances in neural information processing systems , vol. 33, pp. 7537– 7547, 2020. [17] N. Benbarka, T. H¨ ofer, A. Zell et al. , “Seeing implicit neural repre-sentations as fourier series,” in Proceedings of the IEEE/CVF Winter Conference on Applications of Computer Vision , 2022, pp. 2041–2050. [18] J. N. Martel, D. B. Lindell, C. Z. Lin, E. R. Chan, M. Monteiro, and G. Wetzstein, “Acorn: Adaptive coordinate networks for neural scene representation,” arXiv preprint arXiv:2105.02788 , 2021. [19] T. M¨ uller, A. Evans, C. Schied, and A. Keller, “Instant neural graphics primitives with a multiresolution hash encoding,” ACM Transactions on Graphics , vol. 41, no. 4, pp. 102:1–102:15, 2022. [20] D. B. Lindell, D. Van Veen, J. J. Park, and G. Wetzstein, “Bacon: Band-limited coordinate networks for multiscale scene representation,” in Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , 2022, pp. 16 252–16 262. [21] V. Saragadam, D. LeJeune, J. Tan, G. Balakrishnan, A. Veeraraghavan, and R. G. Baraniuk, “WIRE: Wavelet implicit neural representations,” in Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , 2023, pp. 18 507–18 516. [22] Y. Str¨ umpler, J. Postels, R. Yang, L. V. Gool, and F. Tombari, “Implicit neural representations for image compression,” in European conference on computer vision . Springer, 2022, pp. 74–91. [23] J. Lee, J. Tack, N. Lee, and J. Shin, “Meta-learning sparse implicit neural representations,” Advances in Neural Information Processing Systems ,vol. 34, pp. 11 769–11 780, 2021. [24] J. R. Schwarz and Y. W. Teh, “Meta-learning sparse compression networks,” arXiv preprint arXiv:2205.08957 , 2022. [25] B. Kerbl, G. Kopanas, T. Leimk¨ uhler, and G. Drettakis, “3d gaussian splatting for real-time radiance field rendering,” in ACM SIGGRAPH 2023 Conference Proceedings , 2023, pp. 1–14. [26] H. Liang, Y. Chen, Y. Pan, S. Wang, J. Dai, G. Lu, and W. Zhang, “Structure-guided allocation of 2d gaussians for image representation and compression,” arXiv preprint arXiv:2512.24018 , 2025. [27] T. Li, X. Zhang, X. Ge, T. Xu, D. He, J. Zhang, and Y. Wang, “Gaussianimage++: Boosted image representation and compression with 2d gaussian splatting,” in Proceedings of the AAAI Conference on Artificial Intelligence , vol. 40, no. 8, 2026, pp. 6442–6449. [28] J. Marino, Y. Yue, and S. Mandt, “Iterative amortized inference,” in 
+
+Proceedings of the 35th International Conference on Machine Learning ,2018, pp. 3403–3412. [29] J. Adler and O. ¨Oktem, “Learned primal-dual reconstruction,” IEEE Transactions on Medical Imaging , vol. 37, no. 6, pp. 1322–1332, 2018. [30] P. Putzky and M. Welling, “Recurrent inference machines for solving inverse problems,” in Workshop Track of the International Conference on Learning Representations , 2017. [31] H. Xu, D. Barath, A. Geiger, and M. Pollefeys, “Resplat: Learning recurrent gaussian splatting,” arXiv preprint arXiv:2510.08575 , 2025. [32] T. Chen, W. Xiang, K. Han, Y. Lu, D. Wu, G. Liu, and R. R. Kompella, “Gifsplat: Generative prior-guided iterative feed-forward 3d gaussian splatting from sparse views,” arXiv preprint arXiv:2602.22571 , 2026. [33] M. Wu, H. Huang, J. Kerr, C. M. Kim, A. Zhang, B. Yi, and A. Kanazawa, “Predict-optimize-distill: A self-improving cycle for 4d object under-standing,” in Proceedings of the IEEE/CVF International Conference on Computer Vision , 2025, pp. 6575–6584. [34] G. Franchini, R. Cavicchioli, and J. C. Hu, “Stochastic floyd-steinberg dithering on gpu: image quality and processing time improved,” in 2019 Fifth International Conference on Image Information Processing (ICIIP) .IEEE, 2019, pp. 1–6. [35] D. F. Watson, “Computing the n-dimensional delaunay tessellation with application to voronoi polytopes,” The Computer Journal , vol. 24, no. 2, pp. 167–172, 1981. [36] M. Song, J. Choi, and B. Han, “Variable-rate deep image compression through spatially-adaptive feature transform,” in Proceedings of the IEEE/CVF international conference on computer vision , 2021, pp. 2380– 2389. [37] D. Minnen, G. Toderici, M. Covell, T. Chinen, N. Johnston, J. Shor, S. J. Hwang, D. Vincent, and S. Singh, “Spatially adaptive image compression using a tiled deep network,” in 2017 IEEE International Conference on Image Processing (ICIP) . IEEE, 2017, pp. 2796–2800. [38] M. Figurnov, M. D. Collins, Y. Zhu, L. Zhang, J. Huang, D. Vetrov, and R. Salakhutdinov, “Spatially adaptive computation time for residual networks,” in Proceedings of the IEEE conference on computer vision and pattern recognition , 2017, pp. 1039–1048. [39] Z. Wang, A. C. Bovik, H. R. Sheikh, and E. P. Simoncelli, “Image quality assessment: from error visibility to structural similarity,” IEEE transactions on image processing , vol. 13, no. 4, pp. 600–612, 2004. [40] A. Dosovitskiy, L. Beyer, A. Kolesnikov, D. Weissenborn, X. Zhai, T. Unterthiner, M. Dehghani, M. Minderer, G. Heigold, S. Gelly et al. ,“An image is worth 16x16 words: Transformers for image recognition at scale,” arXiv preprint arXiv:2010.11929 , 2020. [41] Y. Bengio, N. L´ eonard, and A. Courville, “Estimating or propagating gradients through stochastic neurons for conditional computation,” arXiv preprint arXiv:1308.3432 , 2013. [42] J. Deng, W. Dong, R. Socher, L.-J. Li, K. Li, and L. Fei-Fei, “Imagenet: A large-scale hierarchical image database,” in 2009 IEEE conference on computer vision and pattern recognition . Ieee, 2009, pp. 248–255. [43] E. Agustsson and R. Timofte, “Ntire 2017 challenge on single image super-resolution: Dataset and study,” in Proceedings of the IEEE conference on computer vision and pattern recognition workshops , 2017, pp. 126–135. [44] Z. Wang, E. P. Simoncelli, and A. C. Bovik, “Multiscale structural similarity for image quality assessment,” in The thrity-seventh asilomar PREPRINT 13 
+
+conference on signals, systems & computers, 2003 , vol. 2. Ieee, 2003, pp. 1398–1402. [45] R. Zhang, P. Isola, A. A. Efros, E. Shechtman, and O. Wang, “The unreasonable effectiveness of deep features as a perceptual metric,” in 
+
+Proceedings of the IEEE conference on computer vision and pattern recognition , 2018, pp. 586–595. [46] K. Simonyan and A. Zisserman, “Very deep convolutional networks for large-scale image recognition,” arXiv preprint arXiv:1409.1556 , 2014. [47] O. Sim´ eoni, H. V. Vo, M. Seitzer, F. Baldassarre, M. Oquab, C. Jose, V. Khalidov, M. Szafraniec, S. Yi, M. Ramamonjisoa et al. , “Dinov3,” 
+
+arXiv preprint arXiv:2508.10104 , 2025. [48] R. Wang, S. Xu, C. Dai, J. Xiang, Y. Deng, X. Tong, and J. Yang, “Moge: Unlocking accurate monocular geometry estimation for open-domain images with optimal training supervision,” in Proceedings of the Computer Vision and Pattern Recognition Conference , 2025, pp. 5261– 5271. [49] R. Wang, S. Xu, Y. Dong, Y. Deng, J. Xiang, Z. Lv, G. Sun, X. Tong, and J. Yang, “Moge-2: Accurate monocular geometry with metric scale and sharp details,” 2025. [Online]. Available: https://arxiv.org/abs/2507.02546 [50] I. Loshchilov and F. Hutter, “Decoupled weight decay regularization,” 
+
+arXiv preprint arXiv:1711.05101 , 2017. [51] H. Abdi and L. J. Williams, “Principal component analysis,” Wiley interdisciplinary reviews: computational statistics , vol. 2, no. 4, pp. 433– 459, 2010.

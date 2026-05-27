@@ -1,0 +1,1896 @@
+Title: Semantic Granularity Navigation in Image Editing
+
+URL Source: https://arxiv.org/pdf/2605.21190v2
+
+Published Time: Tue, 26 May 2026 01:04:14 GMT
+
+Number of Pages: 31
+
+Markdown Content:
+# Semantic Granularity Navigation in Image Editing 
+
+Liangsi Lu 1 Minzhe Guo 1 Xuhang Chen 2 Yang Shi 1
+
+## Abstract 
+
+Despite the generative capabilities of diffusion and flow models, real-image editing remains con-strained by a persistent trade-off between seman-tic editability and structural fidelity. We trace a primary cause of this limitation to the implicit coupling of edit progress with model scale in exist-ing paradigms. Under this coupling, stronger ed-its typically require visiting noisier states, which spends computation on destabilizing layout before the semantic change is well localized. We intro-duce NaviEdit , a training-free inference-time con-troller that decouples edit progress from model scale traversal through a strict self-consistency contract. NaviEdit operates at the rollout level and leaves the underlying pretrained model un-changed. It treats scale as a control input and reallocates a fixed step budget toward semanti-cally responsive intermediate scales instead of de-structive high-noise regimes. Experiments show positive average gains across compatible editors and flow backbones, supporting decoupling as a portable inference-time control principle. 
+
+## 1. Introduction 
+
+Text-to-image (T2I) generators based on diffusion or flow have recently reached a level of realism that makes them attractive as generic visual priors (Lipman et al., 2023; Liu et al., 2022; Peebles & Xie, 2023; Esser et al., 2024). Many image editing methods therefore leverage a pretrained T2I model directly at inference time. SDEdit (Meng et al., 2021) edits by corrupting the source image with noise and denoising it under the generative prior, while Prompt-to-Prompt (Hertz et al., 2023) manipulates cross-attention dur-ing denoising to preserve layout while modifying content. 
+
+> 1
+
+Guangdong University of Technology, Guangzhou, China 
+
+> 2
+
+Huizhou University, Huizhou, China. Correspondence to: Yang Shi <sudo.shiyang@gmail.com >; Project page: https:// naviedit.github.io .
+
+Proceedings of the 43 rd International Conference on Machine Learning , Seoul, South Korea. PMLR 306, 2026. Copyright 2026 by the author(s). Real Image Decoupled Edit Coupled Edit 
+
+horse -> zebra 
+
+rolled wraps -> steak 
+
+Figure 1. Coupling vs. decoupling. Under the same model and step budget, coupled scale–progress editing exhibits drift/leakage into non-edited regions (red boxes), while decoupled navigation preserves structure while executing the semantic change. 
+
+However, a persistent trade-off between editability and fi-delity remains: stronger semantic changes often damage non-edited content, whereas stronger preservation often weakens the edit itself. In FlowEdit (Kulikov et al., 2025), for example, moving the trajectory toward higher-noise states affords more semantic freedom but weakens struc-tural anchoring, amplifying artifacts outside the target re-gion (Figure 1). Motivated by this tension, recent meth-ods reshape the sampling process through schedule, resam-pling, or inversion, including TiNO-Edit (Chen et al., 2024), Schedule Your Edit (Lin et al., 2024) and Dual-Schedule Inversion (Huang et al., 2025). Many iterative training-free editors make the same implicit design choice: they use the model’s scale coordinate as an edit clock. The same diffusion timestep, noise level, or flow-time coordinate that indexes the model state is also used as a proxy for how far the edit has progressed. In practice, stronger edits are typically pursued by starting from noisier states or by expanding the visited scale range toward higher noise. Edit progress and scale traversal are therefore coupled by construction. Our empirical probes suggest that this default assumption is problematic. High scales produce coarse, spatially underde-termined editing, while low scales are dominated by local 1
+
+> arXiv:2605.21190v2 [cs.CV] 23 May 2026 Semantic Granularity Navigation in Image Editing
+
+reconstruction and struggle to alter geometry. Between them lies an effective scale window where the differential field is both semantically responsive and structurally anchored. The scale axis therefore indexes distinct editable-information regimes rather than a uniform progress variable. We instantiate this view with NaviEdit , a training-free con-troller that treats image editing as controlled navigation of the latent in a differential field under a fixed step bud-get. A fixed budget edit traverses several such regimes over its trajectory, which we call a rollout . We refer to the rollout-level, budgeted property induced by this traversal as semantic granularity . NaviEdit navigates these scale-dependent editable-information regimes, and the resulting scale allocation determines the semantic granularity. To do so, NaviEdit introduces an explicit edit progress axis and uses the model’s scale coordinate as a control input. Con-ventional pipelines tie progress directly to scale traversal; NaviEdit decouples the two. At each step, NaviEdit selects a scale, queries the co-located differential field at that scale, and advances the latent with a self-consistent update. Under a fixed step budget, decoupling turns editing into a compute-allocation problem along the scale axis. Rather than expanding the visited range into destructive high-noise regimes, NaviEdit concentrates computation by increasing 
+
+density within the effective scale window; optionally, this density can be adapted online using signals already pro-duced during editing, without additional model evaluations. Our experiments test this view in three ways: (i) empirical scale diagnostics and effective-window discovery; (ii) con-trolled schedule comparisons that isolate coupling versus de-coupling under a fixed step budget; and (iii) axis-consistency ablations that expose systematic bias under mismatch. We additionally study results across other compatible editors. Finally, we report ablations on compute allocation, optional internal gating, and axis consistency to clarify the conditions required for stable navigation. 
+
+## 2. Related Work 
+
+Most training-free text-guided editing pipelines built on diffusion-style generators steer sampling along the model’s noise/scale coordinate, using noise injection, masked resam-pling, or attention/feature interventions to trade semantic change against faithfulness; representative examples include SDEdit, RePaint, DiffEdit, Prompt-to-Prompt, Plug-and-Play, and inversion-free editing variants that unify attention control mechanisms (Meng et al., 2021; Lugmayr et al., 2022; Couairon et al., 2022; Hertz et al., 2023; Tumanyan et al., 2023; Xu et al., 2023). Closely related are works that improve reconstruction or edit stability by modifying inver-sion or noise schedules rather than changing the model, such as Schedule Your Edit and Dual-Schedule Inversion (Lin et al., 2024; Huang et al., 2025). On the generative modeling, flow matching and rectified flow view generation as learning vector fields/ODE trans-port between distributions, and modern text-to-image mod-els increasingly adopt Transformer architectures (e.g., DiT) and rectified-flow Transformers (Lipman et al., 2023; Liu et al., 2022; Peebles & Xie, 2023; Esser et al., 2024). Most recently, FlowEdit demonstrates inversion-free editing di-rectly on pre-trained text-to-image flow models (Kulikov et al., 2025); orthogonally, a line of work shows that frozen diffusion/flow models expose spatially meaningful internal signals that can be mined for localization (e.g., segmen-tation/correspondence), informing how one might obtain masks without extra training (Luo et al., 2023; Tian et al., 2024). We provide an extended discussion of related work in Ap-pendix A. 
+
+## 3. Empirical Motivation 
+
+Current training-free editing pipelines, routinely use the model’s scale coordinate as an implicit progress proxy. Stronger semantic edits are pursued by expanding the visited range toward higher noise, while fine details are handled by moving to lower noise. We argue that this conflation of scale (which exposes scale-dependent editable-information regimes) with progress (how much semantic change has been accumulated) is a major contributor to the editability– fidelity tension. Under a fixed model-call budget, editing quality is a property of the entire rollout: it depends on where computation is spent along the scale axis and whether the induced prompt-conditioned motion remains spatially localizable and directionally stable along that traversal. We refer to this rollout-level, budgeted property as semantic granularity, and in Sec. 4 we formalize it as a functional of the trajectory together with its scale allocation. 
+
+3.1. Probing Spatial Controllability along the Scale Axis 
+
+We introduce a diagnostic probe to measure the spatial controllability of the model’s semantic prior across scales, independent of any specific editing trajectory. Let xsrc 
+
+denote the source latent, x denote the current editing state, and u ∈ [0 , 1] denote a normalized scale coordi-nate mapped to the model coordinate via model schedule 
+
+t = τ (u) (Appendix C.8). We construct a co-located pair by mixing the source with fresh noise ϵ ∼ N (0 , I ) as 
+
+zsrc = (1 − u)xsrc + uϵ (Lipman et al., 2023; Liu et al., 2022), and aligning the target query by residual shift ztar =
+
+x + ( zsrc − xsrc ) (Kulikov et al., 2025). Querying the flow model with prompts (csrc , c tar ) yields velocities whose dif-ference ∆V (u) = vθ (ztar , τ (u), c tar ) − vθ (zsrc , τ (u), c src )
+
+serves as a local differential field. 2Semantic Granularity Navigation in Image Editing Real image Edited image  
+
+> round cake -> square cake
+
+u = 0.0 u = 1.0
+
+Semantic vector field difference heatmap 
+
+Figure 2. Editable-Information Spectrum and Editability Regimes. We visualize the differential semantic vector field (bottom) and editing results (top) across scales for the prompt “round cake → square cake”. The scale axis reveals a local editable-information spectrum : at low scale (small noise scale u), the field is texture-entangled and fails to alter geometry; at high scale (large noise scale u), the field becomes coarse and causes global drift with background hallucinations (red boxes). Effective editing requires navigating the 
+
+structural sweet spot (middle), where the field is semantically potent yet spatially anchored. 0.4 0.6 0.8 
+
+> u
+> 0.4
+> 0.5
+> 0.6
+> 0.7
+> pressure
+> (a)
+> coupled mean
+> coupled 95% CI
+> decoupled mean
+> decoupled 95% CI
+> effective window (psi q=0.50) 0.4 0.6 0.8
+> u
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> osc
+> (b)
+
+Figure 3. Empirical regime structure on the scale axis. Sweep-ing the scale coordinate u and aggregating per-step diagnostics reveals a stable effective window (shaded) where leakage pressure 
+
+ρ is minimized, flanked by higher-risk tails. ( a) ρ exhibits a clear valley over u. ( b) The raw oscillation statistic ω is more schedule-dependent, so we use it as a secondary diagnostic rather than to define the window. 
+
+Ideally, ∆V (u) should concentrate on the target object. A diffuse field indicates that the editing direction is spatially underdetermined, leading to global drift. To quantify this, we use a feasible-region mask M (u) extracted from internal representations, with no external masks and no additional model evaluations beyond the fixed step budget (see Ap-pendix G.1). We summarize the spatial underdetermination by the outside-to-total energy ratio: 
+
+ρ(u) = ∥(1 − M (u)) ⊙ ∆V (u)∥2
+
+∥∆V (u)∥2
+
+, (1) where a larger ρ(u) indicates that the prompt-induced mo-tion leaks outside the feasible region, rendering the edit intrinsically hard to localize. Complementarily, we track the local oscillation ω(u) = 1 − cos(∆ V (u), ∆V (u − δ)) 
+
+to measure scale-to-scale directional instability for a small 
+
+δ. Sweeping u while holding the probe construction fixed reveals a robust regime structure on the scale axis. As shown in Figure 3, the leakage pressure ρ(u) exhibits a stable valley at intermediate scales, indicating where prompt-conditioned motion is most spatially identifiable. We treat this valley as a diagnostic discovery rather than an oracle that must be recomputed at inference. Operationally, NaviEdit re-stricts navigation to a fixed tail window on the scheduler path, starting from a reference depth (denoted tref ) so as to exclude the extreme high-noise tail. We denote the re-sulting visited scale interval by Ueff and report sensitivity in Appendix C.4. In contrast, the oscillation statistic ω(u)
+
+is more schedule-dependent, so we treat it as a secondary diagnostic for discretization and trajectory stability. 
+
+3.2. The Editable-Information Spectrum and the Coupling Trap 
+
+By sweeping the coordinate u, we observe that the prompt-conditioned motion induced by the generative prior is spa-tially non-uniform. In Figure 2, at high scales (large u,higher noise), the differential field ∆V (u) becomes spa-tially underdetermined: the motion is less confined to plau-sible edit regions, and leakage pressure ρ(u) increases, cor-relating with drift and background hallucination. At low scales (small u, lower noise), the field is dominated by high-frequency reconstruction constraints, so edits tend to become texture-entangled and struggle to alter geometry; di-rectional behavior can also become brittle, which is captured by increased schedule-dependent oscillations in ω(u).Between these extremes lies a semantically responsive re-gion around the valley of ρ(u) in Figure 3. In NaviEdit, we operationalize a fixed visited interval Ueff by selecting a tail window on the scheduler path (Sec. 3.1), which avoids allocating progress to the extreme high-noise regime under a strict step budget. Within Ueff , the pressure and oscillation diagnostics help explain which scales are more identifiable or more brittle, motivating density allocation under a fixed step budget. We use ω(u) only to diagnose trajectory sta-3Semantic Granularity Navigation in Image Editing Decoupled Budget Allocation                  
+
+> Baseline Edit
+> Coupled Budget Allocation
+> Semantic Global Details
+> Semantic Global Details
+> Semantic Global Details
+> Query
+> Edit Progress
+> Scale
+> 01
+> 01
+> 01
+> (a)
+> (b)
+> (c)
+> Real image
+> Cat -> silver cat sculpture Global Layout Seman.cs Local Details
+> ❌Underdetermined
+> Layout :Chao&c field
+> causes global dri2 &
+> re -genera&on.
+> ✅Structural Alignment:
+> Field aligns with object.
+> Enables controllable
+> seman&c migra&on.
+> ⚠Texture Only:
+> Field is too localized.
+> Fails to achieve
+> seman&c changes.
+> Noise Scale / Granularity
+
+Figure 4. Coupling budget with scale range tends to push editing into high-scale regimes where layout is underdetermined. Decoupling budget as density within a fixed effective scale window concentrates computation where the co-located differential field is both strong and spatially identifiable. 
+
+bility across scales and to motivate later density-control choices. This regime structure exposes a limitation of the prevailing design. Conventional schedules often couple edit magnitude with scale-range expansion: to push for stronger edits, they expand the visited range toward the high-noise tail, which allocates nonzero progress mass outside Ueff . In our set-ting, the high-scale tail is empirically more underdetermined (high ρ), and allocating progress mass there correlates with increased drift and artifacts under a fixed model-call bud-get; this also matches controlled step-budget sweeps where increasing steps under coupled rules improves CLIP but can degrade background fidelity (Appendix D.1). Figure 4 summarizes this coupling trap as a compute-allocation issue rather than an update-rule issue. Recent works on diffu-sion scheduling (Lin et al., 2024) and flow editing (Kulikov et al., 2025) emphasize the importance of scale allocation, but typically do not separate it from an explicit notion of progress, making the resulting allocation partially dictated by budget-to-range heuristics instead of being a controllable decision. 
+
+## 4. Methodological Framework 
+
+Section 3 surfaced a recurring paradox under a fixed model-call budget: extending an editing trajectory can reduce struc-tural fidelity and can push the result into a generative failure mode characterized by drift, spurious objects, and tonal explosion. We argue that this is not a tuning artifact but a modeling issue. The diffusion or flow coordinate is a scale axis that indexes what information is malleable, yet many editors treat it as a progress clock that indexes how much change has been accumulated. Once scale is treated as a co-ordinate u and progress as an explicit system time s, editing becomes a controlled integration problem. Under the hard constraints stated in Section 3, the only remaining design freedom is the allocation of compute along the scale axis. 
+
+4.1. Editing is a controlled integration problem 
+
+We reuse the co-located construction and the differen-tial field from Section 3.1. When a base editor exposes reliable training-free localization signals from the same forward pass, we may optionally form an effective field 
+
+∆Veff = Π M (u)(∆ V ) using an internal gate M (u); other-wise the controller simply uses ∆V itself. The only concep-tual addition is to separate where we measure and actuate, namely the scale coordinate, from how much we actuate, namely progress. 
+
+Definition 4.1 (Progress-Granularity decoupled editing) .
+
+An editing process is a controlled dynamical system on an explicit progress axis s ∈ [0 , 1] :
+
+dx ds = du ds ∆Veff 
+
+ x(s); u(s), ϵ (s), ϵ(s) ∼ N (0 , I ), (2) where u(s) ∈ [0 , 1] is a monotone scale control (noise/scale coordinate). Definition 4.1 does not assume that an edit can be summa-rized by a single timestep. An edit is judged by the rollout induced by integrating the co-located differential field under a fixed compute budget. 
+
+4.2. Rollout semantic granularity is a functional 
+
+Section 3.2 shows that reliability is not a property of a sin-gle instantaneous direction, but of an entire rollout: the same update rule behaves like controlled semantic migra-tion inside the effective window and like underdetermined re-generation in the high-scale tail. To compare scale alloca-tions under a fixed budget, we evaluate rollouts by a single functional defined operationally for optimization rather than as a theoretical abstraction. It is the quantity that compute 4Semantic Granularity Navigation in Image Editing 0.3 0.4 0.5 0.6 
+
+> outside-window mass
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> 1.2
+> rollout cost
+> (a)
+> coupled
+> decoupled coupled
+> decoupled
+> 0.475
+> 0.500
+> 0.525
+> 0.550
+> 0.575
+> 0.600
+> bad-mass  m_bad
+> (b) coupled
+> decoupled
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> 1.2
+> Ghat
+> (c)
+
+Figure 5. A quantitative illustration of Theorem 4.2. At a fixed step budget, coupling scale traversal to edit progress forces nonzero outside-window mass mbad , while decoupling concen-trates progress within the effective window. (a) Rollout proxy cost bG increases with mbad . (b) Coupled schedules exhibit larger 
+
+mbad . (c) This forced allocation yields a higher irreducible rollout cost under coupling. 0.25 0.50 0.75     
+
+> scale u
+> baseline_fixed
+> density-heavy
+> mixed
+> ours_asn
+> range-heavy
+> (a)
+> 0.0 0.2 0.4
+> outside mass
+> 0.4
+> 0.5
+> 0.6
+> 0.7
+> 0.8
+> 0.9
+> rollout proxy  ghat
+> (b)
+> 0.0 0.2 0.4
+> outside mass
+> 24
+> 25
+> 26
+> 27
+> PSNR (bg)
+> (c)
+
+Figure 6. Density vs. range at a fixed step budget. (a) Scale windows visited by different schedule families. (b) Rollout proxy 
+
+bG increases with outside-window mass mbad . (c) Background fidelity (PSNR bg ) degrades as mbad grows, indicating a risk floor induced by range expansion beyond the effective window. 
+
+allocation seeks to reduce at a fixed step budget. We posit a nonnegative local risk density ϕ(x, u ) with two properties used throughout the paper. First, we assume the local risk density ϕ(x, u ) increases with the underdetermi-nation measured by our probes in Section 3.1: scales with higher leakage pressure ρ(u) and larger directional oscilla-tion ω(u) are assigned larger risk. Second, when the visited scales stay inside a fixed effective window, refining density along scale (smaller max k |∆uk| at fixed span) does not increase the discretization component of the rollout. We formalize the semantic granularity of a rollout by the functional G[x(·), u (·)] = R 10 ϕ(x(s), u (s)) ds . For mea-surement and online navigation, we instantiate a discrete proxy bG from signals already produced during editing and re-port its fixed hyperparameters and sensitivity in Appendix C. 
+
+4.3. Coupling scale and progress is incomplete 
+
+Coupling scale traversal to edit progress removes a degree of freedom that becomes necessary once editing quality is judged at the rollout level. Under an identical update rule and identical model-call budget K, we compare two sched-ule families: a coupled family whose budget-to-strength rule expands the visited scale range as edit magnitude in-creases, and a decoupled family that keeps the visited range within a fixed tail window on the scheduler path and reallo-cates density within it. Using Ueff defined by this tail win-dow (Sec. 3.1), we measure the resulting outside-window progress mass mbad and the rollout proxy cost bG. Figure 5 shows a consistent mechanism: bG increases with mbad ,coupled schedules exhibit larger mbad , and consequently a higher empirical rollout cost floor at a fixed step bud-get. This micro evidence matches the measure-allocation argument formalized in Theorem 4.2. 
+
+Theorem 4.2 (Incompleteness induced by coupling) . As-sume there exist nonempty intervals Ugood , Ubad and con-stants 0 ≤ cgood < c bad such that ϕ(x, u ) ≤ cgood on 
+
+Ugood and ϕ(x, u ) ≥ cbad on Ubad for all reachable x. As-sume every u(·) ∈ F couple (K) assigns at least δ(K) > 0
+
+progress mass to Ubad , with cbad δ(K) > c good . Assume also that Fdecouple (K) contains a feasible control sup-ported in Ugood . Then, for some editing instances and budgets K,
+
+inf  
+
+> u(·)∈F couple (K)
+
+G[x(·), u (·)] > inf  
+
+> u(·)∈F decouple (K)
+
+G[x(·), u (·)] .
+
+(3) Coupling forces nonzero progress mass in Ubad , which yields an irreducible contribution to G, while a decoupled control can concentrate allocation within Ugood .
+
+4.4. Under a fixed step budget, density dominates range 
+
+Under fixed compute, the central decision is where to spend model calls along the scale axis. We isolate range from den-sity by fixing the number of evaluations K and the update rule, and varying only the visited scale window. A mini-mal controlled study shows a consistent directional trend. Expanding the window into high-scale regimes increases drift and artifacts even when edit compliance is matched, whereas refining density within a fixed effective window improves anchoring. Figure 6 visualizes this density versus range effect in a compact setting. The micro-evidence suggests a structural decomposition. Range expansion inherits a regime-dependent risk floor through nonzero allocation to underdetermined scales, while density refinement within an effective window reduces dis-cretization and active-set instability without paying that floor. We formalize this principle as Theorem 4.3. Theorem 4.2 implies a concrete compute-allocation prin-ciple. When increasing the step budget also expands the visited range into Ubad , the rollout inherits an irreducible risk floor. By contrast, if the visited window stays inside an effective interval, additional steps can be spent on density refinement, reducing discretization error and stabilizing the 5Semantic Granularity Navigation in Image Editing 
+
+active set. 
+
+Theorem 4.3 (Density beats range under a fixed step bud-get) . Fix an anchor realization and let GK be the im-plemented rollout cost. Assume ϕ ≥ 0, ϕ ≤ cgood on 
+
+U⋆ ⊆ U good , and ϕ ≥ cbad on Ubad . For the consid-ered budget K, assume every range-expanding rollout has 
+
+mK 
+
+> bad
+
+≥ δK with cbad δK − cgood ≥ γ > 0. Assume also that a self-consistent rollout inside U⋆ has Euler error at most CE/K and that ϕ is Lϕ-Lipschitz in x there. If 
+
+K > L ϕCE/γ , then density refinement inside U⋆ attains lower GK than any range-expanding rollout into Ubad .
+
+Appendix E proves the claim by comparing the implemented bad-regime risk floor with the good-window Euler error bound. 
+
+4.5. Contract: self-consistent discretization 
+
+Theorems 4.2 and 4.3 are statements about allocating scale measure under a fixed compute budget. They only translate to practice if each discrete step measures and actuates at the same scale coordinate. In flow models, the scale coordinate appears in three places within a single step: the noise mixing that constructs the co-located anchors, the model query through the internal timestep mapping τ (u), and the scale increment used to apply the update. If these operations use inconsistent scale values, the measured differential velocity no longer corresponds to the update that is applied, and the rollout accumulates a systematic bias that manifests as drift and artifacts. 
+
+Theorem 4.4 (Self-consistency contract) . Let {uk}Kk=0 be a monotone scale sequence and ϵk ∼ N (0 , I ) be fresh anchors. If a step uses inconsistent scales for (i) mixing, (ii) model querying, and (iii) update increments, then the update does not correspond to any consistent discretization of Definition 4.1 and incurs a systematic bias term that can manifest as drift and artifacts. Conversely, if the step is self-consistent and uses the same uk for mixing and querying, and uses ∆uk = uk+1 − uk for actuation, then the update 
+
+xk+1 = xk + ∆ uk ∆Veff (xk; uk, ϵ k)
+
+is a first-order consistent discretization of Definition 4.1 in the effective window. 
+
+The proof is given in Appendix F. We validate Theorem 4.4 with axis-mismatch ablations that independently perturb the scale used for querying, stepping, or mixing while keeping the update rule, budget, and fresh-noise anchoring fixed (see Figure 7). 
+
+4.6. From theory to method: a rollout-level Navi controller under hard constraints 
+
+We instantiate the theory under the constraints in Sec. 3: no training, exactly K model evaluations, and fresh noise 0.00 0.30 0 1.4      
+
+> parameters
+> 0.910
+> 0.915
+> 0.920
+> 0.925
+> 0.930
+> SSIM
+> self_consistent
+> delta gamma
+> 0.00 0.30 01.4
+> parameters
+> 0.05
+> 0.06
+> 0.07
+> 0.08
+> LPIPS
+> self_consistent
+> delta gamma
+> self_consistent
+> mismatch_query
+> mismatch_mix
+> mismatch_step
+
+Figure 7. Axis-mismatch ablation for Theorem 4.4. Left: quali-tative grid as |δ| increases (mismatch-query uses uk+δ for model query while keeping mix/update self-consistent). Right: drift and compliance metrics vs |δ| under fixed K.Source 
+
+Distribution 
+
+Target 
+
+Distribution            
+
+> 𝑢 !"#! Diff 𝑢 $"% Diff 𝑢 &'( Diff
+> Diffuser Query Diffuser Query Diffuser Query
+> Failed Navigation
+> Significant Divergence
+> High Scale
+> (Global Drift)
+> Failed Navigation
+> Low Scale (Local)
+> Ineffective Granularity Causes Stagnation
+> NaviEdit Selection
+> Effective Scale
+
+Figure 8. Editing depends on the scale regime. High scales can diverge while low scales stagnate; NaviEdit allocates density within an effective scale window for stable progress. 
+
+at every step. The Navi controller implements the self-consistency contract of Theorem 4.4: each step measures and actuates at the same scale, i.e., co-located mixing, model querying at t = τ (uk), and the update step size are all tied to a single uk and its increment ∆uk. For naming, we use 
+
+NaviEdit throughout the method development to denote the controller itself, and reserve the shorthand Navi-X only for experimental settings where the underlying base editor X
+
+must be identified explicitly. Under this contract, the only remaining design freedom for 
+
+progress control at a fixed step budget is the scale allocation 
+
+{uk}. Guided by Theorem 4.3, we allocate compute by increasing density within an effective scale window instead of expanding range into high-risk regimes. Practically, we parameterize a monotone traversal by a continuous coordi-nate p ∈ [0 , 1] on the model’s discrete path; choosing {pk}
+
+induces {uk} and {∆uk}.The controller acts only on the rollout: in any compatible prompt-pair editor, it replaces the coupled budget-to-range traversal while leaving the pretrained model unchanged. The running example below uses a FlowEdit/SD3 instantiation, and Appendix H studies additional results on InfEdit and FlowAlign. When an instantiation uses the optional feasible-region gate, we state it explicitly; otherwise we write M ≡
+
+6Semantic Granularity Navigation in Image Editing 
+
+Table 1. Quantitative comparison on PIE-Bench. The best/second/third results in each numeric column are highlighted with yellow / orange / blue backgrounds, respectively.                                                                                                                            
+
+> Type Method Struct. Background Preservation CLIP Semantics
+> Dist. 10 3↓PSNR ↑MSE 10 3↓SSIM 10 2↑LPIPS 10 3↓Whole ↑Edited ↑
+> Fixed Schedule DiffEdit (Couairon et al., 2022) (SD1.4) 22.39 24.09 5.14 76.72 80.96 23.34 20.44 DDIM (Song et al., 2020) + MasaCtrl (Cao et al., 2023) 28.79 21.25 8.58 80.11 106.59 24.13 21.13 Direct Inversion (Ju et al., 2023) + MasaCtrl (Cao et al., 2023) 24.46 21.78 7.99 81.74 87.38 24.42 21.38 DDIM (Song et al., 2020) + PnP (Tumanyan et al., 2023) 28.20 21.26 8.42 78.90 113.58 25.45 22.54 Direct Inversion (Ju et al., 2023) + PnP (Tumanyan et al., 2023) 24.27 21.43 8.10 79.52 106.26 25.48 22.63 InfEdit (Xu et al., 2023) (SD1.4) 18.06 25.62 5.88 85.02 55.69 24.92 22.08 FlowEdit (Kulikov et al., 2025) (SD3) 14.64 22.46 7.38 84.08 103.00 25.91 22.50 FlowAlign (Kim et al., 2025) (SD3) 6.21 27.78 2.14 92.41 34.47 25.44 21.80 Reschedule Tino-Edit (Chen et al., 2024) 17.64 22.61 6.15 82.91 87.23 25.02 22.10 SYE (Lin et al., 2024) (DDIM + PnP) 27.17 21.73 8.12 87.45 110.64 24.44 21.26 SYE (Lin et al., 2024) (Direct Inversion + PnP) 24.11 21.57 7.94 80.24 102.62 24.52 21.39 TurboEdit (Deutch et al., 2024) (SDXL-Turbo) 13.80 21.44 9.49 80.08 108.60 24.66 21.70 Navi Controller
+> Navi-FlowEdit ( M≡1) (Kulikov et al., 2025) (SD3) 14.25 22.54 6.86 89.36 92.47 26.01 22.59
+> Navi-FlowEdit + gate (Kulikov et al., 2025) (SD3) 10.67 27.94 2.64 93.85 48.74 26.18 22.72
+> Navi-FlowAlign ( M≡1) (Kim et al., 2025) (SD3) 5.40 28.33 2.09 93.40 34.49 26.15 22.44
+
+1. In this paper, the default FlowEdit system is reported as Navi-FlowEdit + gate , while Navi-FlowEdit ( M ≡ 1),
+
+Navi-InfEdit ( M ≡ 1), and Navi-FlowAlign ( M ≡ 1)
+
+denote ungated variants. Optionally, we adapt the next step along p online using only already-computed per-step signals (a discrete proxy of 
+
+ϕ), without additional model calls. The complete inference pipeline is given in Appendix J (Algorithm 1). 
+
+## 5. Experimental Validation 
+
+5.1. Experimental Setup Dataset and evaluation metrics. We evaluate on two com-plementary benchmarks. PIE-Bench (Ju et al., 2023) serves as the main preservation benchmark: it comprises 700 im-ages with ground-truth masks. We assess performance using Structure Distance for global geometry, PSNR, MSE, SSIM, and LPIPS for background fidelity (computed on non-edited regions), together with CLIP-Whole/Edited scores for se-mantic alignment. To test the controller beyond masked local editing, we also evaluate on ImgEdit-Bench (Ye et al., 2025), following its Basic and UGE protocols. 
+
+ImgEdit-Bench adaptation. ImgEdit-Bench provides a source image and an edit instruction, whereas prompt-pair differential editors require both a source descrip-tion and a target description. We therefore use a sin-gle processed-annotation layer generated with Qwen2.5-VL (Bai et al., 2025), which converts each sample into shared (src prompt , tar prompt ) pairs. InfEdit, FlowAlign, and their Navi variants all consume this same adaptation. Following ImgEdit-Judge, we report per-category Basic scores together with the Basic and UGE averages; the multi-turn subsets are retained only for qualitative inspection. 
+
+Naming convention. In the main text, NaviEdit denotes the controller/framework. We use labels such as Navi-FlowEdit 
+
+and Navi-FlowAlign only when a table, benchmark, or cross-editor experiment needs to distinguish which base editor the controller is instantiated on. When the optional feasible-region gate is enabled, we write it explicitly as + gate ; when it is disabled, we write M ≡ 1.
+
+Implementation details. All experiments are conducted on a single NVIDIA RTX 3090 GPU. The controller is entirely training-free. It decouples the editing progress axis from the model scale coordinate and navigates a fixed tail window on the scheduler path, denoted by Ueff and parameterized by 
+
+tref (Appendix C.3). In the main PIE-Bench comparison, the three Navi-controller rows in Table 1 use schedule step N =50 , editing budget K = 50 , and tref = 42 . The ImgEdit-Bench transfer results use ungated Navi-InfEdit ( M ≡ 1)
+
+and Navi-FlowAlign ( M ≡ 1). For fair comparison, Table 1 uses each baseline’s official configuration and recommended backbone, e.g., SD1.4 for DiffEdit/InfEdit, SDXL-Turbo for TurboEdit, SD3 for FlowEdit, and SD3 for FlowAlign. Baselines use their official editing-step settings. PIE-Bench provides ground-truth masks; we use them only to define edited and background pixels for evaluation, and do not feed any external masks into the Navi controller or any baseline. 
+
+5.2. Comparison with Prior Methods Quantitative Results on PIE-Bench. Table 1 reports the strongest deployed systems together with one controlled decomposition pair. The default FlowEdit instantiation, 
+
+Navi-FlowEdit + gate , substantially improves over official FlowEdit on every reported PIE-Bench metric. The two FlowEdit-based Navi rows, Navi-FlowEdit ( M ≡ 1) and 
+
+Navi-FlowEdit + gate , isolate the role of the optional gate: under the same controlled setting, the gate mainly improves preservation. The ungated FlowAlign row, Navi-FlowAlign (M ≡ 1), shows that the same decoupled controller re-7Semantic Granularity Navigation in Image Editing a yellow bird … -> a crochet bird …
+
+a cat is shown in a low polygonal style -> a fox is shown in a low polygonal style 
+
+a round painting of a forest with flowers, trees -> a round painting of a forest with deer , flowers, trees 
+
+a painting of planets and stars in the sky -> a painting of cats and dogs in the sky    
+
+> Real image TurboEdit FlowEdit DiffEdit InfEdit
+> DDIM +
+> MasaCtrl
+> Direct Inversion
+> +MasaCtrl
+
+Fixed Schedule Reschedule Edit Progress (Ours)  
+
+> (SYE)DDIM
+> +PnP
+> (SYE)Direct
+> Inversion+PnP
+> Navi -
+> Flow Edit Navi -
+> FlowAlign
+> FlowAlign
+
+Figure 9. Comparison of edited results. Real images are in the first column. Prompts are noted under each row. 
+
+mains effective even without any additional gating module. Among the deployed rows, Navi-FlowAlign ( M ≡ 1) attains the best Dist/PSNR/MSE and competitive SSIM/LPIPS, while Navi-FlowEdit + gate attains the best SSIM and the highest CLIP-Whole/CLIP-Edited scores. 
+
+ImgEdit-Bench Results Across Compatible Editors. Fig-ure 10 summarizes category-wise results on ImgEdit-Bench across compatible editors. Both Navi variants are ungated, so the gains isolate the decoupled controller rather than the optional gate. Navi improves both the Basic and UGE av-erages for InfEdit and FlowAlign. The gains are broad for InfEdit. For FlowAlign, the average gains are smaller and not every Basic category improves, but the strongest positive changes appear in background, action, and replace, where trajectory drift is more likely to matter. This supports our claim that the controller remains effective across compatible editors rather than only in the original FlowEdit instantia-tion. Full category-wise scores are reported in Appendix H. 
+
+Qualitative Results on PIE-Bench. Figure 9 visualizes typical outcomes on PIE-Bench. Navi-FlowEdit + gate 
+
+realizes large semantic changes while keeping non-edited regions stable, whereas coupled baselines more often exhibit global drift or background artifacts. Appendix D.1 isolates the effect of decoupled scale allocation under a fixed gating configuration, while Table 1 and Appendix G.4 show that the optional gate mainly improves background preservation. Appendix H provides the full ImgEdit-Bench breakdown, and the user study (Appendix L) is consistent with these trends. 
+
+Table 2. Across flow backbones, controlled K = 28 abla-tion. Using the same differential editing mechanism and matched 
+
+K = 28 budget, we compare coupled and decoupled scale al-location on SD3, SD3.5, and FLUX.1 [dev]. Decoupling im-proves SSIM/PSNR across all three backbones while keeping CLIP-Whole/Edited comparable or slightly higher.                                  
+
+> Method Background CLIP Semantics SSIM ↑PSNR ↑Whole ↑Edited ↑
+> SD3 (Esser et al., 2024) (couple) 88.22 22.18 26.01 22.55 SD3 (Esser et al., 2024) (decouple) 93.22 27.81 26.15 22.67 SD3.5 (Esser et al., 2024) (couple) 85.68 22.01 26.57 22.91 SD3.5 (Esser et al., 2024) (decouple) 92.32 27.45 26.77 23.32 FLUX.1 [dev] (Labs, 2024) (couple) 82.14 21.81 27.02 23.35 FLUX.1 [dev] (Labs, 2024) (decouple) 91.75 26.83 27.06 23.42
+
+## 6. Discussions 
+
+Can rescheduling replicate NaviEdit? No. The distinction is not the shape of the schedule, but the explicit separation of progress from scale together with the self-consistent step contract. Once progress is modeled as its own axis, the de-sign problem becomes scale allocation under a fixed budget. Any rule that mixes, queries, and updates at inconsistent scales is not a valid discretization of the controlled sys-tem and empirically leads to the drift and artifacts seen in coupled baselines. 
+
+Is NaviEdit merely tuning? Frontier shift rather than a single best point. Appendix D.1 (Figure 14) shows a 
+
+family-level shift: at comparable CLIP-Whole, decoupled schedules attain higher background fidelity than coupled ones, suggesting a cost floor induced by forced exposure to risky regimes under coupling. This is exactly the empirical 8Semantic Granularity Navigation in Image Editing ImgEdit-Judge score (higher is better)      
+
+> Add
+> Remove
+> Replace
+> Adjust
+> Background
+> Style
+> Action
+> Extract
+> Compose
+> Basic Avg
+> UGE Avg
+> InfEdit vs Navi-InfEdit
+> InfEdit
+> Navi-InfEdit
+> 1.5 2.0 2.5 3.0 3.5 4.0
+> ImgEdit-Judge score (higher is better)
+> Add
+> Remove
+> Replace
+> Adjust
+> Background
+> Style
+> Action
+> Extract
+> Compose
+> Basic Avg
+> UGE Avg
+> FlowAlign vs Navi-FlowAlign
+> FlowAlign
+> Navi-FlowAlign
+
+Figure 10. Category-wise results on ImgEdit-Bench across com-patible editors. Top: InfEdit vs. Navi-InfEdit. Bottom: FlowAlign vs. Navi-FlowAlign. Both Navi variants use M ≡ 1. The dashed separator isolates the Basic and UGE averages from the nine Basic categories. Edit (+CFG) Real Image Edit Image Edit (Coupled ) Edit (Decoupled )  
+
+> bird ->red bird
+
+Figure 11. Limits of increasing classifier-free guidance (CFG). 
+
+Higher CFG does not reliably prevent drift under coupling, while decoupling preserves structure at similar edit strength. 
+
+signature predicted by a rollout-level view: under a fixed step budget, performance is governed by where progress mass is spent along scale, not by any single timestep choice. 
+
+Across flow architectures. The Navi controller assumes only a conditional velocity field and a monotone scale path. It does not depend on a particular backbone. Table 2 pro-vides a controlled cross-backbone ablation for the same edit-ing mechanism across SD3, SD3.5, and FLUX.1 [dev]. In all three cases, decoupling improves SSIM/PSNR over the coupled allocation and keeps CLIP-Whole/Edited compara-ble or slightly higher. The edit-scale mismatch is therefore not an idiosyncratic artifact of one model family. 
+
+Why not just increase CFG? Increasing CFG strengthens conditional alignment, but it does not address the progress– scale coupling: it changes the magnitude of the driving field, not the allocation of compute along scale under a fixed step budget (Ho & Salimans, 2022). Figure 11 illustrates the practical implication in editing: simply raising CFG does not reliably reproduce the decoupled improvement, while coupled schedules may still drift/regenerate; decou-pling achieves the semantic change with substantially better anchoring at comparable guidance. 
+
+## 7. Limitations 
+
+NaviEdit improves how computation is allocated along the editing rollout, but it does not by itself solve support esti-mation or scene reasoning. When the editable support is too conservative, or when a fixed effective window is too preservation-biased for a difficult replacement, the result can remain semantically intermediate; this is most visible in fine-grained replacements and can be accentuated by gated variants. NaviEdit does not impose explicit geometric or re-lational consistency, so scenes involving mirrors, reflections, repeated objects, or strong inter-object relations may remain globally inconsistent even when local drift is suppressed. More broadly, the controller is most effective when the editability-preservation tradeoff is still strongly governed by allocation; for strong trained image editors that already learn part of this tradeoff end-to-end, the room for addi-tional gains can be smaller. Finally, the current controller is defined for compatible prompt-pair editors that expose a conditional differential field and a monotone scale path; extending the same control principle to less aligned editing interfaces remains future work. 
+
+## 8. Conclusion 
+
+We revisited training-free, inversion-free real-image editing with drift-based generative editors through a single mis-match: existing pipelines implicitly use the model scale coordinate as both a granularity coordinate and an edit-progress clock. By separating progress from scale and en-forcing a strict self-consistency contract, NaviEdit turns editing into a rollout-level vector-field navigation controller under a fixed step budget. This makes NaviEdit a plug-and-play inference-time controller for compatible drift-based editors: it does not require training, inversion, masks, or modifying the underlying generative model. The result-ing allocation principle is simple: spend compute densely within an effective scale window rather than expanding into high-noise regimes. Empirically, the FlowEdit instantia-tion Navi-FlowEdit + gate substantially improves over its coupled counterpart, while ungated transfer results with 
+
+Navi-InfEdit ( M ≡ 1) and Navi-FlowAlign ( M ≡ 1) show positive average gains beyond the original FlowEdit set-ting. These results suggest that the key contribution is not a specific heuristic, but a general progress-scale decoupling principle for training-free drift-based editing. 9Semantic Granularity Navigation in Image Editing 
+
+## Impact Statement 
+
+This paper presents work whose goal is to advance the field of Machine Learning, specifically in controllable image editing. The proposed method may support creative and assistive applications by improving editing controllability and reducing the need for task-specific training. As with other image editing and generative modeling techniques, the method should be used responsibly, since edited images may be misinterpreted or misused in inappropriate contexts. We discuss broader societal considerations in Appendix K. 
+
+## References 
+
+Avrahami, O., Patashnik, O., Fried, O., Nemchinov, E., Aberman, K., Lischinski, D., and Cohen-Or, D. Stable flow: Vital layers for training-free image editing. In Pro-ceedings of the Computer Vision and Pattern Recognition Conference , pp. 7877–7888, 2025. Bai, S., Chen, K., Liu, X., Wang, J., Ge, W., Song, S., Dang, K., Wang, P., Wang, S., Tang, J., Zhong, H., Zhu, Y., Yang, M., Li, Z., Wan, J., Wang, P., Ding, W., Fu, Z., Xu, Y., Ye, J., Zhang, X., Xie, T., Cheng, Z., Zhang, H., Yang, Z., Xu, H., Lin, J., et al. Qwen2.5-vl technical report. 
+
+arXiv preprint arXiv:2502.13923 , 2025. Cai, H., Cao, S., Du, R., Gao, P., Hoi, S., Hou, Z., Huang, S., Jiang, D., Jin, X., Li, L., et al. Z-image: An efficient image generation foundation model with single-stream diffusion transformer. arXiv preprint arXiv:2511.22699 ,2025. Cao, M., Wang, X., Qi, Z., Shan, Y., Qie, X., and Zheng, Y. Masactrl: Tuning-free mutual self-attention control for consistent image synthesis and editing. In Proceedings of the IEEE/CVF international conference on computer vision , pp. 22560–22570, 2023. Chen, S. X., Vaxman, Y., Ben Baruch, E., Asulin, D., More-shet, A., Lien, K.-C., Sra, M., and Sen, P. Tino-edit: Timestep and noise optimization for robust diffusion-based image editing. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition ,pp. 6337–6346, 2024. Chen, W., Guo, X., Li, S., Zhong, Y., Zhang, Z., Zhuang, F., Liu, H., Zhang, L., Ye, G., and He, H. Learning structure-semantic evolution trajectories for graph domain adapta-tion. arXiv preprint arXiv:2602.10506 , 2026a. Chen, Y., Habibian, A., Benini, L., and Li, Y. Gated re-lational alignment via confidence-based distillation for efficient vlms. arXiv preprint arXiv:2601.22709 , 2026b. Couairon, G., Verbeek, J., Schwenk, H., and Cord, M. Diffedit: Diffusion-based semantic image editing with mask guidance. arXiv preprint arXiv:2210.11427 , 2022. Deutch, G., Gal, R., Garibi, D., Patashnik, O., and Cohen-Or, D. Turboedit: Text-based image editing using few-step diffusion models. In SIGGRAPH Asia 2024 Conference Papers , pp. 1–12, 2024. Esser, P., Kulal, S., Blattmann, A., Entezari, R., M ¨uller, J., Saini, H., Levi, Y., Lorenz, D., Sauer, A., Boesel, F., et al. Scaling rectified flow transformers for high-resolution image synthesis. In Forty-first international conference on machine learning , 2024. Hertz, A., Mokady, R., Tenenbaum, J., Aberman, K., Pritch, Y., and Cohen-Or, D. Prompt-to-prompt image editing with cross-attention control. In ICLR , 2023. Ho, J. and Salimans, T. Classifier-free diffusion guidance. 
+
+arXiv preprint arXiv:2207.12598 , 2022. Hu, Y., Liu, S., Tan, Z., Yang, X., and Wang, X. Image editing as programs with diffusion models. arXiv preprint arXiv:2506.04158 , 2025. Huang, J., Huang, Y., Liu, J., Zhou, D., Liu, Y., and Chen, S. Dual-schedule inversion: Training-and tuning-free inversion for real image editing. In 2025 IEEE/CVF Winter Conference on Applications of Computer Vision (WACV) , pp. 660–669. IEEE, 2025. Ju, X., Zeng, A., Bian, Y., Liu, S., and Xu, Q. Direct inversion: Boosting diffusion-based editing with 3 lines of code. arXiv preprint arXiv:2310.01506 , 2023. Kim, J., Hong, Y., Park, J., and Ye, J. C. Flowalign: Trajectory-regularized, inversion-free flow-based image editing. arXiv preprint arXiv:2505.23145 , 2025. Kouzelis, T., Plitsis, M., Nicolaou, M. A., and Pana-gakis, Y. Enabling local editing in diffusion models by joint and individual component analysis. arXiv preprint arXiv:2408.16845 , 2024. Kulikov, V., Kleiner, M., Huberman-Spiegelglas, I., and Michaeli, T. Flowedit: Inversion-free text-based editing using pre-trained flow models. In Proceedings of the IEEE/CVF International Conference on Computer Vision ,pp. 19721–19730, 2025. Labs, B. F. Flux. https://github.com/ black-forest-labs/flux , 2024. Li, S., Zeng, B., Feng, Y., Gao, S., Liu, X., Liu, J., Li, L., Tang, X., Hu, Y., Liu, J., et al. Zone: Zero-shot instruction-guided local editing. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pp. 6254–6263, 2024. Li, Y., Cao, Y., He, H., Cheng, Q., Fu, X., Xiao, X., Wang, T., and Tang, R. M²IV: Towards efficient and fine-grained 10 Semantic Granularity Navigation in Image Editing 
+
+multimodal in-context learning via representation engi-neering. In Second Conference on Language Modeling ,2025a. URL https://openreview.net/forum? id=9ffYcEiNw9 .Li, Y., Yang, J., Yang, Z., Li, B., Han, L., He, H., Yao, Z., Chen, Y. V., Fei, S., Liu, D., et al. Make lvlms focus: Context-aware attention modulation for better multimodal in-context learning. In Proceedings of the AAAI Confer-ence on Artificial Intelligence , volume 40, pp. 6610–6618, 2026. Li, Z., Fu, Z., Hu, Y., Chen, Z., Wen, H., and Nie, L. Finecir: Explicit parsing of fine-grained modification semantics for composed image retrieval. arXiv preprint arXiv:2503.21309 , 2025b. Liang, G., Wang, Z., Hu, J., Zhou, H., Xue, Z., Zhang, J., Xu, D., and Yu, Q. Render-in-the-loop: Vector graph-ics generation via visual self-feedback. arXiv preprint arXiv:2604.20730 , 2026a. Liang, G., Wang, Z., Wang, C., Hu, J., Zhou, H., Liu, J., Zhang, J., Xu, D., and Yu, Q. Vanim: Rendering-aware sparse state modeling for structure-preserving vector ani-mation. arXiv preprint arXiv:2605.01517 , 2026b. Lin, H., Chen, Y., Wang, J., An, W., Wang, M., Tian, F., Liu, Y., Dai, G., Wang, J., and Wang, Q. Schedule your edit: A simple yet effective diffusion noise schedule for im-age editing. Advances in Neural Information Processing Systems , 37:115712–115756, 2024. Lipman, Y., Chen, R. T., Ben-Hamu, H., Nickel, M., and Le, M. Flow matching for generative modeling. In 11th International Conference on Learning Representations, ICLR 2023 , 2023. Liu, G.-H., Vahdat, A., Huang, D.-A., Theodorou, E. A., Nie, W., and Anandkumar, A. I2sb: Image-to-image schr ¨odinger bridge, 2023. URL https://arxiv. org/abs/2302.05872 .Liu, Q., Fu, X., Zhang, H., Cheng, L., Han, J., Moreira, C., Ning, X., and Bai, X. Hybrideditdif: Text and exemplar guided image editing with diffusion models. Pattern Recognition , pp. 112510, 2025. Liu, X., Gong, C., and Liu, Q. Flow straight and fast: Learning to generate and transfer data with rectified flow. 
+
+arXiv preprint arXiv:2209.03003 , 2022. Lugmayr, A., Danelljan, M., Romero, A., Yu, F., Timofte, R., and Van Gool, L. Repaint: Inpainting using denoising diffusion probabilistic models. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pp. 11461–11471, 2022. Luo, G., Dunlap, L., Park, D. H., Holynski, A., and Darrell, T. Diffusion hyperfeatures: Searching through time and space for semantic correspondence. Advances in Neural Information Processing Systems , 36:47500–47510, 2023. Mao, Q., Chen, L., Gu, Y., Shou, M. Z., and Yang, M.-H. Tuning-free image editing with fidelity and editabil-ity via unified latent diffusion model. arXiv preprint arXiv:2504.05594 , 2025. Meng, C., He, Y., Song, Y., Song, J., Wu, J., Zhu, J.-Y., and Ermon, S. Sdedit: Guided image synthesis and edit-ing with stochastic differential equations. arXiv preprint arXiv:2108.01073 , 2021. Peebles, W. and Xie, S. Scalable diffusion models with transformers. In Proceedings of the IEEE/CVF interna-tional conference on computer vision , pp. 4195–4205, 2023. Song, J., Meng, C., and Ermon, S. Denoising diffusion implicit models. arXiv preprint arXiv:2010.02502 , 2020. Tang, L., Jia, M., Wang, Q., Phoo, C. P., and Hariharan, B. Emergent correspondence from image diffusion. Ad-vances in Neural Information Processing Systems , 36: 1363–1389, 2023. Tian, J., Aggarwal, L., Colaco, A., Kira, Z., and Gonzalez-Franco, M. Diffuse attend and segment: Unsupervised zero-shot segmentation using stable diffusion. In Proceed-ings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pp. 3554–3563, 2024. Tumanyan, N., Geyer, M., Bagon, S., and Dekel, T. Plug-and-play diffusion features for text-driven image-to-image translation. In Proceedings of the IEEE/CVF con-ference on computer vision and pattern recognition , pp. 1921–1930, 2023. Wang, J., Pu, J., Qi, Z., Guo, J., Ma, Y., Huang, N., Chen, Y., Li, X., and Shan, Y. Taming rectified flow for inversion and editing. arXiv preprint arXiv:2411.04746 , 2024. Wang, Y., Yoon, S., Jin, P., Tivnan, M., Song, S., Chen, Z., Hu, R., Zhang, L., Li, Q., Chen, Z., et al. Implicit image-to-image schr ¨odinger bridge for image restoration. 
+
+Pattern Recognition , 165:111627, 2025. Xu, S., Huang, Y., Pan, J., Ma, Z., and Chai, J. Inversion-free image editing with natural language. arXiv preprint arXiv:2312.04965 , 2023. Yang, Y., Tang, Y., Chen, Y., Chen, X., Qiu, J., Xiong, H., Yin, H., Luo, Z., Zhang, Y., Tao, S., et al. Au-tomat: Enabling automated crystal structure reconstruc-tion from microscopy via agentic tool use. arXiv preprint arXiv:2505.12650 , 2025. 11 Semantic Granularity Navigation in Image Editing 
+
+Ye, Y., He, X., Li, Z., Lin, B., Yuan, S., Yan, Z., Hou, B., and Yuan, L. Imgedit: A unified image editing dataset and benchmark. arXiv preprint arXiv:2505.20275 , 2025. Yuan, M., Xiao, Y., Chen, W., Zhao, C., Wang, D., and Zhuang, F. Hyperbolic diffusion recommender model. In 
+
+Proceedings of the ACM on Web Conference 2025 , pp. 1992–2006, 2025. Zhou, Y., Zhou, D., Wang, Y., Feng, J., and Hou, Q. Maskd-iffusion: Boosting text-to-image consistency with condi-tional mask. International Journal of Computer Vision ,133(5):2805–2824, 2025. 12 Semantic Granularity Navigation in Image Editing 
+
+## A. Full Related Work 
+
+Training-free image editing with diffusion or flow priors is often framed as intervening on a pretrained generative trajectory while preserving a user-provided source image. A recurring practical pattern is to use the model’s native coordinate (diffusion timestep, noise level, or flow time) both as a semantic-scale knob and as an implicit notion of edit progress, by deciding where to inject structure constraints and where to apply semantic change. Our work is aligned with this line in that we remain training-free and operate by manipulating model-implied vector fields, but we differ in the organizing principle: we treat the model coordinate as a scale (granularity) coordinate and introduce an explicit edit-progress axis that is independent of scale allocation. SDEdit injects noise into a source image and then runs the reverse stochastic process to obtain a realistic sample that remains faithful to the corrupted source, using the noise magnitude as the main knob to trade off faithfulness versus realism (Meng et al., 2021). RePaint adapts reverse diffusion iterations for inpainting by repeatedly resampling unmasked regions from the source while denoising the masked region, again using the diffusion trajectory and its step allocation as the operational model (Lugmayr et al., 2022). These works highlight that trajectory intervention and step allocation can be sufficient for strong editing behavior without additional training, but they also exemplify that the trajectory coordinate simultaneously mediates both which information is preserved and how much semantic change is allowed. A complementary family of training-free editors manipulates internal representations, especially attention and intermediate features, to preserve structure while applying text-driven changes. Prompt-to-Prompt observes that cross-attention mediates the association between words and spatial layout, and edits are realized by controlling cross-attention maps along the generation process; it also introduces localized control mechanisms such as LocalBlend based on attention maps (Hertz et al., 2023). Plug-and-Play Diffusion Features injects spatial features and self-attention information extracted from a source image into the target generation to retain layout and structure (Tumanyan et al., 2023). DiffEdit constructs an edit mask by contrasting diffusion predictions under different prompts and then performs masked semantic editing (Couairon et al., 2022). In instruction-guided editing, ZONE leverages localization cues in instruction-conditioned diffusion models to enable zero-shot local edits (Li et al., 2024). These methods provide strong empirical evidence that internal attention/feature channels encode controllable localization signals and that editing can be staged by choosing where in the model’s trajectory these signals are injected. Several recent works explicitly target the fidelity–editability tradeoff by adding constraints or schedulers that decide at which timesteps to emphasize preservation versus semantic change. UnifyEdit formulates training-free editing as diffusion latent optimization with a self-attention preservation constraint and a cross-attention alignment constraint, and proposes an adaptive timestep scheduler to balance the two in a unified mechanism (Mao et al., 2025). Our focus is orthogonal: rather than treating timestep selection as the only axis for balancing objectives, we explicitly separate edit progress from the scale coordinate and study budget allocation along the scale axis as a controllability problem under a fixed computational budget. Flow-based and rectified-flow models have recently become central to high-capacity text-to-image systems, and a number of training-free editors are being rederived for this setting. Stable Flow studies training-free editing on DiT-style flow-matching models and identifies vital layers for selective attention injection, addressing the practical question of where to intervene in transformer-based flow models (Avrahami et al., 2025). FlowEdit proposes an inversion-free and optimization-free approach that constructs an ODE mapping between the source- and target-prompt distributions for pretrained flow models, motivated by reduced transport cost relative to edit-by-inversion (Kulikov et al., 2025). RF-Solver and RF-Edit improve numerical solution accuracy of the rectified-flow ODE and build inversion/editing pipelines atop the improved solver (Wang et al., 2024). These works are closely related in spirit in that they treat editing as trajectory manipulation for rectified flows; our contribution is a different abstraction layer, emphasizing explicit separation between an edit-progress parameter and the model’s scale coordinate, and making scale-density allocation an object of analysis rather than a byproduct of step count and default schedules. Beyond trajectory-level interventions, some approaches decompose either the edit itself or the latent degrees of freedom into more structured components. Adjacent to image editing, composed image retrieval also studies how textual modification instructions interact with visual content, including explicit parsing of fine-grained modification semantics (Li et al., 2025b). IEAP decomposes instruction-driven editing into a sequence of atomic operations implemented via lightweight adapters and orchestrated as an editing program, enabling compositional multi-step edits under a common DiT model (Hu et al., 2025). This addresses a different axis of complexity—semantic compositionality over operations—while our method focuses on how to allocate a fixed computational budget across scales for a given operation. Kouzelis et al. propose unsupervised local manipulation by analyzing Jacobians of a pretrained diffusion model to identify local latent directions via joint/individual 13 Semantic Granularity Navigation in Image Editing 
+
+component analysis (Kouzelis et al., 2024). HybridEditDif introduces a dynamic decoupled cross-attention mechanism to combine text and exemplar conditioning for guided editing, targeting consistency and controllability via architectural conditioning design (Liu et al., 2025). These works suggest that disentangling and localizing degrees of freedom—via program structure, latent directions, or decoupled conditioning—can substantially improve controllability, and they motivate our emphasis on separating the control over scale (granularity) from the notion of edit progress. Our appendix also relies on the broader literature showing that diffusion and flow models contain rich internal representations that support localization and diagnostic signals. DIFT extracts diffusion features as correspondence descriptors without task-specific training, showing that diffusion networks encode semantically meaningful spatial structure (Tang et al., 2023). Diffusion Hyperfeatures aggregate multi-timestep and multi-layer diffusion features into per-pixel descriptors for semantic correspondence, formalizing that information is distributed across both space and the diffusion coordinate (Luo et al., 2023). DiffSeg segments images in a training-free, zero-shot manner by merging self-attention maps in Stable Diffusion (Tian et al., 2024). MaskDiffusion revisits cross-attention and proposes training-free masking to improve text-image consistency, explicitly linking attention-map pathologies to semantic mismatch (Zhou et al., 2025). In our framework, attention-derived masks and pressure-like signals are treated as diagnostics for identifying effective scale windows and feasible edit regions, rather than as additional learnable modules. Finally, diffusion bridges and Schr ¨odinger-bridge formulations provide a conceptual lens where conditional generation is viewed as transporting between endpoint distributions. I2SB introduces an image-to-image Schr ¨odinger bridge formulation for learning diffusion processes between two distributions (Liu et al., 2023), and subsequent works develop implicit or restoration-oriented SB formulations (Wang et al., 2025). While these methods are typically training-based and focus on learning the bridge dynamics, they support the general viewpoint that editing can be framed as controlled transport; our method operationalizes a training-free version of this view by directly manipulating pretrained flow vector fields with explicit separation between scale control and edit progress. Although these adjacent directions are outside our direct experimental scope, they reinforce the broader methodological pattern that controllable generation benefits from explicit intermediate structure rather than end-to-end output correction alone. In vector graphics and animation, rendering-aware self-feedback and sparse state modeling similarly aim to preserve geometric or temporal structure while changing high-level content (Liang et al., 2026a;b). In other structured generative or adaptation settings, structure–semantic evolution trajectories and geometry-aware diffusion recommenders show that controllability often depends on matching the representation geometry to the task domain (Chen et al., 2026a; Yuan et al., 2025). Related motivations also appear in scientific reconstruction and multimodal reasoning, where agentic tool use, representation engineering, context-aware attention modulation, and confidence-based relational alignment constrain outputs through intermediate signals rather than only through final-sample supervision (Yang et al., 2025; Li et al., 2025a; 2026; Chen et al., 2026b). 
+
+## B. Symbols Table  
+
+> Table 3. Symbols Table
+
+Symbol Description 
+
+Axes, schedules, and budgets 
+
+K Step budget; for NaviEdit this equals the number of model evaluations. 
+
+N Number of scheduler timesteps. 
+
+k Edit-step index ( k = 0 , . . . , K − 1). 
+
+n Scheduler index ( n = 0 , . . . , N − 1). 
+
+s ∈ [0 , 1] Explicit progress axis (ODE time). 
+
+u ∈ [0 , 1] Normalized scale / noise coordinate (granularity axis). 
+
+t Model timestep coordinate. 
+
+τ (u) Timestep map (used as τ (u) = uT ). 
+
+T Scheduler training-time timestep scale. 
+
+{t(n)}N −1 
+
+> n=0
+
+Scheduler timesteps at inference. 
+
+u(n) Normalized scale, u(n) = t(n)/T .
+
+(tpath [n], u path [n]) Monotone scheduler path (noisy →clean). Continued on next page 14 Semantic Granularity Navigation in Image Editing 
+
+Table 3 – continued from previous page 
+
+Symbol Description 
+
+p ∈ [0 , 1] Navigation coordinate along the scheduler path (decoupled from u). 
+
+pk Navigation coordinate at step k.
+
+∆pk Increment of p at step k.
+
+∆pmin Base remaining-progress increment, (1 − pk)/(K − k).
+
+ϵp Small endpoint clamp used before the terminal step. 
+
+Interp( · ; p) Linear interpolation from p to (t, u ).
+
+Speed(risk) Online speed controller (risk →step density). 
+
+risk Online navigation risk signal (from existing diagnostics). 
+
+tref Reference depth for the tail window. 
+
+n0 Tail start index, n0 = max(0 , N − tref ).
+
+Latents, anchors, conditions 
+
+xsrc Source latent. 
+
+x Current latent state. 
+
+xk Latent at step k.
+
+xK Final edited latent. 
+
+x(s) Continuous latent trajectory. 
+
+csrc Source condition / prompt. 
+
+ctar Target condition / prompt. 
+
+ϵ ∼ N (0 , I ) Gaussian noise anchor. 
+
+ϵk Fresh noise at step k.
+
+I Identity matrix. 
+
+zsrc (xsrc ; u, ϵ ) Co-located source anchor, (1 − u)xsrc + uϵ .
+
+ztar (x; xsrc ; u, ϵ ) Target anchor via residual shift. 
+
+zsrc  
+
+> k
+
+Step-k source anchor. 
+
+ztar  
+
+> k
+
+Step-k target anchor. 
+
+model field and differential fields 
+
+vθ (·) model velocity field. 
+
+θ model parameters. 
+
+V src  
+
+> k
+
+Source velocity at step k.
+
+V tar  
+
+> k
+
+Target velocity at step k.
+
+∆V (u) Local differential field at scale u.
+
+∆Vk Step-k differential velocity, V tar  
+
+> k
+
+− V src  
+
+> k
+
+.
+
+M (u) Feasible-region mask at scale u.
+
+Mk Step-k mask ( ∈ [0 , 1] H×W ×C ). 
+
+ΠM (u)(·) Active-set projection induced by M (u).
+
+∆Veff (x; u, ϵ ) Effective field (projected differential field). 
+
+∆V eff  
+
+> k
+
+Masked field, ∆V eff  
+
+> k
+
+:= Mk ⊙ ∆Vk.
+
+⊙ Elementwise (Hadamard) product. 
+
+Discretization / self-consistency 
+
+uk Scale used at step k (mixing/query/update share it). 
+
+tk Timestep queried at step k (from interpolation / τ (uk)). 
+
+∆uk Scale increment, ∆uk = uk+1 − uk.
+
+∆sk Progress weight from scale steps. 
+
+˜uk Mismatched query scale (used in contract violation). 
+
+g∆V eff (x; u, ˜u, ϵ ) Mismatch-field (anchors at u, query at ˜u). 
+
+bk Bias term induced by mismatch. 
+
+xsc  
+
+> k+1
+
+Self-consistent Euler update result. 
+
+Diagnostics 
+
+ρ(u) Leakage pressure (outside/total energy ratio). Continued on next page 15 Semantic Granularity Navigation in Image Editing 
+
+Table 3 – continued from previous page 
+
+Symbol Description 
+
+ρk Discrete leakage pressure at step k.
+
+ω(u) Scale-wise directional oscillation. 
+
+ωk Step-to-step oscillation on ∆V eff  
+
+> k
+
+.
+
+δ Small scale offset (for oscillation). 
+
+cos( a, b ) Cosine similarity. 
+
+⟨a, b ⟩ Inner product. 
+
+∥ · ∥ 2 ℓ2 norm. 
+
+ε Numerical stabilizer (e.g., 10 −8). 
+
+Rollout functional and proxy 
+
+ϕ(x, u ) Local nonnegative risk density. 
+
+ϕk Step risk density (proxy instantiation). 
+
+λρ, λ ω , λ h Weights in ϕk.
+
+G[x(·), u (·)] Rollout functional, R 10 ϕ(·) ds .
+
+bG Discrete rollout proxy, P 
+
+> k
+
+∆sk ϕk.
+
+mbad Outside-window progress mass. 
+
+1{·} Indicator function. 
+
+Scale regimes and schedule families 
+
+Ueff Effective scale window (tail window). 
+
+Ugood Low-risk scale interval. 
+
+Ubad High-risk scale interval. 
+
+U⋆ Good sub-window used in theory. 
+
+Fcouple (K) Coupled budget-to-range schedule family. 
+
+Fdecouple (K) Decoupled (density-refinement) schedule family. 
+
+Tbad Preimage set of bad scales (in proofs). 
+
+tbad Bad cutpoint (in proofs). 
+
+t0(K) Coupled suffix start parameter (budget-dependent). 
+
+δ(K) Lower bound on forced bad mass (proof bound). 
+
+cgood , c bad Risk bounds on good/bad regimes. 
+
+ODE / numerical analysis (appendix) 
+
+f (s, x ) ODE vector field (proof notation). 
+
+g(s) Scale-to-progress factor (proof notation). 
+
+sk Grid point on s for Euler discretization. 
+
+hs Euler step size on s (typically 1/K ). 
+
+hu Max scale step size (density measure). 
+
+x⋆ Reference/ideal trajectory (proof notation). 
+
+u⋆ Window-fixed control (proof notation). 
+
+x(K) 
+
+> k
+
+Euler discrete iterate (proof notation). 
+
+L Lipschitz constant (for f ). 
+
+B Bound on ∥f ∥ (proof). 
+
+Lϕ Lipschitz constant (for ϕ). 
+
+CE Euler global error constant. 
+
+Wu scale-span width. 
+
+Evaluation metrics (tables/figures) 
+
+Dist Structure distance metric. 
+
+PSNR Peak signal-to-noise ratio. 
+
+MSE Mean squared error. 
+
+SSIM Structural similarity index. 
+
+LPIPS Perceptual distance (LPIPS). Continued on next page 16 Semantic Granularity Navigation in Image Editing 
+
+Table 3 – continued from previous page 
+
+Symbol Description 
+
+PSNR bg Background PSNR (background fidelity). 
+
+CLIP (Whole/Edited) CLIP semantic scores (whole image / edited region). 
+
+## C. Instantiation of ϕ and bG
+
+This section specifies the concrete rollout proxy used in Figure 5 and Figure 6. The design goal is purely operational: bG
+
+should be computable from signals already produced during editing (no extra model calls), and should reflect the two weak premises used in the main text: ϕ increases under spatial underdetermination (leakage), and the discretization component of the rollout decreases when density is refined inside a fixed effective window. 
+
+C.1. Per-step signals available during editing 
+
+Fix a run with K model evaluations and a monotone scale sequence {uk}Kk=0 . Each step constructs the co-located pair 
+
+zsrc  
+
+> k
+
+= (1 − uk)xsrc + ukϵk, z tar  
+
+> k
+
+= xk + ( zsrc  
+
+> k
+
+− xsrc ), queries the model once (source and target in a batch), and forms the differential field 
+
+∆Vk = vθ (ztar  
+
+> k
+
+, τ (uk), c tar ) − vθ (zsrc  
+
+> k
+
+, τ (uk), c src ).
+
+Let Mk ∈ [0 , 1] H×W ×C denote the feasible-region mask extracted from the model internal representation at the same query (main text, Sec. 3.1). Define the masked (effective) differential field 
+
+∆V eff  
+
+> k
+
+:= Mk ⊙ ∆Vk.
+
+We use two diagnostics. 
+
+Leakage pressure. With a small ε > 0,
+
+ρk := ∥(1 − Mk) ⊙ ∆Vk∥2
+
+∥∆Vk∥2 + ε . (4) This is exactly Eq. (1) instantiated at uk.
+
+Directional oscillation. Let cos( a, b ) = ⟨a, b ⟩/(( ∥a∥2 + ε)( ∥b∥2 + ε)) . We measure step-to-step instability on the effective field: 
+
+ωk := 
+
+(
+
+0, k = 0 ,
+
+1 − cos(∆ V eff  
+
+> k
+
+, ∆V eff 
+
+> k−1
+
+), k ≥ 1. (5) 
+
+C.2. Progress weights and outside-window mass 
+
+The rollout functional in the main text integrates over the progress axis s ∈ [0 , 1] . In the self-consistent discretization (Theorem 4.4), progress increments are induced by the scale increments. We therefore define per-step progress weights from the scale steps: 
+
+∆uk := uk+1 − uk, ∆sk := |∆uk|
+
+PK−1 
+
+> j=0
+
+|∆uj | ,
+
+> K−1
+
+X
+
+> k=0
+
+∆sk = 1 . (6) Given an effective window Ueff (defined in the main text by the fixed tail window on the scheduler path), the outside-window progress mass is 
+
+mbad := 
+
+> K−1
+
+X
+
+> k=0
+
+∆sk 1{uk /∈ U eff }. (7) 
+
+C.3. Operational effective window Ueff from a tail window 
+
+NaviEdit does not recompute Ueff per instance. Instead, it operationalizes Ueff by selecting a fixed tail window on the scheduler path and restricting visited scales to that suffix. Concretely, let {(t(n), u (n))}N −1 
+
+> n=0
+
+be the monotone path from 17 Semantic Granularity Navigation in Image Editing 0.6 0.7 0.8 0.9                         
+
+> t_ref_norm
+> 25.8
+> 26.0
+> 26.2
+> 26.4
+> 26.6
+> 26.8
+> CLIP-Whole
+> sd3
+> sd3.5 0.60 0.65 0.70 0.75 0.80 0.85 0.90 0.95
+> t_ref_norm
+> 50
+> 52
+> 54
+> 56
+> LPIPS (bg)
+> sd3
+> sd3.5 0.60 0.65 0.70 0.75 0.80 0.85 0.90 0.95
+> t_ref_norm
+> 2.5
+> 3.0
+> 3.5
+> 4.0
+> 4.5
+> 5.0
+> MSE (bg)
+> sd3
+> sd3.5 0.6 0.7 0.8 0.9
+> t_ref_norm
+> 26.5
+> 27.0
+> 27.5
+> 28.0
+> 28.5
+> PSNR (bg)
+> sd3
+> sd3.5 0.60 0.65 0.70 0.75 0.80 0.85 0.90 0.95
+> t_ref_norm
+> 90
+> 91
+> 92
+> 93
+> 94
+> SSIM (bg)
+> sd3
+> sd3.5
+
+Figure 12. Sensitivity to the operational effective window. Sweeping tref varies the tail-window width; the qualitative density-versus-range trend remains stable. 
+
+noisy →clean used by the scheduler. We choose a reference depth tref and set the tail start index as n0 := max(0 , N − tref ),so the visited interval is 
+
+Ueff := {u(n) : n ∈ { n0, . . . , N − 1}} .
+
+Unless stated otherwise, the deployed PIE-Bench Navi-FlowEdit + gate system uses a 50-step scheduler grid ( N = 50 ), a 50-step editing budget ( K = 50 ), and tref = 42 . Other budget settings such as the K = 20 /28 step-scaling study are controlled ablations and should not be read as the deployed Table 1 setting. 
+
+C.4. Sensitivity to tref 
+
+We sweep tref to vary the width of Ueff while keeping the step budget fixed. This directly tests how performance depends on the operational window choice and supports the use of a fixed tail window instead of per-instance oracle selection. 
+
+C.5. Local risk density ϕ and rollout proxy bG
+
+We instantiate a nonnegative per-step risk density as a fixed-weight combination of leakage, oscillation, and a discretization term: 
+
+ϕk := λρ ρk + λω ωk + λh |∆uk|. (8) We use fixed weights across all experiments: (λρ, λ ω , λ h) = (1 .0, 1.0, 0.05) . We set ε = 10 −8 in all cosine/ratio computations. The discrete rollout proxy is the progress-weighted accumulation: 
+
+bG := 
+
+> K−1
+
+X
+
+> k=0
+
+∆sk ϕk. (9) When we report bG for a schedule family, we average Eq. (9) over the evaluation set and random seeds (fresh ϵk per step). 
+
+C.6. Why this instantiation matches the two weak premises Sensitivity to underdetermination. By construction, ρk increases when the prompt-induced motion leaks outside the feasible region. Since ϕk is monotone in ρk, steps at underdetermined scales yield larger local risk contributions. 18 Semantic Granularity Navigation in Image Editing 0 1 2 3 4    
+
+> multiplier
+> 1.0
+> 1.2
+> 1.4
+> 1.6
+> 1.8
+> 2.0
+> gap_ratio (outside / inside)
+> (a) gap stability
+> sweep
+> base
+> rho
+> omega
+> h
+> 01234
+> multiplier
+> 0.0
+> 0.1
+> 0.2
+> 0.3
+> 0.4
+> 0.5
+> 0.6
+> Spearman correlation
+> (b) proxy fidelity correlation
+> base Spearman(Ghat, MSE_bg)
+> base Spearman(Ghat, 1-SSIM_bg)
+> rho Spearman(Ghat, MSE_bg)
+> rho Spearman(Ghat, 1-SSIM_bg)
+> omega Spearman(Ghat, MSE_bg)
+> omega Spearman(Ghat, 1-SSIM_bg)
+> h Spearman(Ghat, MSE_bg)
+> h Spearman(Ghat, 1-SSIM_bg)
+
+Figure 13. Sensitivity of the instantiated proxy. Sweeping λρ, λ ω , λ h shows that the qualitative trends used in the paper are stable within a reasonable range of weights. 
+
+Density refinement decreases the discretization component inside a fixed window. Consider controls that stay inside a fixed window U⋆ and differ only by density (i.e., by how the same total scale span is partitioned into steps). The discretization part of Eq. (9) is 
+
+bGdisc =
+
+K−1X
+
+k=0 
+
+∆sk λh|∆uk| = λh
+
+PK−1
+
+k=0 |∆uk|2
+
+PK−1
+
+j=0 |∆uj | .
+
+Let Wu := PK−1
+
+j=0 |∆uj | be the total traversed scale span (fixed by the window endpoints). Then 
+
+bGdisc = λh
+
+P
+
+k |∆uk|2
+
+Wu
+
+≤ λh
+
+(max k |∆uk|) P
+
+k |∆uk|
+
+Wu
+
+= λh max 
+
+k |∆uk|. (10) Thus, at fixed Wu, refining density (decreasing max k |∆uk|) cannot increase the discretization component and typically decreases it. This is the only property of discretization used by the main text claims: density refinement inside an effective window reduces the rollout proxy through the step-size term, while range expansion can introduce additional leakage/instability through ρk and ωk as the trajectory enters risky regimes. 
+
+C.7. Sensitivity to (λρ, λ ω , λ h)
+
+We evaluate robustness to the proxy instantiation by sweeping one weight at a time while keeping the other two fixed. We report the induced changes in bG and the resulting editability–fidelity trade-off under the same fixed step budget. 
+
+C.8. Timestep mapping τ (u)
+
+Let {t(n)}N −1
+
+n=0 be the scheduler timesteps used at inference. We define the normalized scale as u(n) = t(n)/T , where 
+
+T is the scheduler’s training-time timestep scale (e.g., num train timesteps ). Accordingly, we use the linear map 
+
+τ (u) = u T , so that τ (u(n)) = t(n). In practice we maintain a monotone path (tpath [n], u path [n]) and interpolate with a shared p ∈ [0 , 1] to obtain (t, u ), ensuring that mixing, querying, and actuation share the same scale. 
+
+## D. Proof of Theorem 4.2 
+
+Proof. We make explicit the two ingredients used by the theorem: (i) a scale-regime gap in the local risk density ϕ, and (ii) a coupling-induced lower bound on how much progress must be spent in the bad regime. 
+
+Step 0 (Notation). For any admissible control u(·), define the fraction of progress spent in the bad regime 
+
+mbad 
+
+ u(·) := 
+
+Z 10
+
+1{u(s) ∈ U bad } ds ∈ [0 , 1] . (11) Write G[u(·)] as shorthand for G[x(·), u (·)] where x(·) is the induced trajectory under Definition 4.1. 
+
+Step 1 (Risk gap assumption, made explicit). By the premise of Theorem 4.2, there exist constants 
+
+0 ≤ cgood < c bad (12) 19 Semantic Granularity Navigation in Image Editing 
+
+such that, for all states x reachable under the considered instance, 
+
+ϕ(x, u ) ≤ cgood for u ∈ U good , ϕ(x, u ) ≥ cbad for u ∈ U bad . (13) We additionally use the explicit separation condition 
+
+cbad δ(K) > c good , (14) where δ(K) is the lower bound on the bad-regime progress mass enforced by the coupled family for the considered budgets. 
+
+Step 2 (A valid lower bound for any control that visits the bad regime). Using the nonnegativity of ϕ and its lower bound on Ubad ,
+
+G[u(·)] = 
+
+Z 10
+
+ϕ x(s), u (s) ds 
+
+≥
+
+Z 
+
+> {s:u(s)∈U bad }
+
+ϕ x(s), u (s) ds 
+
+≥ cbad 
+
+Z 10
+
+1{u(s) ∈ U bad } ds 
+
+= cbad mbad (u(·)) . (15) 
+
+Step 3 (Coupling implies a bad-mass lower bound). By the theorem assumption, for the considered budgets, 
+
+mbad (u(·)) ≥ δ(K) > 0, ∀ u(·) ∈ F couple (K). (16) 
+
+Step 4 (Lower bound for the coupled family). Combining (15) with (16) yields, for the considered budgets, 
+
+inf  
+
+> u(·)∈F couple (K)
+
+G[u(·)] ≥ cbad δ(K). (17) 
+
+Step 5 (A decoupled control with smaller objective). By the decoupled-feasibility assumption, choose u⋆(·) ∈Fdecouple (K) such that u⋆(s) ∈ U good for all s ∈ [0 , 1] . By (13), 
+
+G[u⋆(·)] = 
+
+Z 10
+
+ϕ x⋆(s), u ⋆(s) ds ≤
+
+Z 10
+
+cgood ds = cgood , (18) hence 
+
+inf  
+
+> u(·)∈F decouple (K)
+
+G[u(·)] ≤ cgood . (19) 
+
+Step 6 (Strict gap). Combining (17) and (19) gives, for the considered budgets, 
+
+inf  
+
+> u(·)∈F couple (K)
+
+G[u(·)] − inf  
+
+> u(·)∈F decouple (K)
+
+G[u(·)] ≥ cbad δ(K) − cgood > 0, (20) where the last inequality follows from the separation condition in (14). This establishes the incompleteness of the coupled family: the coupled budget-to-range constraint enforces a sufficiently costly progress mass in Ubad , while the decoupled family can allocate progress inside Ugood , yielding a strictly smaller attainable rollout functional value. 
+
+D.1. Coupled vs. decoupled schedules under increasing step budget 
+
+We evaluate how increasing the practical step budget changes the fidelity–editability tradeoff under two schedule families that differ only in scale allocation. The coupled family follows the common heuristic where increasing the budget effectively expands the accessed scale range toward noisier regimes, whereas the decoupled family keeps a fixed effective window 20 Semantic Granularity Navigation in Image Editing 
+
+Table 4. Effect of increasing step budget under coupled vs. decoupled scale allocation on SD3 with the gate-enabled Navi-FlowEdit configuration held fixed. Coupled schedules expand into noisier scales as the budget increases, while decoupled schedules densify within a fixed effective window. The FlowEdit row is a matched-step controlled reference; its official-step result is reported in Table 1.                                                                     
+
+> Method Schedule Dist ↓PSNR ↑MSE ↓SSIM ↑LPIPS ↓CLIP-Whole ↑CLIP-Edit ↑Steps Runtime(s) ↓VRAM(MiB) ↓
+> Navi-FlowEdit + gate Coupled 14.28 26.12 4.75 90.10 71.29 24.12 21.35 20 14.95 22120 Decoupled 10.84 27.92 2.82 93.61 48.62 24.51 21.62 20 14.95 22120 Coupled 27.22 22.18 9.61 88.22 87.98 26.01 22.55 28 17.52 22120 Decoupled 11.10 27.81 2.91 93.22 51.35 26.15 22.67 28 17.52 22120 FlowEdit (matched-step reference) Coupled 17.06 21.52 8.33 86.09 129.54 25.80 22.42 20 14.55 17140 2.5 5.0 7.5 10.0 12.5
+> MSE
+> 25.9
+> 26.0
+> 26.1
+> 26.2
+> CLIP-Whole
+> couple
+> decouple 20 25 30
+> PSNR
+> 25.9
+> 26.0
+> 26.1
+> 26.2
+> CLIP-Whole
+> couple
+> decouple
+
+Figure 14. Decoupling gains a better balance under a matched step budget. We plot CLIP-Whole (edit compliance) against background fidelity for coupled and decoupled schedule families under the same model and evaluation budget. Decoupled schedules consistently attain higher PSNR at comparable CLIP-Whole, indicating a family-level frontier shift rather than a single tuned operating point. 
+
+and uses additional steps to densify sampling within that window. All other components are held fixed, including model, guidance, gating, and self-consistent mixing/querying/update axes. For Navi-FlowEdit, the step budget coincides with the number of model evaluations in our controller. For FlowEdit, we report matched editing steps rather than a literal model-evaluation count, because the official implementation uses a different scheduler/accounting convention. Increasing the budget from 20 to 28 improves edit alignment for both schedule families (higher CLIP-Edit), but only the coupled schedule suffers a pronounced fidelity collapse (lower PSNR/SSIM and higher Dist/MSE/LPIPS). In contrast, the decoupled schedule preserves fidelity while retaining comparable edit strength. This isolates the scale-allocation effect in Theorems 4.2 and 4.3: allocating additional budget to range expansion forces nontrivial mass into high-risk scales, whereas allocating it to density refinement within the effective window improves numerical stability without sacrificing editability. 
+
+## E. Proof of Theorem 4.3 
+
+Proof. We prove the claim for the finite-budget quantity controlled by inference. All statements are conditioned on the fixed anchor realization specified in Theorem 4.3. For a K-step self-consistent rollout {(xk, u k)}Kk=0 , let ∆sk ≥ 0 be normalized progress weights with PK−1 
+
+> k=0
+
+∆sk = 1 .Define the implemented rollout cost and implemented bad-regime mass as 
+
+GK [x0: K , u 0: K ] := 
+
+> K−1
+
+X
+
+> k=0
+
+∆sk ϕ(xk, u k), mK 
+
+> bad
+
+:= 
+
+> K−1
+
+X
+
+> k=0
+
+∆sk 1{uk ∈ U bad }. (21) 
+
+Range-expanding rollouts. For any range-expanding rollout satisfying mK 
+
+> bad
+
+≥ δK , the assumptions ϕ ≥ 0 and 
+
+ϕ(x, u ) ≥ cbad on Ubad give 
+
+GK [x0: K , u 0: K ] = 
+
+> K−1
+
+X
+
+> k=0
+
+∆sk ϕ(xk, u k)
+
+≥
+
+> K−1
+
+X
+
+> k=0
+
+∆sk cbad 1{uk ∈ U bad }
+
+= cbad mK 
+
+> bad
+
+≥ cbad δK . (22) 21 Semantic Granularity Navigation in Image Editing 
+
+Thus every range-expanding rollout in the considered family has implemented cost at least cbad δK .
+
+Density refinement inside the good window. Consider the self-consistent density-refined rollout inside U⋆ ⊆ U good from the theorem. Let u⋆(s) be its continuous good-window control and x⋆(s) the corresponding ideal trajectory. Let x(K) 
+
+> k
+
+be the 
+
+K-step self-consistent Euler rollout on the grid sk = k/K with hs = 1 /K :
+
+x(K) 
+
+> k+1
+
+= x(K) 
+
+> k
+
++  u⋆(sk+1 ) − u⋆(sk)∆Veff 
+
+
+
+x(K) 
+
+> k
+
+; u⋆(sk), ϵ k
+
+
+
+. (23) By the theorem assumption, 
+
+max  
+
+> 0≤k≤K
+
+x(K) 
+
+> k
+
+− x⋆(sk) ≤ CE
+
+K . (24) Since u⋆(sk) ∈ U ⋆ and ϕ(x, u ) ≤ cgood on U⋆, while ϕ is Lϕ-Lipschitz in x there, the implemented cost of this density-refined rollout satisfies 
+
+Gdens  
+
+> K
+
+:= 
+
+> K−1
+
+X
+
+> k=0
+
+hs ϕ
+
+
+
+x(K) 
+
+> k
+
+, u ⋆(sk)
+
+
+
+≤
+
+> K−1
+
+X
+
+> k=0
+
+hs ϕ(x⋆(sk), u ⋆(sk)) + 
+
+> K−1
+
+X
+
+> k=0
+
+hsLϕ x(K) 
+
+> k
+
+− x⋆(sk)
+
+≤ cgood + Lϕ max  
+
+> k
+
+x(K) 
+
+> k
+
+− x⋆(sk)
+
+≤ cgood + LϕCE
+
+K . (25) 
+
+Strict comparison. By the margin assumption in Theorem 4.3, 
+
+cbad δK − cgood ≥ γ > 0. (26) If K > L ϕCE/γ , then 
+
+cgood + LϕCE
+
+K < c good + γ ≤ cbad δK . (27) Combining (22) and (25) yields 
+
+Gdens  
+
+> K
+
+< inf 
+
+> K-step range-expanding rollouts
+> mK
+> bad ≥δK
+
+GK . (28) Hence, under the stated assumptions and fixed budget K, self-consistent density refinement inside U⋆ attains lower implemented rollout cost than any range-expanding rollout that allocates at least δK progress mass to Ubad .
+
+## F. Proof of Theorem 4.4 
+
+Proof. We prove the two directions in Theorem 4.4. Throughout, fix a run with a monotone scale sequence {uk}Kk=0 and fresh anchors ϵk ∼ N (0 , I ). Write ∆uk = uk+1 − uk. For any scale u, define the co-located anchors (as in Sec. 3.1) 
+
+zsrc (xsrc ; u, ϵ ) = (1 − u)xsrc + uϵ, ztar (x; xsrc ; u, ϵ ) = x +  zsrc (xsrc ; u, ϵ ) − xsrc 
+
+,
+
+and the corresponding effective differential field 
+
+∆Veff (x; u, ϵ ) := Π M (u)
+
+ vθ
+
+ ztar (x; xsrc ; u, ϵ ), τ (u), c tar 
+
+ − vθ (zsrc (xsrc ; u, ϵ ), τ (u), c src ) , (29) where ΠM (u) denotes the active-set projection induced by the feasible-region mask at that query (mask extraction details are irrelevant to this proof; we only use that ΠM (u) is well-defined for the same query state). 
+
+Step 0 (What it means to be a consistent discretization). Definition 4.1 states that editing is a controlled ODE on the progress axis s:
+
+dx ds = du ds ∆Veff 
+
+ x(s); u(s), ϵ (s). (30) 22 Semantic Granularity Navigation in Image Editing 
+
+A first-order (explicit Euler) discretization of (30) on a grid 0 = s0 < · · · < s K = 1 reads 
+
+xk+1 = xk + ∆ sk
+
+du ds (sk) ∆ Veff (xk; u(sk), ϵ (sk)) , ∆sk := sk+1 − sk. (31) If we choose the progress parameterization so that s is proportional to the traversed scale coordinate, namely 
+
+∆sk = ∆uk
+
+u(1) − u(0) for monotone u(·), (32) then ∆sk du ds (sk) = ∆ uk and (31) becomes 
+
+xk+1 = xk + ∆ uk ∆Veff (xk; uk, ϵ k), (33) which is exactly the update stated in the theorem. Thus, the “consistent discretization” claim reduces to checking that the discrete step uses the same scale coordinate uk to (i) define the anchors, (ii) query the model through τ (uk), and (iii) scale the update by ∆uk.
+
+Step 1 (Consistency when the step is self-consistent). Assume the step is self-consistent in the sense of the theorem: it uses uk for mixing to form zsrc  
+
+> k
+
+= zsrc (xsrc ; uk, ϵ k), uses the same uk for the query time τ (uk) and mask ΠM (uk ), and uses ∆uk as the multiplier of the differential field computed at (xk, u k, ϵ k). By definition (29), the computed increment is exactly ∆Veff (xk; uk, ϵ k). Therefore the implemented update is (33) , which is the explicit Euler step of the controlled ODE (30) under the progress parameterization (32). This proves the second part of Theorem 4.4. 
+
+Step 2 (Inconsistency under axis mismatch: no ODE can generate the same step). We now consider a mismatched step where the three occurrences of the scale coordinate disagree. To keep the statement minimal and aligned with the ablations in Sec. 4.5, it suffices to analyze a single mismatch mode; the same argument applies to the others. 
+
+Mismatch-query. Suppose mixing and update use uk and ∆uk, but the model is queried at τ (˜ uk) for some ˜uk̸ = uk. Then the implemented update is 
+
+xk+1 = xk + ∆ uk g∆V eff (xk; uk, ˜uk, ϵ k), (34) where g∆V eff denotes the differential field formed by anchors constructed at uk but queried at ˜uk:
+
+g∆V eff (x; u, ˜u, ϵ ) := Π M (˜ u)
+
+ vθ
+
+ ztar (x; xsrc ; u, ϵ ), τ (˜ u), c tar 
+
+ − vθ (zsrc (xsrc ; u, ϵ ), τ (˜ u), c src ) .
+
+Compare this with the self-consistent Euler step (33): 
+
+xsc  
+
+> k+1
+
+= xk + ∆ uk ∆Veff (xk; uk, ϵ k).
+
+The mismatch introduces an additive deviation 
+
+bk := ∆ uk
+
+g∆V eff (xk; uk, ˜uk, ϵ k) − ∆Veff (xk; uk, ϵ k)
+
+
+
+, (35) so that xk+1 = xsc  
+
+> k+1
+
++ bk.We claim that, unless ˜uk = uk, the update (34) cannot be written as a consistent discretization of Definition 4.1 for the same 
+
+control input u(·). Indeed, in Definition 4.1, the right-hand side at progress time sk is determined by the triple 
+
+(anchors at u(sk), query at τ (u(sk)) , actuation by du/ds (sk)) ,
+
+all sharing the same scale value u(sk). A first-order consistent discretization at grid point sk must therefore use (33) with the same uk for anchors and query time. But (34) uses anchors at uk and query time at ˜uk̸ = uk, which is not of the Euler form of (30) under any choice of du/ds at sk because du/ds only rescales the vector field evaluated at uk; it cannot change the vector field evaluation from τ (uk) to τ (˜ uk).Equivalently, suppose for contradiction that (34) were a consistent discretization of some instance of (30) with control 
+
+u(·) satisfying u(sk) = uk. Then the one-step increment divided by ∆uk would have to equal ∆Veff (xk; uk, ϵ k), which is defined by querying at τ (uk). But the actual increment divided by ∆uk equals g∆V eff (xk; uk, ˜uk, ϵ k) which queries at 23 Semantic Granularity Navigation in Image Editing 
+
+τ (˜ uk). These are different functions of (xk, ϵ k) whenever ˜uk̸ = uk unless the model outputs are scale-invariant in t (which they are not in general, and would contradict the empirical regime structure in Sec. 3.2). Therefore no controlled ODE of the form in Definition 4.1 with the same control u(·) can yield (34) as its first-order consistent step. 
+
+Step 3 (The systematic bias term and why it accumulates). Equation (35) gives an explicit bias term bk measuring the discrepancy between what is measured (the differential field under one scale) and what is applied (an update step sized by another scale increment). This term is systematic because it is induced deterministically by the mismatch pattern, not by stochasticity in ϵk (fresh noise is still used). When such a bias persists over steps, it accumulates as 
+
+xK = x0 +
+
+> K−1
+
+X
+
+> k=0
+
+∆uk ∆Veff (xk; uk, ϵ k) + 
+
+> K−1
+
+X
+
+> k=0
+
+bk, (36) so the mismatch behaves like an uncontrolled forcing term on top of the intended controlled dynamics. In practice this manifests as drift, artifacts, and eventual collapse into a generative mode, which is exactly what the axis-mismatch ablations in Figure 7 are designed to test. 
+
+Step 4 (Other mismatch modes). The same structure applies to mismatch-mix (anchors built at ˜uk but query/update at 
+
+uk) and mismatch-step (update scaled by ∆˜ uk while measuring at uk): each can be written as the self-consistent Euler increment plus an additive deviation of the form (35) , induced by evaluating different components of the step on different scale coordinates. Thus, in all mismatch cases, the step is not a consistent discretization of Definition 4.1 and incurs a systematic bias term. This proves Theorem 4.4. 
+
+## G. Optional Internal Feasible-Region Gate in Navi-FlowEdit 
+
+G.1. Internal feasible-region mask extraction (no external masks) 
+
+The internal gate is an optional component used in Navi-FlowEdit to suppress off-region drift. It is not required by the Navi controller itself, and variants such as Navi-FlowAlign are run with M ≡ 1. For Navi-FlowEdit, we compute the feasible-region gate Mk from internal signals produced by the same model call used to obtain ∆Vk, and never require user-provided masks. At step k, we form the co-located pair (zsrc  
+
+> k
+
+, z tar  
+
+> k
+
+) and query the model once with a concatenated batch (source and target, optionally with CFG). Let h(ℓ)(·) ∈ RN ×C denote the token-wise hidden states emitted by transformer block ℓ for that same forward pass, with N = H · W .We use a training-free representation-difference heatmap: 
+
+Ak := 1
+
+|L| 
+
+X
+
+> ℓ∈L
+
+reshape H×W
+
+ 1
+
+C h(ℓ)(ztar  
+
+> k
+
+) − h(ℓ)(zsrc  
+
+> k
+
+) 22
+
+
+
+∈ RH×W , (37) where L is a fixed set of blocks chosen once for the model. In our implementation, L is the middle third of transformer blocks (from ⌊L/ 3⌋ to ⌊2L/ 3⌋ − 1), which provides stable localization while avoiding early high-noise features and late texture-dominated features. We then convert Ak into a soft gate Mk ∈ [0 , 1] H×W using a small sequence of deterministic operations: 
+
+˜Ak := NormMinMax( Ak), (38) 
+
+¯Ak := AvgPool( ˜Ak; kblur ), (39) 
+
+ˆMk := 1{ ¯Ak ≥ Quantile( ¯Ak, q )}, (40) followed by area control and temporal smoothing: 
+
+ˆMk ← AreaBound( ˆMk; amin , a max ), (41) 
+
+Mk ← βM k−1 + (1 − β) ˆMk, Mk ∈ [0 , 1] H×W . (42) 24 Semantic Granularity Navigation in Image Editing  
+
+> Table 5. Compute overhead of internal masking on SD3 (PIE-Bench, bs=1, 1024 ×1024, 20 edit steps, same CFG and precision). Extra model calls are always zero because masking reuses the same model query. VRAM reports peak allocated memory.
+
+Mask setting Extra model calls Time/img (s) ↓ VRAM (MiB) ↓
+
+M ≡ 1 (mask disabled) 0 14.55 17140 Internal mask (ours) 0 14.95 22120 Default hyperparameters (used throughout unless stated otherwise) are: q = 0 .90 (keep the top 10% salient region), 
+
+amin = 0 .02 and amax = 0 .65 (area fraction bounds), kblur = 5 (average pooling kernel), and β = 0 .85 (EMA). We additionally apply a scale-aware dilation to reduce brittleness at noisier scales: 
+
+Mk ← MaxPool( Mk; kdil (uk)) , kdil (uk) = 1 + round  (kmax − 1) uk
+
+, (43) with kmax = 7 and odd kernel sizes. If model hooks are unavailable, we fall back to a ∆V -saliency mask: 
+
+A∆Vk := 1
+
+C ∥∆Vk∥22 ∈ RH×W , (44) followed by the same normalization, blur, quantile thresholding, area control, and EMA. Finally, the gate is used only to form the effective differential field 
+
+∆V eff  
+
+> k
+
+:= ( M γk ) ⊙ ∆Vk, (45) with γ = 1 .0 by default. We do not apply any hard replacement outside the mask unless explicitly enabled. 
+
+G.2. Active-set growth 
+
+The gate above is designed to be conservative; however, overly small gates can stall semantic motion. We therefore allow a lightweight active-set growth rule driven by a pressure ratio computed from already-available tensors: 
+
+rk := ∥(1 − Mk) ⊙ ∆Vk∥2
+
+∥∆Vk∥2 + ε . (46) If rk > τ r for P consecutive steps, we expand Mk by adding a small set of pixels with highest outside-mask energy: 
+
+Pk := NormMinMax 
+
+ 1
+
+C ∥(1 − Mk) ⊙ ∆Vk∥22
+
+
+
+, (47) 
+
+∆Mk := 1{Pk ≥ Quantile( Pk, q g )}, (48) 
+
+Mk ← max( Mk, MaxPool(∆ Mk; kg )) , (49) followed by the same area control. Defaults are τr = 0 .35 , P = 2 , qg = 0 .97 , and kg = 3 .
+
+G.3. Compute overhead of internal masking 
+
+Mask extraction does not introduce additional model evaluations: Mk is computed from tensors produced by the same forward pass used to compute ∆Vk. It does introduce a small constant-factor overhead from per-step tensor operations (pooling, quantiles, and optional transformer-block hooks). We report wall-clock time and peak VRAM for the same step budget and batch size. 
+
+G.4. Ablation: Navi-FlowEdit ( M ≡ 1) versus Navi-FlowEdit + gate 
+
+To isolate the contribution of the optional gate from scale-density allocation, we fix the same effective window Ueff , the same decoupled schedule family, match step budget and random seeds, and disable online navigation. The corresponding matched rows are reported directly in Table 1, so we do not duplicate a separate table here. 25 Semantic Granularity Navigation in Image Editing 
+
+Table 6. Results on ImgEdit-Bench across compatible editors. Navi-X denotes applying the same decoupled controller to editor X; both Navi rows here use M ≡ 1.                                                                
+
+> Method Type Add Remove Replace Adjust Background Style Action Extract Compose Basic Avg. ↑UGE Avg. ↑
+> InfEdit Diffusion-based training-free 2.33 1.79 2.21 2.05 2.31 2.29 1.61 3.96 2.30 2.43 2.96
+> Navi-InfEdit ( M≡1)Diffusion-based training-free 2.42 1.92 2.40 2.07 2.55 2.31 2.12 4.10 2.51 2.57 3.02
+> FlowAlign Flow-based training-free 4.14 2.41 2.62 2.73 2.74 2.63 2.42 3.91 2.26 3.01 3.04
+> Navi-FlowAlign ( M≡1)Flow-based training-free 4.28 2.37 2.80 2.63 2.99 2.39 2.81 3.84 2.26 3.04 3.11
+
+The optional gate substantially improves preservation, while in this setting it does not reduce CLIP compliance; the semantic scores are slightly higher, although the primary benefit is preservation. We emphasize that Ueff is operationalized as a fixed tail window and is not selected per instance from ρ(u). Therefore, masking affects the local update direction via Eq. (45) and the diagnostic statistics (e.g., ρk), but it does not change the visited scale window in our reported experiments. 
+
+## H. ImgEdit-Bench Results Across Compatible Editors 
+
+PIE-Bench isolates preservation under source-region masks, but it does not cover instruction-style, UGE, or multi-turn editing. We therefore additionally evaluate on ImgEdit-Bench (Ye et al., 2025). In our infrastructure, this benchmark includes the nine Basic single-turn categories (add, remove, replace, adjust, background, style, action, extract, compose), the official UGE suite, and multi-turn subsets for content memory, content understanding, and version backtracking. Prompt-pair differential editors require both a source description and a target description, whereas ImgEdit-Bench natively provides a source image and an edit instruction. To adapt the benchmark fairly, we use a single processed-annotation layer generated with Qwen2.5-VL (Bai et al., 2025), which converts each sample into a shared (src prompt , tar prompt )
+
+pair. InfEdit, FlowAlign, and their Navi variants all consume this same prompt-pair annotation. All reported scores follow the official ImgEdit-Judge protocol; we report per-category Basic scores, the Basic average, and the UGE average. The multi-turn subset is retained as review manifests for qualitative inspection rather than collapsed into a single scalar. Table 6 shows positive average gains for both compatible editors. Both Navi rows are ungated, so this evidence is independent of the optional gate used in the default FlowEdit system. For InfEdit, the gains are category-wide in this table; for FlowAlign, the gains are average-level rather than universal across categories, with the clearest positive changes in background, action, and replace. NaviEdit is therefore not a claim of per-category dominance, but a portable inference-time control principle that can improve compatible editors on average. 
+
+## I. Failure Cases and Scope 
+
+Navi improves how the trajectory allocates computation, but it does not by itself solve all support-estimation or scene-reasoning failures. We repeatedly observe two representative failure modes. 
+
+Incomplete semantic migration. When the editable support is estimated too conservatively, or when the effective window is too preservation-biased for a difficult replacement, the result can remain semantically intermediate: some target attributes appear, but source morphology or texture is still partially retained. This failure mode is most visible in fine-grained replacements and is especially relevant to gated variants such as Navi-FlowEdit + gate .
+
+Relational inconsistency in complex scenes. Navi does not impose explicit scene-graph, geometric, or reflection consistency. In scenes involving mirrors, reflections, repeated objects, or strong inter-object relations, a local edit can be plausible in isolation while remaining globally inconsistent with the rest of the scene. This limitation persists even when the controller successfully avoids global drift. These failures clarify the scope of our contribution. Navi addresses trajectory control under a fixed budget; it is not a full semantic parser or a world-modeling module. Future work should combine the decoupled controller with stronger support estimation, instance-adaptive windowing, and explicit relational reasoning. 26 Semantic Granularity Navigation in Image Editing 
+
+## J. Navi controller inference pipeline 
+
+Algorithm 1 outlines the complete inference procedure for prompt-pair differential editors. Unlike standard diffusion sampling, the Navi controller explicitly decouples the editing progress (denoted by p) from the model’s scale schedule (denoted by u). In each iteration, the algorithm enforces the self-consistency contract by strictly using the same scale coordinate uk for constructing anchors, querying the velocity field, and defining the update step size. This ensures that the integration remains stable even when the navigation density is dynamically adjusted within the effective window. 
+
+Algorithm 1 Navi controller inference (strict model-call budget, self-consistent steps) 
+
+Require: Source latent xsrc ; conditions (csrc , c tar ); velocity field vθ (z, t, c ); edit steps K; optional online navigation; optional internal gate (no external masks). 
+
+Ensure: Edited latent xK .Retrieve scheduler timesteps {t(n)}N −1 
+
+> n=0
+
+; compute normalized scales {u(n)} ⊂ [0 , 1] and sort to obtain a monotone path 
+
+(tpath [n], u path [n]) from noisy →clean. Define linear interpolation (t, u ) ← Interp( tpath , u path ; p) for p ∈ [0 , 1] .Initialize x0 ← xsrc , p0 (tail start). Set ∆V−1 ← NONE .
+
+for k = 0 , . . . , K − 1 do 
+
+(tk, u k) ← Interp( ·; pk) and sample fresh ϵk ∼ N (0 , I ).
+
+zsrc  
+
+> k
+
+← (1 − uk)xsrc + ukϵk, ztar  
+
+> k
+
+← xk + ( zsrc  
+
+> k
+
+− xsrc ).Query once with a concatenated batch {zsrc  
+
+> k
+
+, z tar  
+
+> k
+
+} at the same time tk to get V src  
+
+> k
+
+← vθ (zsrc  
+
+> k
+
+, t k, c src ) and V tar  
+
+> k
+
+←
+
+vθ (ztar  
+
+> k
+
+, t k, c tar ).
+
+∆Vk ← V tar  
+
+> k
+
+− V src  
+
+> k
+
+.Optional internal gate (no extra queries): compute Mk from model activations at this step; default Mk ≡ 1.
+
+∆V eff  
+
+> k
+
+← Mk ⊙ ∆Vk.
+
+∆pmin ← (1 − pk)/(K − k).
+
+if online navigation enabled then 
+
+Compute risk from already-available signals, e.g., ωk ← 0 if ∆Vk−1 = NONE else 1 − cos(∆ V eff  
+
+> k
+
+, ∆V eff 
+
+> k−1
+
+), and a magnitude term from ∥∆V eff  
+
+> k
+
+∥.
+
+∆pk ← ∆pmin · Speed(risk) .
+
+else 
+
+∆pk ← ∆pmin .
+
+end if if k < K − 1 then 
+
+pk+1 ← min {1 − ϵp, p k + ∆ pk}.
+
+else 
+
+pk+1 ← 1.
+
+end if 
+
+pk+1 ← max {pk, min {1, p k+1 }} .
+
+(tk+1 , u k+1 ) ← Interp( ·; pk+1 ).
+
+∆uk ← uk+1 − uk, xk+1 ← xk + ∆ uk ∆V eff  
+
+> k
+
+.
+
+end for 
+
+return xK
+
+## K. Societal Impacts 
+
+The development of high-fidelity, training-free editing frameworks like NaviEdit presents significant opportunities while also necessitating a discussion of societal and ethical considerations. 
+
+Positive Applications and Broader Impacts. Our primary motivation for developing NaviEdit is to enhance the controlla-bility and accessibility of high-end creative tools. The method’s core advantages—its training-free nature, compatibility with modern flow-based models (Esser et al., 2024), and ability to operate efficiently under a fixed compute budget—make powerful generative editing accessible to a broader audience without the need for expensive model fine-tuning or heavy inversion branches. We envision our work empowering artists, designers, and content creators by providing a reliable tool 27 Semantic Granularity Navigation in Image Editing NaviEdit            
+
+> TinoEdit
+> FlowEdit
+> Z-Image-Edit
+> 52.2%
+> 11.0%
+> 10.2%
+> 26.6%
+> Semantic Alignment (Preference)
+> 0% 10% 20% 30% 40% 50% 60% 70%
+> NaviEdit
+> TinoEdit
+> FlowEdit
+> Z-Image-Edit
+> 55.3%
+> 16.1%
+> 10.4%
+> 18.2%
+> Preservation Quality (Preference)
+> Method
+> Preference (%)
+> Figure 15. User Study Results. We conducted a blind preference study with 150 participants. Navi-FlowEdit + gate is preferred over Z-Image-Edit, FlowEdit, and Tino-Edit in both Semantic Alignment (52.2%) and Preservation Quality (55.3%).
+
+for rapid prototyping and concept visualization. For instance, a designer could instantly visualize drastic semantic alterations (e.g., changing a material or object class) while trusting that the global layout and non-edited regions will remain structurally intact. This reduces the technical barrier to complex image manipulation, fostering greater creative expression. 
+
+Ethical Considerations and Potential for Misuse. Like all high-fidelity generative models, NaviEdit carries the risk of misuse. As demonstrated in our experiments, the ability to execute intense semantic changes while maintaining high structural fidelity could be exploited to generate deceptive content or spread misinformation. The high quality of background preservation achieved by our method might make such forgeries more convincing, as the unaltered context adds to the perceived authenticity of the manipulated content. Furthermore, NaviEdit is a training-free method that operates directly on pre-trained text-to-image models (e.g., Stable Diffusion 3). It does not, by itself, correct any inherent societal biases (e.g., related to race, gender, or culture) that may be present in these foundational models. As such, edits performed by NaviEdit may reflect or even amplify these underlying biases, depending on the prompts and the specific model employed. 
+
+Mitigation and Author Statement. We strongly condemn the use of our technology for any deceptive or harmful purpose. Our work is intended for creative and assistive applications, aimed at augmenting human creativity, not replacing it or enabling deception. We believe the best mitigation strategy lies in the concurrent development of robust detection tools for synthetic media, as well as in fostering public awareness and critical media literacy. We encourage the research community to continue to prioritize the development of ethical guidelines and safeguards alongside the advancement of generative capabilities. 
+
+## L. User Study 
+
+To complement our quantitative analyses on PIE-Bench, we conducted a formal user study to assess human perceptual preference. An example of the evaluation form shown to participants is provided in Figure 16. Automated metrics often struggle to capture the holistic “quality” or “naturalness” of an edit. This study therefore tests whether the deployed system in the main paper, Navi-FlowEdit + gate , is preferred by human observers over its main comparison methods. For the study setup, we recruited 150 participants with diverse backgrounds. We presented them with a four-way blind comparison, showing the original image, a text prompt, and four edited results from Navi-FlowEdit + gate (ours), Z-Image-Edit (Cai et al., 2025), FlowEdit (Kulikov et al., 2025), and Tino-Edit (Chen et al., 2024). The order of all results was randomized to prevent bias. Participants rated each edited result on a 1–5 rating scale. The two primary criteria used for the reported analysis were Semantic Alignment, which measures how well the edited image matches the target prompt, and Preservation Quality, which measures naturalness, background preservation, and the absence of artifacts in non-edited regions. For each participant, prompt, and reported criterion, we identified the method or methods receiving the highest rating. If a single method received the highest rating, it received one preference unit. If multiple methods tied for the highest rating, the 28 Semantic Granularity Navigation in Image Editing 
+
+unit was split equally among the tied methods. This yields 4,500 total preference units (150 participants × 30 prompts) for each reported criterion. For Semantic Alignment , Navi-FlowEdit + gate was the clear winner, preferred in 52.2% of comparisons. This outper-formed Z-Image-Edit (26.6%), while Tino-Edit (11.0%) and FlowEdit (10.2%) lagged considerably. This indicates that the decoupled rollout is perceived as executing the prompt more faithfully than the compared methods. For Preservation Quality , Navi-FlowEdit + gate also achieved the top position, securing 55.3% of the vote. This indicates that users perceived it as more stable and artifact-free than Z-Image-Edit (18.2%) and Tino-Edit (16.1%). FlowEdit (10.4%) was frequently penalized for background distortion or drift. Overall, the user study is consistent with the main quantitative results. Navi-FlowEdit + gate is the only method that ranks first in both categories, indicating that the improved trade-off is visible to human observers rather than only to automated metrics. 
+
+## M. More Qualitative Results 
+
+We provide additional qualitative comparisons in Figure 17. These examples further support the quantitative findings presented in the main paper. In these qualitative examples, Navi-FlowEdit + gate produces high-fidelity results that follow the target prompt while maintaining strong background preservation. This contrasts with coupled schedules such as FlowEdit , which more often introduce drift or background artifacts when asked to execute large semantic changes. The qualitative results are consistent with the central mechanism of the paper: decoupled navigation keeps the rollout inside an effective scale window where the generative prior is more stable. 29 Semantic Granularity Navigation in Image Editing User Study Evaluation Form 
+
+Purpose: This study aims to assess the effectiveness and perceptual quality of various image editing 
+
+methods. Your feedback will help improve the quality of diffusion -model -based editing techniques. 
+
+Instructions: 
+
+1) You will see an original image followed by several edited versions generated by different methods. 
+
+2) Please rate each processed image based on the criteria provided below. 
+
+3) Use the scale from 1 (Poor) to 5 (Excellent) for your rating. 
+
+Evaluation Criteria: 
+
+1) Target Semantics Alignment: Assessing how accurately and convincingly the edited image reflects the 
+
+intended semantic change (e.g., "turn a dog into a cat," "add sunglasses"). 
+
+2) Background Preservation: Evaluating how well the non -edited regions of the image remain consistent 
+
+with the original (e.g., no unwanted distortions, color shifts, or texture changes in the background). 
+
+3) Overall Coherence: Assessing the visual plausibility and naturalness of the entire edited image, 
+
+considering both the edit and the background. 
+
+Image Evaluation Example: (Below is a demonstration of one group of images to serve as an example for 
+
+the evaluation process.) 
+
+Real image Method A Method B Method C Method D 
+
+Criteria Method A Method B Method C Method D 
+
+Semantics Alignment 
+
+Background Preservation 
+
+Overall Coherence 
+
+Groups 2 to 30 have been omitted in this section for brevity. 
+
+# smoke -> fire 
+
+Figure 16. User Study Form. 
+
+30 Semantic Granularity Navigation in Image Editing Real image TurboEdit FlowEdit DiffEdit InfEdit  
+
+> DDIM +
+> MasaCtrl
+> Direct Inversion
+> +MasaCtrl
+
+Fixed Schedule Reschedule Edit Progress 
+
+> (SYE)DDIM
+> +PnP
+> (SYE)Direct
+> Inversion+PnP
+> NaviEdit
+> （ours ）
+
+a cat sitting next to a mirror -> a silver cat sculpture sitting next to a mirror 
+
+a cup of coffee with drawing of tulip … -> a cup of coffee with drawing of lion …
+
+three white dumplings on brown bowl -> three white sushi on brown bowl 
+
+white plate with fruits on it -> white plate with pizza on it 
+
+smoke -> fire 
+
+a gold potted plant on a wooden table -> a gold potted flower on a wooden table 
+
+a white horse running in the dirt -> a white unicorn running in the dirt 
+
+a photo of a horse in the field -> a photo of a bronze horse in the field 
+
+… snow covered mountains … -> … snow covered mountains … and a goat eating grass 
+
+a paraglider is flying over a mountain with snow capped peaks -> a mountain with snow capped peaks 
+
+Figure 17. Additional Qualitative Comparisons. These examples illustrate that Navi-FlowEdit + gate can execute semantic edits while preserving non-edited regions, whereas the compared baselines may exhibit background leakage or structural degradation. 
+
+31

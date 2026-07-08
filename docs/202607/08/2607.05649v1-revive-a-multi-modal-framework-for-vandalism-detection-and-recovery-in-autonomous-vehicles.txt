@@ -1,0 +1,299 @@
+Title: REVIVE: A Multi-Modal Framework for Vandalism Detection and Recovery in Autonomous Vehicles
+
+URL Source: https://arxiv.org/pdf/2607.05649v1
+
+Published Time: Wed, 08 Jul 2026 00:14:35 GMT
+
+Number of Pages: 11
+
+Markdown Content:
+# REVIVE: A Multi-Modal Framework for Vandalism Detection and Recovery in Autonomous Vehicles 
+
+Abdullah Tariq Choudhry University of the Pacific Stockton, CA, USA a choudhry@u.pacific.edu Tapadhir Das University of the Pacific Stockton, CA, USA tdas@pacific.edu 
+
+Abstract —Autonomous vehicles (AVs) face increasing threats from vandalism-induced occlusion attacks (VOAs) that compro-mise camera-based perception. While detection frameworks can identify vandalized images, restoring camera-stream utility after physical occlusion remains underexplored. This paper presents the Recovery and Enhancement of Vandalized Images for Vision Excellence (REVIVE) framework, a vandalism recovery pipeline integrating: (1) binary VOA detection, (2) multi-class VOA pattern identification, (3) EfficientNet-based U-Net segmentation, and (4) type-aware recovery using Bootstrapping Language-Image Pre-training (BLIP)-guided Stable Diffusion inpainting, direct pixel replacement, or adaptive median filtering. Stable Dif-fusion shows variable reconstruction performance (per-pattern SSIM 0.667-0.867, PSNR 15.4-26.7dB) across VOA patterns, while aligned direct pixel replacement achieves near-identical reconstruction (whole-image SSIM 0.988, PSNR 52.8dB; pixel-identical within the recovered region) under the aligned-reference condition. We emphasize that direct pixel replacement is areference-based upper bound that presumes an available, spa-tially aligned clean reference frame, not a generally deployable recovery method. On 500 tracked clean/vandalized image pairs, unrecovered VOAs reduce YOLOv8l object-detection recall to 0.588, while direct pixel replacement restores recall to 0.967 and F1-score to 0.970 under that aligned-reference condition. LaMa, Telea, and Navier-Stokes baselines improve image similarity but provide more limited downstream detection recovery, and Stable Diffusion is treated as an asynchronous recovery branch subject to a quality gate rather than a blocking real-time perception step. We evaluate a reference-available quality gate that filters recovered candidates before downstream use: without it, type-aware routing degrades per-image recall to 0.304, whereas with it, recall returns to 0.608, at or above the unrecovered baseline, ensuring the forwarded stream is never worse than the unrecovered frame. REVIVE therefore provides a structured recovery framework and a practical evaluation of when each recovery strategy is appropriate for use. 
+
+Index Terms —Physical Adversarial Attacks, Autonomous Ve-hicles, Vandalism, Safety, Generative AI 
+
+I. I NTRODUCTION 
+
+The proliferation of autonomous vehicles (AVs) represents one of the most significant technological advances in modern transportation, with the global AV market projected to reach $980.7 billion by 2040 [1]. These systems rely heavily on camera-based sensors for real-time perception and decision-making. However, increasing AV deployment has exposed them to physical adversarial attacks targeting sensor systems through deliberate vandalism. Vandalism-induced occlusion attacks (VOAs) compromise camera functionality through spray paint, stickers, mud, debris, covers, or other physical 
+
+Fig. 1: Example camera-frame degradation from a VOA, where physical occlusion blocks scene content before object detection or downstream planning can use the image. obstructions [2]. Unlike digital adversarial perturbations, phys-ical vandalism can block or distort scene content directly and can persist until the camera is cleaned or replaced. Recent Waymo robotaxi vandalism incidents in San Francisco [3], [4] highlight perception-system exposure to real physical abuse. An example of a VOA is illustrated in Figure 1. Although modern AV platforms integrate multiple sensing modalities, including LiDAR, radar, and ultrasonic sensors, this work focuses specifically on camera-based perception for three reasons. First, cameras are the primary source of semantic information for object detection, lane recognition, and traffic sign interpretation; LiDAR and radar provide geom-etry and velocity but cannot replicate this semantic richness. Second, camera lenses are externally exposed and require no specialized knowledge or equipment to obstruct physically, making them the lowest-barrier attack surface. Third, VOA patterns such as spray paint, stickers, and mud are visually identifiable occlusion types that map directly onto image-domain classification and recovery techniques; sensor-level integrity monitoring for these modalities therefore naturally operates on the camera image stream. Our methods can complement broader multi-sensor fault-tolerance architectures, but the recovery problem addressed here is inherently image-level. Modern approaches have attempted to address the suscep-tibility of AVs to VOAs [5], [6]. However, these techniques arXiv:2607.05649v1 [cs.CV] 6 Jul 2026 restore functionality, primarily through sensor redundancy or fallbacks. This compromises the operational capability of the perception system; therefore, it continues to leave it vulnerable to prolonged disruption and safety hazards. Additionally, the critical challenge of restoring functionality through automated recovery remains unaddressed. To address this gap, this pa-per introduces the Recovery and Enhancement of Vandal-ized Images for Vision Excellence (REVIVE) framework, a vandalism recovery pipeline integrating detection, classifica-tion, localization, and restoration. Our four-stage framework employs: (1) binary classification (vandalized vs. clean), (2) multi-class VOA pattern identification, (3) EfficientNet-based U-Net segmentation for vandalism localization [7], and (4) type-aware recovery using statistical filtering, direct pixel replacement, or Bootstrapping Language-Image Pre-training (BLIP)-guided Stable Diffusion reconstruction [8], [9]. The central novelty of REVIVE is its type-aware recovery strategy. Existing image inpainting and restoration methods treat all missing or corrupted regions uniformly, applying the same algorithm regardless of the structural nature of the corruption. This is suitable for general image completion tasks, but is suboptimal for VOA recovery, where the spatial structure of the occlusion varies significantly across different attack types. A scattered random occlusion is noise-like and responds well to statistical filtering; a large, coherent block obscuring the center of the image requires structured content synthesis. When an aligned, clean reference frame is available, direct pixel replacement achieves near-perfect fidelity at minimal cost. REVIVE couples multi-class VOA pattern identification with recovery strategy selection in an end-to-end pipeline, routing each occlusion type to the most appropriate recov-ery branch rather than applying a single method universally. This design directly addresses the quality-latency tradeoff: lightweight methods are reserved for cases where they are sufficient, and expensive generative methods are applied only where structurally necessary and treated as asynchronous when their runtime exceeds real-time constraints. The main contributions of this work are:  
+
+> •
+
+Proposing REVIVE, an end-to-end framework that cou-ples multi-class VOA classification with type-aware re-covery branch selection for AV camera streams.  
+
+> •
+
+Defining a threat model and deployment scope for image-level recovery within an AV perception stack.  
+
+> •
+
+Evaluating structured and unstructured VOAs using im-age quality metrics and aggregate downstream object detection recovery.  
+
+> •
+
+Comparing direct pixel replacement against classical and learned inpainting baselines and identifying when gener-ative recovery is unsuitable for blocking real-time use.  
+
+> •
+
+Implementing and evaluating a reference-available quality gate that filters recovered candidates so the forwarded stream is never worse than the unrecovered frame for downstream detection. The rest of the paper is as follows: Section II reviews related work, Section III details our pipeline architecture, Section IV presents experimental evaluation, and Section V concludes with future directions. II. L ITERATURE REVIEW 
+
+Physical adversarial attacks against AV perception systems emerged as a significant security concern following initial demonstrations by Szegedy et al. [10] and Goodfellow et al. [11]. Eykholt et al. [12] showed physical adversarial ex-amples remain effective under real-world variations in viewing angle, lighting, and resolution. Brown et al. [13] introduced printable adversarial patches, while Chen et al. [14] developed ShapeShifter attacks targeting AV object detection. Petit et al. [2] demonstrated AV vulnerability to physical occlusion attacks, highlighting approaches that create realistic occlu-sions indistinguishable from environmental factors. Others have explored adversarial patches [15], localized adversarial noise [16], and even physical accessories to fool perception systems [17]. Non-restoration defense mechanisms have been proposed for adversarial attacks. Madry et al. [18] introduced adversarial training through projected gradient descent, improving model robustness by training on adversarially perturbed examples. Papernot et al. [19] demonstrated defensive distillation as a defense strategy, reducing model sensitivity to perturbations through knowledge distillation. Sensor fusion approaches have also been explored [5], with multiple works proposing re-dundant sensor systems combining camera, LiDAR, and radar to mitigate single-sensor failures. However, these approaches focus on digital perturbations rather than physical occlusions or rely on costly sensor redundancy that reduces operational efficiency. To prevent the impact of physical occlusion attacks, many authors have proposed restoration methods [20]–[23]. [20] introduced Context Encoders using CNNs with adversarial training to predict missing content. [21] advanced the field with Contextual Attention mechanisms borrowing information from distant spatial locations, while Nazeri et al. [22] intro-duced EdgeConnect, leveraging edge information as structural guidance. Other notable works include using partial convolu-tions for irregular holes [24] and gated convolutions for free-form inpainting [25]. More recently, diffusion models have shown strong performance in image inpainting tasks [26], [27]. [23] developed LaMa using Fourier convolutions for resolution-robust inpainting of large missing regions. While promising, these works focus primarily on general image completion. AV vandalism recovery differs because recovery must preserve perception-relevant objects, avoid hallucinating safety-critical content, and operate under latency constraints. REVIVE therefore evaluates restoration not only by image similarity, but also by downstream object-detection consis-tency using YOLOv8 [28]. III. M ETHODOLOGY 
+
+This section presents REVIVE, a vandalism recovery pipeline integrating detection, localization, and multi-modal restoration to address VOAs on AV camera systems. In this paper, recovery means improving the utility of an occluded camera frame for downstream perception, measured by image fidelity and object-detection consistency relative to the corre-sponding clean frame. It does not claim to prove full vehicle-level planning or control correctness. The framework em-ploys a hierarchical strategy determining vandalism presence, identifying VOA type, localizing affected regions, applying appropriate recovery, and forwarding only outputs that pass the quality gate to downstream perception. The REVIVE framework is illustrated in Figure 2. The pipeline can be represented as: 
+
+P(I) = 
+
+(
+
+OD (I) if fbinary (I) = 0 
+
+OD (R(I, S (I), f multi (I))) if fbinary (I) = 1 (1) where I is the input image, fbinary and fmulti are classification functions, S is segmentation, R is recovery, and OD is object detection evaluation. This approach allows early termination for clean images and applies recovery only when the camera frame is likely compromised. 
+
+A. Threat Model and Deployment Scope 
+
+REVIVE assumes an attacker can physically occlude or con-taminate one camera lens after deployment, but cannot modify the AV software stack, alter stored frames, or compromise other sensors. The attack objective is to reduce the utility of camera-based perception by hiding or distorting scene content. We focus on image-level recovery for a camera preprocessing module placed between sensor acquisition and object detec-tion. In a practical AV stack, REVIVE would operate after camera capture and calibration but before the object detector, semantic perception module, sensor-fusion layer, planner, and controller. Its output is therefore a candidate perception input, not a direct driving command. If recovery confidence is low, the recovered frame should not be treated as authoritative; instead, the AV should fall back to existing safety mechanisms such as multi-sensor fusion, degraded-mode driving, or safe stop policies. This scope is intentionally narrower than full AV decision recovery: REVIVE evaluates whether a camera image can be restored enough to support object detection, not whether the vehicle can complete a maneuver safely. 
+
+B. Stage 1: Binary Vandalism Detection 
+
+The initial detection stage employs a convolutional neural network (CNN) architecture designed to distinguish between vandalized and non-vandalized automotive imagery. The main purpose of this stage is to ensure that the AV perception system is actively detecting when vandalism is occurring on the camera lens. The network utilizes a lightweight, three-block convolutional architecture with 3 ×3 kernels, batch nor-malization, and ReLU activation after each convolutional layer, global average pooling, and a fully connected classification head with dropout regularization to prevent overfitting. This design prioritizes computational efficiency for rapid initial screening. Input images are preprocessed through resizing to a standard resolution and normalized using ImageNet statistics to ensure consistency with pre-trained feature extractors. The model is trained using a Binary Cross-Entropy (BCE) loss function, defined as: 
+
+LBCE = − 1
+
+N
+
+> N
+
+X
+
+> i=1
+
+[yi log(ˆ yi) + (1 − yi) log(1 − ˆyi)] (2) where N is the batch size, yi is the ground truth label (0 for non-vandalized, 1 for vandalized), and ˆyi is the predicted probability for the i-th image. The architecture employs global average pooling to reduce spatial dimensions while preserving feature information, followed by fully connected layers for final binary classification. This design choice provides com-putational efficiency while maintaining the spatial awareness necessary for robust vandalism detection across varied auto-motive scenes. 
+
+C. Stage 2: Multi-Class VOA Classification 
+
+Upon vandalism detection, the system proceeds to identify the specific VOA pattern through multi-class classification. This stage selects the recovery strategy most appropriate for the spatial structure of the occlusion. We use five VOA categories based on their spatial characteristics and practical manifestations: Random VOA represents scattered occlusions that mimic salt-and-pepper noise, typically resulting from spray paint splatters or debris impacts. Center-out VOA 
+
+involves square patches positioned at central locations, simu-lating targeted stickers or tape applications on camera sensors. 
+
+Top-bottom VOA creates horizontal bands from the upper image regions, modeling scenarios where paint or covers are applied to the upper portion of cameras. Bottom-top VOA 
+
+produces horizontal occlusions from lower regions, represent-ing mud, dirt, or debris accumulation smeared on cameras. 
+
+Targeted VOA places randomly positioned square patches within specific regions, simulating precise attacks on particular objects or areas of interest. An illustration of the different categories is shown in Figure 3. The multi-class classifier shares architectural similarities with the binary detector but is trained using a Categorical Cross-Entropy (CCE) loss function to output a probability distribution across the five VOA categories, defined by: 
+
+LCCE = − 1
+
+N
+
+> N
+
+X
+
+> i=1
+> C
+
+X
+
+> c=1
+
+yi,c log(ˆ yi,c ) (3) where C is the number of classes, yi,c is the one-hot encoded ground truth label, and ˆyi,c is the predicted probability for class c. This classification directly informs the subsequent restoration strategy selection, as different VOAs require dis-tinct recovery approaches for optimal results. 
+
+D. Stage 3: VOA Segmentation Localization 
+
+Precise localization of vandalized regions is critical for effective restoration upon the identified VOA location. Our approach employs an EfficientNet-based U-Net architecture Fig. 2: REVIVE pipeline architecture. Clean frames bypass recovery; vandalized frames are classified, segmented, and recovered by a type-aware module, then passed through a quality gate: frames that pass are forwarded to downstream object detection, while frames that fail are not output as restored imagery but instead raise a low-confidence (degraded-mode) warning.    
+
+> (a) Random (b) Center-out (c) Top-bottom
+> (d) Bottom-top (e) Targeted
+
+Fig. 3: Five VOA categories used in the framework. that combines the efficiency of EfficientNet backbones with the spatial precision of U-Net segmentation frameworks. This hybrid approach provides both computational efficiency and accurate pixel-level vandalism detection. The segmentation model incorporates VOA-type information from the previous stage as conditional input. This is achieved by transforming the class label into a feature vector that is then integrated into the segmentation network, allowing it to adapt its fo-cus based on the expected spatial characteristics of a given VOA. For example, the class vector can be concatenated with the encoder’s feature map before the decoder stage. This conditioning mechanism improves segmentation accuracy by leveraging prior knowledge about expected spatial patterns for different VOAs. The U-Net decoder reconstructs spatial resolution through transposed convolutions and skip connections, producing bi-nary masks that precisely delineate vandalized regions. The model is trained using a combined loss function that balances pixel-wise accuracy with region-based similarity, particularly effective for segmentation tasks. This loss is a weighted sum of Binary Cross-Entropy ( LBCE ) and a Dice Loss ( LDice ): 
+
+Lseg = αLBCE + βLDice (4) where α and β are weighting factors to balance the two terms. The Dice Loss is defined as: 
+
+LDice = 1 − 2 PNi=1 pigi
+
+PNi=1 p2 
+
+> i
+
++ PNi=1 g2
+
+> i
+
+(5) where pi are the predicted pixel probabilities and gi are the ground truth pixel labels. These masks serve as input to the subsequent restoration stage, enabling targeted recovery while preserving unaffected image content. 
+
+E. Stage 4: Type-Aware Image Recovery 
+
+The restoration stage employs multiple recovery strategies optimized for different VOAs and available resources. Our framework implements three distinct approaches: statistical-parametric median filtering for random occlusions, BLIP-guided Stable Diffusion reconstruction for complex structured patterns, and direct pixel replacement when aligned reference imagery is available. The selection of a recovery method is contingent on the VOA type. Statistical median filtering is applied to random VOAs because of their scattered, noise-like occlusions, which can be reduced without semantic scene synthesis. For structured VOAs (e.g., center-out, top-bottom), which involve large, coherent occluded regions, generative inpainting can synthesize semantically plausible content but must be treated cautiously because it can hallucinate safety-relevant objects. Finally, direct pixel replacement is evaluated as a reference-frame upper bound: it is appropriate only when a recent clean frame is available and remains spatially aligned with the current view. This assumption is plausible for short temporal windows in stopped or slow-moving conditions, but it degrades as ego-motion, object motion, or lighting changes increase. 1) Statistical-Parametric Median Filtering: For random VOAs, we develop a sophisticated median filtering approach that dynamically adapts parameters based on image char-acteristics. The method employs histogram-derived adaptive thresholding using (μ − 2σ) clamped bounds [10,50], multi-scale morphological clustering analysis across kernel sizes [3×3, 5×5, 7×7, 9×9], and conservative kernel selection with quality-first philosophy (bias toward 3×3, maximum 5×5). The adaptive dark threshold is calculated as: 
+
+Tadaptive = max(10 , min(50 , μ noise − 2σnoise )) (6) Maximum processing rounds are determined using complexity-weighted logarithmic scaling: 
+
+Rmax = max(1 , min( ⌊log 10 (N + 1) × C × S⌋,
+
+max(3 , ⌊log 2(N + 1) ⌋))) (7) where N is noise count, C is complexity multiplier, and S is size factor. Convergence detection uses multi-criteria analysis, including improvement trend analysis, plateau detection, and diminishing returns patterns. 
+
+2) BLIP-Guided Stable Diffusion Reconstruction: Struc-tured VOAs can benefit from generative approaches that synthesize semantically plausible content for large occluded regions. Our BLIP-guided Stable Diffusion pipeline integrates BLIP vision-language understanding with Stable Diffusion inpainting to create context-aware reconstructions. The process begins with scene analysis using BLIP to generate descriptive prompts from available scene context. These prompts guide Stable Diffusion inpainting over the segmented vandalized region. Because diffusion-based reconstruction is stochastic and can introduce visual artifacts or hallucinated objects, REVIVE treats this branch as an asynchronous semantic-recovery option subject to a quality gate rather than a blocking replacement for raw camera frames in the real-time perception loop. 
+
+3) Direct Pixel Replacement: When an aligned clean refer-ence frame is available, direct pixel replacement provides an upper-bound reconstruction with minimal error. This is defined by: 
+
+Irecovered (x, y ) = 
+
+(
+
+Iref (x, y ) if M (x, y ) = 1 
+
+Iv (x, y ) if M (x, y ) = 0 (8) where M (x, y ) is the binary segmentation mask indicating vandalized pixels, Iref is the aligned reference image, and Iv
+
+is the vandalized image. This is not a general solution for all driving conditions; direct pixel replacement is an upper-bound reference method for short-horizon temporal recovery when the reference frame has not aged significantly. To stress this assumption, we also tested deliberately mismatched clean references from other tracked samples of the same VOA type. This proxy for reference aging reduced average SSIM to 0.720 and average detection recall to 0.586, confirming that direct pixel replacement should be accepted only when temporal alignment is verified. 
+
+F. Quality Gate for Recovery Outputs 
+
+To reduce the risk of low-confidence or inconsistent re-constructions entering the perception stack, REVIVE applies a post-recovery quality gate. Given a recovered candidate frame, the gate compares it against the detector’s clean-frame behavior and against simply leaving the frame unrecovered, and accepts the candidate only if it (i) does not suppress safety-relevant detections (recall no lower than the unrecov-ered frame), (ii) does not introduce excessive new detections (no increase in false positives), and (iii) clears a structural-consistency floor (SSIM ≥ 0.5). If a candidate passes all three criteria, the recovered frame is forwarded to downstream perception as the active camera input for that frame. If it fails any criterion, the candidate is rejected: REVIVE does not output a restored frame and instead raises a low-confidence (degraded-mode) signal for that frame. How the downstream stack responds to this signal—increasing reliance on other sensors, issuing an operator warning, or invoking a cautionary driving policy—is a vehicle-level decision outside the scope of this paper; the essential property is that unverified recon-structed imagery is never presented to perception as reliable. We evaluate this reference-available gate on the tracked set in Section IV-D. In deployment without ground-truth clean frames, the same criteria can be approximated using tempo-ral consistency checks, multi-sensor disagreement, confidence drops, and object-level plausibility tests; this reference-free in-stantiation remains future work. Thus, REVIVE’s operational contribution is not that every recovery branch is always better than every baseline; it is that recovery candidates are selected by VOA type and filtered before downstream use so that the forwarded stream is never worse than the unrecovered frame. 
+
+G. Object Detection Evaluation 
+
+The final pipeline stage evaluates recovery using object detection on restored images. We employ YOLOv8 [28] as a representative modern object detector. Detections on recovered or vandalized images are matched against detections on the paired clean frame using class agreement and bounding-box IoU. This protocol measures whether recovery restores perception-relevant objects, not merely whether reconstructed pixels look plausible. 
+
+H. Quality Assessment Framework 
+
+Throughout the pipeline, we employ comprehensive qual-ity assessment metrics to evaluate recovery effectiveness. Structural Similarity Index Measure (SSIM) [29] and Peak Signal-to-Noise Ratio (PSNR) provide quantitative measures of restoration quality from the output provided by the REVIVE framework. At the same time, Intersection over Union (IoU), a common metric in object detection challenges like PASCAL VOC [30], assesses the segmentation performance of the proposed framework. PSNR is derived from the Mean Squared Error (MSE), defined as: MSE = 1
+
+mn 
+
+> m−1
+
+X
+
+> i=0
+> n−1
+
+X
+
+> j=0
+
+[I(i, j ) − K(i, j )] 2 (9) where I is the original and K is the recovered image, both of size m × n. PSNR is then calculated as: PSNR = 10 · log 10 
+
+ MAX 2
+
+> I
+
+MSE 
+
+
+
+(10) where MAX I is the maximum possible pixel value of the image. The IoU for segmentation is defined as: IoU = |A ∩ B||A ∪ B| = TP TP + FP + FN (11) where A is the predicted mask, B is the ground truth mask, and TP, FP, and FN represent true positives, false positives, and false negatives, respectively. SSIM quantifies structural simi-larity between original and recovered images on a scale from 0 to 1, where higher values indicate better preservation of image structure. PSNR measures reconstruction fidelity in decibels, with higher values representing less distortion and better quality recovery. The quality assessment framework enables systematic comparison between different recovery approaches and provides guidance for optimal strategy selection based on specific application requirements and resource constraints. IV. E XPERIMENTATION DETAILS AND RESULTS 
+
+A. Experimental Setup 
+
+We use the BDD100K dataset [31], a large-scale and diverse driving dataset. While other excellent datasets like KITTI [32] and nuScenes [33] exist, BDD100K’s diversity in weather and scene types is particularly suitable for our vandalism study. We extract 5,000 images with vandalized versions across five VOA patterns. Each type includes 1,000 samples with 10-30% occlusion. Training employs a 70-15-15 split. For downstream object detection, we additionally use 500 tracked clean/vandalized image pairs with 100 ex-amples per VOA type. Each tracked pair preserves the clean reference, vandalized frame, generated mask, and recovery outputs, allowing aggregate comparison against clean-frame YOLOv8l detections. Performance metrics include accuracy, precision, recall, F1, IoU, Dice coefficient, SSIM, PSNR, processing time, and downstream detection precision/recall/F1. All reported latencies were profiled on Apple Silicon using PyTorch MPS. 
+
+B. Experimental Results 
+
+First, we observe the results achieved by our binary van-dalism detector, as shown in Figure 4. We note that it achieves 97% overall accuracy with precision and recall scores exceeding 95% for both classes, ensuring reliable pipeline initialization for actively detecting vandalism. Next, we observe the performance achieved by the multi-class vandalism classifier, with results shown in Figure 5. We note that the classifier demonstrates superior performance with 99% overall accuracy across all five VOA types. Detailed per-class analysis shows consistent performance: random VOAs achieve 100% precision and recall, center-out patterns achieve 96% precision and 97% recall, top-bottom attacks achieve 100% precision and 99% recall, bottom-top vandalism 
+
+Fig. 4: Binary vandalism detector performance 
+
+Fig. 5: Multi-class VOA detector performance achieves 99% precision and 100% recall, and targeted attacks achieve 99% precision and 97% recall. This classification accuracy enables precise recovery strategy selection further down the REVIVE pipeline. Following detection and classification, the EfficientNet-based U-Net model achieves strong performance as shown in Figure 6 and Figure 7. In Figure 6, we note that the Dice coefficient analysis confirms segmentation quality, with mean scores of 0.91 for structured VOAs and 0.87 for random van-dalism. The conditional architecture incorporating VOA-type information demonstrates improved segmentation performance compared to unconditional baselines, validating the effective-ness of our type-aware approach. These results are further reinforced in Figure 7, where we observe the segmentation model achieving remarkable localization precision for Bottom-top (Figure 7a) and Targeted VOAs (Figure 7b), with mean Intersection over Union (IoU) scores exceeding 85% across all VOA types. Structured VOAs (center-out, top-bottom, bottom-top, targeted) consistently achieve IoU scores above 88%, while random VOAs achieve 82% IoU due to their inherently scattered nature. The usage of the EfficientNet-based U-Net demonstrates suitable performance for real-time applications. With the vandalized regions localized, we now turn to evaluating the quality of our different recovery approaches across the five VOA types. Our analysis examines how each VOA pattern responds to the recovery methods employed by the REVIVE framework. Visual comparisons are presented in Figures 8, 9, 10, and quantitative trade-offs are summarized Fig. 6: Final epoch performance of EfficientNet-U-Net 
+
+(a) Bottom-top (IoU: 0.992) 
+
+(b) Targeted (IoU: 0.852) 
+
+Fig. 7: Segmentation results showing vandalized images (left) and predicted masks (right) for two VOA types. in Tables I, II, IV, and III. 
+
+Bottom-top VOA Recovery: Bottom-top VOAs create hor-izontal occlusions from lower image regions, often hiding road surface, lane context, or nearby objects. The qualitative exam-ples show that generative recovery can preserve broad scene structure, but it may introduce artifacts in the reconstructed lower region. Direct pixel replacement is substantially more TABLE I: Recovery performance summary. Unless marked otherwise, SSIM, PSNR, F1, recall, and clean-reference mAP50 are from the 500-image tracked evaluation. Pixel replacement is a reference-frame upper bound, not a general deployment guarantee. 
+
+Method SSIM PSNR F1 Recall mAP50 Time 
+
+Unrecovered VOA 0.727 20.09dB 0.815 0.588 0.635 –Stable Diffusion ∗ 0.731 18.90dB 0.492 0.339 0.162 8610ms LaMa Inpaint 0.845 26.42dB 0.820 0.667 0.680 170ms Pixel Replace 0.988 52.82dB 0.970 0.967 0.979 0.76ms Telea Inpaint 0.849 26.03dB 0.818 0.607 0.622 8.48ms Navier-Stokes 0.848 25.95dB 0.810 0.606 0.625 8.42ms Median Filter 0.660 19.22dB 0.448 0.214 0.110 0.26ms     
+
+> Note: Recovery times are in ms. mAP50 uses clean-frame YOLOv8l detections as the reference and matches recovered-frame detections by class and IoU ≥0.50. ∗Stable Diffusion is evaluated on the 400 structured VOA samples where the generative branch applies; random VOAs use median filtering in REVIVE.
+
+TABLE II: Deployment-oriented latency budget for REVIVE recovery branches (all times in ms). Fast branches are candi-dates for the online perception path after quality gating; Stable Diffusion is reserved for asynchronous recovery or situations where the AV can tolerate delayed refinement.             
+
+> Component / Branch Measured Time Deployment Role
+> Direct Pixel Replacement 0.76ms Online candidate if aligned reference exists Median Filter 0.26ms Online candidate after quality gate Telea / Navier-Stokes 8.4ms Near-online candidate after quality gate LaMa Inpainting 170ms Learned baseline; not a blocking 30 FPS branch Stable Diffusion ∼8610ms Asynchronous or pause-tolerant recovery branch
+
+reliable when the reference remains aligned, but this result should be interpreted as an upper bound rather than a guarantee under arbitrary ego-motion. 
+
+Center-out VOA Recovery: Center-out patterns present significant challenges because they obscure central semantic content. This is the setting where an incorrect reconstruction is most dangerous: a plausible hallucination can look visually coherent while still failing to restore the object-detection evi-dence needed by an AV perception stack. REVIVE therefore routes such outputs through the quality gate and favors direct pixel replacement only when temporal alignment is strong. 
+
+Targeted VOA Recovery: Targeted VOAs affect local-ized regions and may leave enough surrounding context for plausible inpainting. Even in this favorable case, downstream detection consistency remains the key safety metric because visually realistic reconstruction does not necessarily imply object-level correctness. 
+
+Random VOA Recovery: Random VOAs are scattered, noise-like corruptions. Median filtering is fast and can visually suppress isolated artifacts, but the aggregate object-detection evaluation shows that it does not reliably restore downstream detections across all random samples. This reconciles the low SSIM/PSNR values with the qualitative appearance: the filter may reduce visible noise while also blurring or altering object cues needed by YOLOv8l. 
+
+Top-bottom VOA Recovery: Top-bottom VOAs create horizontal occlusions from upper image regions, modeling scenarios where paint, covers, or debris affect the upper camera view. These attacks may obscure traffic lights, signs, Fig. 8: Representative bottom-top VOA recovery example showing clean reference, vandalized input, generative recovery, and direct pixel replacement. The figure illustrates qualitative branch behavior; aggregate detection metrics are reported separately in Tables I and VI.          
+
+> (a) Center-out VOA recovery (Vandalized →GenAI →Pixel Copy) (b) Targeted VOA recovery (Vandalized →GenAI →Pixel Copy)
+
+Fig. 9: Representative recovery examples for center-out and targeted VOAs. Center-out attacks obscure semantically important image regions and expose the reliability gap between plausible-looking generative outputs and reference-based recovery.       
+
+> (a) Random VOA recovery (Vandalized →Median Filtering)
+> (b) Top-bottom VOA recovery (Vandalized →GenAI →Pixel Copy)
+
+Fig. 10: Representative recovery examples for random and top-bottom VOAs. Random attacks are treated as noise-like corruption, while top-bottom attacks require structured-region restoration or direct pixel replacement when an aligned clean reference is available. TABLE III: Direct pixel replacement alignment sensitivity on 500 tracked pairs. Shift is applied to the clean reference before replacement to approximate temporal misalignment/reference aging.                      
+
+> Reference Shift SSIM F1 Recall
+> 0 px 0.988 0.970 0.967 2 px 0.856 0.857 0.802 5 px 0.814 0.818 0.665 10 px 0.795 0.802 0.618 20 px 0.775 0.794 0.595 40 px 0.754 0.776 0.578
+
+sky-line context, or distant vehicles. Generative recovery can synthesize plausible upper-scene content, but deployment must account for its latency and hallucination risk. 
+
+C. Object Detection Performance Evaluation 
+
+Finally, we evaluate the practical impact of our recovery methods on a downstream perception task. The results from YOLOv8 object detection on the restored imagery provide a clear measure of functional improvement. 
+
+1) Comparative Analysis of Recovery Approaches: To pro-vide a comprehensive overview of the trade-offs between recovery strategies, Table I reports aggregate performance across 500 tracked clean/vandalized pairs, including clean-reference mAP50 computed against clean-frame YOLOv8l detections. Unrecovered VOAs reduce detection recall to 0.588 and mAP50 to 0.635. Direct pixel replacement restores recall to 0.967, F1-score to 0.970, and mAP50 to 0.979 in 0.76ms on average, confirming its value as an upper bound when the reference frame is valid. LaMa provides a learned inpainting baseline with SSIM 0.845, PSNR 26.42dB, recall 0.667, and mAP50 0.680, outperforming unrecovered frames and the classical baselines in recall while remaining substantially slower than the lightweight online candidates. Stable Diffusion provides semantically plausible structured-region recovery, but its aggregate structured-VOA detector recovery is lower (F1 0.492, recall 0.339, mAP50 0.162), and its 8.61s average runtime places it outside the blocking perception path. This result supports the REVIVE design choice: generative re-covery is valuable as a quality-gated semantic branch, while detector-critical recovery should prefer faster reference-based or learned inpainting candidates when they pass object-level checks. Classical Telea and Navier-Stokes inpainting improve SSIM and PSNR over unrecovered frames but provide only modest detection-recall gains, suggesting that visual similar-ity alone is insufficient for AV perception recovery. Median TABLE IV: Measured end-to-end latency of the online (non-generative) REVIVE path on Apple Silicon (MPS), averaged over 482 vandalized tracked frames. REVIVE preprocessing (22.7 ms) fits within a 33 ms (30 FPS) budget; the end-to-end total includes YOLOv8l object detection, which an AV executes regardless of REVIVE. 
+
+Pipeline stage Mean latency (ms) 
+
+Binary VOA classification 4.2 Multi-class VOA classification 3.3 EfficientNet-U-Net segmentation 9.4 Type-aware recovery (median / pixel replace) 2.2 Quality gate (structural check) 3.6 REVIVE preprocessing subtotal 22.7 Object detection (YOLOv8l) 145.1 
+
+End-to-end total 167.8 
+
+filtering is fast, but its average detection recall of 0.214 shows that it should be restricted to cases where the quality gate indicates object-level improvement. Table II further separates online candidates from the asynchronous Stable Diffusion branch, addressing the frame-rate gap without discarding its reconstruction benefits. Table III addresses the direct-pixel-replacement reference assumption. Under the aligned-reference condition, detection recall reaches 0.967. A controlled 2-pixel shift reduces recall to 0.802, and 5–20 pixel shifts reduce recall to 0.665–0.595. This confirms that direct pixel replacement is useful only when the reference frame is temporally and spatially aligned; otherwise, the recovered frame should not be accepted without additional consistency evidence. Table IV profiles the online (non-generative) pipeline on 482 vandalized tracked frames. REVIVE’s preprocessing— binary and multi-class classification, EfficientNet-U-Net seg-mentation, type-aware recovery, and the quality gate—adds 22.7 ms per frame, within a 33 ms (30 FPS) budget; this is the latency attributable to REVIVE itself. When YOLOv8l object detection (145 ms on MPS) is included, the end-to-end total is roughly 168 ms ( ∼6 FPS), but that figure is dominated by downstream detection rather than recovery preprocessing and would be substantially lower on dedicated automotive inference hardware. The asynchronous Stable Diffusion branch (Table II) is excluded from this online path. To test whether the conclusions depend only on hand-designed BDD100K masks, we also ran a real-world mask-geometry stress test using the Raindrops-on-Windshield dataset [34]. The dataset provides real windshield/lens artifact masks but not clean paired recovery targets, so we transferred 75 real artifact masks to clean BDD100K frames and evaluated against the original clean images. This preserves clean ground truth while testing more realistic contamination geometry. The resulting masked frames achieved F1 0.700 and recall 0.790; LaMa improved F1 to 0.836 and SSIM to 0.919, while Telea and Navier-Stokes reached F1 0.828 and 0.817, respectively. Direct pixel replacement again reached pixel-identical recon-struction only because the clean source frame was available. These results add external mask-geometry evidence for real artifact shapes, but they should not be interpreted as a full real-world vandalism-image benchmark. 
+
+2) Detection Performance on Recovered Images: Object detection evaluation reveals functional recovery behavior be-yond image similarity. Table V first illustrates per-pattern de-tection behavior on a single representative scene, and Table VI then reports aggregate detection recovery across the tracked evaluation set. TABLE V: Representative single-scene YOLOv8l detection case study across VOA patterns. This table illustrates per-pattern detection behavior on one shared clean reference scene; aggregate 500-image results are reported in Table VI.                                                                            
+
+> VOA Type Non-vandalized Vandalized Stable Diff. Pixel Copy Median Filter Cnt Avg. Conf. Cnt Avg. Conf. Cnt Avg. Conf. Cnt Avg. Conf. Cnt Avg. Conf.
+> Reference (Clean) 14 0.626 ––––––––Bottom-top 14 0.626 14 0.593 15 0.606 15 0.599 ––Center-out 14 0.626 80.661 80.676 15 0.622 ––Random 14 0.626 90.696 ––––13 0.576 Targeted 14 0.626 14 0.663 17 0.611 15 0.640 ––Top-bottom 14 0.626 13 0.651 14 0.640 14 0.632 ––
+> Note: Cnt = number of detected objects; Avg. Conf. = average YOLOv8l confidence. Identical clean-reference values occur because this is one shared representative scene.
+
+TABLE VI: Aggregate YOLOv8l detection recovery across 500 tracked image pairs. Clean-frame detections serve as the reference; recovered/vandalized detections are matched by class and IoU ≥ 0.50.                                             
+
+> Method TP FP FN Avg. Prec. Avg. Rec.
+> Unrecovered VOA 1346 193 949 0.790 0.588 Pixel Replace 2223 49 72 0.978 0.967 LaMa Inpaint 1528 124 767 0.892 0.667 Telea Inpaint 1413 182 882 0.828 0.607 Navier-Stokes 1408 169 887 0.851 0.606 Median Filter 488 520 1807 0.455 0.214 Stable Diffusion †603 566 1257 0.535 0.339
+> Note: TP/FP/FN are aggregate counts; precision and recall are averaged per image. All methods use n=500 pairs except †Stable Diffusion ( n=400 , structured VOAs only; random VOAs use median filtering in the REVIVE pipeline).
+
+The quantitative analysis avoids single-image ambiguity by aggregating detection recovery over the tracked set. Vandalized frames produce 949 false negatives relative to clean-frame detections. Pixel replacement reduces this to 72 false negatives, while LaMa reduces the count to 767, and Telea/Navier-Stokes reduces it only slightly to 882 and 887, respectively. This result shows that inpainting can improve pixel-level similarity without reliably restoring perception-level evidence. A recovered image should therefore be accepted only when object-level consistency improves, not merely because SSIM or PSNR increases. 
+
+D. Quality-Gate Evaluation 
+
+We evaluate the reference-available quality gate of Sec-tion III-F on the 500 tracked pairs, applying the accept criteria of (i) no recall reduction and (ii) no false-positive increase relative to the unrecovered frame, with (iii) an SSIM floor of 0.5. In deployment, a rejected frame raises a degraded-mode signal rather than yielding a restored frame; for evaluation, we therefore score a rejected frame as “no trusted recovery,” i.e., using the unrecovered frame’s detections, which quantifies whether the gate avoids degrading perception below the unre-covered baseline. Table VII reports, per branch, the fraction TABLE VII: Quality-gate behavior on 500 tracked pairs. Accept rate is the fraction of recovered candidates passing the gate; post-gate recall/precision are per-image averages after rejected frames fall back to the unrecovered frame.                               
+
+> Recovery branch Accept Post-gate Post-gate rate recall precision
+> Unrecovered (baseline) —0.588 0.790 Median filter 23.6% 0.603 0.864 Telea 77.8% 0.625 0.895 Navier-Stokes 80.2% 0.628 0.909 LaMa 86.4% 0.664 0.941 Pixel replace ‡93.8% 0.922 0.992 Stable Diffusion †17.8% 0.725 0.889
+> Note: †Stable Diffusion uses n=400 (structured VOAs only); all other branches use
+> n=500 .‡Pixel replacement is a reference-based upper bound requiring an aligned clean reference.
+
+of recovered candidates accepted and the resulting per-image detection recovery after the gate. The gate accepts the large majority of genuinely useful recoveries (93.8% of aligned pixel-replacement candidates, 86.4% of LaMa candidates, and 77.8–80.2% of classical-inpainting candidates) while rejecting most candidates from the branches that do not reliably restore detections (only 23.6% of median-filter and 17.8% of Stable Diffusion candidates are accepted). Because rejected frames are scored as no trusted recovery, post-gate recall is at or above the unrecovered baseline (0.588) for every branch. The gate is most consequential for the end-to-end pipeline. Under REVIVE’s type-aware routing (random VOAs to me-dian filtering, structured VOAs to Stable Diffusion), forward-ing every recovered frame without the gate degrades per-image recall to 0.304 and precision to 0.509—substantially worse than leaving frames unrecovered. With the gate, only 25.8% of candidates are accepted, and per-image recall and precision re-turn to 0.608 and 0.865, at or above the unrecovered baseline. The gate, therefore, converts branches that are net-harmful in aggregate into a pipeline that never degrades downstream detection below the unrecovered frame, which is REVIVE’s central operational guarantee. 
+
+E. Deployment Role of Generative Recovery 
+
+Detailed analysis clarifies the deployment role of the Stable Diffusion approach. Inconsistent performance across VOA types remains important because the method depends on the surrounding context and prompt quality. False positives pose safety concerns, as the generative process can hallucinate objects not present in the scene. Computational overhead 
+
+also affects deployment: the measured Stable Diffusion branch requires roughly 8 seconds per image, which is outside a 30 FPS camera-frame budget. REVIVE, therefore, does not place Stable Diffusion on the blocking perception path. Instead, the online path relies on lightweight detection, segmentation, quality gating, and direct pixel replacement or classical recov-ery when their outputs pass object-level checks, while Stable Diffusion remains available as an asynchronous or pause-tolerant recovery branch. 
+
+F. Limitations 
+
+Several limitations bound the scope of these results. First, the VOA patterns are synthetically generated on BDD100K frames using programmatic occlusion masks; real-world van-dalism (wet spray paint, semi-transparent film, smeared mud, irregular sticker edges) differs in texture, opacity, and bound-ary geometry. The raindrop mask-geometry stress test only partially addresses this, so validation on paired real-world vandalism data remains future work. Second, direct pixel replacement is a reference-based upper bound: it presumes a recent, spatially aligned clean reference frame, a condition that rarely holds under ego-motion, as the alignment-sensitivity analysis (Table III) shows recall degrading from 0.967 at 0px to 0.595 at 20px of shift. A deployed system could cache a recent unoccluded frame as a reference, but lens- or windshield-level vandalism persists in the same image region across frames and ego-motion continuously shifts the view-point, so the more realistic reference sources are overlapping cameras or complementary sensors; integrating such multi-view references is left to future work. Third, the quality gate is evaluated in its reference-available form, which uses the clean frame to verify recovered candidates; its reference-free deployment instantiation (temporal consistency, multi-sensor disagreement, confidence, and plausibility checks) remains future work. V. C ONCLUSION 
+
+In this paper, we introduce REVIVE, a vandalism recovery pipeline for AV camera systems that bridges detection, local-ization, recovery, and downstream perception evaluation. Sta-ble Diffusion shows variable reconstruction performance (per-pattern SSIM 0.667-0.867, PSNR 15.4-26.7dB) across VOA patterns, while aligned direct pixel replacement achieves near-identical reconstruction (whole-image SSIM 0.988, PSNR 52.8dB; pixel-identical within the recovered region) under the aligned-reference condition. The aggregate evaluation shows why recovery must also be judged at the object-detection level: unrecovered VOAs reduce YOLOv8l recall to 0.588 across 500 tracked image pairs, while direct pixel replacement, treated as a reference-based upper bound, restores recall to 0.967 only when an aligned clean frame is available. LaMa adds a learned inpainting baseline with a recall of 0.667, and the alignment sensitivity test shows that direct pixel replacement degrades sharply when the reference is spatially misaligned. A real windshield/lens mask-geometry stress test adds external mask-geometry evidence while preserving clean ground truth. A reference-available quality gate filters recovered candidates before downstream use: without it, type-aware routing de-grades per-image recall to 0.304, while with it, recall returns to 0.608, at or above the unrecovered baseline. End-to-end profiling shows REVIVE’s recovery preprocessing (classifica-tion, segmentation, recovery, and gating) adds only 22.7 ms per frame on top of object detection, within a 30 FPS bud-get. These findings position REVIVE as a practical camera-preprocessing framework for selecting, quality-gating, and evaluating recovery strategies before downstream perception, rather than blindly passing reconstructed images into an AV stack. Future work will focus on paired real-world vandalism datasets, reference-free quality gating, multi-view reference integration, and deployment-aware latency optimization. REFERENCES [1] Allied Market Research, “Autonomous vehicle market by level of automation (level 3, level 4, level 5), by component (hardware, soft-ware), by vehicle type (passenger cars, commercial vehicles): Global opportunity analysis and industry forecast, 2030-2040.” https://www. alliedmarketresearch.com/autonomous-vehicle-market, Jan 2025. Ac-cessed: October 20, 2025. [2] J. Petit, B. Stottelaar, M. Feiri, and F. Kargl, “Remote attacks on automated vehicles sensors: Experiments on camera and lidar,” Black Hat Europe , vol. 11, no. 2015, p. 995, 2015. [3] J. Kastrenakes, “A crowd destroyed a waymo robotaxi in san francisco.” The Verge, Feb 2024. Accessed: September 29, 2025. [4] G. Leahy, “Video shows gang tagging waymo robotaxis with passengers inside.” The San Francisco Standard, Sep 2024. Accessed: September 29, 2025. [5] J. Fayyad, M. A. Jaradat, D. Gruyer, and H. Najjaran, “Deep learning sensor fusion for autonomous vehicle perception and localization: A review,” Sensors , vol. 20, no. 15, p. 4220, 2020. [6] F. Matos, J. Bernardino, J. Dur˜ aes, and J. Cunha, “A survey on sensor failures in autonomous vehicles: Challenges and solutions,” Sensors ,vol. 24, no. 16, p. 5108, 2024. [7] M. Tan and Q. Le, “Efficientnet: Rethinking model scaling for con-volutional neural networks,” in International conference on machine learning , pp. 6105–6114, PMLR, 2019. [8] J. Li, D. Li, C. Xiong, and S. Hoi, “Blip: Bootstrapping language-image pre-training for unified vision-language understanding and generation,” in International conference on machine learning , pp. 12888–12900, PMLR, 2022. [9] R. Rombach, A. Blattmann, D. Lorenz, P. Esser, and B. Ommer, “High-resolution image synthesis with latent diffusion models,” in Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recogni-tion , pp. 10684–10695, 2022. [10] C. Szegedy, W. Zaremba, I. Sutskever, J. Bruna, D. Erhan, I. Goodfellow, and R. Fergus, “Intriguing properties of neural networks,” arXiv preprint arXiv:1312.6199 , 2013. [11] I. J. Goodfellow, J. Shlens, and C. Szegedy, “Explaining and harnessing adversarial examples,” arXiv preprint arXiv:1412.6572 , 2014. [12] K. Eykholt, I. Evtimov, E. Fernandes, B. Li, A. Rahmati, C. Xiao, A. Prakash, T. Kohno, and D. Song, “Robust physical-world attacks on deep learning visual classification,” in Proceedings of the IEEE conference on computer vision and pattern recognition , pp. 1625–1634, 2018. [13] T. B. Brown, D. Man´ e, A. Roy, M. Abadi, and J. Gilmer, “Adversarial patch,” arXiv preprint arXiv:1712.09665 , 2017. [14] S.-T. Chen, C. Cornelius, J. Martin, and D. H. Chau, “Shapeshifter: Robust physical adversarial attack on faster r-cnn object detector,” in Joint European Conference on Machine Learning and Knowledge Discovery in Databases , pp. 52–68, Springer, 2018. [15] S. Thys, W. Van Ranst, and T. Goedem´ e, “Fooling automated surveil-lance cameras: adversarial patches to attack person detection,” in Pro-ceedings of the IEEE/CVF conference on computer vision and pattern recognition workshops , pp. 0–0, 2019. [16] D. Karmon, D. Zoran, and Y. Goldberg, “Lavan: Localized and visible adversarial noise,” in International conference on machine learning ,pp. 2507–2515, PMLR, 2018. [17] M. Sharif, S. Bhagavatula, L. Bauer, and M. K. Reiter, “Accessorize to a crime: Real and stealthy attacks on state-of-the-art face recognition,” in Proceedings of the 2016 ACM SIGSAC conference on computer and communications security , pp. 1528–1540, 2016. [18] A. Madry, A. Makelov, L. Schmidt, D. Tsipras, and A. Vladu, “Towards deep learning models resistant to adversarial attacks,” arXiv preprint arXiv:1706.06083 , 2017. [19] N. Papernot, P. McDaniel, X. Wu, S. Jha, and A. Swami, “Distillation as a defense to adversarial perturbations against deep neural networks,” in 2016 IEEE Symposium on Security and Privacy (SP) , pp. 582–597, IEEE, 2016. [20] D. Pathak, P. Krahenbuhl, J. Donahue, T. Darrell, and A. A. Efros, “Context encoders: Feature learning by inpainting,” in Proceedings of the IEEE conference on computer vision and pattern recognition , pp. 2536– 2544, 2016. [21] J. Yu, Z. Lin, J. Yang, X. Shen, X. Lu, and T. S. Huang, “Generative image inpainting with contextual attention,” Proceedings of the IEEE conference on computer vision and pattern recognition , pp. 5505–5514, 2018. [22] K. Nazeri, E. Ng, T. Joseph, F. Z. Qureshi, and M. Ebrahimi, “Edge-connect: Structure guided image inpainting using edge prediction,” in 
+
+Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV) Workshops , Oct 2019. [23] R. Suvorov, E. Logacheva, A. Mashikhin, A. Remizova, A. Ashukha, A. Silvestrov, N. Kong, H. Goka, K. Park, and V. Lempitsky, “Resolution-robust large mask inpainting with fourier convolutions,” in 
+
+Proceedings of the IEEE/CVF Winter Conference on Applications of Computer Vision , pp. 2149–2159, 2022. [24] G. Liu, F. A. Reda, K. J. Shih, T.-C. Wang, A. Tao, and B. Catanzaro, “Image inpainting for irregular holes using partial convolutions,” in 
+
+Proceedings of the European conference on computer vision (ECCV) ,pp. 85–100, 2018. [25] J. Yu, Z. Lin, J. Yang, X. Shen, X. Lu, and T. S. Huang, “Free-form image inpainting with gated convolution,” in Proceedings of the IEEE/CVF international conference on computer vision , pp. 4471–4480, 2019. [26] A. Lugmayr, M. Danelljan, L. V. Gool, and R. Timofte, “Repaint: Inpainting using denoising diffusion probabilistic models,” in Proceed-ings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pp. 11461–11471, 2022. [27] C. Saharia, W. Chan, S. Saxena, L. Li, J. Whang, E. Denton, K. S. Ghasemipour, B. K. Ayan, S. S. Mahdavi, R. G. Lopes, et al. , “Palette: Image-to-image diffusion models,” in ACM SIGGRAPH 2022 Confer-ence Proceedings , pp. 1–10, 2022. [28] G. Jocher et al. , “Ultralytics yolov8,” 2023. Accessed: 2025-10-20. [29] Z. Wang, A. C. Bovik, H. R. Sheikh, and E. P. Simoncelli, “Image quality assessment: From error visibility to structural similarity,” IEEE transactions on image processing , vol. 13, no. 4, pp. 600–612, 2004. [30] M. Everingham, L. Van Gool, C. K. Williams, J. Winn, and A. Zisser-man, “The pascal visual object classes (voc) challenge,” International journal of computer vision , vol. 88, no. 2, pp. 303–338, 2010. [31] F. Yu, H. Chen, X. Wang, W. Xian, Y. Chen, F. Liu, V. Madhavan, and T. Darrell, “Bdd100k: A diverse driving dataset for heterogeneous multitask learning,” in Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pp. 2636–2645, 2020. [32] A. Geiger, P. Lenz, and R. Urtasun, “Are we ready for autonomous driving? the kitti vision benchmark suite,” in 2012 IEEE conference on computer vision and pattern recognition , pp. 3354–3361, IEEE, 2012. [33] H. Caesar, V. Bankiti, A. H. Lang, S. Vora, V. E. Liong, Q. Xu, A. Krishnan, Y. Pan, G. Baldan, and O. Beijbom, “nuscenes: A multi-modal dataset for autonomous driving,” in Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pp. 11621– 11631, 2020. [34] V. Soboleva and O. Shipitko, “Raindrops on windshield dataset,” 2021.

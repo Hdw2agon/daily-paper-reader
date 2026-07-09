@@ -1,0 +1,915 @@
+Title: Making Implicit Preservation Intent Explicit in Conversational Image Editing
+
+URL Source: https://arxiv.org/pdf/2607.07051v1
+
+Published Time: Thu, 09 Jul 2026 00:39:47 GMT
+
+Number of Pages: 19
+
+Markdown Content:
+# Making Implicit Preservation Intent Explicit in Conversational Image Editing 
+
+Soomin Han 1, †, Jihyung Ahn 2, †, Bumsoo Kim 3,* , Buru Chang 2,* 
+
+> 1
+
+Sogang University, 2Korea University, 3Chung-Ang University 
+
+soominsion@sogang.ac.kr , gina0520@korea.ac.kr , bumsoo@cau.ac.kr , buru_chang@korea.ac.kr 
+
+> †
+
+Equal contribution. *Corresponding authors. 
+
+Abstract 
+
+Conversational image editing requires preserv-ing not only visible content, but also content that temporarily disappears across turns. When newly added or modified content occludes a previously visible region, that region should reappear if it was never semantically changed. However, existing systems often fail to recover such occluded-but-unchanged content, producing inconsistent or hallucinated results. We introduce OCCUR-Bench , a diagnostic benchmark for temporal preservation in conversational image editing. OCCUR-Bench provides diverse occlusion-and-revelation scenarios with historical restoration references, enabling evaluation of faithful restoration rather than plausible regeneration. We also propose ReSpec , a training-free framework that makes implicit preservation explicit by pairing restoration-aware instructions with historical visual references. Given an editing history, ReSpec identifies what should persist, selects the historical image state that provides missing visual evidence, and conditions an in-context editor on the resulting instruction and reference image. Experiments show that ReSpec improves restoration fidelity and temporal consistency on OCCUR-Bench, highlighting the need to ground preservation in editing history rather than only the current image. The dataset and code are available at https:// github.com/anonymous745961852-cloud/ implicit-preservation-editing .
+
+1 Introduction 
+
+Conversational image editing enables users to re-fine visual content through iterative dialogue. At each turn, the user requests an edit, observes the updated image, and provides a follow-up instruc-tion. Unlike single-turn editing, each instruction must therefore be interpreted in the context of prior edits, intermediate results, and user expectations accumulated across turns. A basic expectation is 
+
+preservation : content that the user has not asked to change should remain consistent. Existing image editing methods are primarily designed to preserve what remains visible in the current image. However, conversational editing also requires preserving what temporarily disap-pears. Such cases naturally arise in iterative edit-ing: common operations such as adding, moving, resizing, replacing, or stylizing objects can tem-porarily hide previously visible content and reveal it again in later turns. As illustrated in Figure 1, flowers added over an owl’s chest can hide the orig-inal feather texture. When the flowers are later removed or resized, the hidden texture should reap-pear because it was never semantically modified. Current conversational editing systems can fail in this setting, producing inconsistent or hallucinated content instead. Once the texture is occluded, the current image no longer provides visual evidence of its original appearance. This reveals a simple but important limitation: visual absence does not imply semantic change. This failure mode is not well captured by ex-isting conversational image editing benchmarks. Most evaluations focus on instruction following, visible-region preservation, or final-output quality. They therefore do not directly test whether a model can recover content that was visible in an earlier turn, temporarily occluded, and later revealed. As a result, a model may appear successful under stan-dard evaluation while still failing to preserve con-tent that should persist across the editing history. To evaluate this problem, we introduce OCCUR-Bench (Occlusion Consistency and C ontent Unveiling for Restoration), a diagnostic benchmark for temporal preservation in conversational image editing. OCCUR-Bench simulates this recurring pattern through diverse occlusion-and-revelation scenarios built from common multi-turn editing operations. Each scenario first occludes existing content without semantically modifying it, may 1arXiv:2607.07051v1 [cs.CV] 8 Jul 2026 GT    
+
+> Turn #0 Turn #1
+> original
+> image
+> “add
+> flowers”
+> Turn #2
+> “flowers”
+> →
+> single
+> flower”
+> MC -Edit Layer -wise
+> Memory Gemini Flux2 OmniGen2
+> +ReSpec
+> +ReSpec
+> +ReSpec
+
+Figure 1: Motivating example of temporal preservation in conversational image editing. The owl’s chest pattern is occluded by added flowers but never semantically modified, so it should be restored when revealed. Existing systems often regenerate the revealed region inconsistently, whereas our proposed ReSpec grounds preservation in the editing history and better recovers the original pattern. 
+
+apply intermediate edits, and later reveals the oc-cluded region through operations such as removal, movement, resizing, or replacement. Each scenario includes a historical reference state that contains the correct appearance of the revealed content, al-lowing us to distinguish faithful restoration from plausible hallucination. Using OCCUR-Bench, we find that existing conversational editing systems struggle to recover occluded-but-unchanged content. These systems primarily respond to the explicit instruction at each turn; preservation is left to the visual evidence avail-able in the current image. When unchanged content becomes occluded, it is neither specified by the in-struction nor available in the current image. We therefore propose ReSpec, a training-free frame-work that makes implicit preservation explicit. As shown in Figure 1, applying ReSpec helps the ed-itor recover the owl’s original chest pattern rather than regenerating the revealed region from the cur-rent image alone. Given an editing history, ReSpec identifies the content that should persist, expresses this preservation target in a restoration-aware in-struction, and supplies the missing visual evidence by selecting a historical reference image where the content is visible and valid. Experiments on OCCUR-Bench show that Re-Spec improves restoration fidelity and tempo-ral consistency when paired with in-context im-age editing models that accept reference images. Trajectory-length analysis further shows the impor-tance of historical reference grounding when hid-den content must be restored across multiple turns. These results suggest that robust conversational image editing requires moving beyond preserving only what is currently visible, toward explicitly grounding preservation in the editing history. Our contributions are summarized as follows: 1. We identify temporal preservation as a key challenge in conversational image editing, where unchanged content may be temporarily occluded but still expected to persist. 2. We introduce OCCUR-Bench , a diagnostic benchmark for occlusion-and-revelation sce-narios, and show that existing conversational editing systems struggle to restore occluded-but-unchanged content. 3. We propose ReSpec , a training-free frame-work that makes implicit preservation explicit through restoration-aware instructions and his-torical visual references. 
+
+2 Preliminaries 
+
+2.1 Conversational Image Editing 
+
+We consider a conversational image editing setting in which an image is iteratively modified through a sequence of natural language instructions. Let I0
+
+denote the base image and Pt denote the editing instruction at turn t. Given the editing history 
+
+Ht−1 = {I0, P 1, I 1, P 2, . . . , I t−2, P t−1, I t−1},
+
+(1) a conversational editing model generates the up-dated image: 
+
+It = fedit (Ht−1, P t), (2) where fedit (·) denotes the editing model. This for-mulation captures the sequential nature of conver-sational editing: the current output may depend not only on the current instruction, but also on previous instructions and intermediate image states. 22.2 Temporal Occlusion 
+
+Existing conversational editing methods often as-sume that preservation can be determined from the currently visible image. This assumption becomes insufficient under temporary occlusion, where newly generated or transformed content vi-sually covers existing content. To reason about occlusion, let O =
+
+{o1, . . . , o N } denote the set of semantic scene entities. We distinguish between the observed image and a conceptual latent scene state that represents the semantic content of the scene. Let 
+
+St = {o(t) 
+
+> i
+
+}Ni=1 (3) denote the latent scene state at turn t, where o(t)
+
+> i
+
+denotes the semantic state of entity oi. Here, St is a conceptual abstraction rather than an explicitly estimated representation. The observed image is viewed as a rendering of this latent state: 
+
+It = R(St), (4) where R(·) denotes the image formation operator. Temporal occlusion occurs when an entity re-mains part of the latent scene state but is not visible in the observed image: 
+
+o(t) 
+
+> i
+
+∈ St, ¬visible( o(t) 
+
+> i
+
+, I t). (5) In this case, the current image no longer provides direct visual evidence of the occluded entity. At editing turn t, the desired scene state after editing may therefore not be recoverable from the current input image and instruction alone: 
+
+p(St | It−1, P t)̸ = p(St | H t−1, P t). (6) Temporal occlusion becomes a preservation prob-lem when the occluded entity has not been seman-tically modified by the editing instructions. 
+
+2.3 Temporal Preservation 
+
+Temporal preservation concerns entities that remain semantically unchanged across the editing trajec-tory, regardless of whether they are currently visi-ble. To define this, let Mt ⊆ O denote the entities whose semantic state is explicitly modified by in-struction Pt at turn t. We define the persistent entity set at turn t as 
+
+Pt = {oi ∈ O | oi /∈ M k, ∀k ≤ t}. (7) 1. Original Image Curation 2. Occlusion Scenario Generation       
+
+> diverse source images
+> COCO
+> PIE -Bench
+> HQ -Edit
+> 3. Trajectory Expansion
+> 𝑰 𝒐
+> occlusion restoration
+> restoration
+> occlusion
+> original
+> original
+> Intermediate
+> 𝐼 !𝐼 "𝐼 #𝐼 $𝐼 %
+> expanded
+
+Figure 2: OCCUR-Bench scenario design. Each tra-jectory temporarily occludes a semantically unchanged occludee, applies optional intermediate edits, and later reveals it by modifying the occluder. Evaluation com-pares the revealed region with Iref to measure faithful restoration rather than plausible regeneration. 
+
+Entities in Pt should remain recoverable after editing, including cases where they become tem-porarily invisible due to occlusion. Accordingly, a conversational editor should not only execute the current instruction, but also preserve unchanged visible content and restore persistent entities when they reappear after occlusion. This intuition moti-vates OCCUR-Bench, which diagnoses failures of temporal restoration, and ReSpec, which grounds restoration in historical visual evidence. 
+
+3 OCCUR-Bench 
+
+Existing conversational image editing benchmarks focus on instruction following and visible-region consistency, but do not assess whether tempo-rally occluded content is faithfully restored af-ter revelation. To address this gap, we intro-duce OCCUR-Bench (Occlusion Consistency and Content U nveiling for Restoration), a diagnostic benchmark for evaluating temporal preservation in conversational image editing. OCCUR-Bench tar-gets occlusion-and-revelation trajectories in which content becomes temporarily hidden, remains se-mantically unchanged, and must be restored when it becomes visible again. 
+
+3.1 Scenario Design 
+
+Each OCCUR-Bench scenario is designed to iso-late temporal preservation under occlusion-and-revelation, as illustrated in Figure 2. We refer to the newly introduced or transformed entity that hides existing content as the occluder , and to the hidden persistent entity or region as the occludee .OCCUR-Bench contains 4,400 scenarios spanning 2- to 5-turn editing trajectories. Each scenario con-sists of three functional stages: (i) occlusion, (ii) 3intermediate editing, and (iii) revelation. In the occlusion stage, the occluder visually cov-ers an occludee oi, making it temporarily invisible. The occludee remains persistent, oi ∈ P t, because it is not semantically modified before revelation. The intermediate stage may alter other regions or the global appearance, but leaves the occludee se-mantically unchanged. A key design principle is that user instructions do not explicitly mention the occludee or directly request its restoration. For example, an instruction may ask the editor to add an object in a plausi-ble location or later remove it, without stating that the previously hidden content should be restored. Thus, successful restoration requires preserving im-plicit scene content rather than merely following an explicit restoration command. For each scenario, we define a restoration refer-ence state: 
+
+Iref ∈ H t−1, (8) where Iref denotes the latest historical state in which the occludee is visible and semantically valid. It provides the visual target for restoration, al-lowing OCCUR-Bench to distinguish faithful tem-poral restoration from plausible hallucination. 
+
+3.2 Construction and Verification 
+
+We summarize the construction procedure here and provide detailed scenario templates, dataset statis-tics, source image filtering criteria, and verification procedures in Appendix A. We construct OCCUR-Bench from COCO (Lin et al., 2014), PIE-Bench (Ju et al., 2024), and HQ-Edit (Hui et al., 2024) images that contain salient occludee candidates, such as distinctive object parts, textures, logos, or clothing details. Source images are selected only when a plausi-ble occluder can be introduced without changing the viewpoint, object layout, or scene composition. This filtering ensures that the benchmark primarily measures temporal preservation rather than failures caused by ill-posed editing instructions. The benchmark covers diverse occlusion-and-revelation patterns built from common multi-turn editing operations. Occlusion is typically induced by adding or transforming an occluder, while rev-elation is instantiated through operations such as removing, moving, resizing, or replacing the oc-cluder. Intermediate turns may include additional object insertions, attribute changes, or global style transformations, as long as they do not semantically Evaluation Pipeline               
+
+> Detection
+> Model
+> occluder : box
+> Segmentation
+> Model
+> 𝑰 𝟐
+> occluder : box
+> 𝑰 𝟐
+> 1-1. Restoration
+> Turn #0 Turn #2 Turn #2 Turn #0
+> Evaluation Area Evaluation Area
+> 1-2. Preservation
+> 1–(𝑀 !""
+> #∪𝑀 !""
+> $)
+> 𝑰 𝟏 𝑰 𝟏
+> 2. Instruction Faithfulness -> LLM -as -Judge
+> 1. Temporal Consistency
+> Detection
+> Model
+> Segmentation
+> Model
+> 𝑰 𝒓𝒆𝒇
+> 𝑀 "##
+> $
+> 𝑀 "##
+> %
+> $𝐼 $$𝐼 $
+> $𝐼 $𝑰 𝒓𝒆𝒇 $𝐼 $
+> 𝑀 !""
+> #-𝑀 !""
+> $
+
+Figure 3: OCCUR-Bench evaluation pipeline for tem-poral consistency. 
+
+modify the occludee. All scenarios are manually verified before inclu-sion. We remove cases with ambiguous occludees, insignificant hidden regions, insufficient occlusion, physically implausible occluder placement, or un-natural editing trajectories. For longer sequences, we additionally verify that intermediate edits do not directly modify the occludee, ensuring that the fi-nal revelation turn evaluates temporal preservation rather than ordinary object editing. 
+
+3.3 Evaluation Metrics 
+
+As shown in Figure 3, OCCUR-Bench evaluates temporal visual consistency along two axes: (i) restoration consistency and (ii) preservation consis-tency. Restoration consistency measures whether temporally occluded content is faithfully recovered when it becomes visible again, while preservation consistency measures whether unchanged visible regions remain stable across the editing trajectory. We additionally report instruction faithfulness as an auxiliary metric to verify that models execute the requested edit. 
+
+Restoration Consistency. Let M 1: N 
+
+> occ
+
+denote the set of pixels covered by the target occluder across the trajectory, and let M N 
+
+> new
+
+denote the set of pix-els occupied by newly introduced objects in the final revelation turn. We define Rrestore ⊆ Ω as the pixel index set corresponding to the historically occluded region that becomes visible again after 4excluding final occluder and new-object regions, as illustrated in Figure 3. Given the generated fi-nal image ˆIN and the historical reference state Iref ,restoration consistency is defined as: 
+
+Srestore = sim 
+
+ ˆIN [Rrestore ], I ref [Rrestore ]
+
+
+
+, (9) where I[R] denotes the masked pixel subset in-dexed by R, and sim( ·) computes the similarity between the generated and reference regions using the averaged normalized PSNR, LPIPS, and CLIP scores. 
+
+Preservation Consistency. Let M 1: N 
+
+> new
+
+denote the regions occupied by newly introduced objects across the trajectory. We define Rpreserve as the complement of M 1: N 
+
+> occ
+
+and M 1: N 
+
+> new
+
+, corresponding to unchanged regions not involved in target occlusion or new object insertion. Since Iref is a valid histor-ical state for the unchanged scene content, we use it as the reference for preservation as well: 
+
+Spreserve = sim 
+
+ ˆIN [Rpreserve ], I ref [Rpreserve ]
+
+
+
+.
+
+(10) For both metrics, sim( ·) averages normalized PSNR, LPIPS-based similarity, and CLIP similar-ity. Detailed construction of the masks and evalua-tion regions is provided in Appendix A.5. 
+
+OCCUR-Bench Score. The overall temporal con-sistency score is computed by averaging restoration and preservation consistency: 
+
+STC = 12 (Srestore + Spreserve ) . (11) This score separately accounts for whether a model restores temporally occluded content and preserves unchanged regions. 
+
+Auxiliary Instruction Faithfulness. We report in-struction faithfulness SIF using an LLM-as-a-judge protocol. This score verifies whether the requested edit is executed and is not included in STC .
+
+4 Proposed Framework 
+
+We propose ReSpec (Re ference Selection and Preservation Spec ification), a training-free intent-grounded framework for conversational image edit-ing. Our key observation is that user instructions explicitly specify what should change, but often leave what should remain unchanged implicit. This underspecification becomes problematic when un-changed content is no longer visible in the current image: the editor receives neither an explicit preser-vation request nor visual evidence for reconstruc-tion. ReSpec addresses this by using a VLM-based controller to make implicit preservation intent ex-plicit. The controller infers what content should persist, grounds this intent in a historical reference image, and realizes it as a restoration-aware in-struction for the editor. The framework proceeds in three steps: (i) implicit preservation target infer-ence, (ii) historical reference grounding, and (iii) restoration-aware instruction realization. 
+
+4.1 Preservation Target Identification 
+
+At turn t, the VLM-based controller infers the preservation intent that is implicit in the editing history and current instruction. It analyzes the in-struction history, intermediate image states, and Pt
+
+to identify content that is not semantically modified but should remain recoverable. This step produces 
+
+Dt, a textual description of the inferred preserva-tion target. For restoration turns, Dt identifies the occludee that should reappear after the occluder is removed or modified. For non-restoration turns, 
+
+Dt may be empty or describe visible content that should remain stable. 
+
+4.2 Historical Reference Selection 
+
+When restoration is needed, the VLM-based con-troller grounds the inferred preservation target in historical visual evidence. It selects Iref as the lat-est prior image in which the target is visible and semantically valid: 
+
+Iref = SelectRef VLM (Ht−1, P t, D t). (12) This reference supplies missing visual evidence for restoration; if no hidden content must be restored, ReSpec proceeds without reference selection. 
+
+4.3 Restoration-Aware Editing 
+
+Finally, the VLM-based controller realizes the in-ferred preservation intent as a restoration-aware instruction ˜Pt. This instruction preserves the re-quested edit in Pt while explicitly stating the preser-vation target Dt:
+
+˜Pt = Rewrite VLM (Pt, D t). (13) The in-context editor then generates the final image using the current image, rewritten instruction, and selected historical reference: 
+
+ˆIt = fedit (It−1, ˜Pt, I ref ). (14) For non-restoration turns, the editor can be applied without Iref . This procedure requires no additional training or architectural modification of the base ed-itor; it only changes the textual and visual context provided at inference time. 5ReSpec Pipeline    
+
+> Target Image User Instruction
+> Change Flowers
+> to a single
+> Flower
+> Current Turn #3
+> Editing History ℋ𝑵 "𝟏
+> Original
+> Image
+> Heart ->
+> Circle
+> Add Flowers
+> VLM
+> Stage1 : Preservation Target Identification
+> Identify
+> occluded -but -persistent content:
+> circular chest emblem
+> Stage2 : Historical Reference Selection
+> Image Editing Model
+
+✅ 
+
+> 𝑰 𝒓𝒆𝒇
+> Stage3 :
+> Restoration -Aware Editing
+> Target
+> Image
+> Reference
+> Image
+> 𝑰 𝒓𝒆𝒇 𝑰 𝑵 %𝟏
+> Augmented Instruction
+> Change Flowers to a
+> single flower, recovering
+> the circular chest
+> emblem.
+> Result
+
+## 👍 
+
+> 𝑰 𝑵
+> 𝑰 𝑵 %𝟏
+
+Figure 4: Overview of ReSpec. A VLM-based controller infers the implicit preservation target from the editing history, selects a historical reference image that provides valid visual evidence, and rewrites the current instruction into a restoration-aware form. The in-context editor then uses the current image, rewritten instruction, and selected reference to follow the requested edit while restoring temporally hidden content. 
+
+5 Experiments 
+
+We conduct experiments on OCCUR-Bench to an-swer the following three research questions: RQ1. 
+
+How well do existing editors preserve temporally occluded content, and to what extent does ReSpec improve reference-conditioned editors? RQ2. How do explicit preservation targets and historical refer-ence grounding contribute to ReSpec? RQ3. How does restoration consistency change as editing tra-jectories become longer? 
+
+5.1 Experimental Setup Benchmark. We evaluate conversational image editing systems on OCCUR-Bench, which contains 4,400 occlusion-and-revelation scenarios spanning 2- to 5-turn editing trajectories. Each scenario pro-vides a restoration reference Iref , defined as the historical image state that contains valid visual evi-dence for the occludee. 
+
+Baselines. We use MC-Edit (Zhou et al., 2025) and Layer-wise Memory (Kim et al., 2025) as multi-turn baselines, evaluating their original outputs without applying our framework. For reference-conditioned in-context editors, we eval-uate Flux.2 (Black Forest Labs, 2025) and Omni-Gen2 (Wu et al., 2025) before and after applying our framework, since these models can accept se-lected historical references as input. For Gemini-2.5, whose closed interface does not support con-trollable historical reference conditioning, we ap-ply only the explicit-preservation component of our framework, which rewrites the instruction without supplying a historical reference image. 
+
+Metrics. We report restoration consistency Srestore ,preservation consistency Spreserve , and their aver-age temporal consistency score STC . We addition-
+
+Editor Srestore Spreserve STC SIF 
+
+MC-Edit 0.323 0.367 0.345 0.271 Layer-wise Memory 0.291 0.290 0.290 0.273 Gemini-2.5 0.538 0.544 0.541 0.605 Gemini-2.5 w/ ReSpec † 0.616 0.580 0.598 0.766 
+
+Flux.2 0.386 0.525 0.455 0.652 Flux.2 w/ ReSpec 0.547 0.620 0.584 0.756 
+
+OmniGen2 0.320 0.420 0.370 0.561 OmniGen2 w/ ReSpec 0.381 0.423 0.402 0.691 
+
+Table 1: Main results on OCCUR-Bench. We com-pare in-context editors with and without ReSpec. †
+
+denotes Gemini-2.5 without Historical Reference Selec-tion due to interface constraints; Gemini variants use a 200-sample subset due to API cost. 
+
+ally report instruction faithfulness SIF as an aux-iliary metric to verify that temporal preservation improvements do not come at the cost of following the current instruction. 
+
+Implementation Details. We implement ReSpec as a two-stage inference pipeline: Qwen3-VL-8B-Instruct plans the preservation target, histori-cal reference, and rewritten instruction in JSON format, and each target editor performs image synthesis. For reference-conditioned editors, we provide the selected historical reference together with the current image; for Gemini-2.5, we use 
+
+gemini-2.5-flash-image with only the rewrit-ten instruction and current image, since control-lable reference conditioning is unavailable. We run 
+
+FLUX.2-klein-base-9B with 30 denoising steps and guidance scale 4.0, and OmniGen2 with 50 denoising steps, text guidance 5.0, and image guid-ance 2.0. We compute instruction faithfulness SIF 
+
+using GPT-4o-mini as an LLM-as-a-judge, and gen-erate all outputs with fixed seeds when supported. 60 20 40 60 80 100         
+
+> Win Rate (%)
+> Gemini
+> Flux2
+> Omni
+> 51.5% 16.2% 32.3%
+> 49.6% 25.6% 24.8%
+> 57.5% 40.0% 2.5%
+> ReSpec (Ours) Baseline Tie
+
+Figure 5: Human preference results for ReSpec ver-sus each base editor. Gemini and Flux.2 use response-scenario preferences, while OmniGen2 uses scenario-level mean ratings.                                               
+
+> Editor Srestore Spreserve STC SIF
+> Flux.2 0.435 0.533 0.484 0.661 Flux.2 + HRS 0.480 0.552 0.517 0.647 Flux.2 + PTI 0.540 0.558 0.549 0.687 Flux.2 + PTI +HRS 0.598 0.629 0.613 0.573
+> OmniGen2 0.350 0.409 0.379 0.595 OmniGen2 + HRS 0.358 0.420 0.389 0.606 OmniGen2 + PTI 0.370 0.410 0.390 0.640 OmniGen2 + PTI +HRS 0.427 0.427 0.427 0.701
+
+Table 2: Ablation study on Flux.2 and OmniGen2. PTI 
+
+and HRS are components of ReSpec, denoting Preser-vation Target Identification and Historical Reference Selection, respectively. 
+
+5.2 Experimental Results Main Results. Table 1 answers RQ1 with two main findings. First, existing conversational image editing models still struggle with temporal preser-vation under occlusion. The multi-turn baselines achieve low temporal consistency scores, with MC-Edit and Layer-wise Memory reaching only 0.345 and 0.290 in STC , respectively. This suggests that baseline models mainly preserve visible or spatially localized regions, but do not model content that is temporarily absent yet semantically persistent. Second, ReSpec improves temporal preservation when applied to reference-conditioned in-context editors. The improvement is most pronounced for Flux.2, where ReSpec increases STC by +0.129, mainly through a +0.161 gain in restoration con-sistency. For OmniGen2, ReSpec also improves 
+
+STC , although with a smaller gain. For Gemini-2.5, which does not support controllable historical ref-erence conditioning, the explicit-preservation-only variant improves STC by +0.057. 
+
+Human Evaluation. We conduct human evalua-tion to assess whether OCCUR-Bench scores align with human perception of temporal preservation. We sample 40 scenarios and evaluate 8 model set-tings, resulting in 320 scenario-model outputs. In total, we collect 960 raw human ratings from 12 evaluators, with each scenario-model output rated by exactly 3 evaluators. Figure 5 shows that human evaluators generally favor ReSpec over the corresponding base editors, with preferred-or-tied rates of 83.85% for Gemini and 74.40% for Flux.2, and a 57.50% scenario-level win rate for OmniGen2. These results suggest that OCCUR-Bench improvements reflect human-perceived gains in restoration and preservation. Au-tomatic scores show moderate sample-level corre-lation with human ratings ( r = 0 .409 for STC )and stronger model-level alignment (Pearson r =0.912 , Spearman ρ = 0 .881 , Kendall τ = 0 .714 ), suggesting that OCCUR-Bench is especially reli-able for aggregate model comparison. 
+
+Ablation Test. To answer RQ2, we conduct an ab-lation study on a 200-sample subset balanced by trajectory length and scenario type, ablating preser-vation target specification ( PTI ) and historical ref-erence selection ( HRS ). Table 2 shows that both components improve temporal preservation and are complementary. On Flux.2, PTI provides a larger standalone gain, indicating that explicitly speci-fying the hidden preservation target is important for guiding restoration, while HRS also improves 
+
+STC by grounding the edit in historical visual evi-dence. Combining both components achieves the strongest performance, improving STC by +0.129 and Srestore by +0.163 over the Flux.2 baseline. A similar trend holds for OmniGen2, where combin-ing PTI and HRS also yields the strongest perfor-mance, improving STC by +0.043 and Srestore by 
+
++0.077 over the OmniGen2 baseline. Overall, PTI 
+
+specifies what should be restored, whereas HRS 
+
+provides the visual evidence needed for faithful restoration. 
+
+Case Study. Figure 6 shows how ReSpec handles a restoration turn by identifying the snowboarder’s right leg as the hidden preservation target and se-lecting the earlier image where it remains visible as the restoration source. Using this historical ref-erence with the latest image as the scene anchor enables the editor to recover the occluded target rather than hallucinating the revealed region. 
+
+Analysis by Trajectory Length. To answer RQ3, Figure 7 shows how restoration consistency changes as editing trajectories become longer. We focus on Srestore , since longer histories primarily make it harder to recover content that disappeared in earlier turns. Flux.2 shows a sharp degrada-tion, dropping from 0.542 at 2 turns to 0.131 at 5 turns, while ReSpec mitigates this collapse and 7Case Study              
+
+> Original
+> Image Add Box Add shipping label
+> Remove the large
+> cardboard box with the
+> white shipping label .
+> 𝑰 𝑵 𝑰 𝑵 ି𝟏
+> Blue -> Red Remove box
+> Original
+> Image Add Box Add shipping label
+> Remove the large
+> cardboard box with the
+> white shipping label .
+> Use image 1 as the
+> source for the
+> snowboarder's right leg.
+> 𝑰 𝒓𝒆𝒇 𝑰 𝑵 𝑰 𝑵 ି𝟏
+> Blue -> Red Remove box
+> Editing History 𝓗 𝑵 ି𝟏
+> PTI
+> Editing History ℋ𝑵 ି𝟏
+
+Flux2. 
+
+Flux2. 
+
+/w ReSpec    
+
+> Instruction 𝑷 ேିଵ
+> Instruction 𝑷 ேିଵ Result
+> Result
+
+## +
+
+## +
+
+> HRS
+
+Figure 6: Qualitative case study of historical reference selection, where ReSpec restores an occluded target from an earlier source image while using the latest image as the editing anchor. 2 3 4 5
+
+> Number of turns
+> 0.20
+> 0.30
+> 0.40
+> 0.50
+> Srestore
+> Flux.2
+> Flux.2 w/ ReSpec
+> OmniGen2
+> OmniGen2 w/ ReSpec
+
+Figure 7: Restoration consistency across editing trajec-tory lengths on OCCUR-Bench. Base editors degrade as trajectories become longer, while ReSpec maintains more stable restoration performance. 
+
+maintains 0.544 at 5 turns. OmniGen2 shows a more gradual decline from 0.359 to 0.266, and ReSpec consistently improves restoration perfor-mance across all trajectory lengths. These results show that restoration consistency degrades as the needed content remains absent from the current image for longer histories. ReSpec mitigates this long-horizon degradation by selecting a historical reference that provides explicit visual evidence for restoration. 
+
+Additional Analyses. Appendix D provides fur-ther analyses of VLM-based controller quality, met-ric sensitivity, and computational cost. We find that ReSpec is sensitive to the controller’s abil-ity to select the correct historical reference, since this selection determines whether the editor re-ceives valid visual evidence for restoration (Ap-pendix D.4). We also show that masked evaluation and restoration-region size affect automatic scores (Appendix D.3), with masked metrics better captur-ing localized restoration failures than whole-image similarity (Appendix D.5). Finally, we report the additional inference cost introduced by VLM-based control and reference-conditioned synthesis (Ap-pendix C.4). 
+
+6 Related Work 
+
+Instruction-guided image editing has evolved from single-turn transformations (Brooks et al., 2023; Cao et al., 2023) to conversational settings with iterative user instructions (Zhang et al., 2023; Ge et al., 2024; Ye et al., 2025). Existing methods improve multi-turn consistency through image ref-erences (Cui et al., 2023; Zhou et al., 2025), editing memory (Kim et al., 2025), dialogue context (Ma et al., 2025), or agentic planning (Shen et al., 2026; Ye et al., 2026; Gupta et al., 2025; Liang et al., 2025; Yao et al., 2026). Meanwhile, benchmarks evaluate instruction following, final-output qual-ity, content memory, backtracking, long-horizon task success (Zhang et al., 2023; Ge et al., 2024; Ye et al., 2025; Shen et al., 2026; Ye et al., 2026; Liang et al., 2025), or region-aware editing qual-ity (Ju et al., 2024; Li et al., 2025). However, both methods and evaluations primarily focus on visi-ble or final-image content, leaving restoration of temporarily occluded content underexplored. 
+
+7 Conclusion 
+
+We introduced OCCUR-Bench , a diagnostic bench-mark for temporal preservation in conversational image editing under occlusion and revelation. 8OCCUR-Bench shows that existing systems strug-gle to restore occluded-but-unchanged content. We further proposed ReSpec, a training-free frame-work that makes implicit preservation explicit us-ing restoration-aware instructions and historical visual references. Experiments show that ReSpec improves restoration fidelity and temporal consis-tency, especially over longer trajectories. These results motivate history-grounded temporal preser-vation beyond current-image preservation. 
+
+Limitations 
+
+We acknowledge several limitations of the pro-posed benchmark and method. First, our automatic evaluation depends on object detection and segmen-tation for constructing restoration and preservation regions. Although masked evaluation is more sen-sitive to localized restoration failures than whole-image similarity, errors in open-vocabulary detec-tion or mask extraction can still affect the resulting scores. This limitation suggests the need for more robust region localization and human-aligned eval-uation protocols. Second, ReSpec depends on the quality of the VLM-based controller. If the controller selects an incorrect historical reference or misidentifies the re-gion that should be restored, the editor may receive misleading visual evidence. Our analysis shows that reference selection quality is important for restoration performance, suggesting that stronger visual history understanding could further improve ReSpec. Finally, ReSpec introduces additional inference overhead because it invokes a VLM controller dur-ing multi-turn editing. While the framework is training-free and does not modify the base editor, this added computation may be non-negligible for long editing sessions. Future work could reduce this cost through lightweight controllers, cached visual memory, or selective invocation only when restoration is likely required. 
+
+References 
+
+Black Forest Labs. 2025. FLUX.2: Frontier Visual Intelligence. GitHub repository. Official inference repository for FLUX.2 models. Tim Brooks, Aleksander Holynski, and Alexei A. Efros. 2023. Instructpix2pix: Learning to follow image edit-ing instructions. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recog-nition (CVPR) , pages 18392–18402. Mingdeng Cao, Xintao Wang, Zhongang Qi, Ying Shan, Xiaohu Qie, and Yinqiang Zheng. 2023. Masactrl: Tuning-free mutual self-attention control for consis-tent image synthesis and editing. In Proceedings of the IEEE/CVF International Conference on Com-puter Vision (ICCV) , pages 22560–22570. Xing Cui, Zekun Li, Peipei Li, Yibo Hu, Hailin Shi, Chunshui Cao, and Zhaofeng He. 2023. ChatEdit: Towards multi-turn interactive facial image editing via dialogue. In Proceedings of the 2023 Conference on Empirical Methods in Natural Language Process-ing (EMNLP) , pages 14567–14583. Yuying Ge, Sijie Zhao, Chen Li, Yixiao Ge, and Ying Shan. 2024. Seed-data-edit technical report: A hy-brid dataset for instructional image editing. Preprint ,arXiv:2405.04007. Advait Gupta, NandaKiran Velaga, Dang Nguyen, and Tianyi Zhou. 2025. CoSTA ∗: Cost-sensitive tool-path agent for multi-turn image editing. Preprint ,arXiv:2503.10613. Mude Hui, Siwei Yang, Bingchen Zhao, Yichun Shi, Heng Wang, Peng Wang, Yuyin Zhou, and Cihang Xie. 2024. Hq-edit: A high-quality dataset for instruction-based image editing. arXiv preprint arXiv:2404.09990 .Xuan Ju, Ailing Zeng, Yuxuan Bian, Shaoteng Liu, and Qiang Xu. 2024. PnP inversion: Boosting diffusion-based editing with 3 lines of code. In The Twelfth International Conference on Learning Representa-tions (ICLR) .Daneul Kim, Jaeah Lee, and Jaesik Park. 2025. Improv-ing editability in image generation with layer-wise memory. In Proceedings of the IEEE/CVF Confer-ence on Computer Vision and Pattern Recognition (CVPR) , pages 7889–7898. Zhuoying Li, Zhu Xu, Yuxin Peng, and Yang Liu. 2025. Balancing preservation and modification: A region and semantic aware metric for instruction-based im-age editing. In Proceedings of the International Con-ference on Machine Learning (ICML) .Zihan Liang, Jiahao Sun, and Haoran Ma. 2025. An LLM-LVLM driven agent for iterative and fine-grained image editing. Preprint , arXiv:2508.17435. Tsung-Yi Lin, Michael Maire, Serge Belongie, James Hays, Pietro Perona, Deva Ramanan, Piotr Dollár, and C Lawrence Zitnick. 2014. Microsoft coco: Common objects in context. In European confer-ence on computer vision , pages 740–755. Springer. Shichao Ma, Xinfeng Zhang, Zeng Zhao, Bai Liu, Changjie Fan, and Zhipeng Hu. 2025. DialogDraw: Image generation and editing system based on multi-turn dialogue. In Proceedings of the AAAI Con-ference on Artificial Intelligence , volume 39, pages 24795–24803. 
+
+9Fei Shen, Chengyu Xie, Lihong Wang, Zhanyi Zhang, Xin Jiang, Xiaoyu Du, and Jinhui Tang. 2026. IMA-GAgent: Orchestrating multi-turn image editing via constraint-aware planning and reflection. Preprint ,arXiv:2603.29602. Chenyuan Wu, Pengfei Zheng, Ruiran Yan, Shitao Xiao, Xin Luo, Yueze Wang, Wanli Li, Xiyan Jiang, Yexin Liu, Junjie Zhou, and 1 others. 2025. Omnigen2: Ex-ploration to advanced multimodal generation. arXiv preprint arXiv:2506.18871 .Mingde Yao, Zhiyuan You, Tam-King Man, Menglu Wang, and Tianfan Xue. 2026. Photoagent: Agen-tic photo editing with exploratory visual aesthetic planning. Preprint , arXiv:2602.22809. Ruijie Ye, Jiayi Zhang, Zhuoxin Liu, Zihao Zhu, Siyuan Yang, Li Li, Tianfu Fu, Franck Dernoncourt, Yue Zhao, Jiacheng Zhu, Ryan Rossi, Wenhao Chai, and Zhengzhong Tu. 2026. Agent banana: High-fidelity image editing with agentic thinking and tool-ing. Preprint , arXiv:2602.09084. Yang Ye, Xianyi He, Zongjian Li, Bin Lin, Shenghai Yuan, Zhiyuan Yan, Bohan Hou, and Li Yuan. 2025. Imgedit: A unified image editing dataset and bench-mark. Preprint , arXiv:2505.20275. Kai Zhang, Lingbo Mo, Wenhu Chen, Huan Sun, and Yu Su. 2023. Magicbrush: A manually annotated dataset for instruction-guided image editing. In Ad-vances in Neural Information Processing Systems (NeurIPS) , volume 36, pages 31428–31449. Zijun Zhou, Yingying Deng, Xiangyu He, Weiming Dong, and Fan Tang. 2025. Multi-turn consistent image editing. In Proceedings of the IEEE/CVF In-ternational Conference on Computer Vision (ICCV) .
+
+10 Appendix 
+
+A OCCUR-Bench Construction Details 
+
+A.1 Source Image Selection and Filtering 
+
+We construct OCCUR-Bench from source images collected from existing vision and image edit-ing datasets, including COCO, PIE-Bench, and HQEdit. Since OCCUR-Bench is designed to eval-uate occlusion-and-revelation scenarios, we do not use all images from these datasets. Instead, we manually curate images that contain visually iden-tifiable content that can be temporarily occluded and later revealed. During image selection, we prioritize images with at least one salient occludee candidate, such as a distinctive object part, texture, logo, body re-gion, clothing detail, or background element. The occludee should be visually meaningful and large enough to support reliable evaluation after revela-tion. We also require that a plausible occluder can be inserted without changing the camera viewpoint, object layout, or global scene composition. We exclude images where the potential occludee is too small, visually ambiguous, or difficult to eval-uate. We also remove images for which a plausi-ble occlusion would require physically implausible placement, large pose changes, camera movement, or substantial modification of existing scene ele-ments. This filtering reduces ambiguity and ensures that OCCUR-Bench primarily measures temporal preservation failures rather than failures caused by ill-posed editing instructions. 
+
+A.2 Scenario Generation and Human Verification 
+
+Given a selected source image, we generate can-didate multi-turn editing scenarios using a VLM-based scenario generation pipeline. The generator proposes an occludee, an occluding object, turn-level editing instructions, and the restoration source state. Each scenario follows the occlusion-and-revelation structure described in the main text: an occluder first hides a persistent entity, optional in-termediate edits are applied without directly modi-fying that entity, and a later revelation edit exposes the hidden region again. A key design principle is that the default user instructions do not explicitly mention the occludee or ask the model to restore it. For example, an occlusion instruction may ask the editor to add an                                                                   
+
+> Length Template #Scen. 2-turn I0→O(T1)→R(T2)1,000 3-turn I0→O(T1)→M(T2)→R(T3)1,000 4-turn v1 I0→O(T1)→M(T2)→M(T3)→R(T4)1,000 4-turn v2 I0→S(T1)→O(T2)→M(T3)→R(T4)200 5-turn v1–v4 I0→ · · · → O(Tk)→ · · · → R(T5),k∈{ 1,2,3,4}1,000 5-turn v5 I0→S(T1)→O(T2)→M(T3)→M(T4)→R(T5)200 Total 4,400
+
+Table 3: Scenario templates and count distribution in OCCUR-Bench. O, M , S, and R denote occlusion, intermediate edit, style transformation, and revelation, respectively. 
+
+object in a plausible location, rather than explicitly saying that it should cover a specific target. Sim-ilarly, the revelation instruction modifies, moves, shrinks, replaces, or removes the occluder without explicitly requesting restoration of the hidden con-tent. This preserves the implicit nature of temporal preservation: the hidden content should be recov-ered because it remains semantically persistent, not because the instruction directly asks for it. All generated scenarios are manually verified before inclusion in OCCUR-Bench. We remove scenarios with ambiguous occludees, insignificant hidden regions, insufficient occlusion, physically implausible occluder placement, or unnatural edit-ing trajectories. For longer sequences, we addition-ally check that intermediate edits do not directly modify the occludee. This ensures that the final rev-elation turn evaluates temporal preservation rather than ordinary object editing. 
+
+A.3 Scenario Templates and Dataset Statistics 
+
+OCCUR-Bench uses three functional edit stages: occlusion, intermediate editing, and revelation. The occlusion stage is instantiated by object addition. For revelation, we consider object replacement, ob-ject relocation, object removal, and object shrink-ing. Intermediate edits include adding new objects, changing the color, material, or pattern of existing objects, and applying global style transformations. 
+
+A.4 Ground-Truth Historical Reference Annotation 
+
+For each scenario, we annotate a ground-truth restoration reference state. This reference is the his-torical image state that provides the correct visual target for the content that becomes visible again at the revelation turn. The ground-truth reference is not necessarily the original image. If the persistent entity was edited before being occluded, the correct reference is the 11 edited state before occlusion, not the initial image. In general, we define the ground-truth restoration reference as the latest historical image in which the persistent entity is visible and semantically valid with respect to the editing history. This annotation is used for evaluation and ora-cle ablations only. It is not provided to the editing models or to the ReSpec orchestrator during in-ference. By separating the ground-truth reference from the model input, OCCUR-Bench evaluates whether a model can recover temporally persistent content from the available editing history rather than relying on explicit access to the answer. 
+
+A.5 Details of Evaluation Metrics 
+
+This section provides the detailed mask construc-tion procedure used to compute restoration con-sistency and preservation consistency in OCCUR-Bench. 
+
+Mask Extraction. For each editing turn t, we derive two types of binary masks using an open-vocabulary detection-and-segmentation pipeline. The target-occluder mask M t 
+
+> occ
+
+indicates the re-gion occupied by the annotated occluder, while the new-object mask M t 
+
+> new
+
+indicates the union of regions occupied by newly introduced objects. If the annotated target occluder or newly introduced objects are absent at turn t, the corresponding mask is set to the empty mask. Let N denote the final revelation turn. 
+
+Restoration Region. To identify the region where temporally hidden content should reappear, we first aggregate all regions covered by the target occluder throughout the trajectory: 
+
+M 1: N 
+
+> occ
+
+=
+
+> N
+
+[
+
+> t=1
+
+M t
+
+> occ
+
+. (15) The restoration region is then defined as the part of the historically occluded area that is no longer oc-cupied by the target occluder or newly introduced objects in the final image: 
+
+Rrestore = M 1: N 
+
+> occ
+
+\  M N 
+
+> occ
+
+∪ M N
+
+> new
+
+ . (16) This region approximates the area where the previ-ously hidden occludee should become visible again after the occluder is removed, moved, resized, or replaced. Given the generated final image ˆIN and the valid historical reference state Iref , restoration consis-tency is computed as: 
+
+Srestore = sim 
+
+ ˆIN (Rrestore ), I ref (Rrestore )
+
+
+
+.
+
+(17) Here, ˆIN (Rrestore ) and Iref (Rrestore ) denote the corresponding restoration regions in the generated final image and the historical reference state, re-spectively. 
+
+Preservation Region. Preservation consistency evaluates whether regions unrelated to the target occlusion or new object insertion remain visually stable. Let Ω denote the full image domain. We first aggregate all regions occupied by newly intro-duced objects throughout the trajectory: 
+
+M 1: N 
+
+> new
+
+=
+
+> N
+
+[
+
+> t=1
+
+M t
+
+> new
+
+. (18) The preservation region is defined as the comple-ment of all regions involved in target occlusion or new object insertion: 
+
+Rpreserve = Ω \  M 1: N 
+
+> occ
+
+∪ M 1: N
+
+> new
+
+ . (19) This region corresponds to unchanged background or non-target content that should remain visually stable across the editing trajectory. Preservation consistency is computed as: 
+
+Spreserve = sim 
+
+ ˆIN (Rpreserve ), I ref (Rpreserve )
+
+
+
+.
+
+(20) Here, ˆIN (Rpreserve ) and Iref (Rpreserve ) denote the corresponding unchanged regions in the generated final image and the historical reference state, re-spectively. 
+
+Similarity Function. For both restoration and preservation consistency, the similarity function 
+
+sim( ·) is computed as the average of normalized PSNR, LPIPS, and CLIP similarity: 
+
+sim( A, B ) = 13
+
+ PSNR norm (A, B )+ (1 − LPIPS norm (A, B )) + CLIP( A, B ).
+
+(21) All components are normalized to the same range before averaging, so higher values indicate greater visual consistency. 
+
+Temporal Consistency Score. The overall tem-poral consistency score is computed by averaging restoration and preservation consistency: 
+
+STC = 12 (Srestore + Spreserve ) . (22) 12 This score evaluates whether a model both re-stores temporally occluded content and preserves unchanged visible content. 
+
+Instruction Faithfulness. In addition to tempo-ral consistency, we report instruction faithfulness 
+
+SIF using an LLM-as-a-judge protocol. This aux-iliary score assesses whether the generated final image follows the current editing instruction. It is not included in STC , which is designed to specif-ically measure temporal visual consistency under occlusion and revelation. 
+
+B Evaluation Details 
+
+B.1 Open-Vocabulary Detection and Mask Extraction 
+
+OCCUR-Bench provides semantic annotations rather than manually annotated segmentation masks. For region-aware evaluation, we derive ob-ject masks using an open-vocabulary detection and segmentation pipeline. We use YOLO-Worldv2 with the yolov8l-worldv2.pt checkpoint for ob-ject detection, followed by SAM with the vit-h 
+
+checkpoint for box-conditioned mask extraction. For each scenario, we construct detection queries from the annotated target occluder and newly in-troduced object labels. We do not directly detect the occludee, since the restoration region is de-fined from the occluder region that becomes visible again after revelation. YOLO-Worldv2 is run with a low internal confidence threshold of conf=0.001 
+
+to avoid prematurely discarding candidate boxes. We then apply a separate acceptance threshold of 0.2 to the returned detections. When multiple boxes are returned for the same query, we use the highest-confidence box. To improve robustness to phrasing differences in object labels, we use a simple query fallback chain. We first use the original object label. If no detection passes the acceptance threshold, we retry using the last word of the label, and then a simple singularized form. We record the accepted prompt, fallback stage, confidence score, and bounding box in the detection output. The selected bounding box is passed to SAM to obtain a binary mask. Bounding boxes are con-verted to pixel coordinates when necessary and clipped to the image boundary. If no detection passes the threshold, the bounding box is invalid, or SAM fails, we assign an all-zero black mask with the same resolution as the corresponding im-age. We do not manually correct these masks. 
+
+B.2 Human Evaluation Protocol 
+
+We conduct a human evaluation on 40 OCCUR-Bench scenarios balanced across sequence lengths. For each scenario, annotators evaluate outputs from eight models, resulting in 320 unique model-scenario outputs. Each model-scenario output is rated by three independent annotators, yielding 960 raw ratings. Each annotator evaluates 10 scenarios and rates outputs from all eight models for each assigned scenario. Annotators are shown the relevant editing his-tory, the current instruction, and the final generated image. They evaluate each output along three di-mensions: restoration, preservation, and instruc-tion following. Restoration measures whether the temporally occluded target content is correctly re-covered in the final image. Preservation measures whether other unchanged regions remain visually consistent with the editing history. Instruction fol-lowing measures whether the final output correctly executes the current editing instruction. Cases where the requested revelation edit is not executed are treated as unsuccessful. For each output, we average the ratings from three annotators to obtain human restoration, preservation, and instruction-following scores. We compare these human scores with the correspond-ing automatic metrics using Pearson, Spearman, and Kendall correlations. For instruction following, we use the mean automatic instruction-following score rather than the sum, since the sum is biased by sequence length. 
+
+C ReSpec Implementation Details 
+
+C.1 Visual Intent Orchestrator Inputs and Outputs 
+
+We implement ReSpec as a VLM-based visual in-tent orchestrator. At turn t, the orchestrator receives the full image history up to the current input im-age, {I0, I 1, . . . , I t−1}, together with the instruc-tion history and the current user instruction. Here, 
+
+I0 is the original image and It−1 is the current im-age provided to the editor. We do not duplicate 
+
+It−1 as a separate input. The first editing turn is executed without a VLM call. For turn 1, the base editor directly receives the original image I0 and the first user instruction. Starting from turn 2, ReSpec invokes the VLM orchestrator once per turn. For restoration turns, the orchestrator returns a structured JSON object with the following 13 fields: reasoning , identity_anchor_id ,
+
+restoration_source_id ,
+
+restoration_region , image_ids ,and synthesis_instruction . The 
+
+restoration_source_id specifies the his-torical image used as visual evidence for restoration, while identity_anchor_id specifies the current or recent image used to preserve the active edited state. The image_ids field determines which images are passed to the editor, and synthesis_instruction is used as the final editing instruction. For non-restoration intermediate turns, the orchestrator only returns reasoning and 
+
+synthesis_instruction . In these cases, ReSpec does not perform historical reference selection and the editor receives only the current image It−1
+
+along with the rewritten instruction. Ground-truth reference ids are not provided to the VLM prompt or image input. The runner uses ground-truth fields only to determine whether the final turn is a restoration turn and to store logging and evaluation metadata. Thus, the VLM decisions are made from the visual history, instruction history, and current user request, without direct access to the ground-truth restoration source. 
+
+C.2 Prompt Templates and Parsing Rules 
+
+We use separate prompt templates for restora-tion turns and non-restoration intermedi-ate turns. For Qwen, these correspond to 
+
+qwen_vpe_orchestrator_restoration and 
+
+qwen_vpe_orchestrator_midturn . InternVL uses the same prompt structure; when an InternVL-specific prompt key is unavailable, the runner falls back to the corresponding Qwen prompt key. The restoration prompt asks the VLM to ana-lyze the image and instruction history, determine whether the current instruction reveals previously occluded content, select the appropriate historical restoration source, select an identity anchor im-age, and produce a concise synthesis instruction for the editor. The mid-turn prompt asks the VLM to rewrite the current user request into a synthesis instruction while preserving the already established visual state. The VLM is instructed to return a strict JSON object. During parsing, the runner first searches for a fenced json block. If no such block is found, it extracts the first JSON-like object using a reg-ular expression. The parsed JSON fields are then converted into the editor inputs. If JSON parsing fails, the runner constructs a fallback object. For restoration turns, the reference ids are returned as None and image_ids 
+
+is returned as an empty list, while the raw VLM response is stored as synthesis_instruction .For mid-turns, the raw VLM response is used as synthesis_instruction . If 
+
+synthesis_instruction is missing or the VLM result is not a valid dictionary, the current user request is used as the fallback instruction. The final synthesis_instruction is passed di-rectly to the editor. It is not merged with the origi-nal user instruction after parsing. 
+
+C.3 Fallback Rules for Invalid VLM Outputs 
+
+We apply deterministic fallback rules when the VLM output is incomplete or invalid. These rules do not use the ground-truth restoration source. For restoration turns, if identity_anchor_id 
+
+is missing or null, we set it to t − 1, corre-sponding to the current editor input image. If restoration_source_id is missing or null, we set it to 0, corresponding to the original image. If restoration_region 
+
+is empty, it is left as None . If image_ids 
+
+is missing or empty, we reconstruct it as 
+
+[restoration_source_id , identity_anchor_id ].We do not clamp out-of-range image ids during VLM output parsing. Instead, when ordering im-ages for the editor, the runner keeps only ids that exist in the available image pool. If all selected ids are invalid, the runner falls back to the latest available image, usually It−1.For non-restoration turns, ReSpec does not use historical reference selection. The editor receives only the current image It−1, and the prompt is the VLM-rewritten synthesis_instruction .
+
+C.4 Runtime and Cost 
+
+ReSpec is training-free and does not modify the architecture or weights of the base editor. The addi-tional cost comes from the local VLM orchestration step used to analyze the editing history and rewrite the editing instruction. In our implementation, both Qwen and In-ternVL are loaded as local models. We use Qwen3-VL-8B-Instruct for Qwen and 
+
+InternVL3-8B-Instruct for InternVL. The Re-Spec runner does not call GPT or Gemini APIs. Under the unified runner, the first editing turn does not require a VLM call. For every subsequent turn, including both restoration and non-restoration 14 Type Description Flux.2 Flux.2w/ ReSpec OmniGen2 OmniGen2 w/ ReSpec A Resize 0.460 0.557 0.370 0.354 B Move 0.474 0.528 0.399 0.403 C Replace 0.427 0.621 0.364 0.410 D Remove 0.456 0.636 0.358 0.439 E Multi-edit 0.458 0.594 0.354 0.427 
+
+Table 4: Temporal consistency by revelation type. Scores are reported using STC .                    
+
+> Distance Flux.2 Flux.2 w/ ReSpec OmniGen2 OmniGen2 w/ ReSpec
+> ∆ = 2 0.527 0.647 0.407 0.436
+> ∆ = 3 0.452 0.576 0.368 0.395
+> ∆ = 4 0.405 0.554 0.344 0.382
+> ∆ = 5 0.411 0.482 0.350 0.385
+
+Table 5: Temporal consistency by reference distance. Scores are reported using STC .
+
+turns, the runner makes one local VLM call. Thus, a T -turn scenario requires T − 1 VLM calls. The base editor is still executed once per turn, as in the original editing pipeline. Therefore, the ad-ditional runtime overhead of ReSpec comes from local VLM inference, while the editor-side infer-ence cost remains unchanged. 
+
+D Additional Analyses 
+
+D.1 Effect of Revelation Type 
+
+We analyze performance across different revelation operations. Revelation operations differ in how the previously occluded region becomes visible again, and therefore may pose different challenges for temporal preservation. Table 4 shows that ReSpec improves Flux.2 across all revelation types, with the largest gains for replacement (+0 .194) , removal (+0 .180) , and multi-occluder cases (+0 .136) . For OmniGen2, the gains are smaller and less uniform: ReSpec improves most revelation types, especially removal 
+
+(+0 .081) and multi-occluder cases (+0 .073) , but slightly decreases performance for resize cases 
+
+(−0.016) . Overall, these results suggest that histor-ical reference grounding is most helpful when the final edit clearly reveals previously hidden content. 
+
+D.2 Effect of Reference Distance 
+
+We further analyze temporal consistency by ref-erence distance, defined as the number of turns between the restoration reference and the final rev-elation turn. Table 5 shows that temporal consistency gener-ally decreases as the relevant historical reference becomes more distant. ReSpec consistently im-proves both Flux.2 and OmniGen2 across all refer-            
+
+> Area Bin Flux.2 Flux.2 w/ ReSpec Gain Small 0.618 0.649 +0.031 Medium 0.620 0.690 +0.070 Large 0.550 0.672 +0.122
+
+Table 6: Temporal consistency by restoration area size. Scores are reported using STC . Area bins are defined by tertiles of the restoration area ratio.                
+
+> Analyzer Ref. Acc. Srestore Spreserve STC N
+> Qwen 79.0% 0.398 0.367 0.383 200 InternVL 59.0% 0.347 0.364 0.355 200
+
+Table 7: Historical reference selection quality on a shared 200-sample diagnostic subset. N denotes the number of common sessions used for both analyzers. 
+
+ence distances, indicating that historical reference grounding remains beneficial even when the needed visual evidence appears several turns earlier. The gain is especially pronounced for Flux.2 at interme-diate distances, where the base editor substantially degrades without historical visual grounding. 
+
+D.3 Effect of Restoration Area Size 
+
+We analyze whether the size of the restoration re-gion affects temporal consistency. We divide exam-ples into three bins according to the restoration area ratio, defined as the area of the restoration region divided by the full image area. Table 6 shows that larger restoration regions are more challenging for the base editor. Flux.2 achieves STC = 0 .618 in the small-area bin and drops to 0.550 in the large-area bin. ReSpec im-proves temporal consistency across all area bins, with the largest gain in the large-area bin (+0 .122) .This suggests that historical reference grounding is especially useful when a larger hidden region must be restored. 
+
+D.4 Historical Reference Selection Quality 
+
+We analyze historical reference selection quality on a shared 200-sample diagnostic subset. This analysis compares Qwen and InternVL as VLM history analyzers using the same base editor and evaluation protocol. Reference selection accuracy is defined as the fraction of examples where the predicted restoration_source_id matches the ground-truth historical reference. Table 7 shows that Qwen selects the correct his-torical reference more accurately than InternVL, improving reference selection accuracy by 20.0 per-centage points. This difference is reflected mainly in restoration consistency: Qwen improves Srestore 
+
+15 Turn #0       
+
+> source “+ plotted plant” “plotted plant →traffic cone”
+> Gemini
+> Gemini
+> w/ReSpec †
+> 𝑆 ௥௘௦௧௢௥௘ w/o mask 𝑆 ௥௘௦௧௢௥௘ model
+> 0.395 0.447 Gemini
+> 0.452 0.858 Gemini w/ReSpec †
+> 0.057 0.411 Difference
+> Turn #1 Turn #2
+
+Figure 8: Qualitative example illustrating the limitation of whole-image similarity for restoration evaluation. Although the requested edit is applied, the restoration failure is localized to the small revealed region, which is better captured by masked restoration scoring than by whole-image metrics. 
+
+from 0.347 to 0.398, while Spreserve remains nearly unchanged. These results suggest that reference selection quality primarily affects the restoration region and supports the use of Qwen as the default history analyzer in ReSpec. 
+
+D.5 Metric Analysis 
+
+Figure 8 illustrates why OCCUR-Bench uses masked restoration scoring rather than whole-image similarity. Although both models replace the potted plant with a traffic cone, the key dif-ference appears only in the small revealed region where the person should be restored. Whole-image CLIP, LPIPS, and PSNR are dominated by un-changed background areas and therefore show only a small score difference, while the masked restora-tion score clearly captures the restoration failure. 
+
+E Prompt Templates 
+
+This section provides the original prompt templates used in our benchmark construction, instruction-following evaluation, and ReSpec orchestration. Specifically, we include prompts for scenario gen-eration, scenario extension, instruction-following evaluation, restoration-aware orchestration, and non-restoration instruction rewriting. 16 [ Two-Turn Generation Prompt ] 
+
+You are an expert in generating multi-turn image editing instructions. 
+
+Look at the provided image. There is a specific object called the "{occluder}" in this image. 
+
+Generate TWO sequential image editing instructions (turn 2 and turn 3) that logically follow 
+
+the current state of the image. 
+
+CRITICAL CONSTRAINTS FOR THE EDITS: 
+
+1. Allowed actions: 
+
+- Adding a completely new object to the image. 
+
+- Changing the color, texture, or pattern of an existing object. 
+
+2. FORBIDDEN actions: 
+
+- You MUST NOT change the position, size, or shape of the "{occluder}". 
+
+- Do not remove the "{occluder}". 
+
+3. style constraints: 
+
+- Keep the instructions concise and direct. 
+
+- DO NOT use complex, lengthy, or flowery adjective phrases. 
+
+Output the result STRICTLY as a JSON object: 
+
+{
+
+"instruction_turn2": "...", 
+
+"instruction_turn3": "..." 
+
+}Figure 9: Two-turn generation prompt used for constructing multi-turn editing instructions. The prompt generates two sequential edit instructions while preserving the occluder’s position, size, and shape. 
+
+17 [ Two-Turn Extension Prompt ] 
+
+You are an expert in generating multi-turn image editing instructions. Look at the provided 
+
+image. There is a specific object called the "{occluder}" in this image. Generate TWO 
+
+sequential image editing instructions (turn 2 and turn 3) that logically follow the current 
+
+state of the image. 
+
+CRITICAL CONSTRAINTS FOR THE EDITS: 
+
+1. Allowed actions: 
+
+- Changing the color, texture, or pattern of an existing object. 
+
+- Adding a completely new object to the image. 
+
+2. FORBIDDEN actions: 
+
+- You MUST NOT change the position, size, or shape of the "{occluder}". 
+
+- Do not remove the "{occluder}". 
+
+3. Style constraints: 
+
+- Keep the instructions concise and direct. 
+
+- DO NOT use complex, lengthy, or flowery adjective phrases. 
+
+Output the result STRICTLY as a JSON object: { "instruction_turn2": "...", "instruction_turn3": 
+
+"..." } Figure 10: Two-turn extension prompt used to extend an existing editing trajectory. The prompt adds intermediate edits while preventing changes to the occluder’s position, size, or shape. [ Instruction Faithfulness Evaluation Prompt ] 
+
+You are an image-editing instruction-following evaluator. 
+
+You will receive: 
+
+- The image before the target edit. 
+
+- The current edited image to evaluate. 
+
+- The editing instruction for the target turn. 
+
+Judge only whether the current edited image follows the target editing instruction. This is 
+
+an instruction-following evaluation, not an image-quality, preservation, or visual-
+
+consistency evaluation. 
+
+Use the before-edit image only as reference for the requested edit. 
+
+Use the following 0-3 score: 
+
+3: Perfect or near-perfect. The requested edit is clearly correct and matches the instruction. 
+
+2: Mostly or partially correct. The main requested change is present, but there may be 
+
+minor visual imperfections, missing details, wrong attributes, or placement errors. 
+
+1: Weak. Some relevant attempt is visible, but major requirements are missing or wrong. 
+
+0: Failed. The requested edit is absent, contradictory, or the image is unusable. 
+
+Return only valid JSON. Do not wrap it in markdown. 
+
+> Figure 11: Instruction faithfulness evaluation prompt. The evaluator judges only whether the edited image follows the target editing instruction, independently of image quality, preservation, or temporal consistency.
+
+18 [ Restoration instruction rewriting prompt ] 
+
+You are a Visual Intent Orchestrator for a multi-turn image editing pipeline. 
+
+Input: 
+
+- Image 0: the original image. 
+
+- Images 1...N-1: previous edited images 
+
+- Edit history: user instructions for previous turns. 
+
+- Current request: the instruction for turn N. 
+
+This turn is a restoration turn. The current request performs a revealing edit(remove / replace / shrink / move) that uncovers a region 
+
+previously hidden by an earlier add edit. Identify the uncovered region, the earlier turn that added content into that region, and the past 
+
+image that best shows the region before it was covered. 
+
+Step 1: Identify the uncovered region. Read the current request and determine the occluder being removed, replaced, shrunk, or moved. 
+
+The freed area is the uncovered region. Infer the target content that should reappear using spatial phrases in the edit history, such as "in 
+
+front of X", "over X", "covering X", or visual evidence. 
+
+Step 2: Trace the edit history by region.For each previous turn, classify whether it: 
+
+(a) added content into the uncovered region, 
+
+(b) modified content already inside that region, or 
+
+(c) edited an unrelated region. 
+
+Select the earliest turn that added content into the uncovered region. 
+
+Step 3: Select visual references. 
+
+Set restoration_source_id to the latest past image before the covering turn where the target is clearly visible. Set identity_anchor_id to the 
+
+most recent image, I_{N-1}. The source and anchor must be different. 
+
+Step 4: Rewrite the editing instruction. 
+
+Select image_ids = [restoration_source_id, identity_anchor_id]. Keep the user's requested edit action intact, and add a concise phrase such 
+
+as: "{edit action}, recovering/revealing [target] from the first image." 
+
+Output strict JSON: 
+
+{ "reasoning": "occluder": "...", "uncovered_region": "...", "target_evidence": "...","add_into_region_turn": 0, "per_turn_classification": { 
+
+"T1": "ADD-INTO-REGION | MODIFY-IN-REGION | UNRELATED" } "notes": "...“ }, "identity_anchor_id": 0,"restoration_source_id": 0, 
+
+"restoration_region": "...", "image_ids": [0, 0], "synthesis_instruction": "...“ } Figure 12: Restoration-aware orchestration prompt used by ReSpec. For restoration turns, the VLM identifies the uncovered region, traces the edit history by region, selects a restoration source and identity anchor, and rewrites the user request into a restoration-aware synthesis instruction. [ Non-restoration instruction rewriting prompt ] 
+
+You are an Instruction Rewriter for a multi-turn image editing pipeline. You receive I0, past 
+
+images, edit history, and [Current Request] for Turn N. This turn is NOT a restoration turn. 
+
+No hidden region needs revealing. Rewrite [Current Request] into a precise, self-contained 
+
+instruction for the editor, which operates on I_{N-1} and has no access to edit history. 
+
+The rewritten instruction MUST: 
+
+- State WHAT to add/change and WHERE in the image. 
+
+- Describe the final expected appearance. 
+
+- Preserve all specific details (colors, sizes, positions, materials, counts). 
+
+- Avoid vague references ("as before", "the one from turn 2"). 
+
+OUTPUT FORMAT (strict JSON, no extra text): 
+
+{
+
+"reasoning": { 
+
+"action_type": "<Add|Modify|Replace|Style-transfer|Other>", 
+
+"notes": "<1 sentence>" 
+
+}, 
+
+"synthesis_instruction": "<complete instruction string>" 
+
+}
+
+Figure 13: Non-restoration instruction rewriting prompt used by ReSpec. For turns that do not reveal hidden content, the VLM rewrites the current request into a precise, self-contained instruction for the editor. 
+
+19

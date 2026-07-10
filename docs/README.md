@@ -6,42 +6,34 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-09
-- 运行时间：2026-07-09 21:45:07 UTC
+- 最新运行日期：2026-07-10
+- 运行时间：2026-07-10 21:15:15 UTC
 - 运行状态：成功
-- 本次总论文数：7
+- 本次总论文数：4
 - 精读区：1
-- 速读区：6
+- 速读区：3
 
 ### 今日简报（AI）
-今日聚焦视频生成模型的物理感知力，揭示其作为天然“光照估计器”的惊人潜力。
-核心突破
-- 详情：[/202607/09/README](/202607/09/README)
+今日聚焦几何感知预训练赋能的全景生成，并同步关注反射消除与航天器弱光增强等图像修复前沿。
+重点推荐 9.0 分的全景生成研究，其通过引入几何先验显著提升了上下文生成的一致性与质量。
+建议优先研读该高分论文，掌握如何利用空间几何约束优化生成模型的核心思路。
+- 详情：[/202607/10/README](/202607/10/README)
 
 ### 精读区论文标签
-1. [Video Generation Models Are Inherent Lighting Estimators](/202607/09/2607.04674v1-video-generation-models-are-inherent-lighting-estimators)  
-   标签：评分：8.0/10、query:q1
-   evidence：将光照估计重新定义为引导式视频修复任务
+1. [Enhancing In-context Panoramic Generation via Geometric-aware Pretraining](/202607/10/2607.08765v1-enhancing-in-context-panoramic-generation-via-geometric-aware-pretraining)  
+   标签：评分：9.0/10、query:q1
+   evidence：包含修复和外扩任务的框架及大规模数据集
 
 ### 速读区论文标签
-1. [Making Implicit Preservation Intent Explicit in Conversational Image Editing](/202607/09/2607.07051v1-making-implicit-preservation-intent-explicit-in-conversational-image-editing)  
-   标签：评分：7.0/10、query:q1
-   evidence：图像编辑中遮挡内容的忠实修复
-2. [Representation Distribution Matching for One-Step Visual Generation](/202607/09/2607.02375v1-representation-distribution-matching-for-one-step-visual-generation)  
+1. [ReLo-IRR: Reflection-Guided LoRA Framework for Image Reflection Removal](/202607/10/2607.02957v1-relo-irr-reflection-guided-lora-framework-for-image-reflection-removal)  
+   标签：评分：7.0/10、query:q3
+   evidence：利用扩散模型进行反光去除的图像修复
+2. [SCI-Mamba: Unsupervised Learning based Low-Light Image Enhancement for Non-Cooperative Spacecraft](/202607/10/2607.08033v1-sci-mamba-unsupervised-learning-based-low-light-image-enhancement-for-non-cooperative-spacecraft)  
+   标签：评分：7.0/10、query:q3
+   evidence：基于无监督学习的低光图像增强
+3. [Perceptual Flow Matching for Few-Step Generative Modeling](/202607/10/2607.03524v1-perceptual-flow-matching-for-few-step-generative-modeling)  
    标签：评分：6.0/10、query:q4
-   evidence：通过匹配特征分布训练的一步图像生成器
-3. [From SRA to Self-Flow: Data Augmentation or Self-Supervision?](/202607/09/2607.02508v1-from-sra-to-self-flow-data-augmentation-or-self-supervision)  
-   标签：评分：6.0/10、query:q7
-   evidence：扩散模型中的自对齐与自监督学习
-4. [VLRC: Vision-Language Reprojection Consistency as a scalable signal for better feed-forward 3D pretraining](/202607/09/2607.02707v2-vlrc-vision-language-reprojection-consistency-as-a-scalable-signal-for-better-feed-forward-3d-pretraining)  
-   标签：评分：6.0/10、query:q7
-   evidence：利用视觉语言一致性的3D重建自监督信号
-5. [Geometry-aware Depth-guided Representation Learning for Structure-preserving Low-light Image Enhancement](/202607/09/2607.05005v1-geometry-aware-depth-guided-representation-learning-for-structure-preserving-low-light-image-enhancement)  
-   标签：评分：6.0/10、query:q7
-   evidence：低光照图像修复与增强
-6. [CanvasAgent: Enabling Complex Image Creation and Editing via Visual Tool Orchestration](/202607/09/2607.05465v1-canvasagent-enabling-complex-image-creation-and-editing-via-visual-tool-orchestration)  
-   标签：评分：6.0/10、query:q4
-   evidence：用于复杂图像创建和编辑的生成模型
+   evidence：用于图像和视频生成的生成模型
 
 
 <div class="dpr-home-promo-card">

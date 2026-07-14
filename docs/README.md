@@ -6,38 +6,43 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-13
-- 运行时间：2026-07-13 21:30:28 UTC
+- 最新运行日期：2026-07-14
+- 运行时间：2026-07-14 20:29:27 UTC
 - 运行状态：成功
-- 本次总论文数：5
-- 精读区：0
-- 速读区：5
+- 本次总论文数：7
+- 精读区：3
+- 速读区：4
 
 ### 今日简报（AI）
-今日聚焦生成模型的前沿优化，涵盖约束流匹配、高效噪声生成及扩散表示学习等 5 项进展。
-重点关注通过拉格朗日对偶实现的约束流匹配，以及仅需两张噪声图即可模拟真实 sRGB 噪声的 YeTI 技术。
-建议关注如何利用这些轻量化与约束优化方案，提升真实场景下的图像处理与特征提取效率。
-- 详情：[/202607/13/README](/202607/13/README)
+今日聚焦全景生成与光流补全，深度解析几何感知预训练与置信度引导修复的前沿突破。
+重点关注两篇 9.0 分佳作：几何感知显著提升了全景图生成质量，而 FlowPainter 则为光流修复提供了更精准的置信度引导方案。
+建议优先研读几何先验在图像生成中的应用，并关注光流技术在动态场景重建中的最新实践。
+- 详情：[/202607/14/README](/202607/14/README)
 
 ### 精读区论文标签
-- 本次无精读推荐。
+1. [Enhancing In-context Panoramic Generation via Geometric-aware Pretraining](/202607/14/2607.08765v2-enhancing-in-context-panoramic-generation-via-geometric-aware-pretraining)  
+   标签：评分：9.0/10、query:profile-1
+   evidence：全景图像的生成式修复与外扩
+2. [FlowPainter: Inpainting Optical Flow via Confidence-Guided Completion](/202607/14/2607.10140v1-flowpainter-inpainting-optical-flow-via-confidence-guided-completion)  
+   标签：评分：9.0/10、query:q1
+   evidence：通过置信度引导的补全进行光流修复
+3. [Self-supervised Automatic Matting](/202607/14/2607.10395v1-self-supervised-automatic-matting)  
+   标签：评分：8.0/10、query:q7
+   evidence：无需人工标注的自监督图像抠图框架
 
 ### 速读区论文标签
-1. [Constrained Flow Matching via Lagrangian Dual Flows](/202607/13/2607.04513v1-constrained-flow-matching-via-lagrangian-dual-flows)  
+1. [h-Flow: Flexible Flow-based Image Editing via Doob's h-Transform](/202607/14/2607.10800v1-h-flow-flexible-flow-based-image-editing-via-doobs-h-transform)  
    标签：评分：7.0/10、query:q4
-   evidence：带有修复约束的生成模型
-2. [YeTI: You Only Need Two Noisy Images for Real-World sRGB Noise Generation](/202607/13/2607.09193v1-yeti-you-only-need-two-noisy-images-for-real-world-srgb-noise-generation)  
-   标签：评分：7.0/10、query:q3
-   evidence：无需清洁地面真值的自监督噪声生成
-3. [Steering Optimisation Trajectories in Diffusion Representation Learning](/202607/13/2607.05319v1-steering-optimisation-trajectories-in-diffusion-representation-learning)  
-   标签：评分：6.0/10、query:q4
-   evidence：用于图像重建和表示学习的扩散自编码器
-4. [Straight-Path Flow Matching for Incomplete Multi-View Clustering](/202607/13/2607.06281v1-straight-path-flow-matching-for-incomplete-multi-view-clustering)  
-   标签：评分：6.0/10、query:q4
-   evidence：恢复缺失视图的生成式方法
-5. [Simon-SR: Spatially Adaptive Modulation and Visual Prompt Adaptation for Text-Reinforced Super-Resolution](/202607/13/2607.09351v1-simon-sr-spatially-adaptive-modulation-and-visual-prompt-adaptation-for-text-reinforced-super-resolution)  
+   evidence：无需训练的基于流的图像编辑与条件生成
+2. [Multilevel Preconditioning Strategies for Convex Optimization Methods in Image Deblurring](/202607/14/2607.10864v1-multilevel-preconditioning-strategies-for-convex-optimization-methods-in-image-deblurring)  
+   标签：评分：7.0/10、query:q7
+   evidence：图像修复与去模糊的加速框架
+3. [PnP-IPA: A Provably Convergent Plug-and-Play Inexact Proximal Algorithm for Nonconvex Imaging Problems](/202607/14/2607.10223v1-pnp-ipa-a-provably-convergent-plug-and-play-inexact-proximal-algorithm-for-nonconvex-imaging-problems)  
+   标签：评分：6.0/10、query:q3
+   evidence：用于解决成像逆问题的即插即用算法，结合深度去噪器
+4. [Backbone-Agnostic Perturbation-Induced Uncertainty Learning for End-to-End Real-World Image Dehazing](/202607/14/2607.11623v1-backbone-agnostic-perturbation-induced-uncertainty-learning-for-end-to-end-real-world-image-dehazing)  
    标签：评分：6.0/10、query:q7
-   evidence：用于图像修复的自监督学习
+   evidence：真实世界图像修复与去雾的不确定性学习
 
 
 <div class="dpr-home-promo-card">

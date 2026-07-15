@@ -6,43 +6,35 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-14
-- 运行时间：2026-07-14 20:29:27 UTC
+- 最新运行日期：2026-07-15
+- 运行时间：2026-07-15 20:12:19 UTC
 - 运行状态：成功
-- 本次总论文数：7
-- 精读区：3
+- 本次总论文数：4
+- 精读区：0
 - 速读区：4
 
 ### 今日简报（AI）
-今日聚焦全景生成与光流补全，深度解析几何感知预训练与置信度引导修复的前沿突破。
-重点关注两篇 9.0 分佳作：几何感知显著提升了全景图生成质量，而 FlowPainter 则为光流修复提供了更精准的置信度引导方案。
-建议优先研读几何先验在图像生成中的应用，并关注光流技术在动态场景重建中的最新实践。
-- 详情：[/202607/14/README](/202607/14/README)
+今日聚焦视觉建模新范式，探索从几何引导的纹理生成到将 RGB 视为视觉语言的前沿突破。
+重点关注 GHOST 带来的几何引导纹理补全技术，以及重新定义视觉表征的“RGB 语言化”趋势。
+建议优先阅读两篇 7.0 分论文，深入理解多模态自回归与 3D 表面重建的交叉应用。
+- 详情：[/202607/15/README](/202607/15/README)
 
 ### 精读区论文标签
-1. [Enhancing In-context Panoramic Generation via Geometric-aware Pretraining](/202607/14/2607.08765v2-enhancing-in-context-panoramic-generation-via-geometric-aware-pretraining)  
-   标签：评分：9.0/10、query:profile-1
-   evidence：全景图像的生成式修复与外扩
-2. [FlowPainter: Inpainting Optical Flow via Confidence-Guided Completion](/202607/14/2607.10140v1-flowpainter-inpainting-optical-flow-via-confidence-guided-completion)  
-   标签：评分：9.0/10、query:q1
-   evidence：通过置信度引导的补全进行光流修复
-3. [Self-supervised Automatic Matting](/202607/14/2607.10395v1-self-supervised-automatic-matting)  
-   标签：评分：8.0/10、query:q7
-   evidence：无需人工标注的自监督图像抠图框架
+- 本次无精读推荐。
 
 ### 速读区论文标签
-1. [h-Flow: Flexible Flow-based Image Editing via Doob's h-Transform](/202607/14/2607.10800v1-h-flow-flexible-flow-based-image-editing-via-doobs-h-transform)  
-   标签：评分：7.0/10、query:q4
-   evidence：无需训练的基于流的图像编辑与条件生成
-2. [Multilevel Preconditioning Strategies for Convex Optimization Methods in Image Deblurring](/202607/14/2607.10864v1-multilevel-preconditioning-strategies-for-convex-optimization-methods-in-image-deblurring)  
-   标签：评分：7.0/10、query:q7
-   evidence：图像修复与去模糊的加速框架
-3. [PnP-IPA: A Provably Convergent Plug-and-Play Inexact Proximal Algorithm for Nonconvex Imaging Problems](/202607/14/2607.10223v1-pnp-ipa-a-provably-convergent-plug-and-play-inexact-proximal-algorithm-for-nonconvex-imaging-problems)  
-   标签：评分：6.0/10、query:q3
-   evidence：用于解决成像逆问题的即插即用算法，结合深度去噪器
-4. [Backbone-Agnostic Perturbation-Induced Uncertainty Learning for End-to-End Real-World Image Dehazing](/202607/14/2607.11623v1-backbone-agnostic-perturbation-induced-uncertainty-learning-for-end-to-end-real-world-image-dehazing)  
+1. [GHOST: Geometry-Guided Hallucination of Opaque Surface Textures](/202607/15/2607.11118v1-ghost-geometry-guided-hallucination-of-opaque-surface-textures)  
+   标签：评分：7.0/10、query:q1
+   evidence：不透明表面纹理的生成与补全
+2. [Let RGB Be the Language of Vision](/202607/15/2607.12450v1-let-rgb-be-the-language-of-vision)  
+   标签：评分：7.0/10、query:q3
+   evidence：零样本图像编辑和针对多样化任务的统一视觉接口
+3. [Next-Dense-Stride Prediction for Multimodal Autoregressive Visual Modeling](/202607/15/2607.09892v1-next-dense-stride-prediction-for-multimodal-autoregressive-visual-modeling)  
+   标签：评分：6.0/10、query:q4
+   evidence：视觉建模与合成的生成式范式
+4. [RFMSR: Residual Flow Matching for Image Super-Resolution](/202607/15/2607.12753v1-rfmsr-residual-flow-matching-for-image-super-resolution)  
    标签：评分：6.0/10、query:q7
-   evidence：真实世界图像修复与去雾的不确定性学习
+   evidence：利用流匹配和生成先验进行图像修复
 
 
 <div class="dpr-home-promo-card">

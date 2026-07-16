@@ -6,35 +6,31 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-15
-- 运行时间：2026-07-15 20:12:19 UTC
+- 最新运行日期：2026-07-16
+- 运行时间：2026-07-16 21:11:32 UTC
 - 运行状态：成功
-- 本次总论文数：4
-- 精读区：0
-- 速读区：4
+- 本次总论文数：3
+- 精读区：1
+- 速读区：2
 
 ### 今日简报（AI）
-今日聚焦视觉建模新范式，探索从几何引导的纹理生成到将 RGB 视为视觉语言的前沿突破。
-重点关注 GHOST 带来的几何引导纹理补全技术，以及重新定义视觉表征的“RGB 语言化”趋势。
-建议优先阅读两篇 7.0 分论文，深入理解多模态自回归与 3D 表面重建的交叉应用。
-- 详情：[/202607/15/README](/202607/15/README)
+今日聚焦工业视觉与物理引导生成，涵盖钢材缺陷识别、室内重绘及触觉建模三大前沿。
+重点关注利用掩码自编码器（MAE）实现的无监督钢材缺陷检测，以及无需成对数据的物理引导室内光照重绘技术。
+建议深入探索无监督学习在工业质检中的降本增效潜力，并关注物理先验与扩散模型的跨界融合。
+- 详情：[/202607/16/README](/202607/16/README)
 
 ### 精读区论文标签
-- 本次无精读推荐。
+1. [A Masked Autoencoder Approach to Unsupervised Steel Surface Defect Recognition](/202607/16/2607.13178v1-a-masked-autoencoder-approach-to-unsupervised-steel-surface-defect-recognition)  
+   标签：评分：8.0/10、query:q2
+   evidence：用于无监督重建和表示的掩码自编码器
 
 ### 速读区论文标签
-1. [GHOST: Geometry-Guided Hallucination of Opaque Surface Textures](/202607/15/2607.11118v1-ghost-geometry-guided-hallucination-of-opaque-surface-textures)  
-   标签：评分：7.0/10、query:q1
-   evidence：不透明表面纹理的生成与补全
-2. [Let RGB Be the Language of Vision](/202607/15/2607.12450v1-let-rgb-be-the-language-of-vision)  
+1. [FreeLit: Paired-Free Indoor Relighting via Physics-Guided Diffusion](/202607/16/2607.13656v1-freelit-paired-free-indoor-relighting-via-physics-guided-diffusion)  
    标签：评分：7.0/10、query:q3
-   evidence：零样本图像编辑和针对多样化任务的统一视觉接口
-3. [Next-Dense-Stride Prediction for Multimodal Autoregressive Visual Modeling](/202607/15/2607.09892v1-next-dense-stride-prediction-for-multimodal-autoregressive-visual-modeling)  
-   标签：评分：6.0/10、query:q4
-   evidence：视觉建模与合成的生成式范式
-4. [RFMSR: Residual Flow Matching for Image Super-Resolution](/202607/15/2607.12753v1-rfmsr-residual-flow-matching-for-image-super-resolution)  
-   标签：评分：6.0/10、query:q7
-   evidence：利用流匹配和生成先验进行图像修复
+   evidence：基于物理引导扩散的无配对室内重光照框架
+2. [Topology-Agnostic Mesh Reconstruction of Deformable Objects from Sparse Touch](/202607/16/2607.13479v1-topology-agnostic-mesh-reconstruction-of-deformable-objects-from-sparse-touch)  
+   标签：评分：6.0/10、query:q1
+   evidence：基于稀疏数据的变形物体网格补全
 
 
 <div class="dpr-home-promo-card">

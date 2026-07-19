@@ -6,28 +6,29 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-18
-- 运行时间：2026-07-18 21:04:19 UTC
+- 最新运行日期：2026-07-19
+- 运行时间：2026-07-19 20:59:22 UTC
 - 运行状态：成功
 - 本次总论文数：2
-- 精读区：1
-- 速读区：1
+- 精读区：0
+- 速读区：2
 
 ### 今日简报（AI）
-今日聚焦跨模态配准与4D重建，重点攻克了基于流模型的LiDAR上采样技术。
-核心突破在于利用修正流（Rectified Flow）提升点云密度，从而大幅简化图像与点云的配准难题。
-建议关注空间感知与传感器融合的读者深入研读该上采样方案，以提升复杂场景下的定位精度。
-- 详情：[/202607/18/README](/202607/18/README)
+今日聚焦 3D 医学影像一步式转换与人脸超分辨率重建，探索生成模型在特定领域的精准应用。
+重点关注频谱一致流对 3D 翻译的加速，以及空间变换器在参考人脸修复中的性能表现。
+建议关注如何结合参考信息与频谱约束，以平衡图像生成的效率与细节还原度。
+- 详情：[/202607/19/README](/202607/19/README)
 
 ### 精读区论文标签
-1. [Image-to-Point Cloud Registration Made Easy with Rectified Flow-based LiDAR Upsampling](/202607/18/2607.14639v1-image-to-point-cloud-registration-made-easy-with-rectified-flow-based-lidar-upsampling)  
-   标签：评分：8.0/10、query:q2
-   evidence：通过自监督图像补全任务进行预训练
+- 本次无精读推荐。
 
 ### 速读区论文标签
-1. [4D Human-Scene Reconstruction from Low-Overlap Captures](/202607/18/2607.09125v1-4d-human-scene-reconstruction-from-low-overlap-captures)  
+1. [Spectral Consistent Flow for One-step 3D Medical Image Translation](/202607/19/2607.10627v1-spectral-consistent-flow-for-one-step-3d-medical-image-translation)  
+   标签：评分：6.0/10、query:q7
+   evidence：潜空间中的医学图像转换与修复
+2. [Reference-Based Face Super-Resolution Using the Spatial Transformer](/202607/19/2607.11025v1-reference-based-face-super-resolution-using-the-spatial-transformer)  
    标签：评分：6.0/10、query:q1
-   evidence：合成新视图以填充未观察到的区域
+   evidence：基于参考的脸部修复与超分辨率
 
 
 <div class="dpr-home-promo-card">

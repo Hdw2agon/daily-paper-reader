@@ -6,29 +6,31 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-19
-- 运行时间：2026-07-19 20:59:22 UTC
+- 最新运行日期：2026-07-20
+- 运行时间：2026-07-20 21:26:50 UTC
 - 运行状态：成功
-- 本次总论文数：2
-- 精读区：0
+- 本次总论文数：3
+- 精读区：1
 - 速读区：2
 
 ### 今日简报（AI）
-今日聚焦 3D 医学影像一步式转换与人脸超分辨率重建，探索生成模型在特定领域的精准应用。
-重点关注频谱一致流对 3D 翻译的加速，以及空间变换器在参考人脸修复中的性能表现。
-建议关注如何结合参考信息与频谱约束，以平衡图像生成的效率与细节还原度。
-- 详情：[/202607/19/README](/202607/19/README)
+今日聚焦视觉可解释性（XAI）与扩散模型前沿，深入探讨了如何通过真实感修复技术提升 AI 决策的透明度。
+核心亮点在于利用图像补全优化 XAI 解释质量，以及针对超分辨率任务开发的难度感知动态路由提速方案。
+建议优先研读高分精读论文，掌握如何用“以假乱真”的扰动修复传统视觉解释方法的固有
+- 详情：[/202607/20/README](/202607/20/README)
 
 ### 精读区论文标签
-- 本次无精读推荐。
+1. [Inpainting Insights: Elevating Visual XAI with Photorealistic Perturbations](/202607/20/2607.15482v1-inpainting-insights-elevating-visual-xai-with-photorealistic-perturbations)  
+   标签：评分：8.0/10、query:q1
+   evidence：用于XAI中逼真扰动的图像补全
 
 ### 速读区论文标签
-1. [Spectral Consistent Flow for One-step 3D Medical Image Translation](/202607/19/2607.10627v1-spectral-consistent-flow-for-one-step-3d-medical-image-translation)  
-   标签：评分：6.0/10、query:q7
-   evidence：潜空间中的医学图像转换与修复
-2. [Reference-Based Face Super-Resolution Using the Spatial Transformer](/202607/19/2607.11025v1-reference-based-face-super-resolution-using-the-spatial-transformer)  
-   标签：评分：6.0/10、query:q1
-   evidence：基于参考的脸部修复与超分辨率
+1. [Efficient Difficulty-Aware Dynamic Routing for Diffusion-Based Real-World Image Super-Resolution](/202607/20/2607.15711v1-efficient-difficulty-aware-dynamic-routing-for-diffusion-based-real-world-image-super-resolution)  
+   标签：评分：7.0/10、query:q4
+   evidence：基于扩散模型的图像修复生成先验
+2. [Toward a mechanistic understanding of inference in visual cortex and diffusion models](/202607/20/2607.15693v1-toward-a-mechanistic-understanding-of-inference-in-visual-cortex-and-diffusion-models)  
+   标签：评分：6.0/10、query:q4
+   evidence：扩散模型与去噪分数匹配
 
 
 <div class="dpr-home-promo-card">

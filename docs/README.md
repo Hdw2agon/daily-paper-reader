@@ -6,49 +6,56 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-21
-- 运行时间：2026-07-21 21:11:21 UTC
+- 最新运行日期：2026-07-23
+- 运行时间：2026-07-23 21:15:21 UTC
 - 运行状态：成功
-- 本次总论文数：9
-- 精读区：2
-- 速读区：7
+- 本次总论文数：11
+- 精读区：0
+- 速读区：11
 
 ### 今日简报（AI）
-今日聚焦扩散模型在密集场景下的精准物体移除，并探索半监督条件生成学习的新范式。
-重点关注 DORS 提出的动态注意力路由技术，其在复杂背景修复中表现卓越，同时随机插值理论为生成模型提供了更强的表征能力。
-建议优先研读高分论文 DORS 以掌握图像编辑前沿，并关注隐式神经表示在多曝光融合中的创新应用。
-- 详情：[/202607/21/README](/202607/21/README)
+今日速览 11 篇 AI 前沿论文，重点聚焦像素空间扩散 Transformer 与超分辨率重建技术。
+值得关注 Pixel-Space DiT 的生成潜力，以及通过稀疏感知与空间一致性解码实现的超写实图像修复方案。
+建议读者优先探索扩散模型在像素级精细生成与高保真图像重建中的最新融合趋势。
+- 详情：[/202607/23/README](/202607/23/README)
 
 ### 精读区论文标签
-1. [DORS: Dynamic Attention Routing for Diffusion-based Object Removal in Dense Scenes](/202607/21/2607.16656v1-dors-dynamic-attention-routing-for-diffusion-based-object-removal-in-dense-scenes)  
-   标签：评分：9.0/10、query:q4
-   evidence：基于扩散模型的物体移除与视觉一致性
-2. [Semi-Supervised Conditional Generative Learning through Stochastic Interpolation and Sufficient Representations](/202607/21/2607.16725v1-semi-supervised-conditional-generative-learning-through-stochastic-interpolation-and-sufficient-representations)  
-   标签：评分：8.0/10、query:profile-1
-   evidence：利用无标签数据的半监督生成学习
+- 本次无精读推荐。
 
 ### 速读区论文标签
-1. [QuReC: All-in-One Image Restoration with Query-Specific Guidance and Local-Global Response Calibration](/202607/21/2607.15097v2-qurec-all-in-one-image-restoration-with-query-specific-guidance-and-local-global-response-calibration)  
-   标签：评分：7.0/10、query:q1
-   evidence：带有查询引导的全能图像修复
-2. [Iterated graph Laplacian for image restoration problems](/202607/21/2607.17313v1-iterated-graph-laplacian-for-image-restoration-problems)  
-   标签：评分：7.0/10、query:q3
-   evidence：用于图像修复问题的图拉普拉斯算子
-3. [Coarse-to-fine Framework for Generative MEF via Implicit Neural Representation](/202607/21/2607.17611v1-coarse-to-fine-framework-for-generative-mef-via-implicit-neural-representation)  
+1. [Pixel-Space Diffusion Transformers](/202607/23/2607.17585v1-pixel-space-diffusion-transformers)  
    标签：评分：7.0/10、query:q4
-   evidence：细节缺失处的生成式补全
-4. [To Blend In, First Decouple: Rethinking Camouflage Image Generation via Context-Decoupled Representations](/202607/21/2607.17768v1-to-blend-in-first-decouple-rethinking-camouflage-image-generation-via-context-decoupled-representations)  
+   evidence：用于高保真图像合成的像素级扩散模型
+2. [Pixel-Space Diffusion Transformers](/202607/23/2607.17585v2-pixel-space-diffusion-transformers)  
    标签：评分：7.0/10、query:q4
-   evidence：用于外扩绘制与合成的生成范式
-5. [FlowMimic: Mask-free Visual Editing and Generation with Pixel-pair Warped Flow Field for Online Video Editing Data Generation and Modality Mimicry](/202607/21/2607.18227v1-flowmimic-mask-free-visual-editing-and-generation-with-pixel-pair-warped-flow-field-for-online-video-editing-data-generation-and-modality-mimicry)  
-   标签：评分：7.0/10、query:q6
-   evidence：无掩码视觉编辑与生成
-6. [Self-Supervised Visual Representation Learning: Pretrain-Finetuning or Joint Training?](/202607/21/2607.13192v1-self-supervised-visual-representation-learning-pretrain-finetuning-or-joint-training)  
-   标签：评分：6.0/10、query:q7
-   evidence：基于无标签数据的自监督视觉表示学习
-7. [A${}^2$BM: Alignment-Aware Bridge Matching for Image-to-Image Translation](/202607/21/2607.16294v1-a2bm-alignment-aware-bridge-matching-for-image-to-image-translation)  
+   evidence：用于高保真图像合成的像素级扩散模型
+3. [Rarity-Aware Discrete Diffusion with Spatially Consistent Decoding for Photo-Realistic Image Super-Resolution](/202607/23/2607.17612v1-rarity-aware-discrete-diffusion-with-spatially-consistent-decoding-for-photo-realistic-image-super-resolution)  
+   标签：评分：7.0/10、query:q4
+   evidence：用于图像重建和超分辨率的离散扩散模型
+4. [Rarity-Aware Discrete Diffusion with Spatially Consistent Decoding for Photo-Realistic Image Super-Resolution](/202607/23/2607.17612v2-rarity-aware-discrete-diffusion-with-spatially-consistent-decoding-for-photo-realistic-image-super-resolution)  
+   标签：评分：7.0/10、query:q4
+   evidence：用于图像重建和超分辨率的离散扩散模型
+5. [MixDiffusion: Mixing Diffusion-based Uni-condition Text-to-Image Generation Models for Multi-condition Image Synthesis](/202607/23/2607.17634v1-mixdiffusion-mixing-diffusion-based-uni-condition-text-to-image-generation-models-for-multi-condition-image-synthesis)  
+   标签：评分：7.0/10、query:q4
+   evidence：用于多条件图像合成的免训练扩散框架
+6. [Mage-Flow: An Efficient Native-Resolution Foundation Model for Image Generation and Editing](/202607/23/2607.19064v2-mage-flow-an-efficient-native-resolution-foundation-model-for-image-generation-and-editing)  
+   标签：评分：7.0/10、query:q4
+   evidence：用于图像生成和指令编辑的基础模型
+7. [Think, Plan, Paint: Layout-Aware Reasoning for Controllable Image Generation in Unified Models](/202607/23/2607.16409v1-think-plan-paint-layout-aware-reasoning-for-controllable-image-generation-in-unified-models)  
    标签：评分：6.0/10、query:q4
-   evidence：用于图像到图像转换的桥接匹配
+   evidence：用于可控图像生成和绘画的统一模型
+8. [DARA: Degradation-Aware Low-Rank Residual Adaptation with Original-to-Corrupted Distillation for Corruption-Robust Animal Re-Identification](/202607/23/2607.16644v1-dara-degradation-aware-low-rank-residual-adaptation-with-original-to-corrupted-distillation-for-corruption-robust-animal-re-identification)  
+   标签：评分：6.0/10、query:q3
+   evidence：无需标注的受损输入特征空间修复
+9. [Test-Time Registers as Global Priors for Tokenized Image Generation](/202607/23/2607.16824v1-test-time-registers-as-global-priors-for-tokenized-image-generation)  
+   标签：评分：6.0/10、query:q4
+   evidence：用于标记化图像生成的零样本全局先验
+10. [Consistent Feature Transport for Image Relighting](/202607/23/2607.17833v1-consistent-feature-transport-for-image-relighting)  
+   标签：评分：6.0/10、query:q4
+   evidence：用于图像合成和光照传输的生成模型
+11. [DuSPiT: Dual-Branch Sub-Patch Pixel Diffusion Transformer](/202607/23/2607.18510v1-duspit-dual-branch-sub-patch-pixel-diffusion-transformer)  
+   标签：评分：6.0/10、query:q4
+   evidence：用于像素级图像生成的扩散Transformer
 
 
 <div class="dpr-home-promo-card">

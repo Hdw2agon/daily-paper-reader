@@ -1,0 +1,403 @@
+Title: DuSPiT: Dual-Branch Sub-Patch Pixel Diffusion Transformer
+
+URL Source: https://arxiv.org/pdf/2607.18510v1
+
+Published Time: Wed, 22 Jul 2026 00:20:44 GMT
+
+Number of Pages: 11
+
+Markdown Content:
+# DuSPiT: Dual-Branch Sub-Patch Pixel Diffusion Transformer 
+
+Yunpeng Bai 
+
+The University of Texas at Austin 
+
+Yossi Gandelsman 
+
+Reve 
+
+Michaël Gharbi 
+
+Reve 
+
+## Abstract 
+
+Diffusion Transformers achieve strong image generation performance, but most operate in compressed latent spaces. Pixel-space diffusion avoids this information loss, yet existing approaches map each raw image patch to a single token, forcing one representation to handle both global communication and fine-grained details. We address this issue by proposing a new architecture, DuSPiT , a Du al-branch 
+
+Sub Patch Pi xel Transformer. This model separates global structural reasoning from local appearance modeling. DuSPiT uses a compact base branch for efficient global reasoning and a parallel, high-capacity pixel branch, organized into subpatch groups, to preserve detailed appearance, with the two branches interacting through cross-attention. Our results show that DuSPiT generates images with richer details and stronger fine-grained structures, while also achieving a better quality–efficiency trade-off than prior pixel-space diffusion transformers. The code is available at: 
+
+https://github.com/yunpeng1998/DuSPiT .
+
+## 1 Introduction 
+
+Diffusion Transformers (DiTs) [ 17 ] have become a dominant paradigm for high-quality image generation, and most modern systems improve efficiency by performing diffusion in the latent space of a pretrained variational autoencoder [ 18 ]. However, this efficiency comes from substantial learned compression, which can discard fine-grained visual signals. This motivates renewed interest in pixel-space diffusion, where generation is performed closer to the raw image domain. Pixel-space diffusion transformers have recently attracted growing interest [ 21 , 27 , 16 ], as they operate directly on raw image patches and avoid the information loss introduced by learned latent compression. This makes them a promising direction for preserving high-frequency details such as textures, sharp boundaries, and textual patterns. However, it also creates a structural modeling challenge: each patch token must support global image-level interactions through attention while also preserving rich intra-patch structure for fine-grained appearance modeling. Existing methods typically compress each raw patch into a single compact token before applying standard transformer blocks, forcing one representation to support both long-range patch-level reasoning and fine-grained appearance modeling. While computationally efficient, this design can limit representation quality, and simply increasing token width quickly incurs substantial parameter and compute overhead. In this work, we argue that the central challenge of pixel-space diffusion is not simply insufficient model width, but the absence of an architectural separation between efficient global patch-level reasoning and high-fidelity local subpatch-level appearance modeling . To address this issue, we propose DuSPiT , a Du al-branch Sub Patch Pi xel Transformer. Instead of collapsing each raw patch into a single compressed token, DuSPiT maintains two coupled representations for every patch: a compact base branch for efficient global interaction, and a parallel high-capacity pixel branch that preserves patch appearance without undergoing the same aggressive compression. Crucially, the pixel branch is not modeled as an unstructured high-dimensional vector. Rather, it is organized into multiple subpatch groups , each corresponding to a finer spatial region inside the patch. 
+
+> Preprint. arXiv:2607.18510v1 [cs.CV] 20 Jul 2026
+
+This design preserves the internal spatial organization of raw pixel content and enables the model to represent intra-patch appearance at a much finer granularity. The base branch provides globally contextualized structural and semantic information, while the subpatch-aware pixel branch focuses on detailed appearance refinement. The two branches interact through cross-attention, allowing the model to combine efficient global reasoning with high-capacity local detail modeling, without forcing the entire transformer to operate in a prohibitively high-dimensional space. To align these two levels of representation, we further introduce a hierarchical positional encoding scheme that combines patch-level positions with relative subpatch offsets. This gives the model a coherent notion of both inter-patch layout and intra-patch geometry, enabling each subpatch representation to attend to globally meaningful patch features while retaining precise local spatial identity. Finally, DuSPiT predicts the clean image directly from the pixel branch, while the base branch serves purely as an internal structural bottleneck. This explicit division of labor is central to our design: global reasoning is carried out in a compact communication space, whereas high-fidelity reconstruction is preserved in a subpatch-aware appearance space. Extensive experiments show that DuSPiT improves visual fidelity in pixel-space diffusion, especially for fine textures and sharp structures, while maintaining competitive efficiency. More broadly, our results suggest that effective pixel-space diffusion requires architectures that explicitly respect the dual role of image patches: they are both global communication units and structured containers of local appearance. Our main contributions are summarized as follows: • We address a structural quality issue in existing pixel-space diffusion transformers, where compact patch tokens must simultaneously support global patch-level interactions and fine-grained intra-patch appearance modeling. • We propose DuSPiT , a dual-branch subpatch-aware pixel diffusion transformer that maintains a compact base branch for efficient global reasoning and a parallel high-capacity pixel branch for detailed appearance modeling. • We introduce a hierarchical positional encoding scheme that aligns patch-level structure with subpatch-level spatial detail, enabling effective cross-branch interaction. • We show that DuSPiT improves pixel-space image generation quality, particularly on fine textures, while remaining computationally efficient. 
+
+## 2 Related Work 
+
+2.1 Image Generation 
+
+Recent state-of-the-art image generation systems are largely built on latent diffusion models (LDMs [ 18 ]), which perform denoising in a compressed latent space. This design greatly reduces computation and memory cost, enabling larger backbones and higher-resolution generation. In practice, LDMs typically rely on a VAE tokenizer to balance reconstruction fidelity and compression efficiency. Many recent works therefore focus on improving the autoencoding stage through better architectures, objectives, and tokenization strategies [ 2 , 3, 1, 28 ], while also studying the trade-off between reconstruction quality and generative performance [ 25 ]. Beyond these improvements, several studies explore end-to-end optimization of the latent representation. For instance, REPA-E jointly trains the autoencoder and diffusion transformer to better align the learned latent space with the gener-ative objective [ 13 ]. More recently, alternative formulations have replaced the traditional variational bottleneck with representation autoencoders, demonstrating competitive latent representations without relying on explicit variational modeling [ 19 , 29 ]. Collectively, these advances have established latent diffusion as the dominant framework for contemporary high-quality image synthesis. 
+
+2.2 Pixel-Space Diffusion Models 
+
+Diffusion models operating directly in pixel space predate latent-based approaches and continue to attract significant research interest. Early works showed that directly denoising images in the pixel domain can produce highly realistic results [ 5]. Subsequent developments, such as cascaded diffusion 2Figure 1: DuSPiT architecture. (a) The model takes a noisy input and processes it with two patch embedding branches: a coarse token branch and a fine sub-token branch. Timestep and class embeddings are combined into a shared conditioning vector, which modulates all transformer layers. The coarse branch is updated by stacked DiT blocks, while its intermediate features are reshaped and used to guide the fine branch through CrossDiTBlock layers. The final fine-branch features are then decoded by a final layer and unpatchified to produce the output. (b) Structure of a DiT block with AdaLN-based modulation, self-attention, and an MLP. (c) Structure of the CrossDiTBlock, where coarse-branch features interact with fine-branch tokens through cross-attention followed by a token-wise SwiGLU feed-forward module. models, extended this capability to higher resolutions by employing multi-stage, coarse-to-fine synthesis pipelines [ 6]. Despite these successes, a major limitation of pixel-based approaches is their unfavorable scalability: both computational and memory costs grow quadratically with image resolution, making end-to-end training at megapixel scales particularly challenging. More recent efforts [ 12 , 30 , 22 , 14 ] have revisited pixel-space generation with innovations in both architecture and training methodology. Simple Diffusion improves efficiency through streamlined convolutional networks equipped with skip connections [ 7, 9 ]. PixelFlow introduces a hierarchical flow-based framework for modeling pixel-level distributions [ 4 ]. PixNerd further enhances computational efficiency by integrating lightweight neural field layers into the diffusion process [ 23 ]. Notably, JiT [ 21 ] demonstrates that standard Transformer architectures can effectively operate in pixel space by directly predicting clean images using an x0-prediction objective. Concurrent works such as PixelDiT [ 27 ] and DeCo [ 16 ] follow a similar paradigm, where a patch-level DiT first generates coarse structural representations, which are then refined into full-resolution pixel-space images via a pixel-level decoder. 
+
+## 3 Dual-Branch Sub-Patch Pixel Diffusion Transformer 
+
+We propose a pixel space diffusion transformer architecture with an additional high-dimensional branch to better model fine-grained appearance details. The key idea is to decouple global patch-level structure from local appearance modeling . Therefore, our model contains a base branch that processes compact patch tokens for efficient global reasoning, and a pixel branch that maintains richer per-patch features for preserving appearance details. The two branches interact through cross-attention, allowing the patch branch to provide structural guidance while the pixel branch retains fine-grained information. Within each block, the model performs patch-wise attention over patch tokens, followed by intra-patch refinement of pixel tokens conditioned on the patch-level representation. Finally, the denoising prediction is generated solely from the pixel branch through a lightweight output head. 33.1 Tokenization and Dual-Branch Representation 
+
+Pixel-space diffusion transformers typically tokenize an image by splitting it into non-overlapping patches. Let xt ∈ RH×W ×C denote the noisy image at diffusion step t ∈ [0 , 1] . The image is divided into patches of size P × P , resulting in N = HW/P 2 patches. Each patch contains P 2 × C raw pixel values. For example, when P = 32 and C = 3 , each patch corresponds to a 3072-dimensional vector. Representing such high-dimensional patch content is non-trivial. Unlike latent diffusion models, which rely on a pretrained VAE to compress images into a compact latent space, pixel-space diffusion lacks an explicit compression mechanism. Directly feeding tokens of dimension P 2C into a transformer would lead to prohibitively large parameter counts and computational costs, especially since the complexity of attention and feed-forward layers scales with the embedding dimension. Consequently, existing Pixel Diffusion Transformer (DiT) architectures typically project each raw patch into a lower-dimensional embedding using a simple linear, MLP, or convolutional layer: 
+
+zi = Epatch (x(i) 
+
+> t
+
+), zi ∈ Rdp , dp ≪ P 2C, (1) where x(i) 
+
+> t
+
+denotes the i-th image patch. While this approach enables efficient transformer compu-tation, the projection inevitably discards fine-grained information. In contrast to VAEs, which are explicitly trained to learn an information-preserving compression, such shallow projection layers lack sufficient capacity to achieve comparable reconstruction fidelity, often resulting in the loss of subtle textures and textual details. 
+
+Motivation for High-Dimensional Appearance Modeling. We argue that maintaining a repre-sentation with dimensionality comparable to, or even larger than, the original patch dimension is essential for accurately modeling appearance in pixel-space diffusion. However, naively increasing the transformer embedding dimension would significantly inflate the number of parameters and the computational cost of self-attention and feed-forward networks. To overcome these limitations, we introduce a dual-branch representation that separates the roles of global communication and local appearance modeling: 
+
+Patch Branch. We define a compact patch token: zi ∈ Rdp , where dp is a relatively small embedding dimension. This branch functions similarly to the standard DiT architecture and is responsible for capturing global spatial structure and semantic relationships across patches. 
+
+Pixel Branch. In parallel, we introduce a higher-capacity pixel token: ai ∈ Rda , da ≥
+
+P 2C and da ≫ dp, which preserves rich appearance information such as textures, colors, and fine structural details. This branch is designed to retain the expressive power of raw pixel representa-tions without forcing the entire transformer to operate at this high dimensionality. The two representations are obtained via separate embedding functions: 
+
+zi = Epatch (x(i) 
+
+> t
+
+), ai = Epixel (x(i) 
+
+> t
+
+), (2) where Epatch (·) can be implemented as a convolutional or linear projection similar to standard DiT models, and Epixel (·) maps the raw patch to a higher-dimensional appearance space. This dual-branch design enables the model to maintain high-fidelity appearance representations while keeping the computational cost of global reasoning manageable. 
+
+Cross-Branch Interaction. To effectively integrate global structure and local appearance, we enable information exchange between the two branches through cross-attention mechanisms. The patch tokens provide globally contextualized structural guidance, while the pixel tokens focus on detailed appearance modeling. This structured interaction allows the model to achieve a favorable balance between representation capacity and computational efficiency. 
+
+3.2 Hierarchical Positional Encoding for Cross-Attention 
+
+To effectively bridge the compact patch branch and the high-capacity pixel branch, we design a hierarchical positional encoding (PE) scheme for the cross-attention mechanism. Our goal is to preserve the global spatial consistency provided by standard Diffusion Transformers (DiTs) while enabling fine-grained appearance modeling within each patch. 4Patch-Level Positional Encoding. In the base diffusion transformer, each patch token corresponds to the center of a spatial patch in the image. We adopt the standard 2D Rotary Positional Encoding (RoPE) [ 20 ] used in DiT to encode the global position of each patch. Let the spatial grid of patches be indexed by (u, v ) along the horizontal and vertical axes. The patch-level positional encoding is defined as: 
+
+ppatch (u, v ) = RoPE( u, v ), (3) which is applied to the query, key, and value projections of the patch tokens during both self-attention and cross-attention. 
+
+Sub-Patch Appearance Encoding. While the patch-level encoding captures global spatial structure, it is insufficient for modeling fine-grained appearance details within each patch. To address this, we further partition the high-dimensional pixel token into a set of sub-patch groups that correspond to finer spatial regions inside each patch. Specifically, for a patch of size P × P , we conceptually divide it into an n × n grid of sub-patches. Each sub-patch represents a local region within the patch and is associated with a relative offset from the patch center. Let (s, t ) denote the sub-patch indices, where s, t ∈ { 0, . . . , n − 1}. The relative offset of each sub-patch center is defined as: 
+
+∆x(s) = s + 0 .5
+
+n − 12 , ∆y (t) = t + 0 .5
+
+n − 12 . (4) The final positional encoding for each sub-patch is obtained by augmenting the patch-level encoding with this relative offset: 
+
+psub (u, v, s, t ) = RoPE  u + ∆ x(s), v + ∆ y (t). (5) This formulation enables the model to represent fine-grained spatial variations within each patch without explicitly encoding every individual pixel. 
+
+Dimension Partitioning of Pixel Tokens. Given a pixel token ai ∈ Rda , we partition it into n2
+
+groups corresponding to the sub-patch grid: 
+
+ai =
+
+h
+
+a(1)  
+
+> i
+
+, a (2)  
+
+> i
+
+, . . . , a (n2)
+
+> i
+
+i
+
+, a(r) 
+
+> i
+
+∈ Rda/n 2
+
+. (6) For example, when da = 3072 and n = 8 , the pixel token is divided into 8 × 8 = 64 sub-patch groups, each with dimension 48 . Each group a(r) 
+
+> i
+
+is associated with a specific sub-patch location and is projected into the query space using a lightweight MLP. To reduce parameter overhead, these MLPs share parameters across all patches and sub-patch groups: 
+
+q(r) 
+
+> i
+
+= MLP q
+
+
+
+a(r)
+
+> i
+
+
+
+, (7) 
+
+Patch Tokens as Keys and Values. Let z′ 
+
+> i
+
+∈ Rdp denote the latent representation of the i-th patch token produced by the base diffusion transformer after the feed-forward (MLP) projection within each transformer block. These tokens encode globally contextualized structural information and serve as the keys and values in the cross-attention mechanism. To align with the multi-head attention formulation and to facilitate efficient interaction with the sub-patch queries from the pixel branch, we partition z′ 
+
+> i
+
+into H attention heads: 
+
+z′ 
+
+> i
+
+=
+
+h
+
+z′
+
+> i(1)
+
+, z ′
+
+> i(2)
+
+, . . . , z ′
+
+> i(H)
+
+i
+
+, z′ 
+
+> i(h)
+
+∈ Rdp/H , (8) where H denotes the number of attention heads. For each head h, we compute the corresponding key and value vectors using head-specific linear projections: 
+
+k(h) 
+
+> i
+
+= Wkz′
+
+> i(h)
+
+, v(h) 
+
+> i
+
+= Wv z′
+
+> i(h)
+
+, (9) where Wk and Wv are learnable projection matrices. 5Cross-Attention with RoPE. Rotary positional encoding (RoPE) is applied to the query and key vectors. Let R(·, p) denote the RoPE operation. The rotated queries and keys are then given by: 
+
+˜q(r) 
+
+> i
+
+= R
+
+
+
+q(r) 
+
+> i
+
+, psub (u, v, s, t )
+
+
+
+, ˜k(h) 
+
+> i
+
+= R
+
+
+
+k(h) 
+
+> i
+
+, ppatch (u, v )
+
+
+
+. (10) where the one-dimensional indices are obtained from their two-dimensional coordinates via row-major ordering: i = u · Wp + v, r = s · n + t, with Wp = W/P . Here, (u, v ) denotes the patch coordinate, 
+
+(s, t ) denotes the sub-patch coordinate within a patch, and r is the flattened sub-patch index. In particular, q(r) 
+
+> i
+
+denotes the query vector of the r-th sub-patch group within the i-th patch. During cross-attention, each sub-patch query q(r) 
+
+> i
+
+from the pixel branch only attends to the corresponding patch token from the same patch: 
+
+α(r,h ) 
+
+> i
+
+= softmax h
+
+
+
+˜q(r)
+
+> i
+
+˜k(h)
+
+> i
+
+⊤
+
+√dh
+
+ , ˆa(r) 
+
+> i
+
+=
+
+> H
+
+X
+
+> h=1
+
+α(r,h ) 
+
+> i
+
+v(h) 
+
+> i
+
+. (11) where dh = dp/H is the dimensionality of each attention head. All query, key, and value vectors are projected to the common dimension dh before computing attention. Finally, the outputs from all heads and sub-patch groups within the same patch are concatenated to form the updated pixel representation: 
+
+ˆai = ai + Concat r
+
+
+
+MLP r
+
+
+
+ˆa(r)
+
+> i
+
+ 
+
+. (12) Here, each sub-patch group r uses an independent projection MLP r , allowing different sub-patch locations to learn location-specific appearance transformations. As shown in Table 5, this design performs better than sharing a single MLP across all sub-patch groups. 
+
+Output Head. After L transformer blocks, the final denoising prediction is produced solely from the pixel branch. In contrast to the base patch branch, which mainly provides global structural guidance through cross-attention, the pixel branch preserves the high-capacity appearance representation used for reconstruction. Specifically, we directly project the final pixel tokens with a lightweight output layer Wout to obtain the denoising prediction. We do not concatenate the patch tokens with the pixel tokens at the output stage. This design ensures that the final prediction is generated from the pixel branch alone, while the patch branch acts as a compact structural bottleneck for global reasoning. We adopt the x0-prediction parameterization, where the model directly predicts the clean image rather than the noise term. The predicted pixel outputs are then rearranged back to the image space following the original patch layout to form the final reconstructed image ˆx0.
+
+## 4 Experimental Results 
+
+Implementation details. Our training setup closely follows JiT to ensure a fair comparison. Unless otherwise noted, we train our models on ImageNet at 512 × 512 resolution and use a patch size of 
+
+32 . Following the setting used by JiT, we adopt the x0-prediction parameterization as in JiT, where the model directly predicts the clean image instead of the noise, and set the noise scale to 2.0. We use Adam [ 11 ] as the optimizer with β1 = 0 .9, β2 = 0 .95 , and a learning rate of 2 × 10 −4. Further implementation details are provided in the Appendix. 
+
+Better pixel-space generation with lower computation. We compare our method with both latent-space and pixel-space diffusion models on ImageNet 512 × 512 in Table 1. Among pixel-space methods, our model achieves the best overall trade-off between computational cost and generation quality. In particular, compared with recent strong pixel-space baselines, our method obtains lower FID while using fewer FLOPs, showing that the proposed dual-branch design improves generation quality without relying on substantially higher computation. This trend is also reflected in Figure 2, where our method achieves a favorable position when jointly considering FID and FLOPs. Figure 3 provides qualitative comparisons with JiT and other pixel-space diffusion baselines. As shown, our model generates images with richer local details and more faithful fine-grained structures. Baseline models often produce plausible global layouts but tend to smooth out high-frequency textures 6Table 1: Comparison of latent-space and pixel-space diffusion models on ImageNet 512 × 512 .
+
+ImageNet 512 × 512 GFLOPs FID ↓ NFE 
+
+Latent-space Diffusion 
+
+DiT-XL/2 [17] 525 3.04 250 SiT-XL/2 [15] 525 2.62 250 REPA [26], SiT-XL/2 525 2.08 250 DDT-XL/2 [24] 525 1.28 250 RAE [29], DiT DH -XL/2 642 1.13 50 
+
+Pixel-space Diffusion 
+
+ADM-G [5] 1983 7.72 250 RIN [10] 415 3.95 1000 SiD [8], UViT/4 555 3.02 –VDM++, UViT/4 555 2.65 –SiD2 [9], UViT/4 137 2.19 512 SiD2 [9], UViT/2 653 1.48 512 PixNerd [23], XL/16 583 2.84 50 PixelDiT/32 [27] 426 2.73 50 DeCo/16 [16] 508 2.22 50 JiT-G/32 [21] 384 1.78 50 DuSPiT/32 329 1.52 50 DuSPiT/32 329 1.46 512 300 400 500 600 700 800 
+
+> GFLOPs
+> 1.0
+> 1.5
+> 2.0
+> 2.5
+> 3.0
+> 3.5
+> 4.0
+> 4.5
+> FID
+> Latent
+> Pixel
+> Ours
+> DiT-XL/2
+> SiT-XL/2
+> REPA, SiT-XL/2
+> DDT-XL/2
+> RAE, DiT DH -XL/2
+> RIN
+> SiD, UViT/4
+> VDM++, UViT/4
+> PixNerd, XL/16
+> JiT-G/32
+> PixelDiT/32
+> DeCo/16
+> Ours
+
+Figure 2: Quality–efficiency trade-off on ImageNet 512 × 512 . Our method achieves a favorable balance between computational cost and generation qual-ity. Ours JiT DeCo 
+
+Figure 3: Qualitative comparison of generated images on ImageNet. Compared with baseline methods for 512 × 512 resolution, our model produces images with richer local details, sharper structures, and more faithful fine-grained textures. Please zoom in for a better comparison of details. or miss subtle object details. In contrast, our dual-branch design preserves stronger appearance representations in the pixel branch, enabling better reconstruction of textures, boundaries, and small visual elements. These qualitative results are consistent with the quantitative improvements and support the benefit of separating global structural reasoning from fine-grained appearance modeling. 
+
+Necessity of the additional dimension. Table 2 compares our models with JiT under the same ImageNet 512 × 512 setting to examine whether the additional dimension is necessary for pixel-space diffusion transformers. Compared with JiT, our method consistently improves generation quality 7Table 2: Comparison with JiT models on ImageNet 512 × 512 .                                             
+
+> Model Params Gflops FID ↓IS ↑Model Params Gflops FID ↓IS ↑
+> JiT-B/32 [21] 133M 26 4.02 271.0 JiT-H/32 [21] 956M 183 1.94 309.1 Ours-B/32 132M 26.8 3.75 283.3 Ours-H/32 781M 153 1.67 311.9 JiT-L/32 [21] 462M 89 2.53 299.9 JiT-G/32 [21] 2B 384 1.78 306.8 Ours-L/32 434M 86 2.22 304.7 Ours-G/32 1.69B 329 1.52 317.4
+
+Table 3: Ablation on the size of the extra dimension. Increasing the dimension improves repre-sentation capacity but also increases computational cost. The performance peaks at an intermediate dimension, suggesting that overly large extra dimensions may introduce unnecessary complexity without consistent quality gains.                         
+
+> Extra Dim Params (M) GFLOPs FID ↓IS ↑
+> 2048 126 25.1 3.92 276.4 4096 139 28.6 3.63 289.7 8192 165 35.8 3.41 304.8
+> 16384 218 50.3 3.57 296.2
+> Ours (Default, 3072) 132 26.8 3.75 283.3
+
+across all model scales. At the base scale, Ours-B/32 achieves a lower FID of 3.75 compared to 4.02 for JiT-B/32 with almost the same parameter count and GFLOPs. This indicates that the gain does not simply come from increasing model size, but from the proposed additional-dimension design, which provides extra capacity for modeling fine-grained intra-patch appearance. The advantage becomes more evident at larger scales. Ours-L/32 improves FID from 2.53 to 2.22 while using slightly fewer parameters and FLOPs than JiT-L/32. Similarly, Ours-H/32 and Ours-G/32 outperform their JiT counterparts with substantially lower computational cost. In particular, Ours-G/32 achieves the best FID of 1.52 with 1.69B parameters and 329 GFLOPs, outperforming JiT-G/32, which uses 2B parameters and 384 GFLOPs. These results suggest that explicitly allocating an additional dimension for subpatch-level representation is an effective and efficient way to overcome the representation bottleneck of standard pixel transformers. Rather than relying solely on scaling the backbone, our design improves the quality-efficiency trade-off by separating global patch-level reasoning from fine-grained local appearance modeling. 
+
+Effect of the extra dimension size. Table 3 studies the influence of the extra dimension size in our dual-branch pixel modeling framework. Starting from a smaller extra dimension, increasing the dimension consistently improves generation quality, reducing FID from 3.92 at 2048 dimensions to 3.41 at 8192 dimensions, while improving IS from 276.4 to 304.8. This indicates that a larger extra branch provides stronger capacity to preserve fine-grained intra-patch appearance, thereby alleviating the representation bottleneck caused by compressing each raw patch into a compact token. However, further increasing the dimension to 16384 yields no additional gains and slightly degrades both FID and IS, despite substantially increasing the parameter count and computational cost. This suggests that overly large extra dimensions may introduce optimization difficulty. We therefore use 3072 as the default setting, which offers a favorable balance between efficiency and generation quality. 
+
+Ablation on cross-attention flow. Table 4 evaluates different information-flow designs in the cross-attention module. Our default design only updates the subpatch tokens by attending to the globally contextualized patch tokens. This asymmetric design achieves the best FID and IS, indicating that the compact patch branch is most effective when used as a stable structural bottleneck, while the high-dimensional subpatch branch absorbs global context for appearance refinement. In contrast, bidirectional interaction degrades performance despite additional computation, suggesting that feeding local subpatch information back into the patch branch may disturb its global representation. We also find that introducing subpatch-to-subpatch attention does not improve performance and instead slightly worsens generation quality. This implies that explicit dense interaction among subpatch tokens is unnecessary in the cross-attention module, as local appearance modeling is better handled through structured subpatch representations conditioned on patch-level context. These results validate the asymmetric patch-to-subpatch cross-attention used in our default architecture. 8Table 4: Ablation on the information flow in cross-attention. The default design updates only the subpatch tokens using patch-token context. Updating both branches or introducing subpatch-to-subpatch attention increases computation but leads to worse generation quality.                             
+
+> Cross-Attention Flow Params (M) GFLOPs FID ↓IS ↑
+> Patch →Subpatch Only 132 26.8 3.75 283.3
+> Patch ↔Subpatch 135 28.1 4.29 276.7 Subpatch →Patch Only 132 26.8 4.73 270.9 Patch →Subpatch + Subpatch Self-Attn 136 30.2 3.92 278.1
+
+Table 5: Ablation on projection and modulation designs for integrating the extra dimensions. The default setting uses a small per-token MLP together with different modulation parameters.                         
+
+> Variant Params (M) GFLOPs FID ↓IS ↑
+> Projection design
+> Small MLP (single) 128 25.7 4.18 267.9 Large MLP 156 31.4 3.91 276.8
+> Small MLP (per token) 132 26.8 3.75 283.3
+> Modulation design
+> Same Modulation 131 26.5 3.96 278.6
+> Different Modulation 132 26.8 3.75 283.3
+
+Ablation on projection and modulation design. Table 5 studies different projection and modula-tion mechanisms for integrating the extra dimensions. Compared with using a single shared small MLP for all subpatch tokens, our default per-token projection achieves substantially better generation quality. This suggests that different subpatch tokens encode distinct local appearance structures and should not be forced to share the same projection function. We also compare against a large MLP that first concatenates all subpatch tokens and then projects them jointly. Although this design introduces more parameters and computation, it performs worse than the lightweight per-token design, indicating that simply increasing projection capacity does not necessarily lead to better subpatch modeling and may make optimization more difficult. We further evaluate the modulation strategy used for different subpatch tokens. Applying the same modulation to all subpatch tokens leads to slightly worse performance than using different modulation parameters, suggesting that token-specific modulation provides a more flexible way to adapt local subpatch representations. 
+
+## 5 Discussion, Limitations, and Future Work 
+
+Our results show that explicitly separating global structural reasoning from fine-grained appearance modeling is beneficial for pixel-space diffusion transformers. Rather than uniformly increasing the entire model, our design allocates additional capacity to the pixel branch, where high-frequency details are most needed, while keeping the global reasoning branch relatively compact. The main limitation of our approach is the additional training cost. The high-dimensional pixel branch increases memory usage, particularly for storing intermediate activations, and makes the backward pass more expensive due to the extra projection, modulation, and cross-branch interaction modules. As a result, training larger variants requires more GPU memory and longer training time than a standard single-branch transformer. Future work includes improving the efficiency and scalability of this architecture. Possible directions include memory-efficient training strategies, sparse or local cross-branch interactions, parameter sharing across subpatch groups, and adaptive allocation of the extra dimensions. Another promising direction is to extend the proposed dual-branch design to video generation, where global spatio-temporal structure and local appearance details are both critical for high-quality synthesis. 9References 
+
+[1] Hao Chen, Yujin Han, Fangyi Chen, Xiang Li, Yidong Wang, Jindong Wang, Ze Wang, Zicheng Liu, Difan Zou, and Bhiksha Raj. Masked autoencoders are effective tokenizers for diffusion models. In ICML , 2025. [2] Junyu Chen, Han Cai, Junsong Chen, Enze Xie, Shang Yang, Haotian Tang, Muyang Li, Yao Lu, and Song Han. Deep compression autoencoder for efficient high-resolution diffusion models. In ICLR , 2025. [3] Junyu Chen, Dongyun Zou, Wenkun He, Junsong Chen, Enze Xie, Song Han, and Han Cai. Dc-ae 1.5: Accelerating diffusion model convergence with structured latent space, 2025. [4] Shoufa Chen, Chongjian Ge, Shilong Zhang, Peize Sun, and Ping Luo. Pixelflow: Pixel-space generative models with flow. arXiv preprint arXiv:2504.07963 , 2025. [5] Prafulla Dhariwal and Alexander Nichol. Diffusion models beat GANs on image synthesis. In 
+
+NeurIPS , 2021. [6] Jonathan Ho, Chitwan Saharia, William Chan, David J Fleet, Mohammad Norouzi, and Tim Salimans. Cascaded diffusion models for high fidelity image generation. Journal of Machine Learning Research , 23(47):1–33, 2022. [7] Emiel Hoogeboom, Jonathan Heek, and Tim Salimans. Simple diffusion: End-to-end diffusion for high resolution images. In ICML , 2023. [8] Emiel Hoogeboom, Jonathan Heek, and Tim Salimans. simple diffusion: End-to-end diffusion for high resolution images. In International Conference on Machine Learning , pages 13213– 13232. PMLR, 2023. [9] Emiel Hoogeboom, Thomas Mensink, Jonathan Heek, Kay Lamerigts, Ruiqi Gao, and Tim Salimans. Simpler diffusion (sid2): 1.5 fid on imagenet512 with pixel-space diffusion. In CVPR ,2025. [10] Allan Jabri, David Fleet, and Ting Chen. Scalable adaptive computation for iterative generation. In ICML , 2023. [11] Diederik P Kingma and Jimmy Ba. Adam: A method for stochastic optimization. arXiv preprint arXiv:1412.6980 , 2014. [12] Jiachen Lei, Keli Liu, Julius Berner, Haiming Yu, Hongkai Zheng, Jiahong Wu, and Xiangxiang Chu. Advancing end-to-end pixel space generative modeling via self-supervised pre-training. 
+
+arXiv preprint arXiv:2510.12586 , 2025. [13] Xingjian Leng, Jaskirat Singh, Yunzhong Hou, Zhenchang Xing, Saining Xie, and Liang Zheng. Repa-e: Unlocking vae for end-to-end tuning with latent diffusion transformers. In ICCV , 2025. [14] Tianhong Li, Qinyi Sun, Lijie Fan, and Kaiming He. Fractal generative models. arXiv preprint arXiv:2502.17437 , 2025. [15] Nanye Ma, Mark Goldstein, Michael S Albergo, Nicholas M Boffi, Eric Vanden-Eijnden, and Saining Xie. Sit: Exploring flow and diffusion-based generative models with scalable interpolant transformers. In ECCV , 2024. [16] Zehong Ma, Longhui Wei, Shuai Wang, Shiliang Zhang, and Qi Tian. Deco: Frequency-decoupled pixel diffusion for end-to-end image generation. arXiv preprint arXiv:2511.19365 ,2025. [17] William Peebles and Saining Xie. Scalable diffusion models with transformers. In ICCV , 2023. [18] Robin Rombach, Andreas Blattmann, Dominik Lorenz, Patrick Esser, and Björn Ommer. High-resolution image synthesis with latent diffusion models. In CVPR , 2022. [19] Minglei Shi, Haolin Wang, Wenzhao Zheng, Ziyang Yuan, Xiaoshi Wu, Xintao Wang, Pengfei Wan, Jie Zhou, and Jiwen Lu. Latent diffusion model without variational autoencoder. arXiv preprint arXiv:2510.15301 , 2025. 10 [20] Jianlin Su, Murtadha Ahmed, Yu Lu, Shengfeng Pan, Wen Bo, and Yunfeng Liu. Roformer: Enhanced transformer with rotary position embedding. Neurocomputing , 568:127063, 2024. [21] Kaiming He Tianhong Li. Back to basics: Let denoising generative models denoise. arXiv preprint arXiv:2511.13720 , 2025. [22] Michael Tschannen, André Susano Pinto, and Alexander Kolesnikov. Jetformer: An autoregres-sive generative model of raw images and text. In ICLR , 2025. [23] Shuai Wang, Ziteng Gao, Chenhui Zhu, Weilin Huang, and Limin Wang. Pixnerd: Pixel neural field diffusion. arXiv preprint arXiv:2507.23268 , 2025. [24] Shuai Wang, Zhi Tian, Weilin Huang, and Limin Wang. Ddt: Decoupled diffusion transformer, 2025. [25] Jingfeng Yao, Bin Yang, and Xinggang Wang. Reconstruction vs. generation: Taming optimiza-tion dilemma in latent diffusion models. In CVPR , 2025. [26] Sihyun Yu, Sangkyung Kwak, Huiwon Jang, Jongheon Jeong, Jonathan Huang, Jinwoo Shin, and Saining Xie. Representation alignment for generation: Training diffusion transformers is easier than you think. In ICLR , 2025. [27] Yongsheng Yu, Wei Xiong, Weili Nie, Yichen Sheng, Shiqiu Liu, and Jiebo Luo. Pixeldit: Pixel diffusion transformers for image generation. arXiv preprint arXiv:2511.20645 , 2025. [28] Yongsheng Yu, Haitian Zheng, Zhifei Zhang, Jianming Zhang, Yuqian Zhou, Connelly Barnes, Yuchen Liu, Wei Xiong, Zhe Lin, and Jiebo Luo. Zipir: Latent pyramid diffusion transformer for high-resolution image restoration. arXiv preprint arXiv:2504.08591 , 2025. [29] Boyang Zheng, Nanye Ma, Shengbang Tong, and Saining Xie. Diffusion transformers with representation autoencoders. arXiv preprint arXiv:2510.11690 , 2025. [30] Guangting Zheng, Qinyu Zhao, Tao Yang, Fei Xiao, Zhijie Lin, Jie Wu, Jiajun Deng, Yanyong Zhang, and Rui Zhu. Farmer: Flow autoregressive transformer over pixels. arXiv preprint arXiv:2510.23588 , 2025. 11

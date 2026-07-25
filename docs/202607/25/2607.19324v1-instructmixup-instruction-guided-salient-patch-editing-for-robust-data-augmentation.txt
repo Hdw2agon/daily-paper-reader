@@ -1,0 +1,1044 @@
+Title: InstructMixup: Instruction-Guided Salient Patch Editing for Robust Data Augmentation
+
+URL Source: https://arxiv.org/pdf/2607.19324v1
+
+Published Time: Wed, 22 Jul 2026 01:23:34 GMT
+
+Number of Pages: 14
+
+Markdown Content:
+> IEEE TRANSACTIONS ON CIRCUITS AND SYSTEMS FOR VIDEO TECHNOLOGY 1
+
+# InstructMixup: Instruction-Guided Salient Patch Editing for Robust Data Augmentation 
+
+Khawar Islam, Arif Mahmood, Xin Jin, and Naveed Akhtar 
+
+Abstract —In image and video technologies, data augmentation is widely used to improve the generalization of deep visual mod-els, and mixup-based strategies that interpolate between samples have become the dominant approach. However, computing infor-mative mixing regions adds substantial overhead, and blending content across different images frequently disrupts the semantic integrity of the resulting sample. We propose InstructMixup, a data augmentation method that constructs challenging yet label-consistent training samples entirely within a single visual sample. InstructMixup first extracts multi-scale salient patches from the sample using a lightweight saliency detector, refines each patch with an instruction-guided generative model, and blends the edited patch back into the non-salient regions of the same sample; because the generative edits are computed once and cached offline, this step adds negligible training cost. To further diversify the learned representation, InstructMixup injects self-similar fractal structure into the same salient regions at an adaptive ratio, so each training sample carries both fractal and non-fractal structure. We derive a second-order approximation of the result-ing vicinal risk, showing that the method simultaneously enforces invariance to the generative edit and suppresses curvature along the perturbed salient directions, and we verify both predictions empirically. We evaluate on small to large backbones for instance Convolutional Neural Networks (CNNs), Vision Transformers (ViTs) and Vision-Language Foundational Models (VLMs) across seven benchmarks covering coarse- and fine-grained classifica-tion, robustness to corruption and occlusion, calibration, and transfer and self-supervised learning, InstructMixup outperforms nine competing augmentation methods, surpassing the strongest baseline across all benchmarks. 
+
+Index Terms —Data augmentation, mixup, cutmix, fractal mix-ing, robustness. 
+
+I. I NTRODUCTION 
+
+# MODERN Deep Neural Networks (DNNs) have grown large enough in scale and capacity to memorize their training data [1], [2], [3], [4]. This capacity drives strong empirical accuracy, yet it also makes overfitting worse and widens the gap between training and test performance. In image and video technologies, data augmentation has become a primary tool for closing that gap [5], [6], [7], [8], [9], [10], and it is now standard across a range of practical systems. By broadening the training distribution, data augmentation im-proves generalization to unseen inputs, reduces model collapse [6], [11], [12], helps re-balance under-represented classes [13], and makes models more resilient to distribution shift [14], [15], [16], [17]. Beyond input-space mixing, augmentation has been performed by randomly cropping and patching images 
+
+Khawar Islam is with The University of Melbourne, Melbourne, Australia. Arif Mahmood is with the Information Technology University, Lahore, Pakistan. Xin Jin is with Westlake University, China. Naveed Akhtar is with The University of Melbourne, Melbourne, Australia. Corresponding author: Khawar Islam. 
+
+and frames [9], by translating deep features along semantic directions [10], [18], by blending superpixels with local and global context [19], and by replacing patches to isolate causal features in few-shot regimes [20]. Any practical augmentation method must balance two de-mands: it should add diversity and robustness, yet keep the structural and semantic content of the data intact [15], [21], [22], [23], [24], [25], [26], [27], all without driving up training cost [8], [7]. We propose InstructMixup, an augmentation method that meets both demands, adding structural complexity and diversity to each sample while (see Figure 1). Most task-agnostic mixup methods synthesize new samples by combining random pairs of training visual samples [2]. CutMix [28], Manifold Mixup [26], AlignMixup [29], and ResizeMix [30] each propose a different recipe for this pairing. Because the pairs are chosen at random, these methods can overwrite semantically important regions and break structural consistency. Saliency-guided variants such as SaliencyMix [31], PuzzleMix [7], Co-Mixup [8], and GuidedMixup [6] address this by steering the mix toward informative regions, but the saliency computation is expensive and pushes up both training time and hardware requirements [7], [8]. AutoMix [32] and AdAutoMix [33] instead learn the mixing policy and label assignment automatically, yet they transfer poorly to Transformer backbones [34] and remain compute-heavy. Fractal-based methods [35], [21], [36] take a different route but tend to overwrite real visual content and shift the data distribution. A further line of work uses generative models to edit or synthesize whole visual samples for added semantic variety [35], [12], though the methods are slow and can yield off-distribution or label-inconsistent results. InstructMixup is built to sidestep these issues, and it has two complementary parts: Self-Saliency ( S2) and AdaFrac . The S2
+
+stage locates multi-scale salient patches in a sample and edits each one with an instruction-guided generative model, then mixes the edited patches back into the non-salient regions of the same sample. Keeping both the edit and the mix inside one frame lets S2 add targeted, label-consistent variation to the most discriminative regions without ever borrowing content from another sample, which in turn supports scale-invariant representation learning. The generative edits are produced offline, before training, so this step adds little runtime cost. 
+
+AdaFrac builds on the salient regions that S2 identifies. Where DiffuseMix [35] spreads fractal texture over the whole image frame, AdaFrac restricts self-similar fractal injection to those salient regions alone. This keeps the surrounding context clean while raising the structural complexity of the object itself, so every augmented sample ends up holding both fractal and non-fractal structure, gaining diversity without the arXiv:2607.19324v1 [cs.CV] 21 Jul 2026 IEEE TRANSACTIONS ON CIRCUITS AND SYSTEMS FOR VIDEO TECHNOLOGY 2Source (S) CutMix (S+T) SaliencyMix (S+T) Fmix (S+T)               
+
+> PuzzleMic (S+T)
+> ResizeMix (S+T)
+> AutoMix (S+T)
+> AdAutoMix (S+T)
+> Target (T) Ours (S+T) AugMix (S) DiffuseMix (S)
+> GridMix (S+T)
+> PixMix (S) FracMix (S)
+> Mixup (S+T)
+> Fig. 1. Representative augmentation samples created by different mixup methods. Each competing method constructs its sample from a source and a target frame, whereas InstructMixup operates entirely within a single frame.
+
+distribution shift that global fractal mixing causes. Instruct-Mixup also avoids committing to a single mixing rule. For each training instance it draws from several mixing modes at random, which widens the training distribution further and pushes the model toward more robust object representations. Evaluated on seven datasets against nine competing methods, InstructMixup delivers consistent improvements not only on clean test accuracy but also when the input is adversarially perturbed, partially occluded, or drawn from a downstream task distribution. We summarize our contributions as follows:  
+
+> •
+
+InstructMixup introduces a multi-scale saliency-guided mixing stage that extracts informative patches from a sample and edits each one with an instruction-guided generative model before reinserting the edited patches into the non-salient regions of the same sample. As the edits are computed offline and cached in advance, this stage supplies controlled, label-consistent diversity to the most discriminative regions at negligible training cost.  
+
+> •
+
+We propose AdaFrac , which injects self-similar fractal structure only within the salient regions identified by InstructMixup, raising the structural complexity of the object itself while leaving its surrounding context and data fidelity intact, avoiding the distribution shift caused by blending fractals over the whole sample.  
+
+> •
+
+We combine both components into InstructMixup, extend it with multi-mode mixing that draws at random from Mixup, CutMix, and ResizeMix, and derive a second-order approximation of the resulting vicinal risk that explains why the combination improves generalization.  
+
+> •
+
+We benchmark InstructMixup on seven datasets against nine state-of-the-art methods, reproducing 27 competing augmentation strategies for direct qualitative comparison. The evaluation spans coarse and fine-grained recognition, detection, transfer, self-supervised pre-training, calibra-tion, and learning from limited data, where InstructMixup exceeds the strongest method. This paper substantially extends our preliminary work, S2-FracMix [37]. The conference version introduced a label-preserving self-saliency mixing method that relocate salient regions and injecting fractal perturbations within the same image. While effective, its augmentation capability is funda-mentally limited to geometric transformations and structural perturbations of the existing visual content. Consequently, it cannot create new semantic appearance variations that nat-urally occur in real-world data, such as changes in texture, illumination, material, or style. To address this limitation, the journal version introduces instruction-guided generative patch editing, which synthesizes realistic, label-consistent appear-ance variations within the most discriminative regions while preserving the semantic identity of the object. The edited patches are generated offline, cached before training, and ver-ified using a pretrained classifier to ensure label consistency, making the approach both computationally efficient and reli-able. Beyond introducing a fundamentally new augmentation mechanism, we also develop an extended theoretical analysis by incorporating the generative editing process into the vicinal-risk formulation, providing a principled explanation for why the proposed framework improves generalization instead of only demonstrating empirical gains. Finally, unlike the confer-ence version, which primarily evaluated image classification, the journal paper establishes that the proposed framework is architecture-independent and task-agnostic through extensive experiments on CNNs (ResNet-18, ResNeXt-50, ConvNeXt-T), Vision Transformers (Swin-T and ViT-B), and Vision-Language Models (CLIP), together with evaluations on classi-fication, object detection, corruption and occlusion robustness, calibration, transfer learning, self-supervised learning, and few-shot learning. II. R ELATED WORK 
+
+A. Mixup Augmentation 
+
+Mixup-based augmentation techniques are widely used to enrich training diversity through interpolation strategies [38], [39], [40]. Verma et al. propose Manifold Mixup [26], which extends linear interpolation from the pixel space to hidden representations, encouraging smoother decision boundaries in the latent space. Yun et al. introduce CutMix [28], which pastes a rectangular crop from one image onto another so that the network learns to cope with missing evidence. FMix [41] and GridMix [42] generalize the mask geometry beyond rect-angles, while ResizeMix [30] shrinks an entire source image and overlays it onto the target, exposing the model to content at varying scales. SnapMix [43] targets fine-grained recognition, using class activation maps to weight the label of each mixed region by its semantic relevance. For Transformer backbones, TokenMix [44] mixes at the token level and reweights labels IEEE TRANSACTIONS ON CIRCUITS AND SYSTEMS FOR VIDEO TECHNOLOGY 3
+
+using attention maps from a pretrained teacher, while MixPro [45] combines patch-level masking with progressive attention labeling to better align mixed labels with the visible con-tent ratio. More recently, Decoupled Mixup [46] formulates an efficient decoupled regularizer that mines discriminative features from hard mixed samples. Despite these advances, such methods enhance generalization primarily through inter-image mixing, without explicitly preserving semantic saliency, which can disrupt the discriminative regions most relevant to classification. 
+
+B. Adversarial Mixup Methods 
+
+Some influential lines of work integrate fractal images directly into the augmentation pipeline to improve model robustness. PixMix [36] augments training images by blending them with synthetic images including fractals and feature visualizations. Building on this, IPMix [21] introduces multi-scale fractal mixing, where fractal patterns are inserted at pixel, patch, and image levels; the effectiveness of such patterns is grounded in their self-similar texture statistics [47]. Recent studies have further combined fractal augmentation with generative models: DiffuseMix [35] blends a diffusion-generated image with the original, then overlays a fractal image, resulting in augmented views that are structurally complex. A complementary line of work instead perturbs images directly through adversarial optimization: AdvMask [48] locates the image regions most influential to the classifier via a sparse adversarial attack module and occludes them to force the model to rely on additional discriminative cues. Despite their gains in robustness, these approaches apply fractal or adversarial perturbations globally, without adapting them to the semantic content of the image. 
+
+C. Saliency-driven Mixup Augmentation 
+
+A separate family of methods steers the mixing mask toward discriminative image content so that class evidence survives augmentation. SaliencyMix [31] and Attentive-CutMix [49] select the most informative crop of one image and paste it into another. PuzzleMix [7] formulates mixing as a transport prob-lem that jointly respects saliency and local image statistics, and Co-Mixup [8] generalizes this objective to batches of images under a supermodular diversity criterion. SAMix [50] splits the mixup objective into a locally emphasized and a globally constrained term for adaptive mixing, whereas SuperMix [51] distills the mixing policy from a teacher network that identifies and merges salient evidence across images. Saliency Grafting [52] clips outlier attribution scores so that visually dominant but uninformative regions cannot dictate the mixed label, and GradSalMix [53] builds the mask directly from classifier gradients instead of an external saliency detector. LGCOAMix [19] exploits superpixel-level context at both local and global scales to keep object-part structure intact. Closest in spirit to our work, SalfMix [54] relocates the salient region of an image into its own background, and GuidedMixup [6] extracts critical local features via spectral-residual saliency. Even so, the majority of these methods still swap salient content between 
+
+images, and this cross-image transfer is precisely what breaks semantic consistency. 
+
+D. Generative Mixup Methods 
+
+Recently, several generative mixup methods have also been proposed, such as DiffuseMix [35], DiffCoRe-Mix [55] and DiffMix [12]. These methods generate or edit images via con-textual prompts to add meaningful features [56], [57], and this idea has also been applied beyond classification, for instance to generate controllable synthetic training images for object detection [58]. Although these methods have shown impressive gains, these techniques may produce out-of-distribution and unfaithful samples. It may become particularly important if a pre-trained generative model has not observed the training data distribution to be augmented [59], [23], [24]. Another issue with generative mixup methods is their significant com-putational overhead due to generating new samples [12], [60]. In contrast to the generative mixup methods, we consider this work without requiring pre-trained models on the same or overlapping knowledge base. We also aim to design a probabilistic method with reduced computational overhead without affecting the generalization of the neural network. For this purpose, we propose InstructMixup, an approach that employs multi-scale and self-mixing method. III. P ROPOSED METHOD 
+
+A. Overview 
+
+InstructMixup encodes self-contained, multi-scale, saliency-guided augmentation within a single image frame while pre-serving object saliency and promoting structural diversity. Salient regions are located directly in the input via the spectral residual method [61]. These regions steer multi-scale patch extraction, so that augmentation strength is concentrated where it is least likely to erase class-discriminative content. Each extracted salient patch is then edited by an instruction-guided generative model, so that the most discriminative region of the sample is refined rather than merely copied verbatim – introducing appearance diversity that spatial transformations alone cannot provide. The edited patches are subsequently blended with a fractal texture and split into two complementary streams: the salient sub-region is rotated to encourage viewpoint invariance, while the surrounding non-salient sub-region is blurred to suppress background reliance. The resulting patches are resized and recomposed into the original sample, so that class-critical content is preserved while background or less-discriminative areas are perturbed to strengthen robust feature learning. As shown in Algorithm 1 and illustrated in Fig. 2, this pipeline is applied independently per frame, and – unlike Mixup [62] and CutMix [28] – the original hard label is retained because the augmentation never imports content from a different class. 
+
+B. Self-Saliency-Guided Multi-Scale Mixing 1) Problem Setup and Saliency Estimation: Let X =
+
+{(xi, yi)}Ni=1 denote the training set, where each xi ∈
+
+RC×H×W is a C-channel image of spatial size H × W paired with a one-hot label yi. InstructMixup produces an augmented image ˆxi while leaving the label unchanged, i.e., ˆyi = yi. A IEEE TRANSACTIONS ON CIRCUITS AND SYSTEMS FOR VIDEO TECHNOLOGY 4 
+
+> Fig. 2. InstructMixup overview. In the InstructMixup mode, the spectral-residual detector computes a saliency map and selects salient patches at two scales. Accepted patches are refined using an instruction-guided generative editor with label-consistency filtering. A fractal pattern is then blended with the patch, followed by rotation and Gaussian blur on salient and non-salient regions. Finally, the transformed patches are recomposed to produce the augmented image.
+
+saliency map highlighting the regions most critical to model prediction is first computed as 
+
+Mi = Φ( xi), Mi ∈ R1×H×W , (1) where Φ( ·) denotes the spectral-residual saliency detector [61]. 
+
+Mi subsequently governs both where candidate patches are accepted and how each accepted patch is later split into salient and non-salient streams. 
+
+2) Multi-Scale Candidate Extraction and Saliency-Based Acceptance: Candidate patches are drawn from xi at two scales, K = {(H/ 2, W/ 2) , (H/ 4, W/ 4) }. For a target scale 
+
+(Hj , W j ) ∈ K , the top-left corner (uj , v j ) is sampled uni-formly, 
+
+uj ∼ Unif (0 , W − Wj ), vj ∼ Unif (0 , H − Hj ), (2) and the candidate patch and its corresponding saliency sub-map are cropped as qj = xi[uj : uj + Wj , v j : vj + Hj ] and 
+
+mj = Mi[uj : uj +Wj , v j : vj +Hj ], respectively. We min– max normalize mj to [0 , 1] and draw a random acceptance threshold τ ∼ Unif (0 .5, 1.0) to obtain the binarized saliency mask 
+
+ˆmj = ⊮mj ≥ τ . (3) The candidate patch qj is accepted only if its salient-area ratio satisfies 1
+
+Hj Wj
+
+X ˆmj ≥ (1 − τ ); (4) otherwise it is discarded and re-sampled. Randomizing τ per patch, rather than fixing it, prevents the model from overfitting to a single saliency granularity and yields patches whose salient coverage varies across training iterations. 
+
+3) Saliency-Conditioned Generative Editing: Naively reusing the raw salient crop, as in prior saliency-guided mixing methods, limits appearance diversity to whatever variation already exists in the source image itself. We instead let a generative model refine the discriminative content, conditioned on the saliency mask so that class identity is preserved while low-level appearance (texture, lighting, style) is varied. Each accepted patch is passed through an instruction-guided generative editor E(·, ·):
+
+qej = E qj , ˆmj
+
+, (5) where ˆmj conditions the edit so that E(·, ·) concentrates its changes within the salient region while leaving the class-defining structure intact. To avoid incurring generative infer-ence cost during training, every edit is produced offline prior to training and stored in a cache C, so that no generative model is invoked inside the training loop; at training time, qej is simply retrieved from C given (qj , ˆmj ). We additionally discard any cached edit whose predicted label under a frozen, pretrained verifier V(·) disagrees with yi,
+
+qej is retained iff arg max V(qej ) = arg max yi, (6) which empirically preserves label consistency and removes edits that drift outside the source class (Sec. VII). 
+
+4) Fractal-Guided Dual-Stream Transformation: The edited patch qej is blended with a texture z sampled from a fixed fractal library Z (constructed once, prior to training; see Sec. III-C), 
+
+qbj = β z + (1 − β) qej , z ∼ Unif (Z), (7) where β ∈ [0 , 1] controls the fractal-blend strength; we set 
+
+β = 0 .20 by default (Sec. III-C). The fractal-enriched patch is then split into a salient stream and a non-salient stream, each undergoing a different spatial transformation: 
+
+rj = R(qbj , ϕ ) ⊙ ˆmj + Ψ σ (qbj ) ⊙ (1 − ˆmj ), (8) IEEE TRANSACTIONS ON CIRCUITS AND SYSTEMS FOR VIDEO TECHNOLOGY 5
+
+where R(·, ϕ ) rotates its input by an angle ϕ ∼
+
+Unif (−30 ◦, 30 ◦), Ψσ (·) applies Gaussian blurring with kernel bandwidth σ, and ⊙ denotes the element-wise (Hadamard) product. Rotating the salient stream encourages viewpoint-invariant recognition of the discriminative content, while blur-ring the non-salient stream discourages the network from relying on background texture. The transformed patch is then resized back to the original image resolution, 
+
+pj = Resize  rj , (H, W ), (9) where Resize (·, (H, W )) applies bilinear interpolation so that 
+
+pj can be directly recomposed with the full-resolution input in the next step. 
+
+5) Weighted Recomposition: Let J denote the number of patches accepted for image xi (across both scales in K). The resized patches {pj }Jj=1 are mixed back into the original image via a weighted sum, 
+
+ˆxi = γ xi + (1 − γ)
+
+> J
+
+X
+
+> j=1
+
+ωj pj , (10) where ωj = 1 /J so that PJj=1 ωj = 1 , and γ ∼ Unif (0 , 1) is a global blending coefficient resampled independently for every image. Because ˆyi = yi throughout, InstructMixup trains the model to be robust to a combination of spatial transformations and generative appearance changes without the label-mixing bookkeeping, or the combinatorial mask optimization, required by SaliencyMix [31], PuzzleMix [7], and Co-Mixup [8]. The resulting procedure remains computationally lightweight at training time – the only added cost relative to a standard augmentation pipeline is a saliency-map computation and a cache lookup – while still synthesizing a diverse set of mixing outcomes that preserve the semantic content needed for the classifier to learn the correct label. 
+
+C. Multi-Mode High-Level Mixing 
+
+Conventional fractal-blending methods apply the fractal texture over the entire input image. InstructMixup instead confines fractal blending to the salient patches selected in Sec. III-B, so that the fractal texture perturbs appearance with-out overwhelming class-discriminative structure. The fractal library Z is constructed once, prior to training, and reused across all images; for every accepted and generatively edited patch qej , a texture z is drawn uniformly from Z and blended according to Eq. 7. We choose the blend strength β by sweeping a handful of candidate values on withheld validation data (Sec. VII, Fig. 5) and fix β = 0 .20 in all subsequent ex-periments; the fractal-enriched patch qbj then proceeds through the dual-stream transformation of Eq. 8, the resizing of Eq. 9, and the recomposition of Eq. 10. A qualitative visualization of every stage of this process is deferred to Figure 4 in Sec. VII. Existing mixing-based augmentations typically commit to a single strategy throughout training – e.g., Mixup [62], CutMix [28], ResizeMix [30], PuzzleMix [7], and Guided-Mixup [6]. We find that restricting training to a single low-level mixing mode narrows the supervisory signal the network is exposed to and, in turn, weakens downstream performance 
+
+Algorithm 1: InstructMixup Augmentation 
+
+Require: mini-batch Xb = {(xi, yi)}bi=1 ; scale set K;fractal library Z; blend factor β; edit cache C
+
+Ensure: augmented batch ˆXb = {(ˆ xi, yi)}bi=1 
+
+foreach (xi, yi) ∈ X b do 
+
+Mi ← Φ( xi) // Step 1: saliency map, Eq. 1
+
+psum ← 0H×W , J ← 0
+
+foreach scale (Hj , W j ) ∈ K do 
+
+uj ← uniform (0 , W − Wj ),
+
+vj ← uniform (0 , H − Hj )
+
+qj ← xi[uj : uj +Wj , v j : vj +Hj ] // Step 2: candidate patch 
+
+mj ← Mi[uj : uj +Wj , v j : vj +Hj ]
+
+mj ← (mj − min mj )/(max mj − min mj )
+
+τ ← uniform (0 .50 , 1.0) , ˆmj ← ⊮[mj ≥ τ ]
+
+if sum ( ˆ mj )/(Hj Wj ) < (1 − τ ) then 
+
+reject qj // fails Eq. 4
+
+end else 
+
+qej ← fetch (C, qj , ˆmj ) // Step 3: cached generative edit, Eq. 5 
+
+z ← uniform (Z)
+
+qbj ← βz + (1 − β)qej // Step 4a: fractal blend, Eq. 7
+
+ϕ ← uniform (−30 , 30) 
+
+rj ← R (qbj , ϕ ) ⊙ ˆmj + Ψ σ (qbj ) ⊙ (1 − ˆmj )
+
+// Step 4b: dual-stream transform, Eq. 8
+
+pj ← Resize (rj , (H, W )) // Step 4c: resize, Eq. 9
+
+psum ← psum + pj , J ← J + 1 
+
+end end 
+
+γ ← uniform (0 , 1) ˆxi ← γxi + 1 − γJ psum // Step 5: recomposition, Eq. 10 
+
+ˆXb ← ˆXb ∪ { (ˆ xi, yi)}
+
+end return ˆXb
+
+(Sec. VII). We therefore incorporate multiple low-level mixing modes into the pipeline, combining Mixup [62], CutMix [28], and ResizeMix [30] jointly, at a high level, alongside In-structMixup. One mode is selected uniformly at random for each training instance, which exposes the model to a richer variety of mixed inputs and encourages complementary forms of regularization; we quantify this effect in Sec. VII. 
+
+D. Training Objective 
+
+Unlike Mixup and CutMix, which interpolate both the image 
+
+and the label, InstructMixup interpolates only the image while preserving the original hard label, since class-discriminative content is refined and retained rather than blended in from a different class. The augmented pair (ˆ xi, yi) is therefore used directly with the standard cross-entropy loss, 
+
+L = 1
+
+N
+
+> N
+
+X
+
+> i=1
+
+LCE 
+
+ hθ (ˆ xi), yi
+
+, (11) where hθ (·) denotes the target classifier with parameters θ,and LCE (·, ·) is the cross-entropy loss between the predicted IEEE TRANSACTIONS ON CIRCUITS AND SYSTEMS FOR VIDEO TECHNOLOGY 6
+
+class distribution and the ground-truth label. Because no label mixing occurs, InstructMixup can be dropped into any standard classification training loop without modifying the loss function or requiring soft-label bookkeeping, distinguishing it from prior mixing-based augmentation strategies. IV. A S ECOND -O RDER ANALYSIS OF INSTRUCT MIXUP 
+
+We now characterize the objective that InstructMixup im-plicitly optimizes. Viewing the saliency-guided generative edit together with the rotation and blur (Sec. III-B) as a structured transform, and the fractal injection (Sec. III-C) as an additive localized perturbation, a second-order expansion of the vicinal risk yields two interpretable terms: the first enforces invariance to the structured transform, while the second penalizes loss curvature in directions confined to salient regions. We provide the analysis below. 
+
+A. Setup and Notation 
+
+Consider a sample (x, y) ∼ D , with x ∈ [0 , 1] C×H×W a C-channel image at resolution H ×W (following Sec. III-B) and 
+
+y its label. Write hθ for the predictor of Eq. 11 and ℓ(·, ·) for the training loss; in our implementation ℓ is the cross-entropy 
+
+LCE of Eq. 11. To keep notation compact, we set 
+
+g(s) := ℓ hθ (s), y, (12) where g denotes the loss viewed as a function of the input 
+
+s while the label y is held fixed. We denote by ξ ∼ Π the random augmentation state, where ξ collects every source of randomness in the InstructMixup pipeline: the patch location sampled at each scale in K (Eq. 2), the acceptance threshold and resulting saliency mask (Eqs. 3–4), the retrieved generative edit (Eq. 5), the rotation angle ϕ and fractal sample (Eqs. 7– 8), and the global blend coefficient γ (Eq. 10). We define the augmentation operator Aξ (·) and the augmented sample 
+
+x′ := Aξ (x). (13) 
+
+B. Decomposing the Augmentation Operator 
+
+Our analysis rests on splitting the augmentation operator into two parts: a structured transformation and an additive perturbation that acts only locally, 
+
+Aξ (x) = Tξ (x) + ∆ ξ (x), (14) where Tξ (x) ∈ [0 , 1] C×H×W collects the structured part and 
+
+∆ξ (x) ∈ RC×H×W the additive part. For InstructMixup, the structured part is saliency-guided: it comprises the generative edit of each salient patch together with the selective rota-tion/blur of Eq. 8, accumulated over all accepted patches in Algorithm 1. Recall the saliency map M(x) := Φ( x) from Eq. 1, and let 
+
+Bξ ∈ { 0, 1}1×H×W denote the full-resolution binary mask obtained by resizing and compositing the accepted patch-level masks { ˆmj } (Eq. 4) onto the image canvas. Let Eξ (x) ∈
+
+[0 , 1] C×H×W denote the full-resolution image obtained by replacing each accepted salient region with its generatively edited counterpart qej from Eq. 5, resized and composited back onto the canvas, while all non-salient content is left unchanged; the retrieved edit is part of ξ. Let R(·, ϕ ) and Ψσ (·) denote the rotation and Gaussian-blur operators of Eq. 8, with ϕ
+
+sampled as part of ξ. With the same global blend coefficient 
+
+γ ∼ Uniform (0 , 1) as in Eq. 10, we define 
+
+Tξ (x) = γx + (1 − γ)
+
+
+
+R Eξ (x), ϕ  ⊙ Bξ
+
++ Ψ σ (x) ⊙ (1 − Bξ )
+
+
+
+,
+
+(15) where ⊙ denotes the element-wise (Hadamard) product; Eq. 15 is the full-image aggregate of the per-patch dual-stream trans-form in Eq. 8. Because the generative edit is structured and not zero-mean, it is absorbed into Tξ rather than into the perturbation term; the model is thus driven to become invariant to it, exactly as for the rotation and blur. The remaining term captures the fractal injection of Sec. III-C: textures enter only through the accepted regions, scaled by the same blend factor β as in Eq. 7. Let Z ∈
+
+RC×H×W denote the full-resolution fractal pattern obtained by resizing and compositing the patch-level textures z sampled per Eq. 7 onto the canvas. Since natural fractal textures are not zero-mean, we write Z = μZ + ˜Z, where μZ = E[Z]
+
+and ˜Z is the zero-mean residual with covariance ΣZ, and we absorb the deterministic shift (1 − γ)β(Bξ ⊙ μZ) into Tξ . The perturbation component is then 
+
+∆ξ (x) = (1 − γ)β  Bξ ⊙ ˜Z. (16) 
+
+C. Second-Order Expansion of the Vicinal Risk 
+
+Following the vicinal risk minimization (VRM) frame-work [63], the objective induced by training on augmented samples is 
+
+VRM( hθ ) := E(x,y)∼D Eξ∼Π
+
+ℓ(hθ (Aξ (x)) , y)
+
+= Ex,yEξ
+
+g Tξ (x) + ∆ ξ (x) . (17) For brevity, let 
+
+xT := Tξ (x), δ := ∆ ξ (x), (18) so that x′ = xT + δ. By construction, ˜Z is zero-mean and 
+
+γ is sampled independently of (Bξ , ˜Z), hence Eξ [δ] = 0
+
+without further assumptions. We additionally require that Tξ
+
+leave the semantic label unchanged; the generative edit Eξ
+
+satisfies this by construction, since every cached edit must pass the offline verification of Eq. 6 (Sec. III-B). The sole role of this requirement is to license evaluating the loss against the original target y after transformation. Expanding g to second order around xT and using x′ =
+
+xT + δ gives 
+
+g(xT + δ) ≈ g(xT ) + ∇g(xT )⊤δ
+
++ 12 δ⊤Hg (xT )δ, (19) where ∇g(xT ) and Hg (xT ) are, respectively, the input-space gradient and Hessian of g at xT . Taking expectation over ξ,the first-order term vanishes because the perturbation is zero-mean: 
+
+Eξ
+
+∇g(xT )⊤δ = ∇g(xT )⊤Eξ [δ] = 0 . (20) IEEE TRANSACTIONS ON CIRCUITS AND SYSTEMS FOR VIDEO TECHNOLOGY 7
+
+Therefore, the expected loss under augmentation is approxi-mately 
+
+Eξ [g(xT + δ)] ≈ Eξ [g(xT )] + 12 Eξ
+
+h
+
+δ⊤Hg (xT )δ
+
+i
+
+. (21) Taking expectation over (x, y) ∼ D yields 
+
+VRM( hθ ) ≈ Ex,yEξ [g(xT )] + 12 Ex,yEξ
+
+h
+
+δ⊤Hg (xT )δ
+
+i
+
+.
+
+(22) The second term becomes interpretable once the quadratic form is expressed as a trace via v⊤Hv = tr( Hvv ⊤):
+
+Eξ
+
+h
+
+δ⊤Hg (xT )δ
+
+i
+
+= tr 
+
+
+
+Hg (xT ) Eξ [δδ ⊤]
+
+
+
+. (23) We now compute the second moment of the perturbation. Since δ = (1 − γ)β(Bξ ⊙ ˜Z) and γ ∼ Uniform (0 , 1) is independent of (Bξ , ˜Z), we have E[(1 − γ)2] = 13 , and thus 
+
+Eξ [δδ ⊤] = β2
+
+3 Eξ
+
+Bξ ΣZ B⊤
+
+> ξ
+
+ . (24) We define the mask-dependent covariance as the localized-perturbation covariance, 
+
+Σloc (x) := Eξ
+
+Bξ ΣZ B⊤
+
+> ξ
+
+ . (25) Substituting Eqs. 24 and 25 into Eq. 23 yields 
+
+Eξ
+
+h
+
+δ⊤Hg (xT )δ
+
+i
+
+= β2
+
+3 tr( Hg (xT ) Σloc (x)) . (26) Collecting terms, the vicinal risk is approximated to second order by 
+
+VRM( hθ ) ≈ Ex,yEξ
+
+ℓ(hθ (Tξ (x)) , y)| {z }
+
+> invariance term
+
++ β2
+
+6 Ex[tr( Hg (Tξ (x)) Σloc (x))] 
+
+| {z }
+
+> saliency-local stability penalty
+
+. (27) V. E XPERIMENTS 
+
+A. Datasets 
+
+Our evaluation covers seven benchmarks under the proto-cols established by prior SOTA mixup methods [62], [33], [28], [35]. For coarse-grained recognition we use CIFAR-100 [64] ( 100 classes of 32 × 32 images, 500 /100 per class for training/testing), Tiny-ImageNet [65] (a 200 -class Ima-geNet derivative at 64 × 64 , with 500 /50 /50 images per class for train/val/test), and the full ImageNet-1K [66] ( ∼1.28 Mtraining and 50 ,000 validation images over 1,000 categories). Fine-grained recognition is assessed on CUB-200-2011 [67] (200 bird species, 5,994 /5,794 train/test), FGVC-Aircraft [68] (100 aircraft variants, 6,667 /1,333 /2,000 train/val/test), and Stanford-Cars [69] ( 196 car models, 8,144 /8,041 train/test). In addition, Oxford Flowers-102 [70] is used for the data-scarce and self-supervised settings, Pascal VOC [71] for object detection, and the corrupted variants CIFAR-100-C [72] and ImageNet-C [8] for robustness evaluation. 
+
+B. Comparison Methods and Backbones 
+
+We compare InstructMixup against nine competitive mixup methods: Mixup [2], CutMix [28], ManifoldMix [26], FMix [41], ResizeMix [30], SaliencyMix [31], PuzzleMix [7], AutoMix [32], and AdAutoMix [33], and additionally re-port computational overhead against the timings in AdAu-toMix [33]. We also report the results of the prelimi-nary version of our method, termed S2-FracMix [37], for reference. To assess generalizability, we span small- to large-scale backbones, including ResNet-18/34/50 [73] and ResNeXt-50 [74], the transformer architectures Swin Transformer [75] and ConvNeXt [76], and the contrastive methods MoCo v2 [77] and SimSiam [78]. All experiments use the open-source OpenMixup [79] and follow the evaluation protocol of AdAutoMix [33] for fair comparison. 
+
+C. Implementation Details 
+
+In our experiment for CIFAR-100, we use random flip and random crop with 4-pixel padding on 32 × 32 inputs. For ResNet-18 and ResNeXt-50, we train for 200 epochs with SGD (momentum 0.9, weight decay 1 × 10 −4), batch size 100 , and an initial learning rate of 0.1 decayed by a cosine schedule. For ImageNet-1K, we adopt a standard PyTorch configuration, training for 100 epochs with SGD (momentum 0.9, weight decay 1 × 10 −4), batch size 256 ,and an initial learning rate of 0.1. For fine-grained datasets, CUB-200, FGVC-Aircraft, and Stanford-Cars, we initialize from official ImageNet-1K pre-trained weights and fine-tune for 200 epochs with SGD (momentum 0.9, weight decay 
+
+5×10 −4), batch size 16 , and a cosine-decayed learning rate starting at 0.001 . The hyperparameters λ and t are fixed to 
+
+0.2 and 0.5, respectively (see Sec. VII). For self-supervised learning, the ImageNet-1K configuration above with a ResNet-50 encoder, we replace the final fully connected layer with the projection heads of MoCo v2 and SimSiam, following DiffuseMix [35] and YOCO [80]. MoCo v2 uses a two-layer MLP head ( 2048 → 2048 → 128 ) with ReLU and temperature 
+
+0.2; SimSiam uses a three-layer MLP head ( 2048 → 2048 →
+
+2048 → 128 ) with BN and ReLU and a two-layer predictor (128 → 512 → 128 ). We apply InstructMixup to one of the two augmented 224 × 224 views before encoding, following prior SSL augmentation studies, with no other architectural or hyperparameter changes. We use the fractal images from DiffuseMix [35], whose complex multi-scale patterns inject a level of structural abstraction rarely present in natural training images (Figure 4(b)). VI. P ERFORMANCE COMPARISON 
+
+This section compares InstructMixup against the competing augmentation methods introduced in Sec. V-B across general and fine-grained classification, transfer learning, robustness, calibration, object detection, few-shot classification, and self-supervised learning. 
+
+General Classification. Table I (Panel A) compares In-structMixup with existing augmentation strategies on CNNs and ViTs. It is observed that: (i) InstructMixup achieves the highest Top-1 accuracy among all compared methods, IEEE TRANSACTIONS ON CIRCUITS AND SYSTEMS FOR VIDEO TECHNOLOGY 8
+
+TABLE I COMPARISON OF MIXUP -BASED AUGMENTATION METHODS ACROSS COARSE -GRAINED AND FINE -GRAINED IMAGE -CLASSIFICATION BENCHMARKS .PANEL A REPORTS TOP -1 PERFORMANCE (%) ON CIFAR-100, T INY -I MAGE NET , AND IMAGE NET -1K. P ANEL B REPORTS ACCURACY (%) ON CALTECH 
+
+BIRDS -200, FGVC-A IRCRAFT , AND STANFORD -C ARS .
+
+A. Coarse-grained image-classification benchmarks 
+
+Method CIFAR-100 Tiny-ImageNet ImageNet-1K 
+
+ResNet-18 ResNeXt-50 Swin-T ConvNeXt-T ResNet-18 ResNeXt-50 ResNet-18 ResNet-34 ResNet-50 ViT-B Vanilla 78 .04 ± 0.14 81 .09 ± 0.10 78 .41 ± 0.13 78 .70 ± 0.12 61 .68 ± 0.19 65 .04 ± 0.15 70 .04 ± 0.08 73 .85 ± 0.07 76 .83 ± 0.06 76 .70 ± 0.09 
+
+MixUp [2] 79 .12 ± 0.12 82 .10 ± 0.09 76 .78 ± 0.15 81 .13 ± 0.11 63 .86 ± 0.17 66 .36 ± 0.13 69 .98 ± 0.09 73 .97 ± 0.07 77 .12 ± 0.06 80 .80 ± 0.08 
+
+CutMix [28] 78 .17 ± 0.13 81 .67 ± 0.10 80 .64 ± 0.12 82 .46 ± 0.10 65 .53 ± 0.16 66 .47 ± 0.12 68 .95 ± 0.10 73 .58 ± 0.08 77 .17 ± 0.06 79 .90 ± 0.09 
+
+SaliencyMix [31] 79 .12 ± 0.11 81 .53 ± 0.09 80 .40 ± 0.11 82 .82 ± 0.09 64 .60 ± 0.15 66 .55 ± 0.11 69 .16 ± 0.09 73 .56 ± 0.07 77 .14 ± 0.05 –FMix [41] 79 .69 ± 0.12 81 .90 ± 0.10 80 .72 ± 0.10 81 .79 ± 0.11 63 .47 ± 0.16 65 .08 ± 0.12 69 .96 ± 0.08 74 .08 ± 0.07 77 .19 ± 0.05 –PuzzleMix [7] 81 .13 ± 0.10 82 .85 ± 0.08 80 .33 ± 0.11 82 .29 ± 0.10 65 .81 ± 0.14 67 .83 ± 0.10 70 .12 ± 0.07 74 .26 ± 0.06 77 .54 ± 0.05 –ResizeMix [30] 80 .01 ± 0.11 81 .82 ± 0.09 80 .16 ± 0.12 82 .53 ± 0.10 63 .74 ± 0.15 65 .87 ± 0.11 69 .50 ± 0.08 73 .88 ± 0.06 77 .42 ± 0.05 –AutoMix [32] 82 .04 ± 0.09 83 .64 ± 0.07 82 .67 ± 0.09 83 .30 ± 0.08 67 .33 ± 0.12 70 .72 ± 0.09 70 .50 ± 0.07 74 .52 ± 0.05 77 .91 ± 0.04 –AdAutoMix [33] 82 .32 ± 0.08 84 .22 ± 0.06 84 .33 ± 0.08 83 .54 ± 0.07 69 .19 ± 0.11 72 .89 ± 0.08 70 .86 ± 0.06 74 .82 ± 0.05 78 .04 ± 0.04 –
+
+S2-FracMix [37] 82 .74 ± 0.07 84 .91 ± 0.06 85 .35 ± 0.07 84 .41 ± 0.06 70 .38 ± 0.10 74 .27 ± 0.07 71 .37 ± 0.05 75 .34 ± 0.04 78 .54 ± 0.04 81 .20 ± 0.06 
+
+InstructMixup 82 .94 ± 0.06 85 .21 ± 0.05 85 .55 ± 0.06 84 .61 ± 0.05 70 .68 ± 0.09 74 .47 ± 0.06 71 .57 ± 0.05 75 .54 ± 0.04 78 .74 ± 0.03 81 .40 ± 0.05 
+
+B. Fine-grained visual-classification benchmarks 
+
+Method Caltech Birds-200 FGVC-Aircraft Stanford-Cars 
+
+ResNet-18 ResNet-50 Swin-T ConvNeXt-T ResNet-18 ResNeXt-50 ResNet-18 ResNeXt-50 ResNet-50 ViT-B Vanilla 77 .68 ± 0.18 82 .38 ± 0.14 85 .24 †± 0.12 85 .71 †± 0.11 80 .23 ± 0.17 85 .10 ± 0.13 86 .32 ± 0.15 90 .15 ± 0.11 88 .88 †± 0.10 91 .31 †± 0.09 
+
+MixUp [2] 78 .39 ± 0.16 82 .98 ± 0.13 85 .66 †± 0.11 86 .08 †± 0.10 79 .52 ± 0.18 85 .18 ± 0.12 86 .27 ± 0.14 90 .81 ± 0.10 89 .45 †± 0.09 91 .36 †± 0.08 
+
+CutMix [28] 78 .40 ± 0.17 83 .17 ± 0.12 85 .82 †± 0.11 86 .31 †± 0.10 78 .84 ± 0.19 84 .55 ± 0.13 87 .48 ± 0.13 91 .22 ± 0.10 88 .99 †± 0.10 91 .53 †± 0.08 
+
+ManifoldMix [26] 79 .76 ± 0.15 83 .76 ± 0.11 86 .35 †± 0.10 86 .79 †± 0.09 80 .68 ± 0.16 86 .60 ± 0.11 85 .88 ± 0.16 90 .20 ± 0.12 89 .20 †± 0.09 91 .72 †± 0.08 
+
+SaliencyMix [31] 77 .95 ± 0.17 81 .71 ± 0.14 84 .67 †± 0.12 85 .13 †± 0.11 80 .02 ± 0.17 84 .31 ± 0.14 86 .48 ± 0.14 90 .60 ± 0.11 89 .13 †± 0.10 91 .56 †± 0.09 
+
+FMix [41] 77 .28 ± 0.18 83 .34 ± 0.12 85 .96 †± 0.11 86 .42 †± 0.10 79 .36 ± 0.18 86 .23 ± 0.11 87 .55 ± 0.13 90 .90 ± 0.10 89 .09 †± 0.09 91 .53 †± 0.08 
+
+PuzzleMix [7] 78 .63 ± 0.14 83 .83 ± 0.11 86 .41 †± 0.10 86 .86 †± 0.09 80 .76 ± 0.15 86 .23 ± 0.10 87 .78 ± 0.12 91 .29 ± 0.09 89 .37 †± 0.08 91 .83 †± 0.07 
+
+ResizeMix [30] 78 .50 ± 0.15 83 .41 ± 0.12 86 .02 †± 0.11 86 .48 †± 0.10 78 .10 ± 0.20 84 .08 ± 0.14 88 .17 ± 0.11 91 .36 ± 0.09 89 .21 †± 0.09 91 .64 †± 0.08 
+
+AutoMix [32] 79 .87 ± 0.12 83 .88 ± 0.10 86 .74 †± 0.09 87 .16 †± 0.08 81 .37 ± 0.13 86 .72 ± 0.09 88 .89 ± 0.10 91 .38 ± 0.08 88 .71 †± 0.09 92 .51 †± 0.07 
+
+AdAutoMix [33] 80 .88 ± 0.10 84 .57 ± 0.09 87 .42 †± 0.08 87 .85 †± 0.07 81 .73 ± 0.12 87 .16 ± 0.08 89 .19 ± 0.09 91 .59 ± 0.07 89 .65 †± 0.08 91 .38 †± 0.07 
+
+S2-FracMix [37] 81 .84 ± 0.08 85 .73 ± 0.07 88 .56 †± 0.07 88 .98 †± 0.06 82 .81 ± 0.10 88 .34 ± 0.07 90 .56 ± 0.08 92 .86 ± 0.06 90 .85 †± 0.07 92 .86 †± 0.06 
+
+InstructMixup 82 .04 ± 0.07 85 .93 ± 0.06 88 .76 †  
+
+> (±0.06)
+
+89 .18 †  
+
+> (±0.05)
+
+83 .01 ± 0.09 88 .54 ± 0.06 90 .76 ± 0.07 93 .06 ± 0.05 91 .05 †  
+
+> (±0.06)
+
+93 .06 † 
+
+> (±0.05)
+
+consistently outperforming AdAutoMix [33], AutoMix [32], ResizeMix [30], and PuzzleMix [7] across CIFAR-100, Tiny-ImageNet, and ImageNet-1K. (ii) On CIFAR-100, Instruct-Mixup surpasses AdAutoMix, the strongest existing baseline, by 0.62% and 0.99% in Top-1 accuracy with ResNet-18 and 
+
+ResNeXt-50 , respectively, with the improvement observed consistently from small-scale to large-scale backbones. (iii) The performance margin widens further on Tiny-ImageNet and ImageNet-1K, indicating that InstructMixup scales favorably with dataset complexity and captures more discriminative fea-tures than prior augmentation methods. These results establish InstructMixup as a new state-of-the-art (SOTA) among mixup-based augmentation methods for improving generalization performance. 
+
+Fine-Grained Visual Classification. Following the training protocol of AdAutoMix [33], we report baseline results di-rectly from that work and compare them with InstructMixup in Table I (Panel B). It is observed that: (i) InstructMixup achieves the highest Top-1 accuracy across all three fine-grained datasets and both backbone families evaluated. (ii) On Caltech Birds-200, InstructMixup improves over AdAutoMix by +1.16% and +1.36% with ResNet-18 and ResNet-50 ,respectively. (iii) On FGVC-Aircraft and Stanford-Cars, con-sistent gains of +1.28%/+1.38% and +1.57%/+1.47% are obtained with ResNet-18 and ResNeXt-50 , respectively. These results demonstrate that InstructMixup generalizes ef-fectively to fine-grained categorization, where the salient dis-criminative regions targeted by our augmentation are particu-larly informative. 
+
+Transfer Learning. Table II examines whether features shaped by InstructMixup remain useful after fine-tuning: 
+
+ResNet-50 and ViT-B models are first pretrained on ImageNet-1K and then adapted to Caltech Birds-200 and Stanford-Cars. It is observed that: (i) InstructMixup con-sistently outperforms AdAutoMix [33], the strongest exist-ing baseline, across both backbones and both downstream datasets. (ii) On Caltech Birds-200, InstructMixup reaches Top-1 accuracies of 84.62% and 90.04% with ResNet-50 
+
+and ViT-B , outperforming AdAutoMix by 1.26% and 1.28%, respectively. (iii) On Stanford-Cars, InstructMixup attains 91.05% and 93.06%, exceeding AdAutoMix by 1.40% and 1.68%. These results indicate that the representations learned with InstructMixup transfer more effectively than those of prior augmentation strategies, benefiting both convolutional and transformer-based architectures. 
+
+Corrupted Datasets. We evaluate the robustness of our method on the ImageNet dataset corrupted with Gaussian noise and random replacement following [8]. On clean ImageNet dataset, compared to baseline the Top-1 and Top-5 error rate is reduced by 2.47% and 2.00% (Table V). For the corrupted dataset, InstructMixup delivers an improvement of 5.48% on Gaussian corruption and 4.01% on random replacement over baseline. This experiment highlights InstructMixup capability to handle corrupted datasets. 
+
+Calibration. A classifier is well calibrated when its confi-dence matches its actual accuracy, yet deep networks trained on image classification are notoriously prone to overconfident predictions. We therefore report the Expected Calibration Error (ECE) of models trained with each mixup method on CIFAR-100, with baseline numbers taken from AdAutoMix [33]. As visible in Figure 3, our InstructMixup attains the lowest ECE of 2.8%, surpassing recent SOTA methods, with AdAutoMix [33] being second best. We attribute this improvement to the label-preserving design of InstructMixup: because augmented samples always retain their original hard label, the network is never supervised with soft targets that conflict with the visible IEEE TRANSACTIONS ON CIRCUITS AND SYSTEMS FOR VIDEO TECHNOLOGY 9
+
+TABLE II DOWNSTREAM FINE -TUNING ACCURACY (%) ↑ USING 
+
+CLIP R ES NET -50 AND DINO V2 V IT-S/14 ON CUB-200 
+
+AND STANFORD CARS .                                                                                                                             
+
+> Method CLIP ResNet-50 DINOv2 ViT-S/14 CUB-200 Stanford Cars CUB-200 Stanford Cars
+> Vanilla 79 .97 ±0.18 87 .10 ±0.14 88 .64 ±0.12 88 .30 ±0.11
+> CutMix [28] 79 .29 ±0.17 88 .24 ±0.13 88 .59 ±0.11 88 .53 ±0.10
+> MixUp [2] 80 .22 ±0.15 88 .27 ±0.12 89 .01 ±0.10 88 .32 ±0.09
+> GridMix 80 .08 †±0.16 88 .31 †±0.12 88 .67 †±0.11 88 .45 †±0.10
+> SaliencyMix [31] 80 .17 †±0.14 88 .35 †±0.11 88 .73 †±0.10 88 .47 †±0.09
+> ResizeMix [30] 80 .33 †±0.13 88 .42 †±0.10 88 .76 †±0.09 88 .50 †±0.08
+> FMix [41] 80 .41 †±0.15 88 .38 †±0.11 88 .71 †±0.10 88 .46 †±0.09
+> AdAutoMix [33] 81 .63 †±0.10 89 .04 †±0.08 88 .89 †±0.07 88 .61 †±0.06
+> PixMix 80 .58 †±0.14 88 .47 †±0.10 88 .79 †±0.09 88 .49 †±0.08
+> AugMix 80 .63 †±0.13 88 .54 †±0.09 88 .82 †±0.08 88 .51 †±0.07
+> AutoMix [32] 81 .28 †±0.11 88 .87 †±0.08 88 .86 †±0.07 88 .58 †±0.06
+> PuzzleMix [7] 80 .76 †±0.12 88 .61 †±0.09 88 .80 †±0.08 88 .54 †±0.07
+> DiffuseMix [35] 81 .78 †±0.09 89 .12 †±0.07 88 .91 †±0.06 88 .62 †±0.05
+> FracMix 82 .03 †±0.08 89 .30 †±0.06 88 .93 †±0.06 88 .64 †±0.05
+> InstructMixup 82 .47 ±0.06 89 .63 ±0.05 88 .97 ±0.05 88 .68 ±0.04
+
+TABLE III TOP -1 DOWNSTREAM TRANSFER ACCURACY (%) ↑ USING MOCO V 2 AND SIM SIAM ON 
+
+FLOWERS 102, S TANFORD CARS , AND FGVC-A IRCRAFT UNDER DIFFERENT AUGMENTATIONS .                                                                                                                                                                                             
+
+> Augmentation MoCo v2 [77] SimSiam [78]
+> Flowers102 Stanford Cars FGVC-Aircraft Flowers102 Stanford Cars FGVC-Aircraft
+> Vanilla 80 .31 ±0.20 40 .82 ±0.24 51 .36 ±0.18 86 .93 ±0.16 48 .34 ±0.22 40 .37 ±0.19
+> CutMix [28] 80 .88 †±0.18 41 .35 †±0.22 52 .12 †±0.16 87 .42 †±0.15 48 .85 †±0.20 41 .06 †±0.17
+> MixUp [2] 81 .05 †±0.17 41 .20 †±0.21 51 .90 †±0.15 87 .68 †±0.14 48 .72 †±0.19 40 .91 †±0.16
+> GridMix 81 .23 †±0.16 41 .57 †±0.20 52 .34 †±0.15 87 .91 †±0.14 49 .02 †±0.18 41 .22 †±0.16
+> SaliencyMix [31] 81 .40 †±0.15 41 .65 †±0.19 52 .48 †±0.14 88 .06 †±0.13 49 .11 †±0.17 41 .36 †±0.15
+> ResizeMix [30] 81 .58 †±0.14 41 .88 †±0.18 52 .66 †±0.13 88 .24 †±0.12 49 .28 †±0.16 41 .52 †±0.14
+> FMix [41] 81 .47 †±0.15 41 .71 †±0.18 52 .57 †±0.14 88 .13 †±0.13 49 .16 †±0.16 41 .44 †±0.14
+> AdAutoMix [33] 83 .12 †±0.11 44 .18 †±0.15 54 .73 †±0.10 90 .24 †±0.09 50 .93 †±0.13 42 .96 †±0.11
+> PixMix 81 .66 †±0.14 41 .95 †±0.17 52 .72 †±0.13 88 .39 †±0.12 49 .35 †±0.15 41 .61 †±0.13
+> AugMix 81 .74 †±0.13 42 .10 †±0.16 52 .84 †±0.12 88 .52 †±0.11 49 .48 †±0.14 41 .73 †±0.12
+> AutoMix [32] 82 .63 †±0.12 43 .55 †±0.15 54 .12 †±0.11 89 .67 †±0.10 50 .41 †±0.13 42 .74 †±0.11
+> PuzzleMix [7] 82 .02 †±0.13 42 .38 †±0.16 53 .05 †±0.12 88 .78 †±0.11 49 .62 †±0.14 41 .91 †±0.12
+> DiffuseMix [35] 82 .15 ±0.10 41 .73 ±0.14 53 .28 ±0.09 89 .24 ±0.08 49 .17 ±0.12 42 .63 ±0.10
+> FracMix 84 .21 †±0.08 45 .96 †±0.11 55 .88 †±0.07 91 .78 †±0.06 51 .74 †±0.09 43 .12 †±0.08
+> InstructMixup 84 .96 ±0.06 47 .02 ±0.09 56 .91 ±0.05 92 .51 ±0.04 52 .47 ±0.07 43 .54 ±0.06
+
+PuzzleMix AutoMix AdAutoMix Ours 
+
+> ECE=2.8%
+
+Fig. 3. Calibration plots of InstructMixup on CIFAR100 using ResNet18 .
+
+content, which reduces the systematic overconfidence intro-duced by cross-image label mixing. The reliability diagram in Figure 3 confirms this, showing that the predicted confidence of a model trained with InstructMixup tracks its empirical accuracy closely across all confidence bins rather than only in the high-confidence regime. 
+
+Object Detection. We evaluate two object detection frame-works including SSD [81] and Faster R-CNN [82] on the Pascal VOC [71] benchmark. We follow the protocols of Cut-Mix [28]; while the original detection frameworks employed VGG-16 as the backbone, we replace it with a ResNet-50 initialized from ImageNet pre-trained weights. Fine-tuning is conducted on the combined VOC 2007 and 2012 trainval sets (VOC07+12), and performance is measured using mean Average Precision (mAP) on the VOC 2007 test set. Our fine-tuning follows the protocols of the original works [81]. In-structMixup improves mAP to 80.46% with SSD and 79.68% with Faster R-CNN, exceeding the strongest augmentation baseline, CutMix, by 2.86% and 2.98%, respectively, and the vanilla ResNet-50 backbone by 3.76% and 4.08%. These gains indicate that the representations shaped by saliency-guided, label-consistent augmentation transfer beyond classification: preserving and diversifying the discriminative object regions during pre-training yields features that localize objects more reliably under the varied scales and occlusions present in detection benchmarks. 
+
+Few-shot Learning. We compare the performance of dif-ferent algorithms under limited data settings. We limit the number of images in each class to only 10 %, 20 %, and 50 % of 
+
+TABLE IV ABLATION STUDY OF DIFFERENT HIGH -LEVEL MIXING STRATEGIES ON 
+
+CIFAR-100. T HE FIRST ROW DENOTES THE BASELINE .CIFAR-100 Accuracy (%) InstructMixup Mm Mc Mr Res18 ResXt50 – – – – 78 .04 81 .09 
+
+✓ – – – 81 .93 82 .42 
+
+– ✓ – – 79 .12 82 .10 
+
+– – ✓ – 78 .17 81 .67 
+
+– – – ✓ 80 .01 81 .82 
+
+✓ ✓ ✓ – 82 .44 82 .52 
+
+✓ ✓ – ✓ 82 .66 83 .09 
+
+✓ – ✓ ✓ 82 .78 83 .72 
+
+✓ ✓ ✓ ✓ 82 .94 85 .21 
+
+Mf ✓ ✓ ✓ 80 .24 82 .27 
+
+the original CIFAR-100 dataset. We evaluate the accuracy of 
+
+WideResNet-28-10 trained with various SOTA strategies. As shown in Table V, InstructMixup shows excellent gains of 17.55%, 14.0%, and 9.38% compared to the baseline. 
+
+Self-Supervised Learning. A key step in self-supervised learning involves generating two distinct views of an image via data augmentations. InstructMixup enhances data diversity by introducing more challenging views. In this section, we evaluate the effectiveness of InstructMixup during the pre-training phase of MoCo v2 [77] and SimSiam [78]. As shown in Table III, compared to recent DiffuseMix [35], MoCo v2, InstructMixup achieves a +2.81% on Flower102, +5.29% on Stanford Cars, and +3.63% on Aircraft. Similarly, under SimSiam, InstructMixup improves performance by +3.27% on Flower102, +3.30% on Stanford Cars, and +0.91% on Aircraft. These results demonstrate that InstructMixup significantly enhances self-supervised learning, especially on challenging datasets. VII. A BLATION STUDY AND ANALYSIS 
+
+Since InstructMixup draws from several mixing modes (Section III), we now quantify how much each mode con-tributes. 
+
+Inclusion of Simple Modes. Table IV reports CIFAR-100 accuracy for Res18 and ResXt50 , where Mm, Mc, Mr , and 
+
+Mf stand for Mixup [62], CutMix [28], ResizeMix [30], and FMix [41], respectively. Used alone, InstructMixup already improves over the base model by 3.89% and 1.33%, a larger jump than any individual mode Mm, Mc, or Mr achieves, IEEE TRANSACTIONS ON CIRCUITS AND SYSTEMS FOR VIDEO TECHNOLOGY 10 (a) Input images (b) Fractal images (c) Visualization of patches Visualization of final augmented images (d) 
+
+Fig. 4. Qualitative visualization of the InstructMixup pipeline on samples from CUB-Birds [67], Stanford-Cars [69], and Flowers-102 [70]: (a) input images, (b) self-similar fractal images drawn from the fractal library Z, (c) multi-scale salient patches after editing and blending back into the input, and (d) final augmented samples produced by the full pipeline. 
+
+which we attribute to its multi-scale feature construction and its principled, saliency-driven patch transformations. When FMix is substituted into the pool (“ Mf +Mm+Mc+Mr ”) under identical training settings, accuracy falls, confirming that the strength of the mixed mode comes specifically from Instruct-Mixup. 
+
+Exclusion of Simple Modes. We deliberately leave Puz-zleMix [7], Co-Mixup [8], and GuidedMixup [6] out of the high-level mixing pool: their accuracy is competi-tive but their per-batch cost is not. Table IV identifies “InstructMixup+ Mm+Mc+Mr ” as the strongest pool, and the composition is not accidental. Global pixel interpolation from 
+
+Mm, localized region replacement from Mc, and rescaled-content overlay from Mr each supply a form of inter-image variation the others lack, so the selected modes cover comple-mentary regions of the augmentation space. 
+
+Motivation behind High-level Mixing. An effective aug-mentation strategy should be simultaneously invariant to scale, diverse across images, spatially varied, and robust to resolution changes, yet earlier methods pursue these goals one at a time. High-level mixing is designed to satisfy all four at once without inflating the compute budget. Its sensitivity to composition is evident in Table IV: swapping InstructMixup for Mf (as in [85]) under otherwise unchanged settings causes a marked accuracy drop, showing that the benefit stems from choosing the right modes rather than from mode multiplicity. 
+
+Effect of Label-Consistency Verification. The offline veri-fier of Eq. 6 is the component that licenses the label-preserving assumption underpinning our analysis in Sec. IV: the vicinal-risk decomposition evaluates the loss against the original target only because every cached edit is guaranteed to agree with it. Disabling the verifier admits generatively edited patches whose content has drifted toward a neighboring class, which converts a fraction of the training signal into label noise; the effect is most damaging on fine-grained datasets, where the discriminative evidence separating two classes can be as small as a wing bar or a grille pattern, precisely the content the editor perturbs. Because verification runs once, offline, over the cached edits, it adds no cost to the training loop, and the small pool of rejected edits is simply regenerated with a fresh random seed. In practice the verifier therefore acts as a safety valve: it bounds the worst-case behavior of the generative editor without constraining the diversity of the edits that pass. 
+
+Effect of Multi-Scale Extraction. InstructMixup draws candidate patches at two scales, (H/ 2, W/ 2) and (H/ 4, W/ 4) ,and this choice interacts with the acceptance test of Eq. 4. 0.25 0.50 0.75            
+
+> (a) threshold t
+> 82.0
+> 82.2
+> 82.4
+> 82.6
+> 82.8
+> 83.0
+> Top-1 (%) Accuracy
+> ResNet-18 Acc Top1
+> 0.2 0.4
+> (b) ratio λ
+> 82.0
+> 82.2
+> 82.4
+> 82.6
+> 82.8
+> 83.0
+> Top-1 (%) Accuracy
+> ResNet-18 Acc Top1
+> 10 100 1000
+> (c) library size ||
+> 82.0
+> 82.2
+> 82.4
+> 82.6
+> 82.8
+> 83.0
+> Top-1 (%) Accuracy
+> ResNet-18 Acc Top1
+> 020 40 60
+> (d) rotation φ(deg)
+> 82.0
+> 82.2
+> 82.4
+> 82.6
+> 82.8
+> 83.0
+> Top-1 (%) Accuracy
+> ResNet-18 Acc Top1
+
+Fig. 5. Hyper-parameter ablation of InstructMixup on CIFAR-100 with 
+
+ResNet-18 : (a) saliency threshold t, (b) fractal-blend strength λ, (c) fractal library size |Z| , and (d) salient-stream rotation range ±φ. The adopted configuration ( t = 0 .5, λ = 0 .20 , |Z| = 500 , φ = ±30 ◦) attains 82.94%. 
+
+Large patches are accepted more often on images whose sub-ject dominates the frame, injecting coarse, object-level varia-tion, whereas small patches survive the saliency test mainly on localized discriminative parts, injecting fine, part-level variation. Restricting extraction to a single scale collapses this spectrum: with only (H/ 2, W/ 2) patches the augmentation behaves like a global transform and under-represents part-level diversity, while with only (H/ 4, W/ 4) patches the perturbed area is too small to influence the learned representation on large-subject images. Sampling both scales per image lets the saliency statistics of each individual image decide which granularity contributes, which is what makes the augmentation strength adaptive rather than fixed. 
+
+Qualitative Visualization. Figure 4 illustrates the full pipeline on samples from CUB-Birds, Stanford-Cars, and Flowers-102: (a) the input images, (b) fractal textures drawn from Z, (c) the multi-scale salient patches after generative editing and blending back into the input, and (d) the final augmented samples. Two properties are visible. First, the object identity remains unambiguous in every augmented sample, evidence of the label-preserving design. Second, the perturbation concentrates on the subject while the background remains close to the original, in line with the saliency-localized penalty derived in Eq. 27. 
+
+Global Fractal vs Local Fractal. Panels B and C of Table VI probe where the fractal signal should enter, using Stanford-Cars. The default configuration restricts saliency-weighted fractal blending to the detected salient regions (Eq. 7); we con-trast it with a global variant, Ii = λF + (1 − λ)Ii, that spreads the fractal over the whole image, and with a no-weighting variant that replaces Eq. 8 by an even split between region and background transforms, Tk = 0 .50 R(P fk , θ ) + 0 .50 B(P fk ).Together these variants disentangle the value of targeted fractal perturbation from that of fractal perturbation per se. 
+
+Effect of Saliency and Fractal Mixing. Panel A of Ta-ble VI dissects the mixing strategy on CIFAR-100 for the Res18 and ResXt-50 backbones. Two saliency variants are IEEE TRANSACTIONS ON CIRCUITS AND SYSTEMS FOR VIDEO TECHNOLOGY 11 
+
+TABLE V COMPARISON UNDER DATA -SCARCE AND CORRUPTED -DATA SETTINGS . CIFAR-100 RESULTS REPORT ACCURACY (%) ↑ USING 
+
+WI D E RE S NE T -28-10 [83], TRAINED FROM SCRATCH WITH VARYING NUMBERS OF IMAGES PER CLASS . F LOWERS 102 RESULTS REPORT VALIDATION AND TEST ACCURACY (%) ↑ USING PR E AC T RE S NE T -18 [84], TRAINED FROM SCRATCH FOR 300 EPOCHS WITH 10 IMAGES PER CLASS . I MAGE NET -C 
+
+RESULTS REPORT ERROR RATES (%) ↓ USING RE S NE T -50 [73], TRAINED FROM SCRATCH .
+
+Method CIFAR-100 Accuracy ↑ Flowers102 Accuracy ↑ ImageNet-C Error ↓
+
+50 (10% ) 100 (20% ) 250 (50% ) Validation Test Gaussian Noise Random Rep. 
+
+Vanilla 40 .10 ± 0.52 55 .56 ± 0.38 70 .16 ± 0.24 53 .43 ± 0.46 46 .22 ± 0.51 29 .12 ± 0.21 41 .73 ± 0.27 
+
+CutMix [28] 42 .81 ± 0.49 60 .14 ± 0.34 74 .94 ± 0.21 51 .96 ± 0.42 46 .37 ± 0.47 27 .11 ± 0.20 46 .20 ± 0.29 
+
+MixUp [2] 49 .44 ± 0.44 61 .74 ± 0.31 74 .31 ± 0.20 60 .59 ± 0.39 52 .84 ± 0.43 26 .29 ± 0.18 39 .41 ± 0.23 
+
+GridMix 47 .62 †  
+
+> ±0.45
+
+62 .10 †  
+
+> ±0.30
+
+75 .20 †  
+
+> ±0.19
+
+57 .82 †  
+
+> ±0.38
+
+50 .44 †  
+
+> ±0.42
+
+26 .75 †  
+
+> ±0.18
+
+39 .82 † 
+
+> ±0.22
+
+SaliencyMix [31] 45 .90 †  
+
+> ±0.47
+
+61 .05 †  
+
+> ±0.33
+
+75 .12 †  
+
+> ±0.20
+
+51 .96 ± 0.44 46 .33 ± 0.46 26 .94 †  
+
+> ±0.19
+
+40 .05 † 
+
+> ±0.24
+
+ResizeMix [30] 46 .80 †  
+
+> ±0.43
+
+62 .48 †  
+
+> ±0.29
+
+75 .60 †  
+
+> ±0.18
+
+55 .72 †  
+
+> ±0.40
+
+49 .18 †  
+
+> ±0.44
+
+26 .48 †  
+
+> ±0.17
+
+39 .74 † 
+
+> ±0.23
+
+FMix [41] 48 .55 †  
+
+> ±0.41
+
+62 .90 †  
+
+> ±0.28
+
+75 .88 †  
+
+> ±0.17
+
+58 .63 †  
+
+> ±0.37
+
+51 .12 †  
+
+> ±0.41
+
+26 .32 †  
+
+> ±0.16
+
+39 .36 † 
+
+> ±0.21
+
+AdAutoMix [33] 53 .88 †  
+
+> ±0.34
+
+66 .75 †  
+
+> ±0.23
+
+77 .42 †  
+
+> ±0.14
+
+62 .25 †  
+
+> ±0.31
+
+55 .11 †  
+
+> ±0.35
+
+24 .72 †  
+
+> ±0.13
+
+38 .30 † 
+
+> ±0.18
+
+PixMix 49 .82 †  
+
+> ±0.39
+
+63 .28 †  
+
+> ±0.27
+
+76 .05 †  
+
+> ±0.17
+
+59 .85 †  
+
+> ±0.36
+
+52 .43 †  
+
+> ±0.40
+
+25 .98 †  
+
+> ±0.15
+
+38 .95 † 
+
+> ±0.20
+
+AugMix 50 .28 †  
+
+> ±0.38
+
+63 .62 †  
+
+> ±0.26
+
+76 .24 †  
+
+> ±0.16
+
+60 .12 †  
+
+> ±0.35
+
+52 .76 †  
+
+> ±0.39
+
+25 .74 †  
+
+> ±0.15
+
+38 .68 † 
+
+> ±0.19
+
+AutoMix [32] 52 .90 †  
+
+> ±0.35
+
+65 .94 †  
+
+> ±0.24
+
+77 .16 †  
+
+> ±0.15
+
+61 .74 †  
+
+> ±0.33
+
+54 .82 †  
+
+> ±0.37
+
+24 .98 †  
+
+> ±0.14
+
+38 .42 † 
+
+> ±0.18
+
+PuzzleMix [7] 50 .13 ± 0.38 63 .99 ± 0.27 76 .31 ± 0.16 61 .47 ± 0.36 54 .71 ± 0.41 26 .11 ± 0.16 39 .23 ± 0.21 
+
+DiffuseMix [35] 55 .86 †  
+
+> ±0.31
+
+68 .25 †  
+
+> ±0.21
+
+78 .46 †  
+
+> ±0.13
+
+62 .88 †  
+
+> ±0.30
+
+55 .42 †  
+
+> ±0.34
+
+24 .22 †  
+
+> ±0.12
+
+38 .10 † 
+
+> ±0.17
+
+FracMix 57 .10 †  
+
+> ±0.29
+
+69 .10 †  
+
+> ±0.19
+
+79 .08 †  
+
+> ±0.12
+
+63 .40 †  
+
+> ±0.28
+
+55 .88 †  
+
+> ±0.32
+
+23 .92 †  
+
+> ±0.11
+
+37 .94 † 
+
+> ±0.16
+
+InstructMixup 57 .65 ± 0.25 69 .56 ± 0.17 79 .54 ± 0.10 63 .93 ± 0.27 56 .23 ± 0.31 23 .64 ± 0.10 37 .72 ± 0.14 CAM for 
+
+> Bank Swallow
+> CAM for
+> Cliff Swallow
+> CAM for
+> Common Shallow
+
+Input Mixup SaliencyMix CutMix Co -Mixup GuidedMixup Ours PuzzleMix 
+
+Fig. 6. Grad-CAM [86] visualization on un-augmented and augmented images [87], [62], [28]. InstructMixup effectively identifies target objects even under severe occlusion or mixing scenarios. 
+
+considered: Saliency (A+B), which mixes a target image B
+
+under guidance from the saliency map of a source image A,and Saliency S 2 (A+A), which derives self-saliency from a single image. Both variants beat the baseline, yet the fractal-driven AdaFrac contributes a larger share of the improvement, and combining everything in InstructMixup performs best. The reason, we believe, is that the class-defining evidence lives in the salient regions: placing self-similar fractal patterns exactly there compels the network to build features that survive high-frequency perturbation precisely where robustness matters, instead of spending the regularization budget on uninformative background. Panel D of Table VI breaks down the wall-clock cost of producing the augmented CIFAR-100 images per pipeline component. Generating the complete augmented set takes 2.833 minutes in total, against 198 minutes of ResNet-50 training, so augmentation accounts for just 1.43% of the end-to-end budget. 
+
+Hyperparameters Ablation. Figure 5 studies the four tunable quantities of InstructMixup on CIFAR-100 with 
+
+ResNet18 trained for 200 epochs: the saliency threshold t
+
+(the lower bound of τ in Eq. 3), the fractal-blend strength 
+
+λ (denoted β in Eq. 7), the fractal library size |Z| , and the rotation range ±φ of the salient stream (Eq. 8). Accuracy peaks at 82.94% with t = 0 .5 (Figure 5(a)) and at λ = 0 .20 
+
+(Figure 5(b)); pushing λ to 0.50 trims accuracy to 82.42%, and raising t to 0.9 produces a comparable decline, indicating that either parameter alone can bound the attainable performance and that neither dominates the other. Figure 5(c) shows that accuracy grows with the diversity of the fractal library and saturates around |Z| = 500 , so the method does not depend on careful library curation. Finally, Figure 5(d) exhibits the same rise-then-fall pattern predicted by our analysis for structured transforms: moderate rotation ( ±30 ◦) supplies useful view-point variation, whereas aggressive rotation ( ±60 ◦) distorts the salient content and drops accuracy to 82.15%. Taken together, the four sweeps show that InstructMixup is not delicately tuned: every configuration examined remains within roughly 0.8% of the peak and above most competing methods in Table IV, so practitioners can adopt the default setting (t = 0 .5, λ = 0 .20 , |Z| = 500 , φ = ±30 ◦) without a per-dataset search. 
+
+Object Localization. To inspect where trained models look, we compare class activation maps across InstructMixup and SOTA methods. In Figure 6, the CAM produced under In-structMixup forms a single connected, strongly activated blob sitting squarely on the object, whereas competing methods IEEE TRANSACTIONS ON CIRCUITS AND SYSTEMS FOR VIDEO TECHNOLOGY 12 
+
+TABLE VI ABLATION AND EFFICIENCY ANALYSIS OF THE PROPOSED 
+
+INSTRUCT MIXUP DESIGN . P ANELS A–C REPORT TOP -1 ACCURACY (%) 
+
+> FOR SALIENCY
+
+/FRACTAL (F RAC ) DESIGN CHOICES AND LOCAL VERSUS 
+
+GLOBAL FRACTAL (GF) INJECTION . P ANEL D REPORTS THE AUGMENTED -IMAGE GENERATION TIME ON CIFAR-100. Study Dataset / Backbone Variant Metric / Value                                                                                       
+
+> A. Effect of saliency and Frac mixing
+> Saliency vs. Fractal CIFAR-100 / ResNet-18 Baseline 78 .04
+> Saliency vs. Fractal CIFAR-100 / ResNet-18 Saliency (A+B) 79 .12
+> Saliency vs. Fractal CIFAR-100 / ResNet-18 Saliency S2(A+A) 79 .54
+> Saliency vs. Fractal CIFAR-100 / ResNet-18 AdaFrac 81 .73
+> Saliency vs. Fractal CIFAR-100 / ResNet-18 InstructMixup 82 .94
+> Saliency vs. Fractal CIFAR-100 / ResNeXt-50 Baseline 81 .09
+> Saliency vs. Fractal CIFAR-100 / ResNeXt-50 Saliency (A+B) 81 .53
+> Saliency vs. Fractal CIFAR-100 / ResNeXt-50 Saliency S2(A+A) 81 .92
+> Saliency vs. Fractal CIFAR-100 / ResNeXt-50 AdaFrac 82 .22
+> Saliency vs. Fractal CIFAR-100 / ResNeXt-50 InstructMixup 85 .21
+> B. Effect of local versus GF injection
+> AdaFrac Components Cars / ResNet-50 Baseline 85 .52
+> AdaFrac Components Cars / ResNet-50 InstructMixup w/o SAL 92 .07
+> AdaFrac Components Cars / ResNet-50 InstructMixup with GF 92 .47
+> AdaFrac Components Cars / ResNet-50 InstructMixup with LF 92 .98
+> C. Comparison with global fractal augmentation
+> GF Comparison Cars / ResNet-50 Baseline 85 .52
+> GF Comparison Cars / ResNet-50 GF, ˜Ii=Ii+λF 86 .73
+> GF Comparison Cars / ResNet-50 MixUp [62] 88 .14
+> GF Comparison Cars / ResNet-50 MixUp + global fractal [35] 54 .25
+> GF Comparison Cars / ResNet-50 InstructMixup with LF 92 .98
+> D. Augmented-image generation time on CIFAR-100
+> Efficiency CIFAR-100 Saliency detector 0.50 min Efficiency CIFAR-100 Transformations 0.01 min Efficiency CIFAR-100 Fractal blending 1.00 min Efficiency CIFAR-100 Multi-mode mixing 1.75 min Efficiency CIFAR-100 Total 2.83 min
+
+scatter activation across the scene evidence of better object retention and sharper attention boundaries. 
+
+Feature Representation. Finally, Figure 7 contrasts the embedding spaces learned under InstructMixup and under the 27 competing augmentation strategies that we reproduced on CIFAR-10. In the t-SNE [88] projections, samples sharing a label collapse into tight groups under our method, and the groups are separated by visibly wider margins than those of competing approaches a signature of features that encode class identity rather than incidental appearance. InstructMixup also strengthens recognition when the object is only partially visible. In Figure 6, the input is degraded by occluding image regions or mixing in content from a second image (leftmost columns), and the resulting class activation maps are shown for a model trained with each augmentation strategy. VIII. C ONCLUSION 
+
+This paper presented InstructMixup, a data augmentation method built around two cooperating mechanisms. The S2
+
+stage uses saliency to select patches at multiple scales from an image, refines them with instruction-guided generative edits, applies distinct spatial transformations, and folds them back into the very image they came from. The AdaFrac stage then infuses those salient patches with self-similar fractal structure. On top of both, a high-level mixing scheme samples among several low-level mixing modes per training instance to broaden augmentation diversity. Evaluations spanning coarse and fine-grained recognition, corruption robustness, learning from scarce data, and transfer settings show consistent ad-vantages over current state-of-the-art augmentation methods. Where prior work fixes a single mixing recipe, InstructMixup asks ‘how many ways to mix?’ and answers by sampling PuzzleMix Co -Mixup Guided -SR Guided -AP Ours     
+
+> Baseline Mixup CutMix SaliencyMix SnapMix
+
+Fig. 7. 2-D t-SNE embeddings of CIFAR-10 features under each augmenta-tion method; color encodes the ground-truth class (airplane, automobile, bird, cat, deer, dog, frog, horse, ship, truck). Ours (last panel) yields the tightest, best-separated clusters. 
+
+among several. The present design selects modes uniformly at random, so instance- or task-specific structure is not exploited; a learned gating or selection mechanism could exploit it, at the price of extra augmentation cost. Similarly, all mixing param-eters are hand-set rather than optimized, a choice that favors reproducibility over adaptability, and the method operates on single-modality visual data, leaving multimodal extensions to future work. REFERENCES [1] G. Jiang, P. Zhu, Y. Wang, and Q. Hu, “Openmix+: Revisiting data augmentation for open set recognition,” IEEE Transactions on Circuits and Systems for Video Technology , vol. 33, no. 11, pp. 6777–6787, 2023. [2] H. Zhang, M. Cisse, Y. N. Dauphin, and D. Lopez-Paz, “mixup: Beyond empirical risk minimization,” in International Conference on Learning Representations (ICLR) , 2018. [3] C. Cao, F. Zhou, Y. Dai, J. Wang, and K. Zhang, “A survey of mix-based data augmentation: Taxonomy, methods, applications, and explainability,” ACM Computing Surveys , vol. 57, no. 2, pp. 1–38, 2024. [4] L. Carratino, M. Ciss´ e, R. Jenatton, and J.-P. Vert, “On mixup regular-ization,” Journal of Machine Learning Research , vol. 23, no. 325, pp. 1–31, 2022. [5] Z.-Y. Mi and Y.-B. Yang, “Dynamic-aware enhanced data augmentation for light field super-resolution,” IEEE Transactions on Circuits and Systems for Video Technology , vol. 36, no. 6, pp. 8431–8448, 2026. [6] M. Kang and S. Kim, “Guidedmixup: an efficient mixup strategy guided by saliency maps,” in Proceedings of the AAAI Conference on Artificial Intelligence , vol. 37, no. 1, 2023, pp. 1096–1104. [7] J.-H. Kim, W. Choo, and H. O. Song, “Puzzle mix: Exploiting saliency and local statistics for optimal mixup,” in International Conference on Machine Learning . PMLR, 2020, pp. 5275–5285. [8] J.-H. Kim, J. Park, and S. Hwang, “Co-mixup: Saliency-guided joint mixup with supermodular diversity,” in Advances in Neural Information Processing Systems (NeurIPS) , 2021. [9] R. Takahashi, T. Matsubara, and K. Uehara, “Data augmentation using random image cropping and patching for deep CNNs,” IEEE Transac-tions on Circuits and Systems for Video Technology , vol. 30, no. 9, pp. 2917–2931, 2020. [10] Y. Wang, G. Huang, S. Song, X. Pan, Y. Xia, and C. Wu, “Regularizing deep networks with semantic data augmentation,” IEEE Transactions on Pattern Analysis and Machine Intelligence , vol. 44, no. 7, pp. 3733– 3748, 2022. [11] H. Xiao, W. Zheng, Z. Zhu, J. Zhou, and J. Lu, “Token-label alignment for vision transformers,” in Proceedings of the IEEE/CVF international conference on computer vision , 2023, pp. 5495–5504. [12] Z. Wang, L. Wei, T. Wang, H. Chen, Y. Hao, X. Wang, X. He, and Q. Tian, “Enhance image classification via inter-class image mixup with diffusion model,” in Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , 2024, pp. 17 223–17 233. [13] Y. Zhang, B. Kang, B. Hooi, S. Yan, and J. Feng, “Deep long-tailed learning: A survey,” IEEE Transactions on Pattern Analysis and Machine Intelligence , vol. 45, no. 9, pp. 10 795–10 816, 2023. IEEE TRANSACTIONS ON CIRCUITS AND SYSTEMS FOR VIDEO TECHNOLOGY 13 
+
+[14] F. Pinto, H. Yang, S. N. Lim, P. Torr, and P. Dokania, “Using mixup as a regularizer can surprisingly improve accuracy & out-of-distribution ro-bustness,” Advances in Neural Information Processing Systems , vol. 35, pp. 14 608–14 622, 2022. [15] X. Jin, H. Zhu, S. Li, Z. Wang, Z. Liu, C. Yu, H. Qin, and S. Z. Li, “A survey on mixup augmentations and beyond,” arXiv preprint arXiv:2409.05202 , 2024. [16] K. Zhou, Z. Liu, Y. Qiao, T. Xiang, and C. C. Loy, “Domain general-ization: A survey,” IEEE Transactions on Pattern Analysis and Machine Intelligence , vol. 45, no. 4, pp. 4396–4415, 2023. [17] Z. Yu, J. Li, Z. Du, L. Zhu, and H. T. Shen, “A comprehensive survey on source-free domain adaptation,” IEEE Transactions on Pattern Analysis and Machine Intelligence , vol. 46, no. 8, 2024. [18] Y. Pu, Y. Han, Y. Wang, J. Feng, C. Deng, and G. Huang, “Fine-grained recognition with learnable semantic data augmentation,” IEEE Transactions on Image Processing , vol. 33, 2024. [19] F. Dornaika and D. Sun, “Lgcoamix: Local and global context-and-object-part-aware superpixel-based data augmentation for deep visual recognition,” IEEE Transactions on Image Processing , 2023. [20] C. Xu, C. Liu, X. Sun, S. Yang, Y. Wang, C. Wang, and Y. Fu, “PatchMix augmentation to identify causal features in few-shot learning,” IEEE Transactions on Pattern Analysis and Machine Intelligence , vol. 45, no. 6, 2023. [21] Z. Huang, X. Bao, N. Zhang, Q. Zhang, X. Tu, B. Wu, and X. Yang, “Ipmix: Label-preserving data augmentation method for training robust classifiers,” Advances in Neural Information Processing Systems , vol. 36, pp. 63 660–63 673, 2023. [22] J. Han, L. Petersson, H. Li, and I. Reid, “Cropmix: Sampling a rich input distribution via multi-scale cropping,” arXiv preprint arXiv:2205.15955 ,2022. [23] A. Y. Parast, B. Azam, and N. Akhtar, “Ddb: Diffusion driven balancing to address spurious correlations,” in Proceedings of the IEEE/CVF International Conference on Computer Vision , 2025, pp. 17 526–17 535. [24] A. Y. Parast, P. Hosseini, H. Asadollahzadeh, A. S. Moakhar, B. Azam, S. Feizi, and N. Akhtar, “Ghost: Hallucination-inducing image genera-tion for multimodal llms,” arXiv preprint arXiv:2509.25178 , 2025. [25] D. Hendrycks, N. Mu, E. D. Cubuk, B. Zoph, J. Gilmer, and B. Lak-shminarayanan, “Augmix: A simple data processing method to improve robustness and uncertainty,” in International Conference on Learning Representations (ICLR) , 2020. [26] V. Verma, A. Lamb, C. Beckham, A. Najafi, I. Mitliagkas, D. Lopez-Paz, and Y. Bengio, “Manifold mixup: Better representations by interpolat-ing hidden states,” in International Conference on Machine Learning .PMLR, 2019, pp. 6438–6447. [27] X. Jin, S. Li, S. Jian, K. Yu, and H. Wang, “Mergemix: A unified augmentation paradigm for visual and multi-modal understanding,” 
+
+arXiv preprint arXiv:2510.23479 , 2025. [28] S. Yun, D. Han, S. J. Oh, S. Chun, J. Choe, and Y. Yoo, “Cutmix: Reg-ularization strategy to train strong classifiers with localizable features,” in International Conference on Computer Vision (ICCV) , 2019. [29] S. Venkataramanan, E. Kijak, L. Amsaleg, and Y. Avrithis, “Alignmixup: Improving representations by interpolating aligned features,” in Pro-ceedings of the IEEE/CVF conference on computer vision and pattern recognition , 2022, pp. 19 174–19 183. [30] J. Qin, J. Fang, Q. Zhang, W. Liu, X. Wang, and X. Wang, “Resizemix: Mixing data with preserved object information and true labels,” arXiv preprint arXiv:2012.11101 , 2020. [31] A. S. Uddin, M. S. Monira, W. Shin, T. Chung, and S.-H. Bae, “Saliencymix: A saliency guided data augmentation strategy for better regularization,” in International Conference on Learning Representa-tions , 2020. [32] Z. Liu, S. Li, D. Wu, Z. Liu, Z. Chen, L. Wu, and S. Z. Li, “Automix: Unveiling the power of mixup for stronger classifiers,” in European Conference on Computer Vision . Springer, 2022, pp. 441–458. [33] H. Qin, X. Jin, Y. Jiang, M. El-Yacoubi, and X. Gao, “Adversarial automixup,” in The Twelfth International Conference on Learning Rep-resentations , 2024, pp. OpenReview, Spotlight. [34] K. Han, Y. Wang, H. Chen, X. Chen, J. Guo, Z. Liu, Y. Tang, A. Xiao, C. Xu, Y. Xu, Z. Yang, Y. Zhang, and D. Tao, “A survey on vision transformer,” IEEE Transactions on Pattern Analysis and Machine Intelligence , vol. 45, no. 1, pp. 87–110, 2023. [35] K. Islam, M. Z. Zaheer, A. Mahmood, and K. Nandakumar, “Diffusemix: Label-preserving data augmentation with diffusion models,” in Proceed-ings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , 2024, pp. 27 621–27 630. [36] D. Hendrycks, A. Zou, M. Mazeika, L. Tang, B. Li, D. Song, and J. Steinhardt, “Pixmix: Dreamlike pictures comprehensively improve safety measures,” in Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , 2022, pp. 16 783–16 792. [37] K. Islam, A. Mahmood, X. Jin, and N. Akhtar, “ ˆS2-fracmix: Label-preserving self-saliency mixup augmentation,” arXiv preprint arXiv:2606.25784 , 2026. [38] J.-H. Lee, M. Z. Zaheer, M. Astrid, and S.-I. Lee, “Smoothmix: a simple yet effective data augmentation to train robust classifiers,” in 
+
+Proceedings of the IEEE/CVF conference on computer vision and pattern recognition workshops , 2020, pp. 756–757. [39] L. Yang, X. Li, B. Zhao, R. Song, and J. Yang, “Recursivemix: Mixed learning with history,” Advances in Neural Information Processing Systems , vol. 35, pp. 8427–8440, 2022. [40] M. Hong, J. Choi, and G. Kim, “Stylemix: Separating content and style for enhanced data augmentation,” in Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , 2021, pp. 14 862–14 870. [41] E. Harris, A. Marcu, M. Painter, M. Niranjan, A. Pr¨ ugel-Bennett, and J. Hare, “Fmix: Enhancing mixed sample data augmentation,” arXiv preprint arXiv:2002.12047 , 2020. [42] K. Baek, D. Bang, and H. Shim, “Gridmix: Strong regularization through local context mapping,” Pattern Recognition , vol. 109, p. 107594, 2021. [43] S. Huang, X. Wang, and D. Tao, “Snapmix: Semantically proportional mixing for augmenting fine-grained data,” in Proceedings of the AAAI Conference on Artificial Intelligence , 2021. [44] J. Liu, B. Liu, H. Zhou, H. Li, and Y. Liu, “Tokenmix: Rethinking image mixing for data augmentation in vision transformers,” in European Conference on Computer Vision . Springer, 2022, pp. 455–471. [45] Q. Zhao, Y. Huang, W. Hu, F. Zhang, and J. Liu, “Mixpro: Data augmentation with maskmix and progressive attention labeling for vision transformer,” in International Conference on Learning Representations ,2023. [46] Z. Liu, S. Li, G. Wang, L. Wu, C. Tan, and S. Z. Li, “Harnessing hard mixed samples with decoupled regularizer,” Advances in Neural Information Processing Systems , vol. 36, 2024. [47] S. Vidivelli, S. Sathiya Devi, and G. Parthasarathy, “Fractal features for texture analysıs,” in International Conference on Data Science and Communication . Springer, 2023, pp. 247–257. [48] S. Yang, J. Li, T. Zhang, J. Zhao, and F. Shen, “Advmask: A sparse adversarial attack-based data augmentation method for image classifica-tion,” Pattern Recognition , p. 109847, 2023. [49] D. Walawalkar, Z. Shen, Z. Liu, and M. Savvides, “Attentive cutmix: An enhanced data augmentation approach for deep learning based image classification,” in ICASSP 2020-2020 IEEE International Conference on Acoustics, Speech and Signal Processing (ICASSP) . IEEE, 2020, pp. 3642–3646. [50] S. Li, Z. Liu, Z. Wang, D. Wu, Z. Liu, and S. Z. Li, “Boosting dis-criminative visual representation learning with scenario-agnostic mixup,” 
+
+arXiv preprint arXiv:2111.15454 , 2021. [51] A. Dabouei, S. Soleymani, F. Taherkhani, and N. M. Nasrabadi, “Su-permix: Supervising the mixing data augmentation,” in Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition ,2021, pp. 13 794–13 803. [52] J. Park, J. Y. Yang, J. Shin, S. J. Hwang, and E. Yang, “Saliency grafting: Innocuous attribution-guided mixup with calibrated label mixing,” arXiv preprint arXiv:2112.08796 , 2021. [53] T. Hong, Y. Wang, X. Sun, F. Lian, Z. Kang, and J. Ma, “Gradsalmix: Gradient saliency-based mix for image data augmentation,” in 2023 IEEE International Conference on Multimedia and Expo (ICME) . IEEE, 2023, pp. 1799–1804. [54] J. Choi, C. Lee, D. Lee, and H. Jung, “Salfmix: a novel single image-based data augmentation technique using a saliency map,” Sensors ,vol. 21, no. 24, p. 8444, 2021. [55] K. Islam and N. Akhtar, “Context-guided responsible data augmentation with diffusion models,” in ICLR Workshop on Navigating and Address-ing Data Problems for Foundation Models , 2025. [56] B. Trabucco, K. Doherty, M. Gurinas, and R. Salakhutdinov, “Effective data augmentation with diffusion models,” in The Twelfth International Conference on Learning Representations , 2024. [57] Y. Wang and L. Chen, “Improving diffusion-based data augmentation with inversion spherical interpolation,” arXiv preprint arXiv:2408.16266 ,2024. [58] H. Fang, B. Han, S. Zhang, S. Zhou, C. Hu, and W.-M. Ye, “Data augmentation for object detection via controllable diffusion models,” in 
+
+Proceedings of the IEEE/CVF Winter Conference on Applications of Computer Vision , 2024, pp. 1257–1266. IEEE TRANSACTIONS ON CIRCUITS AND SYSTEMS FOR VIDEO TECHNOLOGY 14 
+
+[59] Z. Zang, H. Luo, K. Wang, P. Zhang, F. Wang, S. Z. Li, and Y. You, “Diffaug: Enhance unsupervised contrastive learning with domain-knowledge-free diffusion-based data augmentation,” in Forty-first Inter-national Conference on Machine Learning , 2024. [60] K. Islam, M. Z. Zaheer, A. Mahmood, K. Nandakumar, and N. Akhtar, “Genmix: Effective data augmentation with generative diffusion model image editing,” arXiv preprint arXiv:2412.02366 , 2024. [61] X. Hou and L. Zhang, “Saliency detection: A spectral residual approach,” in 2007 IEEE Conference on computer vision and pattern recognition .Ieee, 2007, pp. 1–8. [62] H. Guo, Y. Mao, and R. Zhang, “Mixup as locally linear out-of-manifold regularization,” in Proceedings of the AAAI Conference on Artificial Intelligence , vol. 33, 2019, pp. 3714–3722. [63] O. Chapelle, J. Weston, L. Bottou, and V. Vapnik, “Vicinal risk mini-mization,” Advances in neural information processing systems , vol. 13, 2000. [64] A. Krizhevsky, “Learning multiple layers of features from tiny images,” 
+
+Master’s thesis, University of Tront , 2009. [65] P. Chrabaszcz, I. Loshchilov, and F. Hutter, “A downsampled variant of imagenet as an alternative to the cifar datasets,” arXiv preprint arXiv:1707.08819 , 2017. [66] J. Deng, W. Dong, R. Socher, L. Li, K. Li, and F. Li, “Imagenet: A large-scale hierarchical image database,” in IEEE Conference on Computer Vision and Pattern Recognition , 2009. [67] C. Wah, S. Branson, P. Welinder, P. Perona, and S. Belongie, “The Caltech-UCSD Birds-200-2011 Dataset,” California Institute of Tech-nology, Tech. Rep. CNS-TR-2011-001, 2011. [68] S. Maji, E. Rahtu, J. Kannala, M. Blaschko, and A. Vedaldi, “Fine-grained visual classification of aircraft,” arXiv preprint arXiv:1306.5151 ,2013. [69] J. Krause, M. Stark, J. Deng, and L. Fei-Fei, “3d object representations for fine-grained categorization,” in 4th International IEEE Workshop on 3D Representation and Recognition (3dRR-13) , Sydney, Australia, 2013. [70] M.-E. Nilsback and A. Zisserman, “Automated flower classification over a large number of classes,” in 2008 Sixth Indian Conference on Computer Vision, Graphics & Image Processing . IEEE, 2008, pp. 722–729. [71] M. Everingham, L. Van Gool, C. K. Williams, J. Winn, and A. Zisser-man, “The pascal visual object classes (voc) challenge,” International journal of computer vision , vol. 88, pp. 303–338, 2010. [72] D. Hendrycks and T. Dietterich, “Benchmarking neural network ro-bustness to common corruptions and perturbations,” Proceedings of the International Conference on Learning Representations , 2019. [73] K. He, X. Zhang, S. Ren, and J. Sun, “Deep residual learning for image recognition,” in Proceedings of the IEEE conference on computer vision and pattern recognition , 2016, pp. 770–778. [74] S. Xie, R. Girshick, P. Doll´ ar, Z. Tu, and K. He, “Aggregated residual transformations for deep neural networks,” in Proceedings of the IEEE conference on computer vision and pattern recognition , 2017, pp. 1492– 1500. [75] Z. Liu, Y. Lin, Y. Cao, H. Hu, Y. Wei, Z. Zhang, S. Lin, and B. Guo, “Swin transformer: Hierarchical vision transformer using shifted windows,” in Proceedings of the IEEE/CVF international conference on computer vision , 2021, pp. 10 012–10 022. [76] Z. Liu, H. Mao, C.-Y. Wu, C. Feichtenhofer, T. Darrell, and S. Xie, “A convnet for the 2020s,” in Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , 2022, pp. 11 976–11 986. [77] X. Chen, H. Fan, R. Girshick, and K. He, “Improved baselines with mo-mentum contrastive learning,” arXiv preprint arXiv:2003.04297 , 2020. [78] X. Chen and K. He, “Exploring simple siamese representation learning,” in Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , 2021, pp. 15 750–15 758. [79] S. Li, Z. Wang, Z. Liu, D. Wu, C. Tan, W. Jin, and S. Z. Li, “Openmixup: A comprehensive mixup benchmark for visual classification,” arXiv preprint arXiv:2209.04851 , 2022. [80] J. Han, P. Fang, W. Li, J. Hong, M. A. Armin, I. Reid, L. Petersson, and H. Li, “You only cut once: Boosting data augmentation with a single cut,” in International Conference on Machine Learning . PMLR, 2022, pp. 8196–8212. [81] W. Liu, D. Anguelov, D. Erhan, C. Szegedy, S. Reed, C.-Y. Fu, and A. C. Berg, “Ssd: Single shot multibox detector,” in Computer Vision– ECCV 2016: 14th European Conference, Amsterdam, The Netherlands, October 11–14, 2016, Proceedings, Part I 14 . Springer, 2016, pp. 21–37. [82] R. Girshick, “Fast r-cnn,” in Proceedings of the IEEE international conference on computer vision , 2015, pp. 1440–1448. [83] S. Zagoruyko and N. Komodakis, “Wide residual networks,” in British Machine Vision Conference 2016 . British Machine Vision Association, 2016. [84] K. He, X. Zhang, S. Ren, and J. Sun, “Identity mappings in deep residual networks,” in European conference on computer vision . Springer, 2016, pp. 630–645. [85] X. Liu, F. Shen, J. Zhao, and C. Nie, “Randomix: A mixed sample data augmentation method with multiple mixed modes,” Multimedia Tools and Applications , vol. 84, no. 8, pp. 4343–4359, 2025. [86] R. R. Selvaraju, M. Cogswell, A. Das, R. Vedantam, D. Parikh, and D. Batra, “Grad-cam: visual explanations from deep networks via gradient-based localization,” International journal of computer vision ,vol. 128, pp. 336–359, 2020. [87] T. DeVries and G. W. Taylor, “Improved regularization of convolutional neural networks with cutout,” arXiv preprint arXiv:1708.04552 , 2017. [88] L. Van der Maaten and G. Hinton, “Visualizing data using t-sne.” Journal of machine learning research , vol. 9, no. 11, 2008.

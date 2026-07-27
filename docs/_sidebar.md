@@ -1,6 +1,9 @@
 * <a class="dpr-sidebar-root-link" href="#/">首页</a>
 * <a class="dpr-sidebar-root-link dpr-sidebar-noactive-link" href="javascript:void(0)" data-dpr-hash="#/tutorial/README">使用教程</a>
 * Daily Papers
+  * 2026-07-27 <!--dpr-date:20260727-->
+    * 精读区
+      * <a class="dpr-sidebar-item-link dpr-sidebar-item-structured" href="#/202607/27/2607.21904v1-diffusion-models-in-medical-image-inpainting-challenges-solution-taxonomy-and-future-directions" data-sidebar-item="{&quot;title&quot;: &quot;Diffusion Models in Medical Image Inpainting: Challenges, Solution Taxonomy, and Future Directions&quot;, &quot;link&quot;: &quot;https://arxiv.org/abs/2607.21904v1-diffusion-models-in-medical-image-inpainting-challenges-solution-taxonomy-and-future-directions&quot;, &quot;score&quot;: &quot;9.0&quot;, &quot;tags&quot;: [{&quot;kind&quot;: &quot;query&quot;, &quot;label&quot;: &quot;q4&quot;}], &quot;evidence&quot;: &quot;基于扩散生成模型的医学图像修复综述&quot;}">Diffusion Models in Medical Image Inpainting: Challenges, Solution Taxonomy, and Future Directions</a>
   * 2026-07-26 <!--dpr-date:20260726-->
     * 速读区
       * <a class="dpr-sidebar-item-link dpr-sidebar-item-structured" href="#/202607/26/2607.16805v1-scene-sam3d-multi-view-scene-asset-generation-without-fine-tuning" data-sidebar-item="{&quot;title&quot;: &quot;Scene-SAM3D: Multi-View Scene Asset Generation Without Fine-Tuning&quot;, &quot;link&quot;: &quot;https://arxiv.org/abs/2607.16805v1-scene-sam3d-multi-view-scene-asset-generation-without-fine-tuning&quot;, &quot;score&quot;: &quot;6.0&quot;, &quot;tags&quot;: [{&quot;kind&quot;: &quot;query&quot;, &quot;label&quot;: &quot;q1&quot;}], &quot;evidence&quot;: &quot;多视图场景资产生成与遮挡处理&quot;}">Scene-SAM3D: Multi-View Scene Asset Generation Without Fine-Tuning</a>

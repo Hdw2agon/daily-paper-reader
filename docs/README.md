@@ -6,34 +6,29 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-31
-- 运行时间：2026-07-31 21:23:37 UTC
+- 最新运行日期：2026-08-01
+- 运行时间：2026-08-01 20:48:55 UTC
 - 运行状态：成功
-- 本次总论文数：4
-- 精读区：1
-- 速读区：3
+- 本次总论文数：2
+- 精读区：0
+- 速读区：2
 
 ### 今日简报（AI）
-今日聚焦全能型图像修复与重建稳定性，深入探讨如何在复杂退化中精准平衡信息去留。
-重点推荐通过双重歧义矫正实现全能修复的新架构，以及利用收缩锚定显著提升深度重建算子稳定性的技术突破。
-建议关注多任务图像处理中的信息保真策略，并尝试将稳定性
-- 详情：[/202607/31/README](/202607/31/README)
+今日聚焦视频对象插入与人脸超分辨率识别，探索视觉增强与层建模新技术。
+重点关注显式层建模在视频编辑中的应用，以及通过特征聚合提升人脸重建与跨场景识别的鲁棒性。
+建议关注视频合成与人脸识别交叉领域的开发者，深入了解层分解与特征融合的工程实践。
+- 详情：[/202608/01/README](/202608/01/README)
 
 ### 精读区论文标签
-1. [What to Remove, What to Preserve: Dual-Ambiguity Rectification for All-in-One Image Restoration](/202607/31/2607.28526v1-what-to-remove-what-to-preserve-dual-ambiguity-rectification-for-all-in-one-image-restoration)  
-   标签：评分：8.0/10、query:profile-1
-   evidence：处理多种退化的通用图像修复框架
+- 本次无精读推荐。
 
 ### 速读区论文标签
-1. [Stabilizing Deep Reconstruction Operators with Contractive Anchoring](/202607/31/2607.23341v2-stabilizing-deep-reconstruction-operators-with-contractive-anchoring)  
-   标签：评分：7.0/10、query:q7
-   evidence：稳定用于图像修复任务的深度重建算子
-2. [Closing the Loop: Training-Free Revisit Consistency for Autoregressive Generative Rendering](/202607/31/2607.21848v1-closing-the-loop-training-free-revisit-consistency-for-autoregressive-generative-rendering)  
+1. [Explicit Layer Modeling for Video Object Insertion and Layer Decomposition](/202608/01/2607.25802v2-explicit-layer-modeling-for-video-object-insertion-and-layer-decomposition)  
    标签：评分：6.0/10、query:q4
-   evidence：无需训练的生成式渲染与外观一致性
-3. [CoRE-UIR: Prior-guided common and residual experts for efficient all-in-one remote sensing image restoration](/202607/31/2607.27898v1-core-uir-prior-guided-common-and-residual-experts-for-efficient-all-in-one-remote-sensing-image-restoration)  
+   evidence：视频对象插入与图层分解
+2. [Collaborative Feature Aggregation for Face Super-Resolution and Robust Re-Identification](/202608/01/2607.28130v1-collaborative-feature-aggregation-for-face-super-resolution-and-robust-re-identification)  
    标签：评分：6.0/10、query:q7
-   evidence：全能遥感图像修复
+   evidence：人脸超分辨率与修复
 
 
 <div class="dpr-home-promo-card">

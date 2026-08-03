@@ -1,0 +1,442 @@
+Title: ESRVS: Extreme Semi-Supervised Retinal Vessel Segmentation with a Single Annotated Image
+
+URL Source: https://arxiv.org/pdf/2607.24453v1
+
+Published Time: Tue, 28 Jul 2026 02:02:54 GMT
+
+Number of Pages: 19
+
+Markdown Content:
+# ESRVS: Extreme Semi-Supervised Retinal Vessel Segmentation with a Single Annotated Image 
+
+Mingzhi Xu 1 and Yizhe Zhang 1⋆
+
+> 1
+
+Nanjing University of Science and Technology, Nanjing, China 
+
+zhangyizhe@njust.edu.cn 
+
+Abstract. Learning from minimal human supervision is a long-standing goal in medical image analysis, where dense expert annotations are costly. We study retinal vessel segmentation in an extreme semi-supervised setting with one annotated image and a pool of unlabeled images. We propose ESRVS, which selects a representative reference image for manual annotation and transfers vessel cues using target-domain-adapted DINOv3 features. ESRVS constructs a multi-granular vessel prototype, combines prototype-similarity maps with a physics-inspired prior to generate initial pseudo-labels, and refines the transferred supervision through weighted pseudo-label training and adversarial refinement. Across eight public datasets, ESRVS achieves the best Dice and clDice on six datasets, and the best HD95 on all eight datasets among the compared semi-supervised methods, although those methods use 10–20% labeled data. With Mask2Former, ESRVS retains on average 93.7% of fully supervised Dice and 95.1% of fully supervised clDice. These results demonstrate the potential of foundation-model label propagation for highly label-efficient retinal vessel segmentation. Code is available at https://github.com/ IAANNH/ESRVS .
+
+Keywords: Semi-supervised learning · Retinal vessel segmentation ·
+
+Foundation models · Pseudo-label propagation · One-shot supervision. 
+
+## 1 Introduction 
+
+Retinal vessels provide a critical window into both ocular and systemic health, serving as indispensable biomarkers for diagnosing conditions such as diabetic retinopathy and glaucoma [ 16 ]. Consequently, the accurate segmentation of these vascular networks is essential for modern AI-assisted ophthalmological diagno-sis [ 26 ]. However, manual delineation of retinal microvasculature is notoriously labor-intensive, requiring specialized clinical expertise. Furthermore, severe inter-and intra-observer variability can compromise the consistency of subsequent diagnoses. While recent advances in deep learning have achieved near-expert segmentation performance [ 40 ], these models heavily rely on fully supervised training with densely annotated datasets [ 47 ]. The acquisition of such large-scale,  
+
+> ⋆
+
+Corresponding author arXiv:2607.24453v1 [cs.CV] 27 Jul 2026 2 Mingzhi Xu and Yizhe Zhang 
+
+pixel-perfect medical data is prohibitively expensive and time-consuming, driving the urgent need for label-efficient segmentation paradigms. Semi-supervised learning leverages a small set of labeled images alongside a larger pool of unlabeled data [ 18 ]. SSL methods [ 18 ] reduce annotation depen-dency by enforcing consistency or generating pseudo-labels on unlabeled images; yet, they typically still require a non-trivial proportion of labeled data (e.g., 10% to 20%) to prevent confirmation bias. Meanwhile, few-shot learning (FSL) approaches [ 2] attempt to generalize from minimal examples, but often rely on complex meta-training episodes and struggle to capture the intricate, continuous topologies of dense vascular networks. In parallel, large-scale foundation models, such as Vision Transformers (ViTs)[ 8]and recent DINO variants[ 4,22 ,31 ], have demonstrated extraordinary zero-shot feature extraction capabilities. Unfortunately, their direct application in medical imaging is severely hindered by a significant domain gap: features learned from natural scenes often fail to localize the delicate and fragile structures of retinal vessels. Although some recent techniques attempt to synthesize pseudo-labels using AI-based priors [ 44 ], the generated labels frequently suffer from topological fragmentation and severe background noise, severely degrading the performance of the downstream segmentation models. Driven by the goal of extreme annotation efficiency, recent studies have explored one-label semi-supervised medical image segmentation [ 43 ]. However, retinal vessel segmentation remains challenging under such limited supervision due to the complex vascular topology, diverse vessel morphology, and the need to preserve fine structures. To address this challenge, we propose ESRVS (Extreme Semi-supervised Retinal Vessel Segmentation) , a framework for label-efficient retinal vessel segmentation (see Figure 1). ESRVS leverages a single annotated reference image and its corresponding label, along with a large pool of unlabeled images. Multi-granular features are extracted from the labeled pair using a DINOv3 foundation model enhanced with task-specific self-supervision. These features are then refined with adaptive physics-inspired priors to generate pseudo-labels, which guide a shape-aware network in correcting topological errors. Our main contributions are threefold: (1) We propose ESRVS , a retinal vessel segmentation framework that pushes label efficiency to the extreme by learning from exactly one annotated image, bridging the gap to fully supervised performance. (2) We design a novel propagation mechanism that integrates DINOv3-based multi-granular features with physics-inspired priors. This generates high-fidelity pseudo-labels from the single reference to guide continuous model refinement. (3) Extensive experiments across eight public datasets demonstrate our method’s exceptional data efficiency. Using only one labeled image, ESRVS with Mask2Former retains over 93% of the fully supervised Dice and clDice performance on seven of the eight datasets, excluding FIVES. ESRVS: Single-Annotation Semi-Supervised Segmentation 3
+
+## 2 Related Work 
+
+2.1 Fully Supervised learning 
+
+Fully supervised learning remains the cornerstone of retinal vessel segmentation, with U-Net [ 28 ] and its derivatives serving as the predominant backbones. To tackle the intricate microvasculature, subsequent research has focused on en-hanced feature extraction [ 9], multi-scale feature fusion [ 17 ], and context-aware encoding [ 39 ]. More recently, Transformer-based architectures have gained trac-tion for modeling global context and long-range dependencies, ranging from hybrid CNN-Transformer networks [ 13 ] to pure transformer-based models [ 35 ]. While these methods achieve excellent segmentation fidelity, they are inherently constrained by the requirement for massive, pixel-perfect annotations, rendering them highly sensitive to annotation scarcity and difficult to scale in clinical deployment. 
+
+2.2 Semi-Supervised Learning 
+
+Semi-supervised learning (SSL) aims to alleviate annotation costs by leveraging unlabeled data alongside a sparse set of annotations. The prevailing strategies generally fall into two categories: pseudo-labeling and consistency regularization. Pseudo-labeling generates temporary targets for unlabeled data, often refined through confidence filtering, probability map sharpening [ 21 ], and intra-batch entropy minimization [ 46 ]. For example, CrossNeXt [ 46 ] combines intra-batch en-tropy minimization with cross-teaching between networks to refine predictions and enhance segmentation accuracy. Meanwhile, consistency regularization enforces prediction stability against input noise or feature-level perturbations [ 23 ], and has recently been fortified by teacher-student distillation [ 45 ] and adversarial training constraints [ 41 ]. Despite their success, SSL paradigms still implicitly assume the presence of a meaningful fraction of labeled data (typically 10-20%), causing them to suffer from catastrophic confirmation bias when labels are reduced to an extreme single-label regime. 
+
+2.3 Few-Shot and One-Shot Learning 
+
+To address extreme label scarcity, few-shot and one-shot segmentation have emerged as efficient alternatives. Most existing methods adopt meta-learning paradigms [ 15 ] to leverage transferable knowledge from known to unseen classes. A dominant strategy is prototype-based learning, which classifies query samples by measuring their embedding similarity to learned class prototypes [ 38 ]. However, for complex anatomical structures like retinal vessels, single-level global proto-types are fundamentally insufficient to capture drastic structural and topological variations. To alleviate this, recent works have incorporated self-supervised (SS) to exploit latent structural priors, utilizing superpixel-based frameworks [ 24 ] or multi-scale, multi-region prototypes [ 33 ] to account for shape variations. Despite these advancements, prototypical representations inherently compress spatial 4 Mingzhi Xu and Yizhe Zhang  
+
+> Fig. 1. The ESRVS framework for retinal vessel segmentation.
+
+details and underutilize the pixel-level relationships in unlabeled data, leading to severe topological disconnections when training data is reduced to a single annotated sample. 
+
+## 3 Method 
+
+The ESRVS framework leverages a self-supervised foundation model (DINOv3) to propagate supervision from a single annotated reference image to an unlabeled dataset. As illustrated in Figure 1, the pipeline consists of three phases: (1) Initial Pseudo-Label Generation; (2) Initial Pseudo-Supervised Refinement; and (3) Adversarial-Guided Refinement for segmentation enhancement. 
+
+3.1 Problem Setup 
+
+Let D = {Ii}Ni=1 denote a fundus image dataset containing N samples, where each image Ii ∈ RH×W ×3. Our goal is to train a segmentation model Sϕ (parameterized by ϕ) using only a single annotated reference image xref = ( Iref , L ref ) and a set of unlabeled images. Here, Iref denotes the reference fundus image and 
+
+Lref ∈ { 0, 1}H×W is its binary vessel label. The remaining images constitute the unlabeled set, denoted as Du = D \ { Iref }. Throughout the paper, D denotes the training split only. Reference selection, target-domain self-supervised adaptation, pseudo-label generation, and model training are restricted to the training images; held-out test images and their annotations are used only for final evaluation. 
+
+3.2 Initial Pseudo-Label Generation Representative Reference Selection. We first select the reference image using image features only, without accessing any segmentation annotations. We ESRVS: Single-Annotation Semi-Supervised Segmentation 5
+
+then simulate annotation by revealing the ground-truth mask of the selected image; all remaining segmentation masks are hidden during training. To obtain a representative supervision signal, we adopt a centroid-based reference selection strategy. Specifically, a pre-trained feature encoder ER (e.g., DINOv3) embeds all images in D into a feature space. We compute the dataset centroid C as the mean feature embedding: 
+
+C = 1
+
+|D| 
+
+X
+
+> Ii∈D
+
+ER(Ii). (1) The reference image Iref is then selected as the one whose feature representation is most similar to the centroid: 
+
+Iref = arg max  
+
+> Ii∈D
+
+CosineSim (ER(Ii), C ). (2) 
+
+Structure-Aware Semantic Amplification. Given the selected reference 
+
+xref , we aim to generate high-fidelity pseudo-labels for the unlabeled set Du.Direct feature matching often suffers from scale ambiguity and coarse boundary alignment. To address this, we introduce a label generation mechanism consisting of Multi-Granular Semantic Matching (MGSM) and Adaptive Physics-Inspired Priors Alignment (APPA). 
+
+Multi-Granular Semantic Matching (MGSM). To achieve robust vessel segmentation across scales, we design a multi-granular matching strategy that constructs a unified vessel prototype and performs dual-view prototype matching. 
+
+Multi-Granular Prototype Construction. Given a reference image Iref , we extract vessel-related features at two complementary granularities. At the macro level, Iref is processed holistically to capture global vascular topology. At the micro level, we partition Iref into a grid of local patches to encode fine-grained structural details. Both views are encoded using a DINOv3 backbone ED , which is further fine-tuned in a self-supervised manner on the target domain. Let Fmacro 
+
+and Fmicro denote the sets of patch embeddings extracted from large-scale and fine-grained patches of the same image, respectively. To ensure semantic consis-tency, we filter the extracted embeddings using the reference annotation Lref and retain only vessel-relevant features: Ω = {f ∈ (Fmacro ∪ F micro ) | Lref (f ) = 1 } ,
+
+where f denotes the feature vector at a spatial location with 1 indicating the target (foreground) class. We then aggregate all valid features to form a unified vessel prototype: 
+
+Puni = Normalize 1
+
+|Ω|
+
+X 
+
+> f∈Ω
+
+f
+
+!
+
+, (3) 
+
+Multi-Granular Prototype Matching. Given the unlabeled target set Du =
+
+D \ { Iref }, for each unlabeled image Iu ∈ D u, we extract patch embeddings F(Iu)
+
+using the same encoder ED . We compute a cosine similarity map between each patch feature and the unified prototype Puni :
+
+Sfused (Iu) = CosSim  F(Iu), Puni 
+
+. (4) 6 Mingzhi Xu and Yizhe Zhang 
+
+which highlights vascular regions and serves as a coarse localization map. 
+
+Adaptive Physics-Inspired Priors Alignment (APPA). To refine coarse vascular predictions and suppress non-vascular noise in Sf used , APPA incorporates an intensity-guided structural prior derived from the image domain. 
+
+Physics-Inspired Priors Integration. Retinal vessels typically appear darker in the green channel because of stronger hemoglobin absorptio [ 27 ]. After normalizing 
+
+Ig to [0,1], we therefore define Vphys = Normalize (1 − Ig ). The refined map is obtained via: 
+
+Msem = Sf used ⊙ Vphys , (5) which suppresses background noise and enhances vessel structures. 
+
+Label Generation. Binary pseudo-labels ˆL(0)  
+
+> u
+
+are obtained via adaptive local thresholding on Msem , : 
+
+ˆL(0)  
+
+> u
+
+(x, y ) = I
+
+
+
+Msem (x, y ) > μ N (x, y ) + δ
+
+
+
+, (6) where μN is the adaptive local mean and δ (+0.02 by default) is a sensitivity margin. This yields a pseudo-labeled set xu = {(Iu, ˆL(0)  
+
+> u
+
+) | Iu ∈ D u}.
+
+3.3 Initial Pseudo-Supervised Refinement 
+
+We train Sϕ on D(1)  
+
+> train
+
+= {(Iref , L ref )} ∪ { (Iu, ˆL(0)  
+
+> u
+
+) | Iu ∈ D u}, and minimize the following loss: 
+
+L(1) = λref ℓ Sϕ(Iref ), L ref 
+
+ + λu ℓ Sϕ(Iu), ˆL(0) 
+
+> u
+
+, (7) where the Ref.Weighting λref > λ u (we set λref = 3 and λu = 1 ) to prioritize the reference supervision. The loss function is a weighted combination of cross-entropy loss and Dice loss, with equal weights of 0.5 assigned to each component. The predictions in this phase, ˆL(1)  
+
+> u
+
+, are then selected as pseudo-labels for Adversarial-Guided Refinement and used to construct the second-stage training dataset D(2)  
+
+> train
+
+= {(Iref , L ref )} ∪ { (Iu, ˆL(1)  
+
+> u
+
+) | Iu ∈ D u}.
+
+3.4 Adversarial-Guided Refinement for segmentation enhancement 
+
+We re-initialize the segmentation network Sϕ as the generator G and train it from scratch on D(2) 
+
+> train
+
+. A PatchGAN-style discriminator D is added to enforce structural and stylistic consistency. The loss is: 
+
+L(2)  
+
+> G
+
+= λref ℓ Sϕ(Iref ), L ref 
+
+ + λu ℓ Sϕ(Iu), ˆL(1) 
+
+> u
+
+ + λadv ℓadv 
+
+ D(Sϕ(Iu)) , 1 (8) where λref = 3 , λu = 1 , λadv = 0 .1 and ℓadv (·, ·) is a binary cross-entropy for real and fake labels. 
+
+L(2)  
+
+> D
+
+= ℓadv 
+
+ D(Lref ), 1 + ℓadv 
+
+ D(Sϕ(Iu)) , 0 (9) The synergy between the generator loss L(2)  
+
+> G
+
+and the discriminator loss L(2) 
+
+> D
+
+ensures the network learns to: (1) trust the supervision from the high-quality reference image, (2) correct errors in the pseudo-labels, and (3) generate outputs that are structurally and stylistically plausible. ESRVS: Single-Annotation Semi-Supervised Segmentation 7
+
+## 4 Experiments 
+
+For a comprehensive evaluation, we compare ESRVS against a wide range of representative methods, including(1) semi-supervised segmentation methods;(2) fully supervised segmentation methods. All experiments are conducted on a machine equipped with an NVIDIA L20 GPU and 256 GB of RAM. 
+
+Datasets. We evaluate our method on eight public fundus vessel segmentation datasets. Specifically, the datasets include DRIVE [ 32 ](40 images, classic bench-mark), STARE [ 11 ](20 images, some pathological cases), CHASEDB1 [ 25 ](28 images from a child health study), HRF [ 3](45 high-resolution images of healthy, diabetic retinopathy, and glaucoma patients), FIVES [ 14 ](800 images with large intra-dataset diversity), and three additional specialized datasets: ORVS [ 29 ], DRHAGIS [ 10 ], and AVRDB [ 1], covering diverse imaging modalities and clinical focuses. The specific dataset splits are summarized in Table 1. For ESRVS , we strictly followed a single-label setting, using only one image with its correspond-ing ground truth as the labeled reference pair; all other images were treated as unlabeled. For semi-supervised comparison methods , a more lenient setting was adopted due to the inherent difficulty of vessel segmentation and the relatively small number of images in most datasets: for the large-scale FIVES dataset, 10% of the training data was used as labeled, while for all other smaller datasets, 20% of the training data was used as labeled, with the remaining images treated as unlabeled. 
+
+Table 1. Data splits under different training settings for each dataset. All methods are evaluated on the same test sets.                                                                    
+
+> Fully-supervised Semi-supervised Ours Dataset Total Training Labeled Unlabeled Labeled Unlabeled Labeled Unlabeled
+> DRIVE 40 28 28 0622 127 STARE 20 14 14 0311 113 CHASEDB1 28 20 20 0416 119 HRF 45 32 32 0626 131 FIVES 800 600 600 060 540 1599 ORVS 49 34 34 0727 133 DRHAGIS 40 28 28 0622 127 AVRDB 100 75 75 015 60 174
+
+Implementation Details. The proposed framework is implemented in PyTorch with a multi-stage pipeline. Different input resolutions are adopted for different stages: 2048 × 2048 for DINOv3-based fine-grained feature extraction and proto-type matching, and 1024 × 1024 for segmentation network training and inference. The training batch size is set to 1 pair per iteration (consisting of exactly one reference sample and one training sample) to satisfy the one-shot constraint, while a batch size of 4 is used for offline pseudo-label inference. Segmentation performance is evaluated using Dice [ 7 ], clDice [ 30 ], and HD95 [ 34 ], measuring region overlap, topology preservation, and boundary accuracy, respectively. 8 Mingzhi Xu and Yizhe Zhang 
+
+Table 2. Performance comparison across eight public datasets. ↑ / ↓ indicate that higher/lower is better. Our method uses only one labeled image, while semi-supervised baselines use 10% labeled data on FIVES and 20% on the other datasets. All methods adopt the same U-Net architecture as the segmentation backbone. 
+
+Single-Label Semi-Supervised Methods Dataset Metric Ours MT ICT CPS CTBCT URPC KnowSAM 
+
+DRIVE Dice ↑ 0.7102 0.3194 0.4009 0.3301 0.3776 0.3086 0.6854 
+
+clDice ↑ 0.6881 0.2932 0.3432 0.3437 0.3444 0.2728 0.6756 
+
+HD95 ↓ 9.55 19.29 17.91 65.07 16.43 63.32 19.53 
+
+FIVES Dice ↑ 0.6668 0.2977 0.2141 0.4954 0.4235 0.7048 0.7111 clDice ↑ 0.6771 0.3313 0.2339 0.6029 0.4728 0.7947 0.7291 
+
+HD95 ↓ 64.56 303.82 290.12 204.33 437.26 91.46 100.92 
+
+ORVS Dice ↑ 0.5415 0.2909 0.4283 0.1824 0.1761 0.2532 0.4548 
+
+clDice ↑ 0.6626 0.2791 0.4035 0.1918 0.1442 0.1966 0.3363 
+
+HD95 ↓ 35.06 140.48 125.94 274.62 217.98 305.66 271.13 
+
+STARE Dice ↑ 0.6357 0.3336 0.4363 0.2028 0.1866 0.2979 0.6547 clDice ↑ 0.7283 0.3126 0.3791 0.1879 0.1316 0.3009 0.6351 
+
+HD95 ↓ 19.58 28.51 24.27 49.84 102.07 82.27 29.54 
+
+HRF Dice ↑ 0.6347 0.5042 0.5751 0.2029 0.3684 0.3682 0.5564 
+
+clDice ↑ 0.6444 0.5018 0.6347 0.2532 0.4296 0.2682 0.4548 
+
+HD95 ↓ 44.34 72.32 55.11 508.65 599.13 358.89 195.92 
+
+CHASEDB1 Dice ↑ 0.6904 0.4305 0.4369 0.3086 0.2336 0.3967 0.6321 
+
+clDice ↑ 0.6653 0.3474 0.3678 0.3495 0.2048 0.3615 0.6279 
+
+HD95 ↓ 14.78 69.27 43.63 63.39 91.91 107.70 50.23 
+
+DRHAGIS Dice ↑ 0.5841 0.2681 0.2058 0.1952 0.2116 0.2133 0.5112 
+
+clDice ↑ 0.6256 0.2561 0.1833 0.2718 0.2025 0.1507 0.4759 
+
+HD95 ↓ 102.07 583.47 685.66 585.65 571.35 617.87 217.52 
+
+AVRDB Dice ↑ 0.6387 0.5957 0.5656 0.6235 0.2386 0.4468 0.4241 
+
+clDice ↑ 0.6891 0.6419 0.6101 0.7542 0.3108 0.4407 0.3991 
+
+HD95 ↓ 24.18 47.49 48.66 25.60 193.01 66.55 113.35 
+
+Compared Methods. We compare ESRVS with representative semi-supervised segmentation methods reflecting recent mainstream design paradigms. Consis-tency regularization-based methods, including Mean Teacher (MT) [ 36 ], Interpo-lation Consistency Training (ICT) [ 37 ], Cross Pseudo Supervision (CPS) [ 5], and Cross Teaching between CNN and Transformer (CTBCT) [ 19 ], enforce predic-tion consistency under perturbations, interpolations, or cross-model supervision. Uncertainty-based approaches such as URPC [ 20 ] further refine pseudo labels by explicitly modeling prediction uncertainty. In addition, foundation model-based methods like KnowSAM [ 12 ] distill knowledge from Segment Anything Model (SAM) to improve semi-supervised learning. Notably, these methods typically rely on multiple annotated images, whereas ESRVS operates in a more chal-lenging extreme setting with only a single labeled image. For fully supervised learning, we evaluate CNN-based UNet variants, a hybrid CNN-Transformer model (HSNet) [42], and a transformer-based architecture (Mask2Former) [6]. ESRVS: Single-Annotation Semi-Supervised Segmentation 9
+
+4.1 Performance Comparison with Semi-Supervised Methods 
+
+Table 2 demonstrates the extreme label efficiency of our proposed method. Using only a single annotated image, our framework outperforms most rival semi-supervised baselines that utilize 10% to 20% of the training labels. Beyond overall pixel-wise accuracy (Dice), a deeper analysis of the metrics reveals our method’s fundamental advantage in preserving structural integrity. Specifically, our method achieves the lowest 95% Hausdorff Distance (HD95) across all eight datasets by a substantial margin. For instance, on challeng-ing datasets like ORVS and DRHAGIS, ESRVS reduces HD95 relative to the strongest baseline from 125.94 to 35.06 and from 217.52 to 102.07, corresponding to reductions of 72.2% and 53.1%, respectively. This overwhelming superiority in HD95 indicates that our approach significantly suppresses severe outliers and false positive predictions in background regions. Furthermore, the topological continuity (clDice) results provide crucial insights into the quality of the seg-mented vascular networks. On the STARE dataset, although our Dice score is marginally lower than KnowSAM (0.6357 vs. 0.6547), our method yields a dramatically higher clDice (0.7283 vs. 0.6351) alongside a much tighter bound-ary (HD95: 19.58 vs. 29.54). Physically, this implies that while semi-supervised methods might capture thicker, disconnected vascular blobs (inflating the Dice score), our single-label method successfully recovers finer, continuous topological structures without over-segmentation. This phenomenon is consistently observed across the datasets, indicating that our framework not only minimizes annotation dependency but also produces geometrically more precise and structurally faithful vessel segmentations. 
+
+4.2 Approaching the Fully Supervised Performance 
+
+The robustness of our single-label method (ESRVS) is remarkably demonstrated by comparing it against the fully supervised baseline across multiple backbone architectures. As shown in Table 3, ESRVS is highly compatible with the three evaluated backbones, functioning effectively on both Transformer (Mask2Former) and CNN (UNet, HSNet) paradigms. Most notably, when applied to Mask2Former, the performance gap between a single labeled image and the entire annotated dataset is substantially narrowed on most datasets. ESRVS retains nearly 95% of the fully supervised Dice and clDice performance on the majority of datasets. For instance, on CHASEDB1, our method recovers 98.39% of the clDice with only a marginal (+2.47) increase in HD95. For UNet and HSNet backbones, ESRVS consistently maintains a substantial retention rate, typically ranging from 80% to 95%. The consistently high clDice retention across all backbones highlights a fundamental strength of ESRVS: even under extreme label scarcity, it prioritizes the extraction of continuous vascular topology over mere pixel matching, rendering it a highly promising alternative to expensive fully-supervised training in clinical settings. 10 Mingzhi Xu and Yizhe Zhang 
+
+Table 3. Segmentation performance of Mask2Former, UNet, and HSNet under two supervision settings: fully supervised training (all images labeled) and our single-label setting (ESRVS; a single annotated image). For Dice and clDice, values in parentheses denote the percentage of the fully supervised score retained by ESRVS. For HD95, values in parentheses report the absolute difference from the fully supervised model, where positive values indicate higher boundary error.                                                                                                                                                                                  
+
+> Mask2Former UNet HSNet Dataset Metric Fully-labeled ESRVS Fully-labeled ESRVS Fully-labeled ESRVS
+> DRIVE
+> Dice ↑0.8252 0.8014 (97.12%) 0.7971 0.7102 (89.10%) 0.7821 0.7355 (94.05%)
+> clDice ↑0.8065 0.7797 (96.68%) 0.8312 0.6881 (82.78%) 0.8423 0.8181 (97.13%)
+> HD95 ↓6.44 9.59 (+3.15) 4.22 9.55 (+5.33) 3.63 6.15 (+2.52) FIVES
+> Dice ↑0.8793 0.7044(80.11%) 0.8749 0.6668(76.21%) 0.8851 0.6131(69.27%)
+> clDice ↑0.9027 0.7735(85.69%) 0.8881 0.6771(76.24%) 0.9102 0.7338(80.62%)
+> HD95 ↓32.13 76.99(+44.86) 40.81 64.56 (+23.75) 29.88 120.10(+90.22) ORVS
+> Dice ↑0.7213 0.6908(95.77%) 0.7083 0.5415(76.45%) 0.7005 0.5233(74.70%)
+> clDice ↑0.7115 0.6923(97.30%) 0.7435 0.6626(89.12%) 0.7767 0.7374(94.94%)
+> HD95 ↓30.71 53.66(+22.95) 17.53 35.06(+17.53) 18.09 30.52(+12.43) STARE
+> Dice ↑0.8423 0.8078(95.90%) 0.7809 0.6357(81.40%) 0.7511 0.6397(85.17%)
+> clDice ↑0.8571 0.8348(97.40%) 0.8606 0.7283(84.63%) 0.8766 0.8281(94.47%)
+> HD95 ↓4.14 6.56(+2.42) 5.93 19.58(+13.65) 4.08 11.08(+7.00) HRF
+> Dice ↑0.7523 0.7263(96.54%) 0.7687 0.6347(82.57%) 0.7342 0.5652(76.98%)
+> clDice ↑0.7005 0.6565(93.72%) 0.7952 0.6444(81.04%) 0.7924 0.7256(91.57%)
+> HD95 ↓59.49 93.29(+33.80) 23.63 44.34(+20.71) 26.04 61.97(+35.93) CHASEDB1
+> Dice ↑0.8165 0.7891 (96.64%) 0.7934 0.6904 (87.02%) 0.7976 0.7037 (88.22%)
+> clDice ↑0.7969 0.7841 (98.39%) 0.8128 0.6553 (80.62%) 0.8412 0.8072 (95.96%)
+> HD95 ↓17.71 20.18 (+2.47) 11.30 14.78 (+3.48) 8.84 15.98 (+7.14) DRHAGIS
+> Dice ↑0.7329 0.6852(93.49%) 0.7214 0.5841(80.97%) 0.6818 0.4811(70.56%)
+> clDice ↑0.7091 0.6826(96.26%) 0.7736 0.6256(80.87%) 0.7842 0.6536(83.35%)
+> HD95 ↓62.36 93.06(+30.70) 37.27 102.07(+64.8) 36.36 87.11(+50.75) AVRDB
+> Dice ↑0.7171 0.6752 (94.16%) 0.7391 0.6387 (86.42%) 0.6983 0.6376 (91.31%)
+> clDice ↑0.7829 0.7492 (95.70%) 0.6818 0.6891 (101.07%) 0.7987 0.7349 (92.01%)
+> HD95 ↓22.83 30.15 (+7.32) 24.79 24.18 (-0.61) 22.40 30.19 (+7.79)
+
+4.3 Ablation Studies and Component Contributions 
+
+All ablation and cross-dataset experiments are conducted using Mask2Former as the segmentation backbone. Table 4 shows that APPA and IPSR provide the largest improvements. Notably, the introduction of the APPA module (Setup 2 to 3) triggers a profound leap in baseline performance, demonstrating the importance of the green-channel structural prior for initial pseudo-label generation. For instance, on the STARE dataset, clDice surges from 0.5441 to 0.6903, and HD95 drops by more than half. MGSM provides smaller but generally positive improvements in Dice and clDice by enriching the reference representation across scales. IPSR further produces large gains, particularly in HD95, indicating that the first pseudo-supervised stage removes many distant false positives. Reference Weighting and Adversarial-Guided Refinement improve Dice on most datasets, although clDice and HD95 exhibit dataset-dependent trade-offs. Overall, the components make complementary contributions rather than producing monotonic improvement on every metric, as shown in the ablation visualization in Fig. 2. One of the most formidable challenges in medical image analysis is domain shift caused by varying scanner protocols and patient demographics. To evaluate ESRVS: Single-Annotation Semi-Supervised Segmentation 11  
+
+> Fig. 2. Qualitative ablation results with progressively added components (left to right). Rows (top to bottom) correspond to the datasets ORVS, DRHAGIS, CHASEDB1, and AVRDB.
+
+the robustness of ESRVS against such shifts, we conduct a cross-dataset evaluation where the network segments unlabeled STARE images using a single reference image sampled from completely different datasets. As presented in Table 5, our method exhibits exceptional zero-shot cross-domain adaptability. Astonishingly, relying on a reference image from a different acquisition distribution (e.g., AVRDB or FIVES) barely degrades performance compared to using an in-domain STARE reference. Most impressively, when using one AVRDB image as the reference, the model achieves a clDice of 0.8446 and an HD95 of 6.31 on STARE—scores that virtually rival the fully-supervised performance (clDice: 0.8571, HD95: 4.14). This compelling evidence demonstrates that ESRVS successfully learns transferable representations of vascular geometry, rather than overfitting to the domain-specific intensity or color distributions of the reference image. 
+
+## 5 Limitations 
+
+ESRVS relies on access to an unlabeled target-domain image pool and on selecting a reference image that is representative in feature space. Its green-channel prior may be less reliable under severe illumination changes, atypical acquisition modalities, or pathologies that substantially alter vessel appearance. Although the stage-wise refinement process reduces pseudo-label noise, systematic errors may still be reinforced during training. Finally, our experiments evaluate segmentation performance on public benchmarks and do not establish downstream clinical utility. 12 Mingzhi Xu and Yizhe Zhang 
+
+Table 4. Ablation study demonstrating the contribution of each model component. Abbreviations: SSP (Self-Supervised Pretrain), IPSR (Initial Pseudo-Supervised Refine-ment), RW (Ref. Weighting), AGR (Adversarial-Guided Refinement).                                                                                                                                                                                                                                                                                                                                 
+
+> #Components DRIVE FIVES ORVS STARE
+> SSP APPA MGSM IPSR RW AGR Dice ↑clDice ↑HD95 ↓Dice ↑clDice ↑HD95 ↓Dice ↑clDice ↑HD95 ↓Dice ↑clDice ↑HD95 ↓
+> 1××××××0.4062 0.4792 50.43 0.3362 0.3906 283.68 0.2747 0.3799 190.31 0.4638 0.5417 54.66 2✓×××××0.4036 0.4822 49.37 0.3186 0.3931 247.41 0.2831 0.3834 195.73 0.4694 0.5441 54.49 3✓✓××××0.6894 0.7203 12.20 0.5618 0.5688 149.30 0.4567 0.5259 77.70 0.6007 0.6903 23.81 4✓✓✓×××0.6889 0.7236 12.27 0.5858 0.5891 147.37 0.4783 0.5397 75.50 0.6017 0.6996 23.94 5✓✓✓✓××0.7585 0.8019 7.10 0.6907 0.7671 78.81 0.6331 0.7165 45.72 0.7726 0.8217 7.88 6✓✓✓✓✓×0.7838 0.7741 12.17 0.6559 0.6715 111.70 0.6699 0.7156 43.17 0.7889 0.7881 9.68 7✓✓✓✓✓✓0.8014 0.7797 9.59 0.7044 0.7735 76.99 0.6908 0.6923 53.66 0.8078 0.8348 6.56 #Components HRF CHASEDB1 DRHAGIS AVRDB
+> SSP APPA MGSM IPSR RW AGR Dice ↑clDice ↑HD95 ↓Dice ↑clDice ↑HD95 ↓Dice ↑clDice ↑HD95 ↓Dice ↑clDice ↑HD95 ↓
+> 1××××××0.2573 0.3411 387.21 0.2967 0.3648 122.71 0.2453 0.3426 228.97 0.3324 0.4249 110.30 2✓×××××0.2576 0.3416 388.05 0.2981 0.3685 119.74 0.2391 0.3386 215.61 0.3381 0.4269 119.64 3✓✓××××0.5363 0.6053 61.95 0.6055 0.6425 32.73 0.4691 0.5434 104.60 0.5929 0.6256 38.30 4✓✓✓×××0.5312 0.6205 61.51 0.6228 0.6553 32.55 0.4738 0.5614 105.77 0.5961 0.6273 39.25 5✓✓✓✓××0.6434 0.7339 57.65 0.7472 0.8007 14.39 0.6567 0.6353 100.94 0.6447 0.7283 26.97
+> 6✓✓✓✓✓×0.7251 0.6534 98.64 0.7902 0.7711 21.65 0.6561 0.6819 88.39 0.6689 0.7467 30.13 7✓✓✓✓✓✓0.7263 0.6565 93.29 0.7891 0.7841 20.18 0.6852 0.6826 93.06 0.6752 0.7492 30.15
+
+Table 5. Cross-dataset performance comparison on the STARE dataset. Each row marked “Ours” uses one reference image and its corresponding label from the specified Reference Dataset to propagate annotations to the Training Dataset. 
+
+Training Setting Reference Training Dataset Dice clDice HD95 
+
+Fully-Supervised —— STARE (all labeled) 0.8423 0.8571 4.14 
+
+Single Label (Ours) STARE STARE (unlabeled) 0.8078 0.8348 6.56 CHASEDB1 STARE (unlabeled) 0.7905 0.8146 9.41 ORVS STARE (unlabeled) 0.7851 0.7867 10.38 FIVES STARE (unlabeled) 0.8023 0.8146 7.99 HRF STARE (unlabeled) 0.7867 0.8077 9.36 AVRDB STARE (unlabeled) 0.7749 0.8446 6.31 
+
+DRHAGIS STARE (unlabeled) 0.7907 0.8045 11.91 DRIVE STARE (unlabeled) 0.7944 0.8148 8.66 
+
+## 6 Conclusion 
+
+We presented ESRVS, a framework that advances label-efficient segmentation using only one annotated image. By integrating foundation model-driven prop-agation, physics-aware priors, and progressive denoising, ESRVS substantially mitigates the fragmentation and topological errors typical of extreme low-data regimes. Compared with the semi-supervised baselines, ESRVS achieves the best Dice and clDice on six of eight datasets, and the best HD95 on all eight datasets, despite using only one annotated image. Furthermore, its remarkable cross-dataset generalization highlights its robustness against domain shifts. Our results suggest that high-quality, continuous vascular segmentation can be achieved without rely-ing on large amounts of expensive dense annotations, offering a promising solution for deploying medical imaging AI in resource-constrained clinical environments. 
+
+Acknowledgment. This research was supported in part by the Natural Science Foundation of Jiangsu Province (Grant BK20220949) and National Natural Science Foundation of China (Grant 62201263). ESRVS: Single-Annotation Semi-Supervised Segmentation 13 
+
+## References 
+
+1. Akbar, S., Hassan, T., Akram, M.U., Yasin, U.U., Basit, I.: Avrdb: annotated dataset for vessel segmentation and calculation of arteriovenous ratio. In: Proceedings of the International Conference on Image Processing, Computer Vision, and Pattern Recognition (IPCV). pp. 129–134. The Steering Committee of The World Congress in Computer Science, Computer . . . (2017) 2. Alsaleh, A.M., Albalawi, E., Algosaibi, A., Albakheet, S.S., Khan, S.B.: Few-shot learning for medical image segmentation using 3d u-net and model-agnostic meta-learning (maml). Diagnostics 14 (12), 1213 (2024) 3. Budai, A., Bock, R., Maier, A., Hornegger, J., Michelson, G.: Robust vessel seg-mentation in fundus images. International journal of biomedical imaging 2013 (1), 154860 (2013) 4. Caron, M., Touvron, H., Misra, I., Jégou, H., Mairal, J., Bojanowski, P., Joulin, A.: Emerging properties in self-supervised vision transformers. In: Proceedings of the IEEE/CVF international conference on computer vision. pp. 9650–9660 (2021) 5. Chen, X., Yuan, Y., Zeng, G., Wang, J.: Semi-supervised semantic segmentation with cross pseudo supervision. In: Proceedings of the IEEE/CVF conference on computer vision and pattern recognition. pp. 2613–2622 (2021) 6. Cheng, B., Misra, I., Schwing, A.G., Kirillov, A., Girdhar, R.: Masked-attention mask transformer for universal image segmentation. In: Proceedings of the IEEE/CVF conference on computer vision and pattern recognition. pp. 1290–1299 (2022) 7. Dice, L.R.: Measures of the amount of ecologic association between species. Ecology 
+
+26 (3), 297–302 (1945) 8. Dosovitskiy, A.: An image is worth 16x16 words: Transformers for image recognition at scale. arXiv preprint arXiv:2010.11929 (2020) 9. Gu, Z., Cheng, J., Fu, H., Zhou, K., Hao, H., Zhao, Y., Zhang, T., Gao, S., Liu, J.: Ce-net: Context encoder network for 2d medical image segmentation. IEEE transactions on medical imaging 38 (10), 2281–2292 (2019) 10. Holm, S., Russell, G., Nourrit, V., McLoughlin, N.: Dr hagis—a fundus image database for the automatic extraction of retinal surface vessels from diabetic patients. Journal of Medical Imaging 4(1), 014503–014503 (2017) 11. Hoover, A., Kouznetsova, V., Goldbaum, M.: Locating blood vessels in retinal images by piecewise threshold probing of a matched filter response. IEEE Transactions on Medical imaging 19 (3), 203–210 (2000) 12. Huang, K., Zhou, T., Fu, H., Zhang, Y., Zhou, Y., Gong, C., Liang, D.: Learnable prompting sam-induced knowledge distillation for semi-supervised medical image segmentation. IEEE Transactions on Medical Imaging (2025) 13. Jiang, M., Zhu, Y., Zhang, X.: Covi-net: A hybrid convolutional and vision trans-former neural network for retinal vessel segmentation. Computers in Biology and Medicine 170 , 108047 (2024) 14. Jin, K., Huang, X., Zhou, J., Li, Y., Yan, Y., Sun, Y., Zhang, Q., Wang, Y., Ye, J.: Fives: A fundus image dataset for artificial intelligence based vessel segmentation. Scientific data 9(1), 475 (2022) 15. Jing, L., Tian, Y.: Self-supervised visual feature learning with deep neural networks: A survey. IEEE transactions on pattern analysis and machine intelligence 43 (11), 4037–4058 (2020) 16. Kellner, R.L., Harris, A., Ciulla, L., Guidoboni, G., Verticchio Vercellin, A., Oddone, F., Carnevale, C., Zaid, M., Antman, G., Kuvin, J.T., et al.: The eye as the window to the heart: optical coherence tomography angiography biomarkers as indicators of cardiovascular disease. Journal of Clinical Medicine 13 (3), 829 (2024) 14 Mingzhi Xu and Yizhe Zhang 17. Liu, Y., Shen, J., Yang, L., Yu, H., Bian, G.: Wave-net: A lightweight deep network for retinal vessel segmentation from fundus images. Computers in biology and medicine 152 , 106341 (2023) 18. Lu, Z., Li, J., Liu, Z., Cao, Q., Tian, T., Wang, X., Huang, Z.: Semi-supervised retinal vessel segmentation based on pseudo label filtering. Symmetry 17 (9), 1462 (2025) 19. Luo, X., Hu, M., Song, T., Wang, G., Zhang, S.: Semi-supervised medical image segmentation via cross teaching between cnn and transformer. In: International conference on medical imaging with deep learning. pp. 820–833. PMLR (2022) 20. Luo, X., Liao, W., Chen, J., Song, T., Chen, Y., Zhang, S., Chen, N., Wang, G., Zhang, S.: Efficient semi-supervised gross target volume of nasopharyngeal carci-noma segmentation via uncertainty rectified pyramid consistency. In: International Conference on Medical Image Computing and Computer-Assisted Intervention. pp. 318–329. Springer (2021) 21. Moezzi, M.: An uncertainty-aware pseudo-label selection framework using regular-ized conformal prediction. arXiv preprint arXiv:2309.15963 (2023) 22. Oquab, M., Darcet, T., Moutakanni, T., Vo, H., Szafraniec, M., Khalidov, V., Fernandez, P., Haziza, D., Massa, F., El-Nouby, A., et al.: Dinov2: Learning robust visual features without supervision. arXiv preprint arXiv:2304.07193 (2023) 23. Ouali, Y., Hudelot, C., Tami, M.: Semi-supervised semantic segmentation with cross-consistency training. In: Proceedings of the IEEE/CVF conference on computer vision and pattern recognition. pp. 12674–12684 (2020) 24. Ouyang, C., Biffi, C., Chen, C., Kart, T., Qiu, H., Rueckert, D.: Self-supervision with superpixels: Training few-shot medical image segmentation without annotation. In: European conference on computer vision. pp. 762–780. Springer (2020) 25. Owen, C.G., Rudnicka, A.R., Nightingale, C.M., Mullen, R., Barman, S.A., Sattar, N., Cook, D.G., Whincup, P.H.: Retinal arteriolar tortuosity and cardiovascular risk factors in a multi-ethnic population study of 10-year-old children; the child heart and health study in england (chase). Arteriosclerosis, thrombosis, and vascular biology 31 (8), 1933–1938 (2011) 26. Qin, Q., Chen, Y.: A review of retinal vessel segmentation for fundus image analysis. Engineering Applications of Artificial Intelligence 128 , 107454 (2024) 27. Ricci, E., Perfetti, R.: Retinal blood vessel segmentation using line operators and support vector classification. IEEE transactions on medical imaging 26 (10), 1357–1365 (2007) 28. Ronneberger, O., Fischer, P., Brox, T.: U-net: Convolutional networks for biomedical image segmentation. In: International Conference on Medical image computing and computer-assisted intervention. pp. 234–241. Springer (2015) 29. Sarhan, A., Rokne, J., Alhajj, R., Crichton, A.: Transfer learning through weighted loss function and group normalization for vessel segmentation from retinal images. In: 2020 25th International Conference on Pattern Recognition (ICPR). pp. 9211–9218. IEEE (2021) 30. Shit, S., Paetzold, J.C., Sekuboyina, A., Ezhov, I., Unger, A., Zhylka, A., Pluim, J.P., Bauer, U., Menze, B.H.: cldice-a novel topology-preserving loss function for tubular structure segmentation. In: Proceedings of the IEEE/CVF conference on computer vision and pattern recognition. pp. 16560–16569 (2021) 31. Siméoni, O., Vo, H.V., Seitzer, M., Baldassarre, F., Oquab, M., Jose, C., Khali-dov, V., Szafraniec, M., Yi, S., Ramamonjisoa, M., et al.: Dinov3. arXiv preprint arXiv:2508.10104 (2025) ESRVS: Single-Annotation Semi-Supervised Segmentation 15 32. Staal, J., Abràmoff, M.D., Niemeijer, M., Viergever, M.A., Van Ginneken, B.: Ridge-based vessel segmentation in color images of the retina. IEEE transactions on medical imaging 23 (4), 501–509 (2004) 33. Sun, S., Yang, J., Tang, L., Feng, Y., Yu, Q.: Multi-level hierarchical prototype for few-shot medical image segmentation. Biomedical Signal Processing and Control 
+
+112 , 108500 (2026) 34. Taha, A.A., Hanbury, A.: Metrics for evaluating 3d medical image segmentation: analysis, selection, and tool. BMC medical imaging 15 (1), 29 (2015) 35. Tan, X., Chen, X., Meng, Q., Shi, F., Xiang, D., Chen, Z., Pan, L., Zhu, W.: Oct2former: A retinal oct-angiography vessel segmentation transformer. Computer Methods and Programs in Biomedicine 233 , 107454 (2023) 36. Tarvainen, A., Valpola, H.: Mean teachers are better role models: Weight-averaged consistency targets improve semi-supervised deep learning results. Advances in neural information processing systems 30 (2017) 37. Verma, V., Kawaguchi, K., Lamb, A., Kannala, J., Solin, A., Bengio, Y., Lopez-Paz, D.: Interpolation consistency training for semi-supervised learning. Neural Networks 
+
+145 , 90–106 (2022) 38. Wang, K., Liew, J.H., Zou, Y., Zhou, D., Feng, J.: Panet: Few-shot image seman-tic segmentation with prototype alignment. In: proceedings of the IEEE/CVF international conference on computer vision. pp. 9197–9206 (2019) 39. Wu, H., Wang, W., Zhong, J., Lei, B., Wen, Z., Qin, J.: Scs-net: A scale and context sensitive network for retinal vessel segmentation. Medical Image Analysis 
+
+70 , 102025 (2021) 40. Yao, W., Bai, J., Liao, W., Chen, Y., Liu, M., Xie, Y.: From cnn to transformer: A review of medical image segmentation models. Journal of Imaging Informatics in Medicine 37 (4), 1529–1547 (2024) 41. You, Zhi-Hui, Wang, J.X., Chen, S.B., Tang, J., Luo, B.: Fmwdct: Foreground mixup into weighted dual-network cross training for semisupervised remote sensing road extraction. IEEE Journal of Selected Topics in Applied Earth Observations and Remote Sensing 15 , 5570–5579 (2022) 42. Zhang, W., Fu, C., Zheng, Y., Zhang, F., Zhao, Y., Sham, C.W.: Hsnet: A hybrid semantic network for polyp segmentation. Computers in biology and medicine 150 ,106173 (2022) 43. Zhang, Y.: Medical image segmentation with minimal labeling effort: how far can we push the limits? In: Proceedings of the AAAI Conference on Artificial Intelligence. pp. 28492–28500 (2026) 44. Zhang, Minqing, He, M., Yuan, W.: Towards robust retinal vessel segmentation via reducing open-set label noises from sam-generated masks. In: International Conference on Medical Image Computing and Computer-Assisted Intervention. pp. 631–641. Springer (2025) 45. Zhao, X., Wang, W.: Semi-supervised medical image segmentation based on deep consistent collaborative learning. Journal of Imaging 10 (5), 118 (2024) 46. Zheng, Z., Luo, X., Li, P., Piao, S., Cao, X., Liu, X., Yang, L., Hu, B., Geng, Y., Geng, D.: Crossnext: Convnext-based cross-teaching with entropy minimization for semi-supervised liver segmentation from abdominal mri. Computerized Medical Imaging and Graphics p. 102624 (2025) 47. Zhou, Z., Rahman Siddiquee, M.M., Tajbakhsh, N., Liang, J.: Unet++: A nested u-net architecture for medical image segmentation. In: International workshop on deep learning in medical image analysis. pp. 3–11. Springer (2018) 1
+
+## A Dataset Details 
+
+We evaluate our method on eight public fundus vessel segmentation datasets, covering a wide range of imaging conditions, resolutions, and pathological vari-ations. Among the commonly used benchmarks, DRIVE contains 40 fundus images with manual vessel annotations, while STARE consists of 20 images including several pathological cases. CHASEDB1 includes 28 images collected from a child health study, and HRF provides 45 high-resolution images spanning both healthy subjects and patients with diabetic retinopathy and glaucoma. In addition, FIVES is a large-scale dataset with 800 images and substantial intra-dataset diversity. We further include three specialized datasets to evaluate robustness under more challenging clinical conditions. ORVS contains 49 images and focuses on vessel segmentation under domain shift scenarios. DRHAGIS consists of 40 images for diabetic retinopathy analysis, featuring hemorrhages and complex pathological structures. AVRDB contains 100 annotated images with artery-vein labels, enabling more fine-grained vascular analysis. The specific dataset splits are summarized in Table 1. Table 1: Data splits under different training settings for each dataset. All methods are evaluated on the same test sets.                                                                    
+
+> Fully-supervised Semi-supervised Ours Dataset Total Training Labeled Unlabeled Labeled Unlabeled Labeled Unlabeled
+> DRIVE 40 28 28 0622 127 STARE 20 14 14 0311 113 CHASEDB1 28 20 20 0416 119 HRF 45 32 32 0626 131 FIVES 800 600 600 060 540 1599 ORVS 49 34 34 0727 133 DRHAGIS 40 28 28 0622 127 AVRDB 100 75 75 015 60 174
+
+## B Implementation Details 
+
+The proposed framework is implemented in PyTorch and consists of a multi-stage pipeline, including zero-shot pseudo-label generation and an iterative self-training paradigm enhanced by adversarial learning. Throughout the framework, the target image size is dynamically configured based on the stage requirements: 
+
+2048 × 2048 for fine-grained zero-shot prototype matching, and 1024 × 1024 for the segmentation network. During network optimization, the training batch size is strictly set to 1 pair per iteration (consisting of exactly one reference sample and one training sample) to maintain the one-shot constraint, while a batch size of 4 is applied during the offline pseudo-label inference phase. All experiments are conducted on a machine equipped with an NVIDIA L20 GPU and 256G 2
+
+RAM. We evaluate segmentation performance using Dice coefficient, clDice, and HD95, which respectively measure region overlap, topological consistency, and boundary accuracy (with lower HD95 indicating better performance). 
+
+Initial Pseudo-Label Generation. All fundus images are pre-processed using physical prior enhancement to emphasize vascular structures. Specifically, each input image is reconstructed into a three-channel tensor by concatenating the inverted green channel, a Contrast Limited Adaptive Histogram Equalization (clip limit = 2.0, grid size = 8 × 8) enhanced green channel, and the original green channel. A pre-trained DINOv3 model is used without fine-tuning. Input images are resized to 2048 × 2048 for fine-grained patch token extraction. A global vessel prototype is constructed by aggregating reference features masked by the one-shot ground truth, combining both global and local ( 4 × 4 non-overlapping tiles) feature representations. Pseudo-labels are generated by computing spatial cosine similarity between the prototype and target image features. This similarity is fused with the inverted green channel prior and amplified by an exponential factor of 1.2. An adaptive local thresholding strategy is applied using a uniform filter with a window size of max (15 , target _size /25) and a margin of +0 .02 by default. 
+
+Pseudo-label supervised optimization. The self-training stage consists of up to two rounds, each trained for 10 epochs at a resolution of 1024 × 1024 . In the first round, a Mask2Former model with a Swin-Tiny backbone is adopted. Optimization is performed using AdamW with an initial learning rate of 5 × 10 −5
+
+and a cosine annealing schedule. A paired-batching strategy is used, where one reference sample and one training sample are processed per iteration. The core segmentation objective follows the default Mask2Former bipartite matching loss, which inherently comprises a Cross-Entropy loss for mask classification, along with Focal and Dice losses for pixel-level mask prediction. To preserve the one-shot prior, the segmentation loss of the reference sample is assigned a dominant weight of 3.0 relative to the pseudo-label training loss. 
+
+Adversarial-guided refinement. In the second round, a PatchGAN-style discriminator is introduced to improve alignment between pseudo-labels and ground truth. The discriminator consists of three convolutional layers followed by Batch Normalization and LeakyReLU (negative slope = 0.2). It is trained using AdamW with learning rate 2.5×10 −5 and momentum parameters β = (0 .5, 0.999) .Binary Cross-Entropy with Logits is used as the adversarial loss, where ground-truth masks are treated as real samples and bilinearly upsampled predictions from Mask2Former as fake samples. The adversarial loss is weighted by λadv = 0 .10 in the generator objective. All architectures (e.g., DINOv3 and Mask2Former) and hyperparameters are provided as default empirical configurations used in our implementation. The detailed settings are reported in Table 2. 3
+
+Table 2: Detailed Hyperparameters and Implementation Configurations 
+
+Phase 0: Initial Pseudo-Label Generation (DINOv3) 
+
+Network Architecture Pre-trained DINOv3 Input Resolution 2048 × 2048 
+
+Inference Batch Size 4Local Tiling Grid 4 × 4 (Non-overlapping) Amplification Factor 1.2 Filter Window Size max(15 , Size /25) 
+
+Threshold Margin +0 .02 
+
+Phase 1: Pseudo-label Supervised Optimization (Mask2Former) 
+
+Network Architecture Mask2Former (Swin-Tiny backbone) Input Resolution 1024 × 1024 
+
+Training Epochs 10 Training Batch Size 1 Pair (1 Ref. + 1 Target) Optimizer AdamW Initial Learning Rate 5 × 10 −5
+
+Learning Rate Schedule Cosine Annealing Segmentation Loss CE + Focal + Dice (Bipartite Matching) Reference Loss Weight 3.0 
+
+Phase 2: Adversarial-guided Refinement (PatchGAN) 
+
+Discriminator Optimizer AdamW Discriminator Learning Rate 2.5 × 10 −5
+
+Momentum ( β) (0 .5, 0.999) 
+
+Adversarial Loss Function BCEWithLogits Adversarial Weight ( λadv ) 0.10 Reference Loss Weight 3.0 
+
+## C Analysis of Reference Image Selection 
+
+To address practical clinical scenarios where users may only have access to a randomly acquired, non-ideal sample for annotation, we extensively evaluate the performance difference when a random image is selected as the one-shot reference, as opposed to our proposed centroid-based method. The results across eight datasets are detailed in Table 3. As observed in Table 3, while the centroid-based method dominates on datasets like DRIVE, FIVES, and STARE, random selection occasionally yields better metrics on datasets such as ORVS or HRF. This phenomenon can be attributed to a "lottery effect." In datasets with relatively homogeneous image qualities, a randomly selected image might coincidentally possess specific hard-to-segment morphological features that provide stronger supervisory signals than the math-ematically averaged centroid. However, such instances are purely stochastic. Despite this fluctuation, the centroid-based approach is strictly necessary for the following three critical reasons: 4
+
+Table 3: Quantitative comparison between Centroid-based Selection and Random Selection for the one-shot reference image. Bold and underlined values indicate the best performance.                                                              
+
+> Dataset Centroid-based Selection Random Selection Dice ↑clDice ↑HD95 ↓Dice ↑clDice ↑HD95 ↓
+> DRIVE 0.8014 0.7797 9.59 0.7934 0.7624 11.81
+> FIVES 0.7044 0.7735 76.99 0.6628 0.7336 106.38
+> ORVS 0.6908 0.6923 53.66 0.7003 0.7027 45.65 STARE 0.8078 0.8348 6.56 0.7775 0.8103 11.07
+> HRF 0.7263 0.6565 93.29 0.7209 0.7066 63.51 CHASEDB1 0.7891 0.7841 20.18 0.7973 0.7711 30.41
+> DRHAGIS 0.6852 0.6826 93.06 0.6826 0.6234 120.14
+> AVRDB 0.6752 0.7492 30.15 0.6688 0.7265 28.88
+
+– Eliminating Unacceptable Variance: Random selection is inherently stochastic. This lack of reproducibility is fatal in scientific research and clinical deployment. The centroid method provides a deterministic mathematical guarantee , ensuring that the selected reference image is systematically identical and reproducible for any given dataset. 
+
+– Prevention of Catastrophic Failure: In medical imaging, the penalty for a worst-case scenario far outweighs the benefit of a best-case scenario. A randomly selected image has a non-zero probability of being extreme outlier (e.g., severe artifacts, extreme illumination variance, or massive pathologi-cal lesions). When an outlier is randomly selected, the one-shot prototype collapses, leading to catastrophic performance degradation. For instance, on the relatively large FIVES dataset, a randomly selected image is unlikely to adequately represent the overall data distribution. As a result, the perfor-mance degrades noticeably, with Dice decreasing from 0.7044 to 0.6628 and clDice from 0.7735 to 0.7336, while the HD95 error increases significantly from 76.99 to 106.38. The centroid method strictly filters out these outliers by anchoring to the core distribution. 
+
+– The Unreliable "Lottery Effect": The instances where random selection outperforms the centroid method can be attributed to stochastic luck. A randomly picked image might coincidentally contain complex vascular struc-tures that perfectly supervise the network for that specific dataset. However, treating a medical algorithm like a lottery is unscalable. While our framework demonstrates acceptable resilience even when forced to use a random, non-ideal reference sample, relying on random selection introduces high variance and unpredictability. The centroid-based approach is highly recom-mended as it acts as an "insurance policy," systematically mitigating the risk of catastrophic failure and ensuring robust, reproducible segmentation performance across diverse domains.

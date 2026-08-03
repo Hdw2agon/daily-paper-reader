@@ -6,29 +6,41 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-08-02
-- 运行时间：2026-08-02 20:52:30 UTC
+- 最新运行日期：2026-08-03
+- 运行时间：2026-08-03 20:43:04 UTC
 - 运行状态：成功
-- 本次总论文数：2
-- 精读区：0
-- 速读区：2
+- 本次总论文数：7
+- 精读区：3
+- 速读区：4
 
 ### 今日简报（AI）
-今日聚焦跨模态异常检测与扩散模型 HDR 生成，探索视觉重建与光影优化的新前沿。
-重点关注 XMatchAD 提出的跨模态匹配检测新视角，以及 LumaGuide 实现的免训练高动态范围图像生成技术。
-建议开发者关注如何通过分布整形优化扩散模型输出，或利用跨模态对齐提升工业异常检测的鲁棒性。
-- 详情：[/202608/02/README](/202608/02/README)
+今日精选7篇前沿论文，深度覆盖了VLM引导的图像编辑、盲RAW去噪及超高清修复等核心领域。
+- 详情：[/202608/03/README](/202608/03/README)
 
 ### 精读区论文标签
-- 本次无精读推荐。
+1. [SatEdit: Mask-Conditioned Image Editing via VLM-Guided Segment Annotation](/202608/03/2607.29367v1-satedit-mask-conditioned-image-editing-via-vlm-guided-segment-annotation)  
+   标签：评分：9.0/10、query:q1
+   evidence：基于无标签图像的掩码引导修复用于图像编辑
+2. [RPG-VST: Robust Poisson-Gaussian Variance Stabilization for Blind RAW Denoising](/202608/03/2607.24291v1-rpg-vst-robust-poisson-gaussian-variance-stabilization-for-blind-raw-denoising)  
+   标签：评分：8.0/10、query:q3
+   evidence：无清洁目标的盲图像恢复与去噪
+3. [FillGS: Filling Observation Gaps in 4D Gaussian Splatting via Viewpoint-Time Selection and Generative Refinement](/202608/03/2607.29284v1-fillgs-filling-observation-gaps-in-4d-gaussian-splatting-via-viewpoint-time-selection-and-generative-refinement)  
+   标签：评分：8.0/10、query:q1
+   evidence：通过生成式细化填补4D场景中的观测空白
 
 ### 速读区论文标签
-1. [XMatchAD: A Cross-Modal Matching Perspective on Reconstruction-based Anomaly Detection](/202608/02/2607.23658v1-xmatchad-a-cross-modal-matching-perspective-on-reconstruction-based-anomaly-detection)  
-   标签：评分：6.0/10、query:q2
-   evidence：基于重建的无监督异常检测
-2. [LumaGuide: Distribution Shaping for Training-Free HDR Generation in Diffusion Models](/202608/02/2607.26237v1-lumaguide-distribution-shaping-for-training-free-hdr-generation-in-diffusion-models)  
-   标签：评分：6.0/10、query:q4
-   evidence：扩散模型中无需训练的分布整形框架
+1. [FocusGS: Spatial Delta Layers for Local Repair and Deterministic Editing of Trained 3D Gaussian Assets](/202608/03/2607.28834v1-focusgs-spatial-delta-layers-for-local-repair-and-deterministic-editing-of-trained-3d-gaussian-assets)  
+   标签：评分：7.0/10、query:q1
+   evidence：通过擦除-插入分解对3D资产进行局部修复和确定性编辑
+2. [CoDe-SSM: Context-Detail Decoupled State Space Model for Efficient UHD Image Restoration](/202608/03/2607.29595v1-code-ssm-context-detail-decoupled-state-space-model-for-efficient-uhd-image-restoration)  
+   标签：评分：7.0/10、query:q1
+   evidence：使用状态空间模型进行超高清图像修复
+3. [ESRVS: Extreme Semi-Supervised Retinal Vessel Segmentation with a Single Annotated Image](/202608/03/2607.24453v1-esrvs-extreme-semi-supervised-retinal-vessel-segmentation-with-a-single-annotated-image)  
+   标签：评分：6.0/10、query:q7
+   evidence：极少标签下的半监督修复与分割
+4. [Interactive Generative Motion Editing via Scheduled Inpainting](/202608/03/2607.29133v1-interactive-generative-motion-editing-via-scheduled-inpainting)  
+   标签：评分：6.0/10、query:q1
+   evidence：用于动作编辑的调度修复技术
 
 
 <div class="dpr-home-promo-card">

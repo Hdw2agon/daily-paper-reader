@@ -1,0 +1,977 @@
+Title: Where Does Generative Difficulty Reside? An Empirical Study of Target Representations
+
+URL Source: https://arxiv.org/pdf/2608.00626v1
+
+Published Time: Tue, 04 Aug 2026 00:39:34 GMT
+
+Number of Pages: 38
+
+Markdown Content:
+# Where Does Generative Difficulty Reside? An Empirical Study of Target Representations 
+
+Marcel Plocher 1 ,Bernhard Schölkopf 2,3,5 , Andreas Geiger 1,4,5 , and Gege Gao 1,2 † 
+
+> 1
+
+University of Tübingen, Tübingen, Germany 
+
+marcel.plocher@student.uni-tuebingen.de  
+
+> 2
+
+ETH Zürich, Zürich, Switzerland 
+
+{gege.gao,a.geiger}@uni-tuebingen.de  
+
+> 3
+
+Max Planck Institute for Intelligent Systems, Tübingen, Germany 
+
+bs@tuebingen.mpg.de  
+
+> 4
+
+Tübingen AI Center, Tübingen, Germany  
+
+> 5
+
+ELLIS Institute, Tübingen, Germany  
+
+> †
+
+Project lead. Abstract. The target representation defines the distribution an image generator must learn, yet it is often treated as an interchangeable inter-face. This assumption is particularly questionable for continuous masked generators, which combine contextual inference from visible tokens with conditional modeling of each missing token. We study raw pixels, SD-VAE latents and DINOv2 as well as MAE representation-autoencoder features within a unified masked autoregressive rectified-flow model. Un-der a shared ImageNet training budget, these spaces exhibit distinct op-timization and inference regimes. DINOv2 converges fastest in both iter-ations and computation but benefits strongly from a wider local denoiser and direct context fusion. Pixels optimize substantially more slowly and require a different prediction, masking, and guidance configuration. MAE reconstructs images more faithfully and exhibits clear semantic cluster-ing, yet produces generations substantially worse than DINOv2. The representations also respond differently to classifier-free guidance and occupy distinct precision-recall trade-offs. Together, our results show that compression, reconstruction fidelity, token dimensionality, and visi-ble semantic clustering do not individually predict generative behavior. Instead, target representations redistribute difficulty across contextual modeling, per-token denoising, and inference-time distributional control. 
+
+Keywords: Autoregressive Generation · Target Representations · Rec-tified Flow 
+
+## 1 Introduction 
+
+The representation in which a generative model predicts its targets determines more than the dimensionality of its output. It determines what information has arXiv:2608.00626v1 [cs.CV] 1 Aug 2026 2 M. Plocher et al. 
+
+already been removed or abstracted, how spatially localized each token is, how strongly tokens depend on their context, and what conditional distribution re-mains to be learned. Nevertheless, target representations are often treated as interchangeable interfaces: once an encoder and decoder are available, a genera-tive architecture is expected to transfer across spaces with limited modification. We investigate when this assumption fails. Most continuous image generators operate in the latent space of a varia-tional autoencoder trained for image reconstruction. In particular, the Stable Diffusion VAE (SD-VAE) combines spatial and channel compression with suffi-cient perceptual reconstruction quality, substantially reducing the cost of high-resolution generation [26]. More recently, representation autoencoders have en-abled generation in features from pretrained vision encoders such as DINOv2 and MAE [10,22,35]. Joint diffusion and flow models trained within these spaces can converge rapidly. Complementary work shows that direct pixel generation can also be effective under suitable prediction and architectural choices [15]. These results establish the target representation as an important determinant of generative optimization. Their implications for masked generation, however, remain unclear. Masked autoregressive modeling provides a particularly informative testbed for studying this question: by decomposing image generation into conditional token predic-tions, it exposes how the target representation shapes both contextual inference and the local prediction problem [16, 32]. In continuous masked generators, a transformer aggregates visible tokens into contextual features, while a local dif-fusion or flow network models the conditional distribution of each missing token. A representation may therefore simplify one component while placing greater de-mands on the other. This decomposition motivates our central question: where does generative difficulty reside for different target representations? Several intuitive explanations are possible. Compressed spaces may be easier because fewer values must be predicted. Reconstruction-oriented representations may be preferable because they preserve image information faithfully. Semantic representations may provide more informative and globally organized tokens. These properties are strongly entangled in existing systems, and it is unclear whether any of them alone predicts masked generative behavior. We study this question using a unified masked autoregressive generator with a per-token rectified-flow objective. The model separates a transformer-based con-text network from a local conditional denoiser and supports four target spaces with the same 16 ×16 token layout: raw image patches, compressed SD-VAE la-tents, self-distilled DINOv2 features, and reconstruction-trained MAE features. We train class-conditional ImageNet generators at 256 ×256 resolution under a shared 503k-step (200 epochs) budget and compare optimization in both itera-tions and accumulated computation. Within each representation, we additionally examine masking, prediction parameterization, context-model and denoiser de-sign, flow integration, classifier-free guidance, and precision–recall. On Generative Difficulty 3
+
+We observe markedly different optimization regimes. Without classifier-free guidance, DINOv2 reaches an FID of 6.43, compared with 15.98 for SD-VAE and 43.60 for pixels, and maintains this advantage when training progress is measured in GFLOPs. However, its performance does not result from uniformly simplifying the architecture: DINOv2 performs well with a two-layer context encoder but benefits strongly from a wider local denoiser and direct context fu-sion. It also retains recognizable generations with a single Euler step, whereas SD-VAE and pixels degrade substantially under the same sampling procedure. Pixel generation remains viable, but benefits from clean-data prediction, a less aggressive masking distribution, a bottleneck, a stronger local denoiser, and lin-ear classifier-free guidance. The comparison between DINOv2 and MAE further challenges simple expla-nations based on representation properties. MAE provides better reconstruction quality, and both spaces exhibit visible semantic clustering, yet DINOv2 pro-duces substantially better generations under the same generator configuration. Representation choice also changes inference-time behavior: DINOv2 obtains its best result without classifier-free guidance and combines high precision with low recall, whereas SD-VAE, MAE, and pixels benefit from representation-specific guidance strategies. Together, these results show that compression, reconstruction fidelity, di-mensionality, and visible semantic organization are individually insufficient to predict masked generative behavior. Instead, the target representation changes where difficulty appears: across contextual modeling, local conditional denoising, flow integration, and distributional control. Our contributions are threefold: 
+
+• We instantiate masked autoregressive rectified flow across raw pixels, com-pressed VAE latents, and two representation-autoencoder feature spaces within a common generative factorization. 
+
+• We compare their optimization under a shared dataset, token layout, and training budget, and document the representation-specific modeling choices required by each space. 
+
+• We show that common representation properties do not individually pre-dict generative behavior; instead, different target spaces induce distinct al-locations of model capacity, sampling efficiency, guidance, and distribution coverage. 
+
+## 2 Preliminaries 
+
+Let an image be represented as a sequence 
+
+x = {x1, . . . , x N }, xi ∈ RD , (1) where N = 256 in all experiments and D depends on the target space. For la-tent representations, the sequence is produced by a frozen encoder and is mapped back to pixels by the corresponding decoder. For raw pixels, the image is patchi-fied before generation and unpatchified afterward. 4 M. Plocher et al. 
+
+2.1 Random-Order Autoregression. 
+
+Given a random mask M ⊆ { 1, . . . , N }, the visible tokens are processed by a bidirectional transformer. The transformer produces a contextual vector zi
+
+for every masked location. Following random-order masked autoregression, the image distribution can be expressed through conditional predictions over subsets of tokens rather than through a fixed causal ordering: 
+
+p(x) = Y
+
+> k
+
+p(xMk | x ¯Mk ), (2) where Mk denotes the subset generated at autoregressive step k, and ¯Mk denotes the tokens already visible at that step. The transformer is therefore responsible for inter-token reasoning: it aggre-gates the visible image content and class-conditioning tokens into contextual features. The conditional distribution of each target token is modeled separately by a local flow network. 
+
+2.2 Per-Token Rectified Flow 
+
+For each masked token xi, we independently sample Gaussian noise ϵi ∼ N (0 , I )
+
+and a continuous timestep ti ∈ [0 , 1] . We use the rectified-flow interpolation 
+
+xt,i = (1 − ti)xi + tiϵi, (3) where ti = 0 corresponds to clean data and ti = 1 to Gaussian noise. The target velocity along this linear path is 
+
+vt,i = ϵi − xi. (4) A local denoiser vθ receives the noisy token xt,i , its timestep ti, and the contextual feature zi. The complete model is trained with 
+
+Lflow = E
+
+"
+
+1
+
+|M |D
+
+X
+
+> i∈M
+
+∥vθ (xt,i , z i, t i) − vt,i ∥22
+
+#
+
+. (5) The loss is computed only on masked positions and is normalized by both the number of masked tokens and the token dimension. Although the model ex-presses an autoregressive factorization, all masked tokens and their indepen-dently sampled timesteps are processed in parallel during training. For the raw-pixel experiments, we additionally evaluate clean-data prediction (x-prediction). The denoiser directly predicts xi, and the output is reparameter-ized as a velocity for flow integration 
+
+vθ (xt,i , z i, t i) = xθ (xt,i , z i, t i) − xt,i 
+
+1 − ti
+
+(6) This intervention follows the motivation that clean image data may be easier for a capacity-limited network to predict than an off-manifold velocity target [15]. Both prediction parameterizations are evaluated within the existing pixel and DINOv2 experiments. 
+
+2.3 Architecture: Context Model and Local Denoiser 
+
+The training and inference pipelines are shown in Figure 1. A frozen encoder first maps an image into a token representation. For direct pixel generation, this encoder is replaced by non-overlapping patchification. On Generative Difficulty 5AR  
+
+> Transformer
+> Random
+> Masking
+> Noising
+> (per Token)
+> Reconstruction
+> zi
+> xt, i
+> Prediction
+> x0, v
+> Flow
+> loss
+> Trainable
+> Frozen
+> Encoder
+> Denoiser
+> (per Token)
+> (a) Training pipeline. AR
+> Transformer
+> Denoiser
+> (per Token) Decoder
+> Condition
+> zi
+> Noise
+> ei
+> # AR-steps
+> (b) Inference pipeline.
+
+Fig. 1: Overview of our masked autoregressive rectified-flow model. (a) Dur-ing training, an image is encoded into continuous tokens (or directly patchified in pixel space), randomly masked, and processed by a bidirectional transformer to obtain con-textual features zi. A local denoiser predicts the rectified-flow target for each masked token. (b) During sampling, the model starts from a fully masked grid and alternates between context prediction and conditional token generation until all positions are filled. Blue and orange denote frozen and trainable modules, respectively. 
+
+The context transformer follows an MAE-style encoder–decoder structure [9, 24]. The encoder operates only on visible image tokens, reducing the amount of self-attention computation under high masking. The decoder inserts learned mask tokens and produces the full sequence of contextual vectors z. We also evaluate a decoder-only configuration of the context transformer for DINOv2, in which the frozen tokens are supplied directly to the decoder. Class information is represented by learned in-context tokens and is incorporated by the transformer rather than being supplied directly to the local denoiser. The local denoiser is a residual MLP conditioned through adaLN-Zero [23]. Its input is a single noisy token, while the timestep and transformer context modulate the intermediate activations. Because the denoiser acts independently at each spatial location, it does not contain self-attention; all communication between locations must pass through the transformer-produced context [24]. We evaluate two modifications of this local denoiser. First, its internal ex-pansion ratio and hidden dimension can be increased to provide more capacity for high-dimensional tokens. Second, the noisy token xt,i and context zi can be 6 M. Plocher et al. 
+
+concatenated and projected through an input fusion layer, in addition to using 
+
+zi through adaLN modulation. These interventions allow us to distinguish limi-tations of contextual inference from limitations of the conditional token model. 
+
+## 3 A Masked-Flow Probe for Target Representations 
+
+3.1 Target Representations 
+
+We compare four target spaces while fixing the spatial sequence length to 256 tokens. We show t-SNE visualization of these spaces in the appendix. 
+
+SD-VAE. We use the KL-regularized Stable Diffusion VAE (SD-VAE) with a spatial stride of 16. A 256 ×256 image is encoded into a 16 ×16 grid with 16 channels per token. 
+
+DINOv2 and MAE . We use the base variants of DINOv2 and MAE, both producing 768-dimensional patch features. Their original patch size is 14 at a 224 ×224 input resolution. Following the setup of RAE [35], the spatial features are bilinearly interpolated to obtain a 16 ×16 token grid for 256 ×256 images. The global CLS token is discarded, and channel-wise layer normalization is applied to the patch tokens. Frozen pretrained decoders map the resulting features back to pixels. These decoders were trained on ImageNet using a combination of ℓ1,LPIPS, and adversarial reconstruction losses [35]. 
+
+Pixels. Images are divided into non-overlapping 16 ×16 RGB patches. Each patch is flattened into a 16 × 16 × 3 = 768 dimensional token. Generated tokens are directly unpatchified into the final image, no pretrained encoder or decoder is used. 
+
+3.2 Autoregressive Sampling 
+
+During inference, generation begins from a fully masked 16 ×16 token grid, as illustrated in Figure 1(b). At each autoregressive step, the transformer processes the currently visible tokens and predicts contextual features for the remaining positions. A subset of masked locations is then activated according to a cosine mask schedule and a random generation order. For each active location, sampling starts from Gaussian noise and integrates the learned velocity field backward from t = 1 to t = 0 . We use a deterministic first-order Euler solver. The newly generated tokens are added to the visible context, and the procedure repeats until the complete token grid has been gen-erated. Latent sequences are subsequently decoded to pixels, while pixel tokens are directly unpatchified. The standard sampling configuration uses 32 autoregressive steps and 50 flow-integration steps per active token. We additionally evaluate fewer autoregressive and ODE steps, including the extreme case of a single Euler step, to compare how directly different target spaces can be transported from noise to data. 
+
+3.3 Representation-Dependent Guidance 
+
+For class-conditional generation, the model is trained with classifier-free guidance by dropping class-conditioning tokens for 10% of training samples. At inference, we combine the conditional and unconditional velocity estimates as 
+
+ˆvΘ = vΘ (xi,t i , t i, z ∅) + w ·  vΘ (xi,t i , t i, z i) − vΘ (xi,t i , t i, z ∅). (7) On Generative Difficulty 7
+
+where the conditioning signal c is provided by the context vector zi and the un-conditional null state z∅ is represented without class information. w is a guidance scale parameter. We consider two schedules. Linear guidance applies the same scale (w) throughout generation. Progressive guidance begins close to the unguided prediction and increases the scale as more tokens become visible. This schedule reflects the sequential structure of the generator: early tokens establish the global layout, whereas later tokens refine the image under an increasingly informative context. Guidance is treated as an experimental variable rather than a fixed component of the method. We report unguided convergence separately from the best guided generation results, since the evaluated target spaces respond differently to classifier-free guidance. 
+
+## 4 Representation Choice Changes Optimization 
+
+4.1 Experimental Setup 
+
+We evaluate generation using Fréchet Inception Distance (FID) [11], Inception Score (IS) [27], and generative precision and recall. The main model evaluations use 50k generated samples. Guidance sweeps and selected inference ablations are evaluated using 10k samples. For the pretrained target spaces, we separately evaluate reconstruction quality using LPIPS and reconstruction FID. These met-rics characterize the target representation rather than the generative model and are therefore not treated as generation results. All models are trained for class-conditional generation on ImageNet [6] at a resolution of 256 ×256. The target sequence contains 256 spatial tokens for every representation. More implemen-tation details are provided in the appendix. 
+
+4.2 Convergence across Target Spaces 
+
+We first compare optimization without classifier-free guidance. This avoids con-flating representation-dependent training behavior with the large and unequal effects of guidance observed at inference. Fig. 2 reports FID and Inception Score as functions of training iterations. DINOv2 improves substantially faster than the compressed SD-VAE and raw pixels. At the end of the shared 503k-step budget, the DINOv2 model reaches an unguided FID of 6.43, compared with 15.98 for SD-VAE and 43.60 for pixels. DINOv2 also obtains the highest unguided Inception Score, 247.63, whereas SD-VAE and pixels obtain 89.53 and 40.19. The ranking is not explained by parameter count. The pixel model contains 221.6M trainable parameters, more than either latent-space model, but remains substantially slower to optimize. Its FID is still improving at the end of training, indicating that the shared budget is insufficient for convergence. We additionally plot FID against accumulated training GFLOPs in Fig. 2c. DINOv2 maintains its advantage under this compute-based comparison. SD-VAE remains intermediate, and pixels require substantially more computation to reach the same generation quality. The representation ranking therefore persists 8 M. Plocher et al. 0 100k 200k 300k 400k 500k         
+
+> Training Steps
+> 0
+> 10
+> 20
+> 30
+> 40
+> 50
+> 60
+> 70
+> 80
+> FID
+> SD-VAE
+> RAE with DINOv2-B
+> Pixels
+> (a) FID over training iterations. 0100k 200k 300k 400k 500k
+> Training Steps
+> 0
+> 50
+> 100
+> 150
+> 200
+> 250
+> 300
+> IS  SD-VAE
+> RAE with DINOv2-B
+> Pixels
+> (b) IS over training iterations. 10 710 8
+
+Training compute (GFLOPs)   
+
+> 0
+> 10
+> 20
+> 30
+> 40
+> 50
+> 60
+> 70
+> 80
+> FID  SD-VAE
+> RAE with DINOv2-B
+> Pixels (c) FID vs. accumulated training GFLOPs.
+
+Fig. 2: Unguided optimization across target representations. FID (a) and In-ception Score (b) over 503k training steps, and FID versus accumulated training com-putation (c). DINOv2-B converges fastest under both iteration- and compute-based comparisons; SD-VAE remains intermediate, while the pixel model continues to im-prove at the end of the shared budget. 
+
+when training progress is measured by computation rather than only optimiza-tion steps. The comparison also shows that target dimensionality alone is not predictive. DINOv2 and pixel tokens are both 768-dimensional, but exhibit the best and worst optimization efficiency, respectively. Conversely, the 16-dimensional SD-VAE target lies between them. More details on design choices for adapting the Model to DINOv2 and pixels are provided in the appendix. 
+
+## 5 Where Does the Difficulty Move? 
+
+5.1 Context Reconstruction under Masking 
+
+We examine the contextual features produced by the transformer after 200 epochs of training. We apply the same fixed spatial masks to SD-VAE, DINOv2, and pixel representations at masking ratios of 65% and 95%. As shown in Fig. 3, for each representation, we visualize both the fully encoded target features and the transformer output z using PCA coloring. On Generative Difficulty 9
+
+Fig. 3: Context reconstruction under 65% and 95% masking. The top rows show the input images and corresponding spatial masks. For each target space, paired rows compare PCA visualizations of the full encoded features and transformer-produced context z under the same mask. At 95% masking, DINOv2 retains clearer global orga-nization, whereas pixel-space context becomes substantially more degraded. We note that the output of the context transformer on the visible tokens is worse as we do not compute the loss on them, but this does not affect generation as only masked tokens are kept. 
+
+A common behavior appears across all spaces. The transformer output at visible positions differs from the corresponding original representation, even in 10 M. Plocher et al. 
+
+the 65% masking condition. This follows from the training objective: the flow loss is applied only at masked positions, and the transformer is not directly trained to reproduce the visible tokens. These visible-position discrepancies do not affect generation because only the contextual vectors at masked positions condition the local denoiser. The representations diverge more clearly at 95% masking. Pixel-space con-text becomes blurry and loses much of the spatial structure present in the full image. DINOv2 retains a substantially clearer and more semantically coherent contextual organization when only 5% of the spatial tokens remain visible. SD-VAE lies between these cases. High masking approximates the early phase of autoregressive sampling, when only a few generated tokens are available. The visualization therefore suggests that DINOv2 provides the transformer with globally informative visible tokens early in generation, whereas localized pixel patches provide less contextual in-formation per observed position. This interpretation is consistent with the spatial masking behavior of the frozen representations (see appendix Fig. 13). When individual tokens are masked and the remaining representation is decoded, missing DINOv2 and SD-VAE to-kens affect areas extending beyond an isolated patch. MAE masking is more spatially localized, and pixel masking is localized by construction. Equal to-ken masks therefore do not remove equivalent image information across target spaces 6.
+
+5.2 Distinct Bottlenecks: Context Modeling and Local Denoising 
+
+The DINOv2 architecture reaches its reported performance with a two-layer transformer encoder, whereas the final SD-VAE and pixel configurations use 10-layer encoders. Within DINOv2, a two-layer encoder improves over a decoder-only architecture, but much of the subsequent performance gain comes from the local denoiser rather than additional context-transformer depth. More detailed results are reported in the appendix Tab. 4. Increasing the DINOv2 denoiser expansion ratio and adding direct context fusion improves FID from 7.59 to 6.30. Increasing its hidden dimension to 1536 further improves FID to 5.33. The pixel model shows a related pattern: the bottleneck configuration reaches 71.04, while the wider denoiser and z-fusion reduce FID to 42.39. These experiments indicate that high-dimensional target spaces place sub-stantial demands on the local conditional model. A representation may expose useful global structure to the transformer while still requiring a strong denoiser to predict an individual 768-dimensional token from a noisy state and its context. The experiments do not isolate denoiser width from context fusion because both are changed together in the principal ablations. We therefore attribute the                 
+
+> 6These visualizations do not provide a direct quantitative measure of conditional entropy or masked-token predictability. They nevertheless expose a representation-dependent difference in the contextual signal available to the local denoiser, partic-ularly in the high-masking regime. On Generative Difficulty 11
+> Table 1: Reconstruction quality of the frozen encoder-decoder pairs on Im-ageNet validation images. These metrics characterize the target representation and decoder rather than the trained generator. Lower is better for both metrics.
+> Encoder Token dimension LPIPS ( ↓) Reconstruction FID ( ↓)
+> SD-VAE (KL-16) 16 0.14 0.62 MAE-B 768 0.11 0.16
+> DINOv2-B 768 0.255 0.49 DINOv2-L 1024 0.266 0.52
+
+observed improvement to the combined increase in local capacity and condition-ing access rather than to either modification alone. 
+
+## 6 What Does Not Predict Generative Behavior? 
+
+6.1 Reconstruction Fidelity 
+
+We first evaluate the reconstruction quality of the pretrained target representa-tions. Reconstruction fidelity constrains the information that can appear in the final generated image, but the experiments show that it does not predict how easily the target distribution can be learned. As shown in Tab. 1, MAE-B achieves the best reconstruction metrics, with an LPIPS distance of 0.11 and a reconstruction FID of 0.16. SD-VAE follows with an LPIPS of 0.14 and a reconstruction FID of 0.62. DINOv2-B obtains a substantially worse LPIPS distance of 0.255 but a competitive reconstruction FID of 0.49. Qualitative reconstructions show the same pattern (see appendix Fig. 12). MAE preserves fine visual details particularly well, followed by SD-VAE. DI-NOv2 reconstructions display larger perceptual deviations despite retaining rec-ognizable image content. However, generation follows a different ranking. DINOv2 reaches substan-tially better unguided generation than either SD-VAE or MAE, despite not pro-viding the best reconstruction fidelity. MAE provides the strongest reconstruc-tions but yields much worse generation than DINOv2 under the same masked-flow architecture. Reconstruction fidelity is therefore an important constraint on attainable output quality, but it is not a sufficient predictor of optimization efficiency or final generative performance. 
+
+6.2 DINOv2 vs. MAE: Different Encoder Objectives 
+
+While DINOv2 is trained using a self-supervised objective, MAE utilizes a mask-ing and reconstruction objective. Prior work reports that MAE features are less effective than DINOv2 features for joint generative models [35]. We examine whether this ranking persists under masked, per-token flow matching. For this experiment, we select the same hyperparameters and architecture as in the final experiment for DINOv2 in Tab. 2. As shown in Fig. 4, we plot the FID and IS metrics over training iterations. The results clearly demonstrate that 12 M. Plocher et al. 0 100k 200k 300k 400k 500k         
+
+> Training Steps
+> 0
+> 10
+> 20
+> 30
+> 40
+> 50
+> 60
+> 70
+> 80
+> FID
+> RAE with DINOv2-B
+> RAE with MAE-B
+> (a) FID over training iterations 0100k 200k 300k 400k 500k
+> Training Steps
+> 0
+> 50
+> 100
+> 150
+> 200
+> 250
+> 300
+> IS
+> RAE with DINOv2-B
+> RAE with MAE-B (b) IS over training iterations
+
+Fig. 4: Generation in DINOv2-B and MAE-B representation spaces. Both models use the same hyperparameters. FID (a) and Inception Score (b) over 200 epochs show substantially better final generation quality in DINOv2 space. 
+
+Table 2: Final class-conditional ImageNet generation results after 503k training steps (200 epochs). The upper block reports unguided models; the lower block reports the best observed guidance configuration for each representation. All metrics use 50k generated samples. Symbols (p) and (l) denote progressive and linear classifier-free guidance, respectively. 
+
+Space Params. CFG scale FID ( ↓) IS ( ↑) Prec. ( ↑) Rec. ( ↑)
+
+Without CFG 
+
+SD-VAE (KL-16) 179.6M 1.0 15.98 89.53 0.580 0.606 
+
+DINOv2-B 165.4M 1.0 6.43 247.63 0.853 0.301 Pixels 221.6M 1.0 43.60 40.19 0.329 0.578 
+
+With CFG 
+
+SD-VAE (KL-16) 179.6M 6.0 (p) 3.19 263.84 0.757 0.507 
+
+DINOv2-B 165.4M 1.0 (–) 6.43 247.63 0.853 0.301 Pixels 221.6M 2.0 (l) 8.70 216.76 0.688 0.346 
+
+DINOv2 outperforms MAE features in masked autoregressive models too. We further observe that the convergence speed remains comparable between both spaces, which aligns with expectations given that both latent spaces possess a strong semantic structure. 
+
+## 7 Representation-Dependent Guidance 
+
+7.1 Classifier-Free Guidance 
+
+The target spaces respond differently to classifier-free guidance, as shown in Tab. 2. SD-VAE benefits strongly from progressive guidance. The unguided model obtains an FID of 15.98. Increasing the guidance scale at later autore-gressive steps improves FID to 3.19 at a maximum scale of w = 6 .0. The asso-ciated precision–recall curve exhibits the expected trade-off: stronger guidance increases fidelity and precision while reducing sample coverage. On Generative Difficulty 13 1 2 3 4 8       
+
+> CFG Scale
+> 0.0
+> 2.5
+> 5.0
+> 7.5
+> 10.0
+> 12.5
+> 15.0
+> 17.5
+> 20.0
+> FID @10k
+> Linear
+> Progressive
+> (a) FID @10k, DINOv2 latent space. 1510 15 20
+> CFG Scale
+> 0
+> 5
+> 10
+> 15
+> 20
+> 25
+> 30
+> FID @10k
+> Linear
+> Progressive (b) FID @10k, MAE latent space.
+
+Fig. 5: Representation-dependent response to classifier-free guidance. We report FID@10k under linear and progressive guidance in DINOv2-B (a) and MAE-B (b) representation spaces. DINOv2 obtains its best result without guidance, whereas MAE improves substantially with linear guidance and reaches its best FID at w = 2 .
+
+Pixel generation also depends strongly on guidance. Linear guidance with w =2.0 improves the final FID from 43.60 to 8.70. Progressive guidance is less effec-tive, suggesting that the initial pixel patches require strong class conditioning before a reliable global structure has been established. 
+
+DINOv2 behaves differently. Neither linear nor progressive guidance improves FID. The best model remains the unguided model with w = 1 .0. This behavior is observed across the evaluated range of guidance scales rather than only at one selected value. 
+
+MAE depends strongly on guidance, despite using the same representation-autoencoder framework. Its FID improves from 28.00 to 12.69 with linear guid-ance at w = 2 .0. Progressive guidance does not provide a similar benefit, includ-ing at high maximum scales, indicating that strong class conditioning is useful from the early autoregressive steps. Fig. 5 further shows the complete guidance sweeps for DINOv2 and MAE. DINOv2 degrades under both linear and progressive guidance, whereas MAE benefits from linear guidance applied from the beginning of generation. These results show that guidance is not a representation-independent in-ference correction. Even DINOv2 and MAE, which share token dimensionality, spatial layout, and a representation-autoencoder interface, require different guid-ance strategies. 
+
+7.2 Qualitative Results and Failure Cases 
+
+We show more qualitative samples for all target representations in appendix I. DINOv2 generations are often sharp and semantically recognizable even with-out guidance. What is striking is that the generated images look very natural. However, characteristic failures appear in global structure and object composi-tion. The model can distort object shape or fail to separate multiple semantically related objects. As illustrated in Fig. 6a, in examples containing two animals, their bodies may merge into one global structure even though local texture and class identity remain plausible. 14 M. Plocher et al.   
+
+> (a) DINOv2: sharp local appearance with fail-ures in global coherence and multi-object sepa-ration.
+> (b) Pixels: recognizable categories and coarse layouts, but limited fine detail.
+
+Fig. 6: Representative failure modes of the final DINOv2-B and pixel mod-els. Representative failure modes of the final DINOv2-B and pixel models. 
+
+Pixel-space generations preserve the target class and broad image layout after linear guidance but remain visibly blurrier and contain fewer fine details, as illustrated in Fig. 6b. This limitation persists after clean-data prediction, the 128-dimensional bottleneck, and the wider denoiser. It is consistent with both the incomplete convergence of the pixel model and the remaining burden placed on the local per-token network. The SD-VAE model produces detailed and diverse samples but requires generation-guidance for high quality results. Here, progressive guidance improves class fidelity and perceptual sharpness while maintaining stronger recall than the other guided models. 
+
+## 8 Conclusion 
+
+Using a unified masked autoregressive rectified-flow model as a controlled testbed, we compared raw pixels, compressed SD-VAE latents, DINOv2 features, and MAE features as generative targets. Under a shared ImageNet training bud-get, the representations produce distinct optimization and inference regimes. DINOv2 converges fastest in both iterations and computation, supports recog-nizable single-step generation, and exposes coherent contextual features under severe masking. Its high-dimensional tokens nevertheless benefit strongly from a wider local denoiser and direct context fusion. Pixels are substantially slower to optimize and require clean-data prediction, a bottleneck, more visible con-text, a wider denoiser, and linear classifier-free guidance. MAE provides the strongest reconstruction quality and clear semantic organization but remains considerably less generatable than DINOv2. These results show that compres-sion, reconstruction fidelity, token dimensionality, and visible semantic clustering do not individually predict masked generative behavior. Instead, the target rep-resentation changes how modeling difficulty is distributed between contextual inference, conditional token generation, flow integration, and inference-time dis-tributional control. On Generative Difficulty 15 
+
+## Acknowledgements 
+
+Gege Gao acknowledges the EuroHPC Joint Undertaking for awarding access to computational resources under project ID EHPC-AIF-2026PG01-147 on the Discoverer+ GPU partition hosted by Sofia Tech Park. Andreas Geiger is a member of the Machine Learning Cluster of Excellence, EXC 2064/1, project number 390727645. The authors gratefully acknowledge the ML Cloud and the Tübingen AI Center for providing the computational resources and facilities that supported this work. 
+
+## References 
+
+1. Baade, A., Chan, E.R., Sargent, K., Chen, C., Johnson, J., Adeli, E., Fei-Fei, L.: Latent Forcing: Reordering the Diffusion Trajectory for Pixel-Space Image Gener-ation. arXiv preprint arXiv:2602.11401 (2026) 2. Black Forest Labs: Representation Comparison: Analyzing and Enhancing the La-tent Space of FLUX (2025) 3. Chang, H., Zhang, H., Jiang, L., Liu, C., Freeman, W.T.: MaskGIT: Masked Gen-erative Image Transformer. In: CVPR (2022) 4. Chefer, H., Esser, P., Lorenz, D., Podell, D., Raja, V., Tong, V., Torralba, A., Rombach, R.: Self-Supervised Flow Matching for Scalable Multi-Modal Synthesis. arXiv preprint arXiv:2603.06507 (2026) 5. Chen, M., Radford, A., Child, R., Wu, J., Jun, H., Luan, D., Sutskever, I.: Gener-ative Pretraining From Pixels. In: ICML (2020) 6. Deng, Jia, Dong, Wei, Socher, Richard, Li, Li-Jia, Li, Kai, Fei-Fei, Li: Imagenet: A large-scale hierarchical image database. In: CVPR (2009) 7. Esser, P., Kulal, S., Blattmann, A., Entezari, R., Müller, J., Saini, H., Levi, Y., Lorenz, D., Sauer, A., Boesel, F., Podell, D., Dockhorn, T., English, Z., Lacey, K., Goodwin, A., Marek, Y., Rombach, R.: Scaling Rectified Flow Transformers for High-Resolution Image Synthesis. In: ICML (2024) 8. Esser, P., Rombach, R., Ommer, B.: Taming Transformers for High-Resolution Image Synthesis. In: CVPR (2021) 9. He, K., Chen, X., Xie, S., Li, Y., Dollár, P., Girshick, R.: Masked autoencoders are scalable vision learners. arXiv preprint arXiv:2111.06377 (2021) 10. He, K., Chen, X., Xie, S., Li, Y., Dollar, P., Girshick, R.: Masked Autoencoders Are Scalable Vision Learners. In: CVPR (2022) 11. Heusel, M., Ramsauer, H., Unterthiner, T., Nessler, B., Hochreiter, S.: Gans trained by a two time-scale update rule converge to a local nash equilibrium. In: NeurIPS (2017) 12. Ho, J., Jain, A., Abbeel, P.: Denoising Diffusion Probabilistic Models. In: NeurIPS (2020) 13. Kocabas, M., Gao, G., Schölkopf, B., Geiger, A.: Trajectory forcing: Structure-first generation with controllable semantic trajectories. In: ECCV (2026) 14. Li, T., Chang, H., Mishra, S.K., Zhang, H., Katabi, D., Krishnan, D.: MAGE: MAsked Generative Encoder to Unify Representation Learning and Image Synthe-sis. In: CVPR (2023) 15. Li, T., He, K.: Back to Basics: Let Denoising Generative Models Denoise. arXiv preprint arXiv:2511.13720 (2026) 16. Li, T., Tian, Y., Li, H., Deng, M., He, K.: Autoregressive Image Generation without Vector Quantization. In: NeurIPS (2024) 16 M. Plocher et al. 17. Lipman, Y., Chen, R.T.Q., Ben-Hamu, H., Nickel, M., Le, M.: Flow Matching for Generative Modeling. In: ICLR (2023) 18. Liu, X., Gong, C., Liu, Q.: Flow Straight and Fast: Learning to Generate and Transfer Data with Rectified Flow. In: ICLR (2023) 19. Lu, Y., Lu, S., Sun, Q., Zhao, H., Jiang, Z., Wang, X., Li, T., Geng, Z., He, K.: One-step Latent-free Image Generation with Pixel Mean Flows. arXiv preprint arXiv:2601.22158 (2026) 20. Ma, N., Goldstein, M., Albergo, M.S., Boffi, N.M., Vanden-Eijnden, E., Xie, S.: SiT: Exploring Flow and Diffusion-Based Generative Models with Scalable Interpolant Transformers. In: ECCV (2024) 21. van den Oord, A., Kalchbrenner, N., Vinyals, O., Espeholt, L., Graves, A., Kavukcuoglu, K.: Conditional Image Generation with PixelCNN Decoders. In: NeurIPS (2016) 22. Oquab, M., Darcet, T., Moutakanni, T., Vo, H., Szafraniec, M., Khalidov, V., Fer-nandez, P., Haziza, D., Massa, F., El-Nouby, A., Assran, M., Ballas, N., Galuba, W., Howes, R., Huang, P.Y., Li, S.W., Misra, I., Rabbat, M., Sharma, V., Syn-naeve, G., Xu, H., Jegou, H., Mairal, J., Labatut, P., Joulin, A., Bojanowski, P.: DINOv2: Learning Robust Visual Features without Supervision. arXiv preprint arXiv:2304.07193 (2024) 23. Peebles, W., Xie, S.: Scalable Diffusion Models with Transformers. In: ICCV (2023) 24. Qing, Z., Zhang, S., Huang, Z., Wang, X., Wang, Y., Lv, Y., Gao, C., Sang, N.: Mar: Masked autoencoders for efficient action recognition. arXiv preprint arXiv:2207.11660 (2022) 25. Ramesh, A., Pavlov, M., Goh, G., Gray, S., Voss, C., Radford, A., Chen, M., Sutskever, I.: Zero-shot text-to-image generation. arXiv preprint arXiv:2102.12092 (2021) 26. Rombach, R., Blattmann, A., Lorenz, D., Esser, P., Ommer, B.: High-Resolution Image Synthesis with Latent Diffusion Models. In: CVPR (2022) 27. Salimans, T., Goodfellow, I., Zaremba, W., Cheung, V., Radford, A., Chen, X.: Improved techniques for training gans. In: NeurIPS (2016) 28. Singh, J., Zheng, B., Wu, Z., Zhang, R., Shechtman, E., Xie, S.: Improved Baselines with Representation Autoencoders. arXiv preprint arXiv:2605.18324 (2026) 29. Sohl-Dickstein, J., Weiss, E.A., Maheswaranathan, N., Ganguli, S.: Deep Unsuper-vised Learning using Nonequilibrium Thermodynamics. In: ICML (2015) 30. Song, J., Meng, C., Ermon, S.: Denoising Diffusion Implicit Models. In: ICLR (2021) 31. Song, Y., Sohl-Dickstein, J., Kingma, D.P., Kumar, A., Ermon, S., Poole, B.: Score-Based Generative Modeling through Stochastic Differential Equations. In: ICLR (2021) 32. You, Z., Ou, J., Zhang, X., Hu, J., Zhou, J., Li, C.: Effective and Efficient Masked Image Generation Models. In: ICML (2025) 33. Yu, S., Kwak, S., Jang, H., Jeong, J., Huang, J., Shin, J., Xie, S.: Representation Alignment for Generation: Training Diffusion Transformers Is Easier Than You Think. In: ICLR (2025) 34. Yu, Y., Xiong, W., Nie, W., Sheng, Y., Liu, S., Luo, J.: PixelDiT: Pixel Diffusion Transformers for Image Generation. arXiv preprint arXiv:2511.20645 (2025) 35. Zheng, B., Ma, N., Tong, S., Xie, S.: Diffusion Transformers with Representation Autoencoders. In: ICLR (2026) On Generative Difficulty 17 
+
+# Appendix 
+
+## Table of Contents 
+
+A The Storyline . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 18 
+
+B Related Work . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 19 B.1 Generative Models across Target Representations . . . . . . . . . . . . . . 19 B.2 Continuous Masked Image Generation . . . . . . . . . . . . . . . . . . . . . . . 20 
+
+C Experimental Protocol . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 20 C.1 Dataset and Evaluation . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 20 C.2 Shared Training Budget . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 21 C.3 Representation-Specific Configurations . . . . . . . . . . . . . . . . . . . . . . . 21 (i) Adapting the Model to DINOv2. . . . . . . . . . . . . . . . . . . . . . . . . . 22 (ii) Adapting the Model to Pixels. . . . . . . . . . . . . . . . . . . . . . . . . . . 23 C.4 Detailed Parameters and Architectures . . . . . . . . . . . . . . . . . . . . . . . 24 
+
+D More on “Where Does the Difficulty Move?” . . . . . . . . . . . . . . . . . 24 D.1 Autoregressive Sampling Steps . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 24 D.2 ODE Integration and One-Step Generation . . . . . . . . . . . . . . . . . . . 24 D.3 Autoregressive Generation Dynamics . . . . . . . . . . . . . . . . . . . . . . . . . 27 
+
+E More on “What Does Not Predict Generative Behavior?” . . . . 27 E.1 Reconstruction Fidelity: Qualitative Examples . . . . . . . . . . . . . . . . 27 E.2 Semantic Organization . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 27 E.3 Compression and Dimensionality . . . . . . . . . . . . . . . . . . . . . . . . . . . . 28 E.4 Decoded Space Visualization . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 28 
+
+F Discussion . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 28 F.1 Target Representations Induce Different Optimization Regimes . . 28 F.2 Reconstruction and Generative Learnability Are Distinct . . . . . . . 29 F.3 Context and Local Transport Must Be Considered Jointly . . . . . . 29 F.4 Distributional Control Is Representation-Dependent . . . . . . . . . . . 29 
+
+G Empirical Principles . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 30 
+
+H Limitations . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 30 
+
+I Qualitative Results . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 36 18 M. Plocher et al. 
+
+## A The Storyline 
+
+1. Why interesting? 
+
+a. Training modern image generators requires substantial training computation; the target representation directly defines the distribution that the generator must learn. b. In masked generative models, each prediction combines two distinct problems: inferring context from partially observed tokens, which we call contextual in-ference, and modeling the conditional distribution of a missing token, which we call conditional token modeling. c. Understanding how the target representation affects these two problems can guide the joint choice of model capacity, masking strategy, and sampling pro-cedure, rather than relying on representation-specific trial and error. 2. How done now? 
+
+a. Most diffusion and continuous masked generative models operate in compressed, reconstruction-trained SD-VAE latent spaces. b. Recent joint diffusion and flow models instead generate semantic representation-autoencoder features or raw pixels, and report improved optimization under suitable architectures. c. Continuous masked generative models use a transformer to perform contextual inference and a local diffusion or flow head to perform conditional token mod-eling, but alternative target representations remain poorly understood in this conditional setting. 3. What is missing, and So What? 
+
+a. Results from joint generation do not directly determine which target represen-tations are easy to model under partial observation. b. Common explanations— compression, reconstruction fidelity, high-level seman-tics, or low-dimensional data structure— remain entangled and are individually insufficient to predict generative behavior. c. Treating target representations as interchangeable obscures where model capac-ity is required: in contextual inference, in conditional token modeling, or during inference-time distributional control. d. Consequently, architectures, masking strategies, and guidance strategies opti-mized for one target representation may transfer poorly to another; faster con-vergence may also conceal reduced distribution coverage. 4. Proposed approach. 
+
+a. Use one masked autoregressive generator with a per-token rectified-flow objec-tive as a common experimental probe. b. Compare raw pixels, SD-VAE latent spaces, DINOv2 representation-autoen-coder features, and MAE representation-autoencoder features under a shared dataset, training budget, sequence length, and model scale. c. Decompose generative difficulty through interventions on contextual inference, local denoiser capacity, flow integration, masking strategy, and classifier-free guidance. d. Test the empirical hypothesis that target representations reallocate, rather than uniformly remove, difficulty across these components. 5. Experimental questions. On Generative Difficulty 19 
+
+C1. Is the common experimental probe reasonable? Can the same masked-flow formulation train viable generators in compressed latent spaces, semantic rep-resentation-autoencoder features, and raw pixels? 
+
+C2. How does the target representation affect optimization? Under matched training budgets and similar model scales, which target representations converge fastest in iterations and total training computation? 
+
+C3. Where is contextual inference difficult? How coherent is the inferred context under severe masking, and how much model capacity must be allocated to the transformer in each space? 
+
+C4. Where is conditional token modeling difficult? How do local denoiser capacity, conditioning, prediction parameterization, and the number of ODE steps affect different target representations? 
+
+C5. Are common representation properties sufficient explanations? Do compression, reconstruction fidelity, or visible semantic clustering consistently pre-dict generative learnability, particularly when comparing DINOv2 representation-autoencoder features and MAE representation-autoencoder features? 
+
+U1. How does the target representation reshape the generated distribu-tion? How do target representations change classifier-free guidance, precision–re-call, sample diversity, and characteristic failure modes? 
+
+## B Related Work 
+
+B.1 Generative Models across Target Representations 
+
+Diffusion and flow-matching models learn a continuous trajectory between a simple noise distribution and the data distribution. Early diffusion models formulate this trajectory as a stochastic forward and reverse process [12, 29], while deterministic formulations such as DDIM and probability-flow ODEs enable sampling with fewer steps [30,31]. Flow matching instead directly regresses the velocity field of a prescribed probability path [17, 18]. Rectified flow adopts a linear interpolation between data and Gaussian noise, providing a simple training objective and deterministic ODE sam-pling [7, 18]. The target distribution learned by these models is commonly defined through a pretrained autoencoder. Latent diffusion models use a reconstruction-trained varia-tional autoencoder to remove perceptually less important image information and re-duce both spatial resolution and channel dimensionality [26]. Stable Diffusion VAE representations have subsequently become a standard target for diffusion transformers and continuous autoregressive image generators [16, 20, 23]. Recent work has investigated alternative representations. Representation autoen-coders pair a frozen vision foundation model with a separately trained image de-coder [13, 35]. Compared with conventional VAEs, these encoders are not trained pri-marily to reconstruct pixels. Instead, they inherit objectives such as self-distillation, masked reconstruction, or image-text alignment. Joint diffusion and flow models trained on such representations can converge rapidly and achieve strong generation quality, al-though their reconstruction properties differ substantially across encoders [2, 28, 35]. A related line of work aligns intermediate generative features with pretrained vi-sual representations rather than directly generating those representations. REPA aligns diffusion-transformer features with DINOv2 features [33], while Self-Flow combines 20 M. Plocher et al. representation learning and generation through a self-supervised teacher-student ob-jective [4]. These approaches show that semantic visual representations can improve generative optimization, but they do not determine how such representations behave when used directly as the output space of a masked conditional generator. At the opposite extreme, recent models revisit direct pixel generation. JiT shows that a denoising model can operate in high-dimensional pixel space when it predicts clean data and uses a capacity-limited bottleneck [15]. Other work similarly explores latent-free or pixel-space diffusion and flow models [1, 19, 34]. Direct pixels avoid the reconstruction ceiling of a pretrained decoder, but present a high-dimensional and spatially local target distribution. We study these target spaces within one masked autoregressive flow formulation. In contrast to joint diffusion or flow models, each prediction is conditioned on a par-tially observed token sequence. The target representation therefore affects not only the marginal distribution to be generated, but also the information available through visible tokens and the conditional distribution of each missing token. 
+
+B.2 Continuous Masked Image Generation 
+
+Autoregressive image models decompose image generation into conditional predictions. Early pixel autoregressive models use a fixed spatial order [5,21], while later approaches generate discrete visual tokens produced by vector-quantized autoencoders [8,25]. Such models benefit from the scalability of next-token prediction, but a fixed causal order limits parallel generation and does not naturally exploit two-dimensional context. Masked generative models instead use bidirectional attention and predict randomly hidden tokens from the visible image context. MaskGIT demonstrates that multiple discrete tokens can be generated in parallel according to an iterative masking schedule [3]. MAGE further combines masked representation learning and generation within one architecture [14]. MAR extends masked autoregression to continuous-valued tokens [16]. Rather than applying a categorical output head, MAR uses a small diffusion network to model the conditional distribution of each missing token. The transformer models dependencies across token positions, while a local denoiser models the continuous distribution p(xi |
+
+zi). This separation makes it possible to generate continuous autoencoder features without vector quantization. Subsequent work improves the efficiency of continuous masked generation through alternative masking schedules, architectures, and loss formulations [32]. However, these models are predominantly developed and evaluated in SD-VAE latent space. We retain their separation between global contextual modeling and local token generation, but replace the local diffusion objective with rectified flow and systematically vary the target representation. 
+
+## C Experimental Protocol 
+
+C.1 Dataset and Evaluation 
+
+All models are trained for class-conditional generation on ImageNet [6] at a resolution of 256 ×256. The target sequence contains 256 spatial tokens for every representation. On Generative Difficulty 21 We evaluate generation using Fréchet Inception Distance (FID) [11], Inception Score (IS) [27], and generative precision and recall. The main model evaluations use 50k gen-erated samples. Guidance sweeps and selected inference ablations are evaluated using 10k samples. For the pretrained target spaces, we separately evaluate reconstruction quality using LPIPS and reconstruction FID. These metrics characterize the encoder-decoder pair rather than the generative model and are therefore not treated as gener-ation results. 
+
+C.2 Shared Training Budget 
+
+The transformer hidden dimension is 768 with 12 attention heads, and the local denoiser contains six residual MLP blocks with a hidden dimension of 1024 in the principal cross-representation comparison. The final SD-VAE, DINOv2-B, and pixel configurations contain 179.6M, 165.4M, and 221.6M trainable parameters, respectively. The models are therefore approximately, but not exactly, matched in scale. The DINOv2 analysis additionally includes a 255.1M-parameter model with a 1536-dimensional denoiser. This configuration is used only to study the effect of local denoiser capacity. The cross-representation efficiency comparison instead uses the 165.4M-parameter DINOv2 model to remain closer to the scale of the SD-VAE baseline. All final models are trained for 200 epochs, corresponding to approximately 500k optimization steps, with a batch size of 512. We use Adam optimizer with (β1, β 2) = (0 .9, 0.95) , a constant learning rate of 2 × 10 −4, weight decay of 0.02, 50 warm-up epochs, and an exponential-moving-average decay of 0.9999. 
+
+C.3 Representation-Specific Configurations 
+
+The shared architecture provides a common generative factorization, but the final train-ing configuration is not identical across all target spaces. We evaluate representation-specific timestep distributions, masking distributions, prediction parameterizations, and denoiser capacities. 
+
+SD-VAE model uses velocity prediction, logit-normal timestep sampling, and an exponential mask-rate distribution. Its transformer contains 10 encoder and 10 decoder layers, and its denoiser uses an expansion ratio of one. 
+
+DINOv2-B model uses velocity prediction, a shifted logit-normal timestep distribu-tion, and the same exponential mask-rate family. Its contextual encoder is reduced to two layers while retaining a 10-layer decoder. The local denoiser uses a larger expansion ratio of four and direct fusion between the noisy token and contextual feature. 
+
+Pixel model uses clean-data prediction, a 128-dimensional bottleneck at the de-noiser input, and a less aggressive truncated-normal mask-rate distribution with a lower bound of 0.7. Its transformer contains 10 encoder and 10 decoder layers, and its denoiser uses an expansion ratio of four with contextual input fusion. 
+
+DINOv2-MAE comparison uses the same generative architecture and hyperparam-eter configuration for both feature encoders. It therefore isolates the encoder repre-sentation more closely than comparisons involving SD-VAE or pixels, although the pretrained encoder-decoder systems themselves remain different. These representation-specific choices are part of the empirical findings: a single schedule and architecture did not transfer equally well across target spaces. 
+
+At the same time, they limit a strictly causal interpretation of the final cross-space rank-ings. We therefore use two complementary forms of evidence. Unguided convergence 22 M. Plocher et al. 
+
+Table 3: Comparison of the target representation spaces.                             
+
+> Target space Grid Dim. Encoder obj. Pixel reconstruction
+> SD-VAE (KL-16) 16 ×16 16 Recon. loss + KL loss Frozen SD-VAE decoder DINOv2-B 16 ×16 768 Self-supervision + distillation Frozen RAE decoder MAE-B 16 ×16 768 Masked patch recon. Frozen RAE decoder Pixels 16 ×16 768 None Direct unpatchification
+
+under a common training budget measures the efficiency of the resulting representation-specific systems, while within-space interventions identify which components are re-sponsible for substantial performance changes. 
+
+(i) Adapting the Model to DINOv2. We identify which design choices improve generation in DINOv2 space. As shown in Tab. 4, all models in this ablation are trained for 503k steps and evaluated using 50k generated samples without classifier-free guidance. 
+
+Table 4: Step-by-step comparison of design choices in the DINOv2 latent space. Metrics are reported on 50k generated samples. 
+
+Space: DINOv2 Params Epochs FID ( ↓) IS ( ↑)
+
+Prediction type 
+
+v-prediction 125.6M 200 9.54 186.85 x-prediction 125.6M 200 10.70 158.70 
+
+Timestep schedule 
+
+uniform time sampling 125.6M 200 9.54 186.85 logit-normal + shift ( α = 6 .93 ) 125.6M 200 7.59 211.37 
+
+Architecture 
+
+decoder-only 124.7M 200 8.55 204.48 encoder (2 layer) + decoder 125.6M 200 7.59 211.37 
+
+Denoiser conditioning 
+
+adaLN (dim=1024, ratio 1) 124.6M 200 7.59 211.37 adaLN (dim=1024, ratio 4) + z-fusion 165.4M 200 6.30 243.91 adaLN (dim=1536, ratio 4) + z-fusion 255.1M 200 5.33 248.00 We begin with a 125.6M-parameter model using two transformer-encoder layers and a local denoiser with hidden dimension 1024 and expansion ratio one. With uniform timestep sampling, velocity prediction reaches an FID of 9.54 and an Inception Score of 186.85. Clean-data prediction does not improve the result, obtaining an FID of 10.70 and an Inception Score of 158.70. We therefore retain velocity prediction for DINOv2. Replacing uniform timestep sampling with a shifted logit-normal distribution im-proves FID from 9.54 to 7.59 and Inception Score from 186.85 to 211.37. The shift parameter is α = 6 .93 , which allocates greater training density toward the high-noise part of the trajectory. We also compare a decoder-only context transformer with a shallow encoder-decoder model. The decoder-only model reaches an FID of 8.55, while adding a two-layer en-On Generative Difficulty 23 
+
+Table 5: Step-by-step comparison of design choices in pixel space. Metrics are reported on 50k generated samples. 
+
+Space: Pixel Params Epochs FID ( ↓) IS ( ↑)
+
+Prediction type 
+
+v-prediction 182.3M 200 104.69 15.82 x-prediction 182.3M 200 89.64 21.10 
+
+Mask-rate schedule 
+
+exponential 182.3M 200 89.64 21.10 truncated normal 182.3M 200 85.05 23.36 
+
+Bottleneck layer 
+
+no bottleneck 182.3M 200 85.05 23.36 bottleneck d′ = 128 182.3M 200 71.04 24.62 
+
+Denoiser conditioning 
+
+adaLN (dim=1024, ratio 1) 182.3M 200 71.04 24.62 adaLN (dim=1024, ratio 4) + z-fusion 221.6M 200 42.39 41.04 coder improves FID to 7.59. The shallow encoder therefore remains useful even though the frozen DINOv2 tokens already contain semantic information. Because the encoder also processes the learned class tokens jointly with the visible image features, the re-sult may reflect both additional contextual processing and improved class-conditioning integration. The largest improvement comes from modifying the local token model. Increasing the denoiser expansion ratio from one to four and adding direct z-fusion improves FID from 7.59 to 6.30 and Inception Score from 211.37 to 243.91. Increasing the denoiser hidden dimension further, from 1024 to 1536, reaches an FID of 5.33 and an Inception Score of 248.00. These results show that the rapid optimization of DINOv2 does not eliminate the need for a capable conditional token model. Its context can be processed with a relatively shallow encoder, but the 768-dimensional targets benefit strongly from a wider local denoiser and direct context-token fusion. For the principal comparison with SD-VAE and pixels, we use the 165.4M-parameter configuration rather than the larger 255.1M model. 
+
+(ii) Adapting the Model to Pixels. Pixel-space generation requires a different sequence of adaptations. We begin with the SD-VAE-style architecture and train all configurations for 503k steps without classifier-free guidance. As reported in Tab. 5, with velocity prediction, the initial pixel model obtains an FID of 104.69 and an Inception Score of 15.82. Unlike the result in DINOv2 space, clean-data prediction is beneficial for pixels: it improves FID to 89.64 and Inception Score to 21.10. We next replace the aggressive exponential mask-rate distribution with a truncated-normal distribution. This gives the model more visible context on average and improves FID from 89.64 to 85.05. The improvement is modest but consistent with the highly localized nature of pixel patches: an individual patch contains no feature information from neighboring regions, unlike tokens produced by a vision transformer or convolu-tional autoencoder. 24 M. Plocher et al. Introducing a 128-dimensional bottleneck at the denoiser input yields a larger im-provement, reducing FID from 85.05 to 71.04. The bottleneck maps each 768-dimensional pixel patch into a lower-dimensional intermediate space before expanding it into the denoiser hidden dimension. Finally, increasing the denoiser expansion ratio from one to four and adding direct z-fusion improves FID from 71.04 to 42.39 and Inception Score from 24.62 to 41.04. As in DINOv2 space, the high-dimensional target benefits substantially from a stronger local model and direct access to transformer context. The pixel ablation demonstrates that the target space does not only change con-vergence speed. It changes which modeling choices are effective. Clean-data prediction and a bottleneck improve pixel generation, whereas clean-data prediction does not help DINOv2. Pixels benefit from a less aggressive mask distribution, while DINOv2 uses the exponential masking family. Both high-dimensional spaces benefit from a stronger denoiser and direct contextual fusion. 
+
+C.4 Detailed Parameters and Architectures 
+
+In Tab. 6, we present the architectural, training and sampling configurations used in our experiments for all representation spaces. The Table is structurally categorized into neural network architectures, training optimization details, and specific inference sampling details. 
+
+## D More on “Where Does the Difficulty Move?” 
+
+D.1 Autoregressive Sampling Steps 
+
+We vary the number of autoregressive steps while keeping the trained models fixed. Because every image contains 256 tokens, fewer autoregressive steps require more tokens to be generated in parallel. As shown in Fig. 7, across SD-VAE, DINOv2, and pixels, generation quality ap-proaches convergence at approximately 32 autoregressive steps. At this setting, the model generates an average of eight new tokens per step. DINOv2 and SD-VAE also retain acceptable qualitative results with only eight autoregressive steps, although their FID is worse than at 32 steps. The broadly similar trend indicates that all three representations support parallel masked generation. Their larger differences emerge in training efficiency, local denois-ing, and the number of flow-integration steps rather than in the overall number of autoregressive updates required for convergence. 
+
+D.2 ODE Integration and One-Step Generation 
+
+We next vary the number of Euler integration steps used by the local rectified-flow sampler. Across all three representations, FID approaches convergence once the number of ODE steps exceeds approximately 25. The representations differ sharply at the extreme of a single Euler step. DINOv2 obtains an FID@10k of 20.82 and an Inception Score of 231.31. Its generated images retain recognizable objects, sharp boundaries, and substantial class-specific structure. Under the same single-step evaluation, SD-VAE obtains an FID@10k of 139.80 and an Inception Score of 6.30. Pixel space obtains an FID@10k of 190.05 and an Inception On Generative Difficulty 25 
+
+Table 6: Implementation details for all representation spaces. 
+
+FlowMAR-B Repr. Space SD-VAE DINOv2-B Pixels architecture 
+
+parameters (M) 179.6M 165.4M 221.6M AR-trans. encoder depth 10 2 10 AR-trans. decoder depth 10 10 10 AR-trans. hidden dim 768 768 768 AR-trans. heads 12 12 12 AR-trans. architecture MAE-style MAE-style MAE-style AR-trans. dropout 0.1 0.1 0.1 AR-trans. class tokens 64 64 64 denoiser depth 6 6 6denoiser hidden dim 1024 1024 1024 denoiser block ratio 1 4 4denoiser dropout 0.0 0.0 0.0 image size 256 256 256 patch size 1 1 image / 16 bottleneck - - 128 
+
+training 
+
+epochs 200 200 200 warmup epochs 50 50 50 optimizer Adam, β1, β 2 = 0 .9, 0.95 Adam, β1, β 2 = 0 .9, 0.95 Adam, β1, β 2 = 0 .9, 0.95 
+
+batch size 512 512 512 learning rate 2e-4 2e-4 2e-4 learning rate schedule constant constant constant weight decay 0.02 0.02 0.02 ema decay 0.9999 0.9999 0.9999 time sampler logit-normal logit-normal + shift logit-normal mask rate sampler Exp + clamb 0.62 Exp + clamb 0.62 trunc normal 0.7 class token drop (for CFG) 0.1 0.1 0.1 
+
+sampling 
+
+ODE solver Euler Euler Euler ODE steps 50 50 50 time steps linear in [0.0, 1.0] shifted in [0.0, 1.0] linear in [0.0, 1.0] mask schedule cosine cosine cosine AR steps 32 32 32 generation order random random random Score of 4.21. Qualitatively, the SD-VAE model produces only coarse outlines, while the DINOv2 model retains much clearer semantic and visual The result shows that DINOv2 supports a much more effective single-step approx-imation of the learned conditional transport. It does not establish that the underlying flow trajectory is globally straight or intrinsically simpler, but it demonstrates a large representation-dependent difference under an identical first-order sampling procedure. In Fig. 9, we provide a qualitative comparison of examples generated using a sin-gle timestep for both SD-VAE and DINOv2. While the DINOv2 model retains sharp structures and clear semantic definition, the SD-VAE baseline constructs only a coarse outline of the target object. 26 M. Plocher et al. 8 16 32 64 
+
+AR Steps 
+
+> 0.0
+> 2.5
+> 5.0
+> 7.5
+> 10.0
+> 12.5
+> 15.0
+> 17.5
+> 20.0
+> FID @10k
+> SD-VAE + Progressive CFG=6.0
+> DINOv2 (w/o CFG)
+> Pixels + Linear CFG=2.0
+
+Fig. 7: Effect of the number of autoregressive steps on FID@10k. Each rep-resentation uses its final guidance configuration. With a sequence length of N = 256 ,32 autoregressive steps generate an average of eight new tokens per step. 0 20 40 60 80 100 
+
+Number Timesteps 
+
+> 0
+> 5
+> 10
+> 15
+> 20
+> 25
+> 30
+> 35
+> FID @10k
+> SD-VAE + Progressive CFG=6.0
+> DINOv2 (w/o CFG)
+> Pixels + Linear CFG=2.0
+
+(a) FID@10k vs. timesteps t0 20 40 60 80 100 
+
+Number Timesteps  
+
+> 0
+> 50
+> 100
+> 150
+> 200
+> 250
+> IS @10k
+> SD-VAE + Progressive CFG=6.0
+> DINOv2 (w/o CFG)
+> Pixels + Linear CFG=2.0
+
+(b) IS@10k vs. timesteps t
+
+Fig. 8: Effect of the number of Euler integration steps per generated token. 
+
+We report FID@10k (a) and Inception Score@10k (b). SD-VAE uses progressive guid-ance with w = 6 , DINOv2 is unguided, and pixels use linear guidance with w = 2 .
+
+(a) SD-VAE (b) DINOv2-B 
+
+Fig. 9: Samples generated with a single Euler integration step. DINOv2 retains recognizable class structure and comparatively sharp boundaries, whereas SD-VAE produces only coarse and degraded object outlines. On Generative Difficulty 27 
+
+Table 7: Comparing generation quality across representation spaces for a single timestep t with the identical loss formulation. 
+
+Space FID@10k ↓ IS@10k ↑
+
+SD-VAE 139.80 6.30 DINOv2-B 20.82 231.31 Pixels 190.05 4.21 
+
+D.3 Autoregressive Generation Dynamics 
+
+We visualize the generation process at autoregressive steps 0, 5, 10, 20, and 31 in Fig. 10. For each representation, we show the PCA-colored transformer context z together with the decoded image after newly activated tokens have been denoised. Across all spaces, the contextual features at already visible positions exhibit struc-tural changes over the generation sequence. As in the masking analysis, these positions are not directly supervised by the flow loss. The generation itself is unaffected because the local denoiser only uses the contextual vectors for currently masked positions. DINOv2 establishes a recognizable global semantic context after only a small num-ber of tokens have been generated. Newly generated DINOv2 tokens also influence the decoded appearance of neighboring regions, reflecting the broader spatial footprint of the representation. SD-VAE exhibits an intermediate degree of interaction. Pixel tokens remain strictly localized, so newly generated patches do not directly alter neighboring patches in the decoded image. These dynamics help explain why identical masking ratios produce different con-ditional problems. The visible-token count is the same, but the information carried by each token and its spatial footprint vary across representations. 
+
+## E More on “What Does Not Predict Generative Behavior?” 
+
+We visualize the global organization of each target space using t-SNE in Fig. 11. We sample 20 ImageNet classes with 200 images per class, encode every image, average its spatial tokens, and project the resulting global features into two dimensions. 
+
+E.1 Reconstruction Fidelity: Qualitative Examples 
+
+In Fig. 12 we show the reconstructed examples on ImageNet after we applied the autoencoders. We can clearly see that both scales of DINOv2 lack behind SD-VAE and MAE-B, while MAE-B shows the overall best reconstructions. 
+
+E.2 Semantic Organization 
+
+Average-pooled pixel patches primarily retain global color statistics and do not produce distinct category clusters. SD-VAE features form a compact central distribution with-out clear class separation. This is consistent with an encoder optimized for reconstruc-tion and regularized toward a Gaussian prior rather than for class-level organization. 28 M. Plocher et al. Both DINOv2 and MAE produce clearly separated class clusters. Despite their different pretraining objectives, each representation contains visible category-level se-mantic structure under the selected projection. The generative results nevertheless differ considerably between the two spaces. Clear semantic clustering is therefore not sufficient to predict whether a target space will be modeled effectively by the masked generator. The t-SNE visualization is qualitative and depends on spatial average pooling and dimensionality reduction. We use it only to establish that both DINOv2 and MAE exhibit visible semantic organization, not as a quantitative measurement of their full token geometry. 
+
+E.3 Compression and Dimensionality 
+
+Compression also fails to provide a monotonic explanation. The 16-dimensional SD-VAE representation is easier to optimize than 768-dimensional pixels, consistent with a dimensionality-based account. However, 768-dimensional DINOv2 features are easier to optimize than both of them. Likewise, the two 768-dimensional spaces of DINOv2 and pixels occupy opposite ends of the optimization ranking. Token dimensionality therefore interacts strongly with representation structure and model design. The results do not imply that dimensionality is irrelevant. Both DINOv2 and pixels benefit strongly from a wider local denoiser, whereas the SD-VAE model operates with a smaller denoiser expansion ratio. Instead, dimensionality appears to influence where capacity is needed without independently determining whether the resulting distribution is easy to learn. 
+
+E.4 Decoded Space Visualization 
+
+In Fig. 13 we visualize each representation space alongside its corresponding decoded spatial image after a masking schedule has been applied directly within that space. This visualization allows us to systematically understand how spatial masking effects the preserved information across different semantic configurations. We see that in SD-VAE and DINOv2 a single token effects also neighboring tokens while MAE does not. 
+
+## F Discussion 
+
+F.1 Target Representations Induce Different Optimization Regimes 
+
+Our experiments show that a target representation cannot be treated as an interchange-able output interface. SD-VAE, DINOv2, MAE, and pixels require different combina-tions of timestep sampling, prediction parameterization, masking, local denoiser design, and classifier-free guidance. DINOv2 converges most rapidly under the shared training budget and retains useful generation with one Euler step. It achieves this with a relatively shallow contextual encoder, but benefits substantially from a wider local denoiser and direct context fusion. Pixels are much slower to optimize and require a sequence of coordinated changes: clean-data prediction, a less aggressive mask distribution, a bottleneck embedding, a wider denoiser, direct context fusion, and linear classifier-free guidance. These changes On Generative Difficulty 29 improve pixel generation from an unguided FID above 100 in the initial configuration to a guided FID of 8.70. SD-VAE occupies an intermediate regime. Its compressed token dimension permits a smaller local denoiser, but unguided optimization is slower than DINOv2. It benefits strongly from progressive guidance and ultimately obtains the best guided FID. MAE demonstrates that representation-autoencoder features do not behave uni-formly. Despite strong reconstruction and semantic clustering, MAE generation remains worse than DINOv2 and depends on linear guidance. The evidence therefore supports a representation-dependent allocation of modeling difficulty. The experiments do not yield a scalar measure that predicts this allocation, nor do they establish one property as its unique cause. Instead, they identify where the consequences become visible: contextual reconstruction under masking, local denoiser sensitivity, flow-integration efficiency, and inference-time guidance. 
+
+F.2 Reconstruction and Generative Learnability Are Distinct 
+
+Reconstruction fidelity determines whether a frozen decoder can map generated tokens into detailed images. It does not determine whether the token distribution itself is easy to learn. MAE provides the best reconstructions but substantially worse generation than DINOv2. DINOv2 reconstructs less faithfully according to LPIPS but is learned much more efficiently. SD-VAE achieves strong guided generation despite lacking the visible class clustering observed in DINOv2 and MAE. A useful target representation must therefore satisfy at least two distinct require-ments: it must preserve sufficient image information for decoding, and it must expose a distribution that the generator can model effectively. Improvements in one requirement do not automatically improve the other. 
+
+F.3 Context and Local Transport Must Be Considered Jointly 
+
+Masked generation separates inter-token context construction from per-token denois-ing. The representation influences both. DINOv2 tokens retain coherent global context under severe masking and influ-ence broader spatial regions. This can make a small number of visible tokens infor-mative early in autoregressive generation. At the same time, each missing token is 768-dimensional and benefits from a strong local model. Pixel tokens are equally high-dimensional but strictly localized. They provide less information about neighboring locations, and the model benefits from a less aggressive masking distribution. Their local denoising also benefits from clean-data prediction, a low-rank bottleneck, and increased capacity. The resulting behavior cannot be summarized as “semantic representations are easy” or “high-dimensional representations are hard.” DINOv2 and pixels demonstrate that contextual structure and local target complexity can vary independently even when token dimensionality is identical. 
+
+F.4 Distributional Control Is Representation-Dependent 
+
+Classifier-free guidance has qualitatively different effects across the spaces. SD-VAE benefits from progressive guidance, while pixels and MAE require linear guidance from the early generation steps. DINOv2 does not improve with either strategy. 30 M. Plocher et al. The representation also changes the precision-recall balance. DINOv2 achieves the highest precision but the lowest recall. SD-VAE provides broader coverage and reaches the best guided FID. Pixels remain less precise than both latent models but maintain higher unguided recall than DINOv2. Optimization efficiency should therefore not be equated with complete distribution modeling. A representation can converge rapidly toward high-fidelity samples while covering a smaller portion of the data distribution. 
+
+## G Empirical Principles 
+
+Across the target spaces and model configurations studied in this work, our experiments suggest five empirical principles: 
+
+• Target dimensionality alone does not determine generative difficulty. 
+
+DINOv2 and pixels both use 768-dimensional tokens, yet exhibit the fastest and slowest unguided optimization, respectively, while the 16-dimensional SD-VAE rep-resentation lies between them. 
+
+• Reconstruction fidelity is a constraint, but not a sufficient predictor of generative learnability. MAE achieves the strongest reconstruction metrics, but yields substantially worse generation than DINOv2. 
+
+• Visible semantic organization is insufficient to predict generative learn-ability. DINOv2 and MAE both form clearly separated class clusters under our t-SNE visualization, yet differ markedly in generation quality and guidance depen-dence. 
+
+• Representation choice redistributes modeling demands across model components. Our final DINOv2 configuration uses a two-layer context encoder but benefits strongly from a wider local denoiser and direct context fusion, whereas pixel generation benefits from a different combination of prediction, masking, bot-tleneck, denoising, and guidance choices. 
+
+• Optimization efficiency and distribution coverage are distinct. DINOv2 converges fastest and achieves the highest precision among the unguided models, but also exhibits the lowest recall. 
+
+## H Limitations 
+
+Frozen decoder dependence. Generation in SD-VAE, DINOv2, and MAE space is constrained by a pretrained decoder. In particular, the DINOv2 representation-autoencoder has worse LPIPS reconstruction than SD-VAE and MAE. The RAE de-coders are trained with injected feature noise to improve robustness to off-manifold inputs, but the distribution of these training perturbations may not match the errors produced by our masked generator. 
+
+Representation-specific configurations. The models share a common masked au-toregressive flow factorization, spatial token layout, dataset, training duration, and evaluation protocol. Their final configurations are not identical. We adapt timestep sampling, masking, prediction parameterization, transformer depth, and denoiser de-sign within each space. The final cross-representation ranking therefore compares the resulting representation-specific systems rather than varying only the frozen encoder under an otherwise identical model. On Generative Difficulty 31 
+
+Incomplete hyperparameter search. We evaluate a targeted set of established con-figurations rather than performing an exhaustive optimization for every representation. Additional combinations of masking, timestep sampling, model capacity, and guidance may further improve each space. 
+
+Model scale. Our models range from approximately 165M to 222M parameters in the principal comparison, with one 255M DINOv2 capacity ablation. We do not evaluate large or huge model scales. The observed allocation of difficulty may change as both the context transformer and local denoiser are scaled. 
+
+Dataset and resolution. All experiments use class-conditional ImageNet-1k genera-tion at 256 ×256. We do not evaluate text conditioning, higher resolutions, or datasets with different structural and semantic distributions. 
+
+Qualitative context analysis. Our masking and autoregressive visualizations show clear representation-dependent differences, but they do not directly quantify condi-tional entropy or masked-token predictability. We therefore use them as evidence about the behavior of the trained context model rather than as a complete causal explanation of convergence. 
+
+Diversity in DINOv2 space. DINOv2’s low recall remains unresolved. We do not evaluate alternative guidance methods such as AutoGuidance or representation align-ment, and we cannot determine whether the reduced coverage originates from the representation, decoder, model scale, or training objective. 32 M. Plocher et al.    
+
+> (a) Autoregressive steps in SD-VAE latent space.
+> (b) Autoregressive steps in DINOv2 latent space.
+> (c) Autoregressive steps in pixel space.
+
+Fig. 10: Autoregressive generation dynamics at steps 0, 5, 10, 20, and 31. 
+
+For each representation, the upper row shows the PCA-colored transformer context 
+
+z, and the lower row shows the corresponding decoded partial image after the active tokens have been denoised. On Generative Difficulty 33 100 75 50 25 0 25 50 75 100 
+
+Dim 1 
+
+100 
+
+75 
+
+50 
+
+25 
+
+0
+
+25 
+
+50 
+
+75 
+
+100 
+
+> Dim 2
+
+n01629819 
+
+n01641577 
+
+n01644900 
+
+n01819313 
+
+n01843065 
+
+n01877812 
+
+n01945685 
+
+n02033041 
+
+n02105505 
+
+n02110185 
+
+n02123045 
+
+n02804610 
+
+n03372029 
+
+n03544143 
+
+n03769881 
+
+n03871628 
+
+n04041544 
+
+n04067472 
+
+n04069434 
+
+n04606251 
+
+(a) Pixel Space (dim = 768 )100 75 50 25 0 25 50 75 100 
+
+Dim 1 
+
+100 
+
+75 
+
+50 
+
+25 
+
+0
+
+25 
+
+50 
+
+75 
+
+100 
+
+> Dim 2
+
+n01629819 
+
+n01641577 
+
+n01644900 
+
+n01819313 
+
+n01843065 
+
+n01877812 
+
+n01945685 
+
+n02033041 
+
+n02105505 
+
+n02110185 
+
+n02123045 
+
+n02804610 
+
+n03372029 
+
+n03544143 
+
+n03769881 
+
+n03871628 
+
+n04041544 
+
+n04067472 
+
+n04069434 
+
+n04606251 (b) SD-VAE (KL-16) (dim = 16 )100 75 50 25 0 25 50 75 100 
+
+Dim 1 
+
+100 
+
+75 
+
+50 
+
+25 
+
+0
+
+25 
+
+50 
+
+75 
+
+100 
+
+> Dim 2
+
+n01629819 
+
+n01641577 
+
+n01644900 
+
+n01819313 
+
+n01843065 
+
+n01877812 
+
+n01945685 
+
+n02033041 
+
+n02105505 
+
+n02110185 
+
+n02123045 
+
+n02804610 
+
+n03372029 
+
+n03544143 
+
+n03769881 
+
+n03871628 
+
+n04041544 
+
+n04067472 
+
+n04069434 
+
+n04606251 
+
+(c) MAE-B (dim = 768 )100 75 50 25 0 25 50 75 100 
+
+Dim 1 
+
+100 
+
+75 
+
+50 
+
+25 
+
+0
+
+25 
+
+50 
+
+75 
+
+100 
+
+> Dim 2
+
+n01629819 
+
+n01641577 
+
+n01644900 
+
+n01819313 
+
+n01843065 
+
+n01877812 
+
+n01945685 
+
+n02033041 
+
+n02105505 
+
+n02110185 
+
+n02123045 
+
+n02804610 
+
+n03372029 
+
+n03544143 
+
+n03769881 
+
+n03871628 
+
+n04041544 
+
+n04067472 
+
+n04069434 
+
+n04606251 (d) DINOv2-B (dim = 768 )
+
+Fig. 11: Qualitative visualization of global representation structure. We spa-tially average the tokens of 200 images from each of 20 ImageNet classes and project them with t-SNE. DINOv2-B and MAE-B exhibit clearer class separation than SD-VAE and pixels. The visualization is qualitative and does not characterize the complete token geometry. 34 M. Plocher et al. 
+
+Fig. 12: Reconstructions produced by the frozen SD-VAE, DINOv2-B, DINOv2-L, and MAE-B encoder–decoder pairs. MAE preserves the most image detail and obtains the best reconstruction metrics, whereas DINOv2 shows larger per-ceptual reconstruction errors despite yielding substantially better masked-generation results. On Generative Difficulty 35 
+
+Fig. 13: Effect of spatial token masking in different representation spaces. 
+
+Rows show 90%, 80%, and 70% masking. For each latent representation, the remaining tokens are decoded into pixel space. Masking one SD-VAE or DINOv2 token affects a broader spatial region, whereas the effect is more localized in MAE space. 36 M. Plocher et al. 
+
+## I Qualitative Results 
+
+(a) class 088: Parrot (b) class 107: Jellyfish 
+
+(c) class 128: White stork (d) class 279: Arctic fox 
+
+(e) class 281: Tabby cat (f ) class 417: Balloon 
+
+(g) class 425: Barn (h) class 930: French loaf 
+
+Fig. 14: Additional class-conditional samples from the final SD-VAE model using progressive guidance with w = 6 .On Generative Difficulty 37 
+
+(a) class 088: Parrot (b) class 107: Jellyfish 
+
+(c) class 128: White stork (d) class 279: Arctic fox 
+
+(e) class 281: Tabby cat (f ) class 417: Balloon 
+
+(g) class 425: Barn (h) class 930: French loaf 
+
+Fig. 15: Additional class-conditional samples from the final unguided DINOv2-B model. 38 M. Plocher et al. 
+
+(a) class 088: Parrot (b) class 107: Jellyfish 
+
+(c) class 128: White stork (d) class 279: Arctic fox 
+
+(e) class 281: Tabby cat (f ) class 417: Balloon 
+
+(g) class 425: Barn (h) class 930: French loaf 
+
+Fig. 16: Additional class-conditional samples from the final pixel model us-ing linear guidance with w = 2 .

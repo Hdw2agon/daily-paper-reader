@@ -1,0 +1,1171 @@
+Title: RIDGE: Re-Noising with Internal Dynamic Guidance for Image Editing
+
+URL Source: https://arxiv.org/pdf/2608.03059v1
+
+Published Time: Wed, 05 Aug 2026 00:26:40 GMT
+
+Number of Pages: 18
+
+Markdown Content:
+# RIDGE: Re-Noising with Internal Dynamic Guidance for Image Editing 
+
+## Ruiliang Gong Zhen Wang Yanghao Wang Long Chen *
+
+Department of Computer Science and Engineering The Hong Kong University of Science and Technology       
+
+> rgongac@connect.ust.hk ·zhenwang@ust.hk ·ywangtg@connect.ust.hk ·longchen@ust.hk
+> *Corresponding author
+
+Abstract 
+
+Inversion-free flow-based image editing avoids latent inversion, but still requires a target-side state at every editing step. The widely used equal-displacement construction keeps the displacement between the noisy source state and the target-side state unchanged across noise levels. This is inconsistent with noising, under which the displacement between two clean states noised with the same noise level and noise sample should contract as the noise level increases. Thus, it can lead to overly aggressive updates at high noise levels. We introduce RIDGE: Re-Noising with Internal Dynamic Guidance for Image Editing, an inversion-free and training-free method that maintains the edited state as an evolving approximation to the unavailable clean target state. RIDGE re-noises this approximation using the same noise level and noise sample as the clean source state, allowing their noisy displacement to decrease naturally with increasing noise. Since the edited state initially contains limited target semantics, RIDGE further applies internal dynamic guidance during the early high-noise steps. A clean target state prediction guides the provisional edited state through a soft dynamic mask derived internally from the model, focusing guidance on regions that require modification without external segmentation or detection models. Experiments on two benchmarks using two backbones, SD3 Medium and FLUX.1-dev, show that RIDGE offers a favorable aggregate trade-off among source preservation, target alignment, and perceptual quality. 
+
+## 1 Introduction 
+
+Recent flow-based text-to-image models (Black Forest Labs et al., 2025; Esser et al., 2024) have become strong generative backbones for text-based image editing. Given a source image with a source prompt, the task is to modify the image according to a target prompt that specifies the desired changes. The main challenge lies in balancing two objectives: faithfully realizing the intended edit while avoiding unnecessary changes to the source structure, identity, or background. Early editing solutions are inversion-based methods: the source image is first inverted to a noisy latent state and then a new image is reconstructed under the target prompt (Rout et al., 2025; Wang et al., 2025a; Xu et al., 2025). However, the inversion process can be slow and prone to reconstruction errors, motivating inversion-free methods to bypass it (Kulikov et al., 2025; Kim et al., 2026; Beaudouin et al., 2026; Jiang et al., 2026a). As shown in Fig. 1(a), a typical inversion-free formulation represents the source image in latent space as the clean source state . The editing process starts from this clean source state and aims to reach the final edited result. At each editing step, the edited state denotes the current intermediate clean state along this process, and is iteratively updated toward the final edited result. To compute this update, the source-prompt velocity is predicted from a noisy source state , obtained by noising the clean source state at the current noise level. Likewise, the target-prompt velocity is predicted from a corresponding target-side state . The difference between these two velocities determines the update direction of the edited state. Therefore, constructing a noisy source state and a target-side state is required at every editing step. The noisy source state is straightforward to construct because the clean source state is available and can be directly noised at the current noise level. In contrast, the target-side state cannot be obtained in the same way because no corresponding clean target state is available. Instead, it must be constructed from the states already available during editing, without access to a target image. This makes target-side state construction a central challenge in inversion-free flow-based editing. A common solution is the equal-displacement construc-tion (Kulikov et al., 2025), which sets the displacement from the noisy source state to the target-side state equal to that from the clean source state to the edited state, as illustrated in Fig. 1(b). Subsequent works retain this construction while improving trajectory regularization, semantic decomposition, or source-feature integration (Kim et al., 2026; Yoon et al., 2025; Jiang et al., 2026b; Yang et al., 2026). Recent work has begun to explore alternatives. SNR-Edit (Jiang et al., 2026a) uses external structural information to modify the noise added to the clean source state, while DRFS (Beaudouin et al., 2026) explores noise-level-dependent schedules that determine how much of the displacement between the clean source state and the edited state is incorporated into the target-side state. These works modify state construction choices but leave unexamined what the target-side state should approximate in inversion-free editing. A closer examination reveals that the equal-displacement construction does not preserve how displacement changes under noising . When the clean source state and the edited 1arXiv:2608.03059v1 [cs.CV] 4 Aug 2026 𝒁 𝒕 
+
+> 𝒕𝒈𝒕 𝑍 #
+> $%&
+> 𝑍 '
+> $%&
+
+(b) Equal -Displacement Construction (c) RIDGE        
+
+> 𝐶𝑙𝑒𝑎𝑛
+> 𝑆𝑝𝑎𝑐𝑒
+> 𝑁𝑜𝑖𝑠𝑦
+> 𝑆𝑝𝑎𝑐𝑒
+> 𝑍 #
+> $%&
+> 𝑍 '
+> $%& 1𝑍 '
+> #(#
+> 𝐶𝑙𝑒𝑎𝑛
+> 𝑇𝑎𝑟𝑔𝑒𝑡 𝑆𝑡𝑎𝑡𝑒
+> 𝑷𝒓𝒆𝒅𝒊𝒄𝒕𝒊𝒐𝒏
+> 𝒁 𝒕
+> 𝒕𝒈𝒕
+> 𝑬𝒒𝒖𝒂𝒍
+> 2𝑍 #
+> )*+#
+> 𝑷𝒓𝒐𝒗𝒊𝒔𝒊𝒐𝒏𝒂𝒍
+> 𝐸𝑑𝑖𝑡𝑒𝑑 𝑆𝑡𝑎𝑡𝑒
+> 𝑍 #
+> )*+# 𝑍 #
+> )*+#
+> Displacement
+> kept equal in
+> noisy space ❌
+> 𝒁 𝒕
+> 𝒕𝒈𝒕
+> 𝑻𝒂𝒓𝒈𝒆𝒕 𝑺𝒊𝒅𝒆
+> 𝑺𝒕𝒂𝒕𝒆
+> 𝑍 #
+> $%&
+> 𝑁𝑜𝑖𝑠𝑦 𝑆𝑜𝑢𝑟𝑐𝑒
+> 𝑆𝑡𝑎𝑡𝑒
+> 𝑍 '
+> #(#
+> 𝐶𝑙𝑒𝑎𝑛
+> 𝑇𝑎𝑟𝑔𝑒𝑡
+> 𝑆𝑡𝑎𝑡𝑒
+> 𝑍 '
+> $%&
+> 𝐶𝑙𝑒𝑎𝑛
+> 𝑆𝑜𝑢𝑟𝑐𝑒
+> 𝑆𝑡𝑎𝑡𝑒
+
+(a) Inversion -Free Editing Formulation   
+
+> 𝑍 #
+> )*+#
+> 𝐸𝑑𝑖𝑡𝑒𝑑 𝑆𝑡𝑎𝑡𝑒
+> Displacement
+> decreases as
+> noise increases ✅
+
+Figure 1: Target-side state construction in inversion-free editing. (a) A typical inversion-free formulation constructs a noisy source state from the clean source state and requires a corresponding target-side state for editing. (b) The equal-displacement construction keeps the noisy displacement equal to the clean displacement at every noise level. (c) RIDGE re-noises the edited state with the same noise level and noise sample as the clean source state, while internal dynamic guidance refines this approximation during early high-noise steps. 
+
+state are noised using the same noise level and sample, their displacement decreases as the noise level increases and van-ishes at the pure-noise endpoint. 1 The equal-displacement construction instead keeps the noisy displacement equal to the clean displacement at every noise level, so the noisy source state and the target-side state remain separated even when dominated by noise and nearly indistinguishable. At high-noise steps, the target-prompt velocity is therefore evaluated at a target-side state too far from the noisy source state, which can produce overly aggressive updates and unwanted changes to edit-irrelevant content. This suggests the target-side state should reflect how dis-placement changes under noising rather than preserve a fixed clean displacement. Since the clean target state is unavailable, we use the edited state as its evolving approximation and noise it with the same noise level and sample as the clean source state. Put simply, the equal-displacement construction keeps the noisy displacement equal to the clean displacement, which is incon-sistent with how displacement should behave under noising, whereas re-noising constructs both noisy states through shared noising, allowing their displacement to decrease naturally as the noise level increases. In this paper, we propose Re-Noising with Internal Dynamic Guidance for Image Editing (RIDGE), an inversion-free and training-free method built on this re-noising principle. RIDGE maintains the edited state as an evolving approximation to the unavailable clean target state. At each step, its re-noising construction noises this state using the same noise level and noise sample as the clean source state to obtain the target-side state, as illustrated in Fig. 1(c). However, during the early steps of editing, the edited state still contains limited target semantics since it is initialized from the clean source state. RIDGE therefore applies internal dynamic guidance to improve this weak approximation to the unavailable clean target state. RIDGE first applies the velocity-difference update to obtain a provisional edited state 
+
+and then obtains a clean target state prediction under the target prompt as the guidance signal. Because this prediction can be uncertain at high noise levels, RIDGE applies guidance 
+
+> 1A formal derivation is provided in Appendix A.
+
+through a soft dynamic mask , so the provisional edited state is guided toward the prediction only in regions requiring greater modification. The resulting edited state is then used by the re-noising construction, as illustrated in Fig. 1(c). The guidance is 
+
+internal because both the prediction and the mask are produced by the editing model itself, without external segmentation or detection models. The mask is dynamic as the edited state changes, allowing RIDGE to adapt which regions receive stronger guidance at different steps. Extensive experiments on PIE-Bench Official and PIE-Bench++ under SD3 Medium and FLUX.1-dev show that RIDGE offers a favorable aggregate balance among the com-pared methods. Across these two benchmarks and two back-bones, it combines strong source preservation with competitive target alignment and perceptual quality, covering standard local edits and diverse instructions. In summary, our contributions are as follows: 
+
+• We identify the under-examined problem of target-side state construction and show that the widely used equal-displacement construction fails to preserve how displace-ment changes under noising. 
+
+• We formulate a re-noising construction that maintains the edited state as an evolving approximation to the unavailable clean target state and noises it using the same noise level and noise sample as the clean source state. 
+
+• We introduce internal dynamic guidance , which uses a clean target state prediction and a soft dynamic mask to compensate for limited target semantics during early editing and strengthen changes in relevant regions without external tools. 
+
+• On PIE-Bench Official and PIE-Bench++ under SD3 Medium and FLUX.1-dev, RIDGE achieves a favorable aggregate trade-off among source preservation, target alignment, global consistency, and perceptual quality while remaining inversion- and training-free. 22 Related Work 
+
+Diffusion-Based Image Editing. SDEdit (Meng et al., 2022) edits real images through partial noising, Prompt-to-Prompt (Hertz et al., 2023) controls cross-attention, and PnP In-version (Ju et al., 2024) improves latent inversion for diffusion-based editing. InfEdit (Xu et al., 2024) avoids explicit inversion through consistency sampling and unified attention control. Recent flow-based methods include Stable Flow (Avrahami et al., 2025), RF-Inversion (Rout et al., 2025), RF-Solver/RF-Edit (Wang et al., 2025a), and Unveil Inversion and Invari-ance (Xu et al., 2025), which adapt these paradigms through specialized solvers and feature injection. 
+
+Inversion-Free Flow-Based Editing. FlowEdit (Kulikov et al., 2025) introduced an inversion-free formulation that edits an image using the difference between the velocities conditioned on the source and target prompts. To obtain these velocities, it constructs the target-side state using an equal-displacement construction , which sets the noisy displacement equal to the clean displacement across noise levels. Subse-quent work improves different parts of this editing process. FlowAlign (Kim et al., 2026) regularizes the editing path to better preserve the source image. SplitFlow (Yoon et al., 2025) decomposes the target prompt into multiple seman-tic flows to better handle edits involving several concepts. FlowDC (Jiang et al., 2026b) separates multiple editing ef-fects and suppresses velocity components less relevant to the requested changes. FIA-Edit (Yang et al., 2026) incorporates source information through frequency-interactive attention and feature injection. These methods improve the editing up-date, trajectory, or source preservation, while largely retaining FlowEdit’s equal-displacement construction. This motivates a closer look at target-side state construction itself. 
+
+State Construction in Inversion-Free Flow Editing. Other works modify the states at which source- and target-prompt velocities are evaluated. Beyond equal-displacement construc-tions as in FlowEdit (Kulikov et al., 2025), SNR-Edit (Jiang et al., 2026a) rectifies sampled noise using structural infor-mation from external tools; DRFS (Beaudouin et al., 2026) introduces noise-level-dependent shifts that vary the target-side construction; and FlowCycle (Wang et al., 2025b) optimizes corruption noise for a target-aware intermediate state under cycle-consistency constraints. These approaches alter source initialization, displacement scheduling, or the corruption pro-cess. RIDGE instead focuses on what the target-side state should approximate during direct source-to-target transport, and constructs it from an evolving approximation to the un-available clean target state. 
+
+## 3 Methodology 
+
+3.1 Preliminaries: Rectified Flow 
+
+Rectified flow learns a velocity field from linear interpolations between clean data and Gaussian noise (Liu et al., 2023; Lipman et al., 2023). Let 𝑋 ∼ 𝜋 0 be a clean latent and 𝜂 ∼ 𝜋 1 = N ( 0, 𝐼 ).𝑍 !
+
+> "#$
+
+𝑍 %!
+
+> &'(%
+> (Guided at
+> the
+> previous
+> timestep)
+
+𝑍 %!
+
+> "#$
+
+𝑍 %!
+
+> %)%
+
+𝑣 %!
+
+> "#$
+
+𝑣 %! 
+
+> %)%
+
+∆𝑣 %!
+
+$𝑍 %!"#
+
+> &'(%
+> Provisional
+
+%𝑍 !
+
+> %)%
+
+(𝑡 ()
+
+> Clean tgt
+> prediction
+
+𝑍 %!"#    
+
+> &'(%
+> Internal Dynamic Guidance
+> (early timesteps only)
+> next
+> timestep
+> Re -noising
+> Construction
+> Figure 2: Overview of one RIDGE iteration from timestep 𝑡 𝑖 to 𝑡 𝑖 +1.The soft dynamic mask applied during guidance is omitted for clarity.
+
+Their interpolation is 
+
+𝑍 𝑡 = (1 − 𝑡 ) 𝑋 + 𝑡𝜂, 𝑡 ∈ [ 0, 1], (1) where 𝑡 = 0 corresponds to clean data and 𝑡 = 1 to Gaussian noise. The velocity along this path is 
+
+𝑢 𝑡 = 𝑑𝑍 𝑡 
+
+𝑑𝑡 = 𝜂 − 𝑋. (2) A text-conditioned predictor 𝑣 𝜃 (𝑍 𝑡 , 𝑐, 𝑡 ) estimates this field. At inference, generation starts from 𝑍 1 = 𝜂 and solves 
+
+𝑑𝑍 𝑡 
+
+𝑑𝑡 = 𝑣 𝜃 (𝑍 𝑡 , 𝑐, 𝑡 ) (3) from 𝑡 = 1 to 𝑡 = 0 under the discrete schedule 
+
+1 = 𝑡 0 > 𝑡 1 > · · · > 𝑡 𝑁 = 0. (4) An Euler step then updates 𝑍 𝑡 𝑖 for 𝑖 = 0, . . . , 𝑁 − 1:
+
+𝑍 𝑡 𝑖 +1 = 𝑍 𝑡 𝑖 + ( 𝑡 𝑖 +1 − 𝑡 𝑖 )𝑣 𝜃 
+
+ 𝑍 𝑡 𝑖 , 𝑐, 𝑡 𝑖 
+
+ . (5) 
+
+3.2 RIDGE Overview 
+
+We present Re-Noising with Internal Dynamic Guidance for Image Editing (RIDGE) , an inversion-free and training-free latent editing method. Given a clean source state 𝑍 src 0 , a source prompt 𝑐 src , and a target prompt 𝑐 tgt , RIDGE treats the edited state as an evolving approximation to the unavailable clean target state. Its re-noising construction noises this approxima-tion at the current noise level to obtain the target-side state. Because the edited state is initialized from the clean source state and initially contains limited target semantics, internal dynamic guidance refines this weak approximation during the early high-noise steps. Figure 2 summarizes one RIDGE iteration from 𝑡 𝑖 to 𝑡 𝑖 +1. 1) Re-noising construction. The edited state 𝑍 edit  
+
+> 𝑡 𝑖
+
+from the pre-ceding iteration and the clean source state 𝑍 src 0 are noised with the same noise level and noise sample, yielding the target-side state 𝑍 tgt  
+
+> 𝑡 𝑖
+
+and noisy source state 𝑍 src  
+
+> 𝑡 𝑖
+
+, respectively. The differ-ence Δ𝑣 𝑡 𝑖 between the target- and source-prompt velocities evaluated at these states updates 𝑍 edit  
+
+> 𝑡 𝑖
+
+to the provisional edited state e𝑍 edit  
+
+> 𝑡 𝑖 +1
+
+. 2) Internal dynamic guidance. During early high-noise steps, the target branch additionally predicts the clean target state ˆ𝑍 tgt 0 (𝑡 𝑖 ). A soft dynamic mask 𝑚 𝑡 𝑖 , derived from this prediction and the clean source state, restricts guidance to 3(a) Re -noising Construction   
+
+> 𝑍 !!
+> "#$
+> 𝑍 %
+> "#$
+> 𝑍 !!
+> !&!
+> 𝑍 !!
+> '()!
+> 𝑣 !!
+> "#$ 𝑣 !!
+> !&!
+> ∆𝒗 𝒕 𝒊
+> : same noise level & noise sample
+> 𝜂 ~𝒩 (0,𝐼 )
+
+(b) Internal Dynamic Guidance   
+
+> 𝑍 %
+> "#$
+> 𝑍 !!
+> '()!
+> 𝑣 !!
+> !&!
+> -𝑍 %
+> !&! (𝑡 ))
+> /𝑍 !!#$
+> '()!
+> ∆𝑣 !!
+> 𝒁 𝒕 𝒊 #𝟏
+> 𝒆𝒅𝒊𝒕
+> 𝑍 !!
+> !&! 𝑍 !!
+> "#$
+> Masked Guidance
+> 𝜂 ~𝒩 (0,𝐼 )
+
+Figure 3: (a) The re-noising construction forms the noisy source and target-side states used in the velocity-difference update. (b) Internal dynamic guidance applies a masked correction toward the clean target state prediction during early high-noise steps. 
+
+regions requiring greater modification. The guidance update yields the next edited state 𝑍 edit  
+
+> 𝑡 𝑖 +1
+
+, which is used as the clean-state approximation in the subsequent re-noising step. Repeating this process along the reverse-time schedule produces the final clean edited result 𝑍 edit 0 .
+
+3.3 Re-Noising Construction Editing window. RIDGE applies velocity-difference editing only for 𝑡 min < 𝑡 𝑖 ≤ 𝑡 max , initializing 𝑍 edit  
+
+> 𝑡 max
+
+= 𝑍 src 0 at the upper boundary. The edited state then follows recursively from the updates below. Upon reaching 𝑡 min , RIDGE stops the velocity-difference updates and completes the remaining reverse-time steps to 𝑡 = 0 under the target prompt. 
+
+Shared noising. At 𝑡 𝑖 , RIDGE samples 𝜂 𝑡 𝑖 ∼ N ( 0, 𝐼 ) and noises the clean source and current edited states with this shared noise sample: 
+
+𝑍 src  
+
+> 𝑡 𝑖
+
+= (1 − 𝑡 𝑖 )𝑍 src 0 + 𝑡 𝑖 𝜂 𝑡 𝑖 ,𝑍 tgt  
+
+> 𝑡 𝑖
+
+= (1 − 𝑡 𝑖 )𝑍 edit  
+
+> 𝑡 𝑖
+
++ 𝑡 𝑖 𝜂 𝑡 𝑖 . (6) Their difference satisfies 
+
+𝑍 tgt  
+
+> 𝑡 𝑖
+
+− 𝑍 src  
+
+> 𝑡 𝑖
+
+= (1 − 𝑡 𝑖 )
+
+
+
+𝑍 edit  
+
+> 𝑡 𝑖
+
+− 𝑍 src 0
+
+
+
+. (7) The factor 1 − 𝑡 𝑖 is fixed by applying the rectified-flow noising path to both clean-state estimates with shared noise, rather than being selected as an independent displacement schedule. The resulting displacement vanishes at the pure-noise endpoint instead of remaining constant across noise levels, as represented by the orange triangular region in Fig. 3(a). 
+
+Velocity-difference update. The target-minus-source veloc-ity difference is 
+
+Δ𝑣 𝑡 𝑖 = 𝑣 𝜃 
+
+
+
+𝑍 tgt  
+
+> 𝑡 𝑖
+
+, 𝑐 tgt , 𝑡 𝑖 
+
+
+
+− 𝑣 𝜃 
+
+ 𝑍 src  
+
+> 𝑡 𝑖
+
+, 𝑐 src , 𝑡 𝑖 
+
+ . (8) The green and red arrows in Fig. 3(a) represent the two velocity terms, and the blue arrow represents Δ𝑣 𝑡 𝑖 . The provisional edited state is then 
+
+e𝑍 edit  
+
+> 𝑡 𝑖 +1
+
+= 𝑍 edit  
+
+> 𝑡 𝑖
+
++ ( 𝑡 𝑖 +1 − 𝑡 𝑖 )Δ𝑣 𝑡 𝑖 . (9) Figure 3(b) illustrates this update from 𝑍 edit  
+
+> 𝑡 𝑖
+
+to e𝑍 edit  
+
+> 𝑡 𝑖 +1
+
+.
+
+3.4 Internal Dynamic Guidance 
+
+During the early high-noise steps, the edited state contains limited target semantics. RIDGE therefore applies internal dynamic guidance over 𝑡 end ≤ 𝑡 𝑖 ≤ 𝑡 start within the editing window to better approximate the clean target state. 
+
+Clean target state prediction. The target branch provides the clean-state prediction: 
+
+ˆ𝑍 tgt 0 (𝑡 𝑖 ) = 𝑍 tgt  
+
+> 𝑡 𝑖
+
+− 𝑡 𝑖 𝑣 𝜃 
+
+
+
+𝑍 tgt  
+
+> 𝑡 𝑖
+
+, 𝑐 tgt , 𝑡 𝑖 
+
+
+
+. (10) The prediction computed at 𝑡 𝑖 guides the provisional edited state e𝑍 edit  
+
+> 𝑡 𝑖 +1
+
+, yielding a one-step-delayed approximation . See Appendix A for the rationale. 
+
+Soft dynamic mask. Predictions at high noise levels can exhibit unstable spatial change patterns. Applying guidance uniformly would propagate this uncertainty into edit-irrelevant regions. RIDGE therefore employs a soft dynamic mask that emphasizes locations with larger predicted changes and attenu-ates the remainder. RIDGE computes a spatial difference map by averaging absolute residuals across channels: 
+
+𝐷 𝑡 𝑖 = 1
+
+𝐶 
+
+> 𝐶
+
+∑︁ 
+
+> 𝑐 =1
+
+ˆ𝑍 tgt 0,𝑐 (𝑡 𝑖 ) − 𝑍 src 0,𝑐 , (11) where 𝐶 is the number of latent channels and subscript 𝑐 indexes the channel. The map 𝐷 𝑡 𝑖 preserves the spatial dimensions and quantifies the predicted change at each location. Rather than using a fixed threshold across images and timesteps, RIDGE identifies relatively large changes from the spatial distribution of 𝐷 𝑡 𝑖 . It sets the adaptive threshold to the 
+
+𝑞 -quantile of 𝐷 𝑡 𝑖 :
+
+𝜙 𝑡 𝑖 = Quantile 𝑞 
+
+ 𝐷 𝑡 𝑖 
+
+ . (12) The difference map is then converted into a soft mask: 
+
+𝑚 𝑡 𝑖 = 𝜎 
+
+ 𝐷 𝑡 𝑖 − 𝜙 𝑡 𝑖 
+
+𝜏 
+
+
+
+, (13) where 𝜎 (·) is applied element-wise and 𝜏 > 0 controls smooth-ness around the threshold. The resulting mask assigns larger weights to locations with larger predicted changes while atten-uating weaker differences. Its construction uses only quantities available during editing and requires no external segmentation model. 
+
+Guided update. Within 𝑡 end ≤ 𝑡 𝑖 ≤ 𝑡 start , RIDGE refines the provisional edited state toward the clean target state prediction: 
+
+𝑍 edit  
+
+> 𝑡 𝑖 +1
+
+= e𝑍 edit  
+
+> 𝑡 𝑖 +1
+
++ 𝛾 𝑡 𝑖 𝑚 𝑡 𝑖 ⊙
+
+ ˆ𝑍 tgt 0 (𝑡 𝑖 ) − e𝑍 edit 
+
+> 𝑡 𝑖 +1
+
+
+
+. (14) The residual in parentheses defines the guidance direction 
+
+from the provisional edited state toward the clean target state prediction, while 𝑚 𝑡 𝑖 assigns larger weights to regions estimated 4Algorithm 1 Simplified algorithm for RIDGE 
+
+Require: Clean source state 𝑍 src 0 , prompts 𝑐 src and 𝑐 tgt , reverse-time schedule {𝑡 𝑖 }, editing window, guidance window, guidance schedule 𝛾 𝑡 𝑖 defined by Eq. 15, velocity predictor 
+
+𝑣 𝜃 .
+
+Ensure: Clean edited state 𝑍 edit 0 . 
+
+> 1:
+
+Initialize 𝑍 edit  
+
+> 𝑡 max
+
+← 𝑍 src 0 . 
+
+> 2:
+
+for each editing timestep 𝑡 𝑖 do  
+
+> 3:
+
+Sample 𝜂 𝑡 𝑖 ∼ N ( 0, 𝐼 ). 
+
+> 4:
+
+𝑍 src  
+
+> 𝑡 𝑖
+
+← ( 1 − 𝑡 𝑖 )𝑍 src 0 + 𝑡 𝑖 𝜂 𝑡 𝑖 . 
+
+> 5:
+
+𝑍 tgt  
+
+> 𝑡 𝑖
+
+← ( 1 − 𝑡 𝑖 )𝑍 edit  
+
+> 𝑡 𝑖
+
++ 𝑡 𝑖 𝜂 𝑡 𝑖 . 
+
+> 6:
+
+Δ𝑣 𝑡 𝑖 ← 𝑣 𝜃 (𝑍 tgt  
+
+> 𝑡 𝑖
+
+, 𝑐 tgt , 𝑡 𝑖 ) − 𝑣 𝜃 (𝑍 src  
+
+> 𝑡 𝑖
+
+, 𝑐 src , 𝑡 𝑖 ). 
+
+> 7:
+
+e𝑍 edit  
+
+> 𝑡 𝑖 +1
+
+← 𝑍 edit  
+
+> 𝑡 𝑖
+
++ ( 𝑡 𝑖 +1 − 𝑡 𝑖 )Δ𝑣 𝑡 𝑖 . 
+
+> 8:
+
+if 𝑡 𝑖 lies within the guidance window then  
+
+> 9:
+
+ˆ𝑍 tgt 0 (𝑡 𝑖 ) ← 𝑍 tgt  
+
+> 𝑡 𝑖
+
+− 𝑡 𝑖 𝑣 𝜃 (𝑍 tgt  
+
+> 𝑡 𝑖
+
+, 𝑐 tgt , 𝑡 𝑖 ). 
+
+> 10:
+
+𝑚 𝑡 𝑖 ← M 
+
+ ˆ𝑍 tgt 0 (𝑡 𝑖 ), 𝑍 src 0
+
+
+
+. 
+
+> 11:
+
+𝑍 edit  
+
+> 𝑡 𝑖 +1
+
+← e𝑍 edit  
+
+> 𝑡 𝑖 +1
+
++ 𝛾 𝑡 𝑖 𝑚 𝑡 𝑖 ⊙
+
+ ˆ𝑍 tgt 0 (𝑡 𝑖 ) − e𝑍 edit 
+
+> 𝑡 𝑖 +1
+
+
+
+. 
+
+> 12:
+
+else  
+
+> 13:
+
+𝑍 edit  
+
+> 𝑡 𝑖 +1
+
+← e𝑍 edit  
+
+> 𝑡 𝑖 +1
+
+. 
+
+> 14:
+
+end if  
+
+> 15:
+
+end for  
+
+> 16:
+
+Complete the remaining target-prompt flow steps.  
+
+> 17:
+
+return 𝑍 edit 0 .as more relevant to the edit. The red arrow in Fig. 3(b) illustrates this spatially weighted correction. The scalar 𝛾 𝑡 𝑖 controls the guidance strength: 
+
+𝛾 𝑡 𝑖 = 𝜆 guide 
+
+1 − 𝛽 guide 𝑡 𝑖 
+
+, (15) where 𝜆 guide sets the base strength and 𝛽 guide controls its noise-level dependence. Guidance is therefore stronger at larger 𝑡 𝑖 
+
+and decreases along the reverse-time trajectory. Outside the guidance window, after the edited state has accumulated stronger target semantics, the provisional velocity-difference update is accepted without additional guidance, i.e. ,
+
+𝑍 edit  
+
+> 𝑡 𝑖 +1
+
+= e𝑍 edit  
+
+> 𝑡 𝑖 +1
+
+. At 𝑡 𝑖 +1, the resulting edited state enters the next iteration, where shared re-noising constructs the new noisy source and target-side states, and the same update cycle repeats along the reverse-time schedule. 
+
+3.5 RIDGE Algorithm 
+
+Alg. 1 presents a simplified RIDGE procedure; the full algo-rithm is provided in Appendix B. Masked guidance is applied within the specified window. For compactness, M (· , ·) denotes the mask construction in Eqs. 11–13, and 𝛾 𝑡 𝑖 follows Eq. 15. 
+
+## 4 Experiments 
+
+4.1 Experimental Setup Benchmarks. We evaluate RIDGE on two text-based image editing benchmarks: PIE-Bench Official (Ju et al., 2024) and PIE-Bench++ (Huang et al., 2024). PIE-Bench++ extends PIE-Bench Official to multifaceted editing scenarios involving multiple objects and attributes. 
+
+Baselines. Under Stable Diffusion 3 Medium (SD3 Medium) (Esser et al., 2024), we compare RIDGE with the inversion-based (Inv-B) methods RF-Inversion (RF-Inv.) (Rout et al., 2025) and UniEdit (Jiao et al., 2026), and the inversion-free (Inv-F) methods FlowEdit (Kulikov et al., 2025), FlowAlign (Kim et al., 2026), and DRFS (Beaudouin et al., 2026). Under FLUX.1-dev, we evaluate the compatible subset: RIDGE, RF-Inversion, UniEdit, and FlowEdit. 
+
+Implementation details. Images are cropped to multiples of 
+
+16 at native resolution. We evaluate all 700 PIE-Bench Official edits and use the same protocol on PIE-Bench++. Baselines use their public implementations and recommended configurations when available; FLUX uses the compatible subset above. For a controlled SD3 comparison, RIDGE matches FlowEdit’s edit-ing window and classifier-free guidance settings (Ho and Salimans, 2022): 𝑇 steps = 50 , 𝑛 max = 36 , 𝑛 min = 5, and source/target CFG scales of 3.5 and 13 .5. RIDGE samples fresh Gaussian noise at each step ( 𝑛 avg = 1) and applies inter-nal dynamic guidance over 𝑛 ∈ [ 30 , 36 ], with 𝜆 guide = 0.012 ,
+
+𝛽 guide = 0.02 , mask quantile 𝑞 = 0.7, and temperature 𝜏 = 0.2.Per-method configurations and additional implementation de-tails are provided in Appendix C. 
+
+Evaluation metrics. We evaluate source preservation, target alignment, and aesthetic quality. For source preservation, Struct-Dist (Tumanyan et al., 2022; Ju et al., 2024) measures full-image spatial structure through DINO key self-similarity (Caron et al., 2021), while PSNR u and LPIPS u (Zhang et al., 2018) respec-tively measure pixel-level and perceptual fidelity in unedited regions. DINOv2 CLS cosine distance (DINO) (Oquab et al., 2024) measures global visual consistency, following prior DINO-based input–edit evaluations (Sheynin et al., 2024). CLIP tgt (Radford et al., 2021) measures target-prompt align-ment, and Aes. measures predicted aesthetic quality. In the tables, Struct., Aes., and Avg Sc. denote StructDist, the LAION aesthetic score, and Avg Score, respectively; the subscripts u
+
+and tgt indicate the unedited region and target prompt. Arrows indicate whether higher or lower values are better. Metric implementation details are provided in Appendix C. 
+
+Average score. Since the metrics have different scales and optimization directions, we additionally report Avg Score as a compact aggregate overview of the six metrics. Within each dataset, we min–max normalize every metric across the compared methods, invert lower-is-better metrics, and take their equal-weighted mean. 
+
+Additional evaluations. The main table reports SD3 results on PIE-Bench Official and PIE-Bench++; Appendix D reports FLUX.1-dev results on both benchmarks, and Appendix E reports the human preference study. 
+
+4.2 Main Results 
+
+Table 1 reports results on PIE-Bench Official and PIE-Bench++. RIDGE achieves strong source preservation on both bench-marks, while maintaining competitive target alignment and 5Table 1: Quantitative comparison on PIE-Bench Official and PIE-Bench++. RF-Inv. denotes RF-Inversion. Best, second-best, and third-best values (per dataset) are shown in boldface, boxed, and underlined, respectively. Dataset Type Method Source Preservation Target Alignment Aesthetic Avg Sc. ↑                                                                                                                         
+
+> Struct. ↓PSNR u↑LPIPS u↓DINO ↓CLIP tgt ↑Aes. ↑
+> PIE-Bench Inv-B RF-Inv. 0.047 19.752 0.193 0.434 26.811 5.799 0.204 Inv-B UniEdit 0.021 25.260 0.094 0.328 26.481 5.725 0.620 Inv-F FlowEdit 0.039 20.250 0.140 0.420 27.688 5.807 0.476 Inv-F FlowAlign 0.016 26.267 0.057 0.343 26.692 5.650 0.648 Inv-F DRFS 0.023 23.400 0.089 0.351 27.535 5.777 0.742 Inv-F RIDGE 0.021 23.570 0.085 0.306 27.137 5.804 0.794
+> PIE-Bench++ Inv-B RF-Inv. 0.048 20.274 0.177 0.498 26.947 5.779 0.187 Inv-B UniEdit 0.026 25.540 0.095 0.428 26.482 5.689 0.541 Inv-F FlowEdit 0.042 20.635 0.132 0.491 28.121 5.806 0.456 Inv-F FlowAlign 0.023 26.382 0.059 0.474 26.941 5.641 0.573 Inv-F DRFS 0.025 23.889 0.082 0.428 27.891 5.776 0.751 Inv-F RIDGE 0.022 24.007 0.081 0.371 27.226 5.791 0.798 Table 2: Ablation of internal dynamic guidance and its soft dynamic mask on PIE-Bench Official. “w/o guidance” removes the guided update, while “w/o mask” applies guidance globally. Method Struct. ↓PSNR u↑LPIPS u↓DINO ↓CLIP tgt ↑
+> RIDGE 0.021 23.570 0.085 0.306 27.137 w/o guidance 0.015 25.260 0.069 0.267 26.780 w/o mask 0.024 23.071 0.096 0.323 27.211
+> Figure 4: Guidance-window sweep on PIE-Bench Official. The dashed line marks the default setting ( 𝑛 end =30 ).
+
+aesthetic quality. In particular, it obtains the lowest DINO dis-tance on both datasets and the best StructDist on PIE-Bench++, indicating better global visual and structural preservation. Un-der the equal-weighted normalization defined above, RIDGE ranks first in aggregate Avg Score on both benchmarks, indicat-ing a favorable trade-off between editing strength and source preservation. 
+
+4.3 Qualitative Results 
+
+Figure 5 shows representative qualitative comparisons across different edit types, including object change, attribute change, texture change, object deletion, and color change. Existing methods often exhibit different edit–preserve imbalances: some produce strong target-directed changes but alter edit-irrelevant regions, while others better preserve the source image but under-edit challenging semantic or texture changes. In contrast, RIDGE tends to preserve more edit-irrelevant structure such as background layout, pose, and surrounding objects, while still moving the image sufficiently toward the target prompt. The rightmost columns visualize RIDGE’s clean target state predictions at selected guidance steps, which generally become more stable and aligned with the intended edit at lower noise levels. More prediction visualizations and timestep-wise diagnostics are in Appendix F. 
+
+4.4 Ablation Masked guidance. Internal dynamic guidance is a central component of RIDGE. We disentangle the effects of internal dynamic guidance and its spatial mask in Table 2. The “w/o guidance” variant removes the guided update entirely, leaving the re-noising-based velocity update unchanged. It achieves stronger source preservation but lower CLIP tgt , indicating that re-noising without guidance is conservative and that early guidance strengthens target semantics. The “w/o mask” variant retains guidance but sets 𝑚 𝑡 𝑖 = 1 everywhere. Applying guid-ance globally yields the highest CLIP tgt but degrades all four preservation metrics relative to full RIDGE. Masked guidance therefore provides the intended division of roles: guidance in-creases editing strength, while the dynamic mask concentrates the correction on regions predicted to require modification, recovering source preservation with only a 0.074 decrease in CLIP tgt relative to global guidance. 
+
+Guidance window. To study guidance duration, we fix 
+
+𝑛 start = 36 and sweep 𝑛 end from 34 down to 22 on PIE-Bench Official, keeping all other hyperparameters fixed. Fig. 4 shows that longer guidance (smaller 𝑛 end ) improves CLIP tgt but in-creases StructDist. We select 𝑛 end = 30 as a balanced operating point; additional metrics are provided in Appendix G. 
+
+Guidance strength. To study guidance strength, we sweep 𝜆 guide ∈ { 0, 0.004 , 0.008 , 0.012 , 0.016 , 0.024 , 0.032 }
+
+6a cat → dog sitting on a wooden chair 
+
+the christmas illustration of a santa’s laughing → angry face 
+
+a person holding a mug → glass of hot chocolate and reading a book 
+
+a bowl of green → red tea icecream with a spoon 
+
+a paraglider is flying over a mountain with snow capped peaks 
+
+a group of rubber → plush ducks are lined up in a canal 
+
+n = 3 6 n = 33 n = 30 
+
+n = 36 n = 33 n = 30 
+
+n = 36 n = 33 n = 30 
+
+n = 36 n = 33 n = 30 
+
+n = 36 n = 33 n = 30 
+
+n = 36 n = 33 n = 30        
+
+> Color  change  Delete object  Texture change  Attribute change  Change object  Change object
+> Source RF -Inversion UniEdit FlowEdit FlowAlign DRFS RIDGE Clean target state prediction visualization
+
+Figure 5: Qualitative comparisons on representative editing examples across different edit types. Columns show the source image, results from baseline methods and RIDGE, and RIDGE’s clean target state predictions at 𝑛 = 36 , 33 , 30 . Red dashed circles highlight representative baseline failure modes. 
+
+Figure 6: Guidance-strength sweep on PIE-Bench Official. The dashed line marks the default setting ( 𝜆 guide = 0.012 ). 
+
+in Eq. 15 on PIE-Bench Official, keeping all other hyperparam-eters fixed. Fig. 6 shows that larger 𝜆 guide improves CLIP tgt but increases StructDist. We select 𝜆 guide = 0.012 as a balanced operating point; additional metrics are provided in Appendix G. 
+
+## 5 Conclusion and Limitations 
+
+We presented RIDGE, an inversion-free and training-free method that reconsiders target-side state construction in flow-based image editing. RIDGE treats the evolving edited state as an approximation to the unavailable clean target state and re-noises it with the clean source state, allowing their displace-ment to contract naturally under noising. Internal dynamic guidance strengthens early target semantics while focusing correction on regions requiring modification. Experiments on two benchmarks and two backbones show a strong balance among source preservation, target alignment, and perceptual quality. Like many inversion-free approaches, RIDGE may remain conservative for edits involving major changes in object identity, geometry, or scene composition. Nevertheless, RIDGE interprets the unknown target-side state by approximating the unavailable clean target state and then noising it, rather than equating noisy and clean displacements. We hope this work highlights target-side state construction as a central design choice in inversion-free flow editing. 7References 
+
+O. Avrahami, O. Patashnik, O. Fried, E. Nemchinov, K. Aberman, D. Lischinski, and D. Cohen-Or. Stable flow: Vital layers for training-free image editing. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 7877–7888, June 2025. URL https://openaccess.thecvf.com/content/CVPR2025/ html/Avrahami_Stable_Flow_Vital_Layers_for_Training-Free_Image_Editing_CVPR_2025_paper.html. G. Beaudouin, M. Li, J. Kim, S.-H. Yoon, and M. Wang. Delta rectified flow sampling for text-to-image editing. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recogni-tion (CVPR) , pages 18662–18672, June 2026. URL https://openaccess.thecvf.com/content/CVPR2026/html/ Beaudouin_Delta_Rectified_Flow_Sampling_for_Text-to-Image_Editing_CVPR_2026_paper.html. Black Forest Labs, S. Batifol, A. Blattmann, F. Boesel, S. Consul, C. Diagne, T. Dockhorn, J. English, Z. English, P. Esser, S. Kulal, K. Lacey, Y. Levi, C. Li, D. Lorenz, J. Müller, D. Podell, R. Rombach, H. Saini, A. Sauer, and L. Smith. FLUX.1 Kontext: Flow matching for in-context image generation and editing in latent space, 2025. URL https://arxiv.org/abs/2506.15742. M. Caron, H. Touvron, I. Misra, H. Jégou, J. Mairal, P. Bojanowski, and A. Joulin. Emerging properties in self-supervised vision transformers. In Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV) , pages 9650–9660, Oct. 2021. URL https://openaccess.thecvf.com/content/ICCV2021/html/ Caron_Emerging_Properties_in_Self-Supervised_Vision_ Transformers_ICCV_2021_paper.html. P. Esser, S. Kulal, A. Blattmann, R. Entezari, J. Müller, H. Saini, Y. Levi, D. Lorenz, A. Sauer, F. Boesel, D. Podell, T. Dock-horn, Z. English, and R. Rombach. Scaling rectified flow transformers for high-resolution image synthesis. In Pro-ceedings of the 41st International Conference on Machine Learning , volume 235 of Proceedings of Machine Learn-ing Research , pages 12606–12633. PMLR, 2024. URL https://proceedings.mlr.press/v235/esser24a.html. A. Hertz, R. Mokady, J. Tenenbaum, K. Aberman, Y. Pritch, and D. Cohen-Or. Prompt-to-prompt image editing with cross-attention control. In The Eleventh International Conference on Learning Representations , 2023. URL https://openreview. net/forum?id=_CDixzkzeyb. J. Ho and T. Salimans. Classifier-free diffusion guidance, 2022. URL https://arxiv.org/abs/2207.12598. M. Huang, J. Cai, S. Jia, V. S. Lokhande, and S. Lyu. Paralleledits: Efficient multi-aspect text-driven image editing with attention grouping. In Advances in Neural Information Processing Systems , volume 37, 2024. URL https://proceedings.neurips.cc/paper_files/paper/2024/ hash/2847043899e1171183ceadf86bdbb280-Abstract-Conference.html. L. Jiang, B. Wu, Y. Pei, T. Wu, Y. Chen, Y. Zhao, S. Yu, and D. Cai. SNR-Edit: Structure-aware noise rectification for inversion-free flow-based editing, 2026a. URL https: //arxiv.org/abs/2601.19180. Y. Jiang, Z. Wang, Y. Wang, J. Yu, Y. Zhuang, J. Xiao, and L. Chen. FlowDC: Flow-based decoupling-decay for complex image editing. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 25757–25766, June 2026b. URL https://openaccess.thecvf.com/content/CVPR2026/ html/Jiang_FlowDC_Flow-Based_Decoupling-Decay_ for_Complex_Image_Editing_CVPR_2026_paper.html. G. Jiao, B. Huang, K.-C. J. Wang, and R. Liao. UniEdit-Flow: Unleashing inversion and editing in the era of flow models. In The Fourteenth International Conference on Learning Representations , 2026. URL https://openreview.net/forum? id=ArU2CeB7Tm. X. Ju, A. Zeng, Y. Bian, S. Liu, and Q. Xu. PnP inversion: Boosting diffusion-based editing with 3 lines of code. In 
+
+The Twelfth International Conference on Learning Repre-sentations , 2024. URL https://openreview.net/forum?id= FoMZ4ljhVw. J. Kim, Y. Hong, J. Park, and J. C. Ye. FlowAlign: Trajectory-regularized, inversion-free flow-based image editing. In The Fourteenth International Conference on Learning Repre-sentations , 2026. URL https://openreview.net/forum?id= nyttIJfwW7. V. Kulikov, M. Kleiner, I. Huberman-Spiegelglas, and T. Michaeli. FlowEdit: Inversion-free text-based editing using pre-trained flow models. In Proceed-ings of the IEEE/CVF International Conference on Computer Vision (ICCV) , pages 19721–19730, Oct. 2025. URL https://openaccess.thecvf.com/content/ ICCV2025/html/Kulikov_FlowEdit_Inversion-Free_Text-Based_Editing_Using_Pre-Trained_Flow_Models_ICCV_ 2025_paper.html. Y. Lipman, R. T. Q. Chen, H. Ben-Hamu, M. Nickel, and M. Le. Flow matching for generative modeling. In The Eleventh In-ternational Conference on Learning Representations , 2023. URL https://openreview.net/forum?id=PqvMRDCJT9t. X. Liu, C. Gong, and Q. Liu. Flow straight and fast: Learn-ing to generate and transfer data with rectified flow. In 
+
+The Eleventh International Conference on Learning Repre-sentations , 2023. URL https://openreview.net/forum?id= gWxpdtQpiYV. C. Meng, Y. He, Y. Song, J. Song, J. Wu, J.-Y. Zhu, and S. Ermon. SDEdit: Guided image synthesis and editing with stochastic differential equations. In The Tenth International Conference on Learning Representations , 2022. URL https: //openreview.net/forum?id=aBsCjcPu_tE. 8M. Oquab, T. Darcet, T. Moutakanni, H. V. Vo, M. Szafraniec, V. Khalidov, P. Fernandez, D. Haziza, F. Massa, A. El-Nouby, M. Assran, N. Ballas, W. Galuba, R. Howes, P.-Y. Huang, S.-W. Li, I. Misra, M. Rabbat, V. Sharma, G. Synnaeve, H. Xu, H. Jégou, J. Mairal, P. Labatut, A. Joulin, and P. Bojanowski. DINOv2: Learning robust visual features without supervision. Transactions on Machine Learning Research , 2024. URL https://openreview.net/forum?id= a68SUt6zFt. A. Radford, J. W. Kim, C. Hallacy, A. Ramesh, G. Goh, S. Agarwal, G. Sastry, A. Askell, P. Mishkin, J. Clark, G. Krueger, and I. Sutskever. Learning transferable visual models from natural language supervision. In Proceedings of the 38th International Conference on Machine Learning ,volume 139 of Proceedings of Machine Learning Research ,pages 8748–8763. PMLR, 2021. URL https://proceedings. mlr.press/v139/radford21a.html. L. Rout, Y. Chen, N. Ruiz, C. Caramanis, S. Shakkottai, and W.-S. Chu. Semantic image inversion and editing using rectified stochastic differential equations. In The Thirteenth Interna-tional Conference on Learning Representations , 2025. URL https://openreview.net/forum?id=Hu0FSOSEyS. C. Schuhmann. Improved aesthetic predictor. https://github.com/christophschuhmann/improved-aesthetic-predictor, 2022. Accessed: 2026-07-31. S. Sheynin, A. Polyak, U. Singer, Y. Kirstain, A. Zohar, O. Ashual, D. Parikh, and Y. Taigman. Emu Edit: Precise image editing via recognition and generation tasks. In 
+
+Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 8871–8879, June 2024. doi: 10.1109/CVPR52733.2024.00847. URL https://openaccess.thecvf.com/content/CVPR2024/ html/Sheynin_Emu_Edit_Precise_Image_Editing_via_ Recognition_and_Generation_Tasks_CVPR_2024_paper. html. N. Tumanyan, O. Bar-Tal, S. Bagon, and T. Dekel. Splicing ViT features for semantic appearance transfer. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 10748–10757, June 2022. URL https://openaccess.thecvf.com/content/CVPR2022/ html/Tumanyan_Splicing_ViT_Features_for_Semantic_ Appearance_Transfer_CVPR_2022_paper.html. J. Wang, J. Pu, Z. Qi, J. Guo, Y. Ma, N. Huang, Y. Chen, X. Li, and Y. Shan. Taming rectified flow for inversion and editing. In Proceedings of the 42nd International Conference on Machine Learning , volume 267 of Proceedings of Machine Learning Research , pages 64044–64058. PMLR, 2025a. URL https://proceedings.mlr.press/v267/wang25ce.html. Y. Wang, Z. Wang, and L. Chen. Target-aware image editing via cycle-consistent constraints, 2025b. URL https://arxiv. org/abs/2510.20212. P. Xu, B. Jiang, X. Hu, D. Luo, Q. He, J. Zhang, C. Wang, Y. Wu, C. Ling, and B. Wang. Unveil inversion and invariance in flow transformer for versatile image editing. In Proceedings of the IEEE/CVF Confer-ence on Computer Vision and Pattern Recognition (CVPR) , pages 28479–28489, June 2025. URL https: //openaccess.thecvf.com/content/CVPR2025/html/Xu_ Unveil_Inversion_and_Invariance_in_Flow_Transformer_ for_Versatile_Image_CVPR_2025_paper.html. S. Xu, Y. Huang, J. Pan, Z. Ma, and J. Chai. Inversion-free image editing with language-guided diffusion models. In Proceedings of the IEEE/CVF Con-ference on Computer Vision and Pattern Recogni-tion (CVPR) , pages 9452–9461, June 2024. URL https://openaccess.thecvf.com/content/CVPR2024/html/ Xu_Inversion-Free_Image_Editing_with_Language-Guided_Diffusion_Models_CVPR_2024_paper.html. K. Yang, B. Shen, X. Li, Y. Dai, Y. Luo, Y. Ma, W. Fang, Q. Li, and Z. Wang. FIA-Edit: Frequency-interactive attention for efficient and high-fidelity inversion-free text-guided image editing. Proceedings of the AAAI Conference on Artificial Intelligence , 40(14):11613–11621, 2026. doi: 10.1609/aaai.v40i14.38145. URL https://ojs.aaai.org/index. php/AAAI/article/view/38145. S.-H. Yoon, M. Li, G. Beaudouin, C. Wen, M. R. Azhar, and M. Wang. SplitFlow: Flow decomposition for inversion-free text-to-image editing. In Advances in Neural Information Processing Systems , volume 38, 2025. URL https://proceedings.neurips.cc/paper_files/paper/2025/ hash/e124f1547f7ac87e33d348b827d4291b-Abstract-Conference.html. R. Zhang, P. Isola, A. A. Efros, E. Shechtman, and O. Wang. The unreasonable effectiveness of deep features as a perceptual metric. In Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition (CVPR) ,pages 586–595, June 2018. URL https://openaccess.thecvf. com/content_cvpr_2018/html/Zhang_The_Unreasonable_ Effectiveness_CVPR_2018_paper.html. 9Appendix 
+
+# A Method Analysis 
+
+## A.1 Displacement Contraction under Shared Noising 
+
+We derive the displacement induced by noising two clean states with the same noise level and noise sample. At an editing timestep 
+
+𝑡 𝑖 , let 𝑍 src 0 denote the clean source state and 𝑍 edit  
+
+> 𝑡 𝑖
+
+denote the edited state at the current editing step. Under rectified-flow interpolation, applying shared noising with 𝜂 𝑡 𝑖 gives 
+
+𝑍 src  
+
+> 𝑡 𝑖
+
+= (1 − 𝑡 𝑖 )𝑍 src 0 + 𝑡 𝑖 𝜂 𝑡 𝑖 , (16) 
+
+𝑍 tgt  
+
+> 𝑡 𝑖
+
+= (1 − 𝑡 𝑖 )𝑍 edit  
+
+> 𝑡 𝑖
+
++ 𝑡 𝑖 𝜂 𝑡 𝑖 . (17) Subtracting Eq. (16) from Eq. (17) cancels the shared noise term: 
+
+𝑍 tgt  
+
+> 𝑡 𝑖
+
+− 𝑍 src  
+
+> 𝑡 𝑖
+
+= (1 − 𝑡 𝑖 )
+
+
+
+𝑍 edit  
+
+> 𝑡 𝑖
+
+− 𝑍 src 0
+
+
+
+. (18) Since 𝑡 𝑖 ∈ [ 0, 1], taking the Euclidean norm yields 
+
+∥𝑍 tgt  
+
+> 𝑡 𝑖
+
+− 𝑍 src  
+
+> 𝑡 𝑖
+
+∥2 = (1 − 𝑡 𝑖 )∥ 𝑍 edit  
+
+> 𝑡 𝑖
+
+− 𝑍 src 0 ∥2. (19) Thus, for a fixed pair of clean states at timestep 𝑡 𝑖 , shared noising scales their displacement by 1 − 𝑡 𝑖 . As the noise level increases, this factor decreases from 1 to 0. At the pure-noise endpoint 𝑡 𝑖 = 1, both noised states collapse to the same noise sample: 
+
+𝑍 src 1 = 𝑍 tgt 1 = 𝜂 1, (20) and their displacement vanishes. In contrast, the equal-displacement construction sets 
+
+𝑍 tgt  
+
+> 𝑡 𝑖
+
+− 𝑍 src  
+
+> 𝑡 𝑖
+
+= 𝑍 edit  
+
+> 𝑡 𝑖
+
+− 𝑍 src 0 , (21) so the noisy displacement is kept equal to the clean-state displacement at all noise levels. Unless the two clean states are identical, this displacement does not contract as 𝑡 𝑖 increases and would remain nonzero at the pure-noise endpoint. Therefore, equal displacement does not match the contraction behavior induced by noising. 
+
+## A.2 One-Step Delayed Guidance Approximation 
+
+Same-timestep circular dependency. A seemingly more direct alternative is to first predict a clean target state at timestep 𝑡 𝑖 +1
+
+and use it to guide the edited state at the same timestep. However, this creates the following circular dependency: 
+
+ˆ𝑍 tgt 0 (𝑡 𝑖 +1) ←− 𝑍 tgt  
+
+> 𝑡 𝑖 +1
+
+←− 𝑍 edit  
+
+> 𝑡 𝑖 +1
+
+←− ˆ𝑍 tgt 0 (𝑡 𝑖 +1), (22) where each arrow denotes a dependency. Computing ˆ𝑍 tgt 0 (𝑡 𝑖 +1) requires the target-side state 𝑍 tgt  
+
+> 𝑡 𝑖 +1
+
+, which is constructed by re-noising the guided state 𝑍 edit  
+
+> 𝑡 𝑖 +1
+
+. However, this guided state would itself depend on ˆ𝑍 tgt 0 (𝑡 𝑖 +1).
+
+One-step delayed approximation. RIDGE breaks this cycle by using the most recent available prediction, ˆ𝑍 tgt 0 (𝑡 𝑖 ), to guide the provisional edited state e𝑍 edit  
+
+> 𝑡 𝑖 +1
+
+. Since predictions at adjacent timesteps approximate the same underlying clean target state, 
+
+ˆ𝑍 tgt 0 (𝑡 𝑖 ) serves as a one-step delayed approximation for the update at 𝑡 𝑖 +1. This design avoids the same-timestep dependency while retaining clean target state guidance during the early high-noise steps. 
+
+# B Full RIDGE Algorithm 
+
+Algorithm 2 gives the complete inference procedure, including the explicit dynamic-mask construction and the optional target-prompt completion stage. 10 Algorithm 2 Full RIDGE Algorithm 
+
+Require: Clean source state 𝑍 src 0 , prompts 𝑐 src and 𝑐 tgt , reverse-time schedule 1 = 𝑡 0 > · · · > 𝑡 𝑁 = 0, editing window (𝑡 min , 𝑡 max ],guidance window [𝑡 end , 𝑡 start ], velocity predictor 𝑣 𝜃 .
+
+Ensure: Clean edited state 𝑍 edit 0 .
+
+// Initialization 
+
+1: Let 𝑖 start and 𝑖 end satisfy 𝑡 𝑖 start = 𝑡 max and 𝑡 𝑖 end = 𝑡 min 
+
+2: 𝑍 edit  
+
+> 𝑡 𝑖 start
+
+← 𝑍 src 0
+
+// Main editing loop 
+
+3: for 𝑖 = 𝑖 start , . . . , 𝑖 end − 1 do 
+
+4: Sample 𝜂 𝑡 𝑖 ∼ N ( 0, 𝐼 )
+
+// Re-noising construction 
+
+5: 𝑍 src  
+
+> 𝑡 𝑖
+
+← ( 1 − 𝑡 𝑖 )𝑍 src 0 + 𝑡 𝑖 𝜂 𝑡 𝑖 
+
+6: 𝑍 tgt  
+
+> 𝑡 𝑖
+
+← ( 1 − 𝑡 𝑖 )𝑍 edit  
+
+> 𝑡 𝑖
+
++ 𝑡 𝑖 𝜂 𝑡 𝑖 
+
+7: Δ𝑣 𝑡 𝑖 ← 𝑣 𝜃 (𝑍 tgt  
+
+> 𝑡 𝑖
+
+, 𝑐 tgt , 𝑡 𝑖 ) − 𝑣 𝜃 (𝑍 src  
+
+> 𝑡 𝑖
+
+, 𝑐 src , 𝑡 𝑖 )
+
+8: e𝑍 edit  
+
+> 𝑡 𝑖 +1
+
+← 𝑍 edit  
+
+> 𝑡 𝑖
+
++ ( 𝑡 𝑖 +1 − 𝑡 𝑖 )Δ𝑣 𝑡 𝑖 
+
+// Internal dynamic guidance 
+
+9: if 𝑡 end ≤ 𝑡 𝑖 ≤ 𝑡 start then 
+
+10: ˆ𝑍 tgt 0 (𝑡 𝑖 ) ← 𝑍 tgt  
+
+> 𝑡 𝑖
+
+− 𝑡 𝑖 𝑣 𝜃 (𝑍 tgt  
+
+> 𝑡 𝑖
+
+, 𝑐 tgt , 𝑡 𝑖 )
+
+11: 𝐷 𝑡 𝑖 ← 1
+
+> 𝐶
+
+Í𝐶 𝑐 =1 ˆ𝑍 tgt 0,𝑐 (𝑡 𝑖 ) − 𝑍 src 0,𝑐 
+
+12: 𝜙 𝑡 𝑖 ← Quantile 𝑞 (𝐷 𝑡 𝑖 )
+
+13: 𝑚 𝑡 𝑖 ← 𝜎 
+
+ 𝐷 𝑡 𝑖 − 𝜙 𝑡 𝑖 
+
+> 𝜏
+
+
+
+14: 𝛾 𝑡 𝑖 ← 𝜆 guide /( 1 − 𝛽 guide 𝑡 𝑖 )
+
+15: 𝑍 edit  
+
+> 𝑡 𝑖 +1
+
+← e𝑍 edit  
+
+> 𝑡 𝑖 +1
+
++ 𝛾 𝑡 𝑖 𝑚 𝑡 𝑖 ⊙
+
+ ˆ𝑍 tgt 0 (𝑡 𝑖 ) − e𝑍 edit 
+
+> 𝑡 𝑖 +1
+
+
+
+16: else 
+
+17: 𝑍 edit  
+
+> 𝑡 𝑖 +1
+
+← e𝑍 edit 
+
+> 𝑡 𝑖 +1
+
+18: end if 
+
+19: end for 
+
+// Target-prompt completion 
+
+20: if 𝑡 𝑖 end = 0 then 
+
+21: return 𝑍 edit 0 = 𝑍 edit 
+
+> 𝑡 𝑖 end
+
+22: else 
+
+23: Sample 𝜂 end ∼ N ( 0, 𝐼 )
+
+24: 𝑌 𝑡 𝑖 end ← ( 1 − 𝑡 𝑖 end )𝑍 edit 
+
+> 𝑡 𝑖 end
+
++ 𝑡 𝑖 end 𝜂 end 
+
+25: for 𝑖 = 𝑖 end , . . . , 𝑁 − 1 do 
+
+26: 𝑌 𝑡 𝑖 +1 ← 𝑌 𝑡 𝑖 + ( 𝑡 𝑖 +1 − 𝑡 𝑖 )𝑣 𝜃 (𝑌 𝑡 𝑖 , 𝑐 tgt , 𝑡 𝑖 )
+
+27: end for 
+
+28: return 𝑍 edit 0 = 𝑌 𝑡 𝑁 
+
+29: end if 
+
+# C Experimental and Evaluation Details 
+
+## C.1 Experimental Configuration 
+
+The main experiments use Stable Diffusion 3 Medium (SD3 Medium) (Esser et al., 2024) as the common backbone. Additional cross-backbone experiments use FLUX.1-dev (Black Forest Labs et al., 2025). Input images are cropped so that both spatial dimensions are divisible by 16 while preserving their native resolution; no fixed-size resizing is applied. 
+
+Datasets. For PIE-Bench Official (Ju et al., 2024) and PIE-Bench++ (Huang et al., 2024), we evaluate all 700 edits specified by their official evaluation lists, covering ten edit categories without additional filtering. 
+
+Backbones and compared methods. Under SD3 Medium, we evaluate RF-Inversion (Rout et al., 2025), UniEdit (Jiao et al., 2026), FlowEdit (Kulikov et al., 2025), FlowAlign (Kim et al., 2026), DRFS (Beaudouin et al., 2026), and RIDGE on both benchmarks. Under FLUX.1-dev, we evaluate the methods for which compatible implementations are available: RF-Inversion, UniEdit, FlowEdit, and RIDGE, using the same evaluation samples. 11 Compute and software. All experiments are run on NVIDIA GeForce RTX 3090 GPUs with 24 GB of memory. The complete software environment is provided in the accompanying code package. 
+
+## C.2 Per-Method Configuration under SD3 Medium 
+
+Tables 3–5 summarize the sampling setup, prompt-conditioning and guidance settings, and method-specific schedules under SD3 Medium. Throughout the experimental configuration, 𝑡 𝑖 denotes the rectified-flow timestep, while 𝑛 denotes the corresponding discrete reverse-time implementation step. 
+
+Table 3: Sampling and numerical setup under SD3 Medium. Steps denote the full scheduler trajectory.                             
+
+> Method Steps Scheduler Seed Precision RF-Inversion 28 SD3 FlowMatch 42 bf16 UniEdit 30 Uni Euler 8fp16 FlowEdit 50 SD3 FlowMatch 42 fp16 FlowAlign 33 FlowAlign Euler 123 fp16 DRFS 50 SD3 descending 41 fp16 RIDGE 50 SD3 FlowMatch 42 fp16
+
+Table 4: Prompt-conditioning and guidance settings under SD3 Medium. The entries follow each method’s native guidance formulation and therefore do not always correspond to conventional classifier-free guidance scales.                        
+
+> Method Source-side guidance Target/edit guidance RF-Inversion Null-conditioned inversion Target CFG 3.5
+> UniEdit Source scale 1.0Target scale 1.0
+> FlowEdit Source CFG 3.5Target CFG 13 .5
+> FlowAlign Direct source conditioning Source-to-target scale 13 .5
+> DRFS Source CFG 6.0Target CFG 16 .5
+> RIDGE Source CFG 3.5Target CFG 13 .5
+
+For FlowAlign, direct source conditioning means that the source prompt is used to predict the conditional velocity without a separate conventional source CFG scale. Its target-side scale extrapolates from the source-conditioned velocity toward the target-conditioned velocity. 
+
+Table 5: Method-specific update schedules and additional settings under SD3 Medium. Method Setting RF-Inversion Uses 28 inversion and denoising steps. Edit interpolation is applied at steps 0, . . . , 8, with 𝛾 = 0.5, 𝜂 base = 0.95 , and a constant 𝜂 schedule. UniEdit Uses 15 inversion steps followed by 15 editing steps, with 𝛼 = 0.6 and 𝜔 = 5.0.FlowEdit Uses 𝑇 steps = 50 , 𝑛 max = 36 , and 𝑛 min = 5. Velocity-difference editing is applied for 𝑛 = 36 , . . . , 6, followed by tail denoising for 𝑛 = 5, . . . , 1. One fresh Gaussian noise sample is drawn at every editing step, corresponding to 𝑛 avg = 1.FlowAlign Uses 𝑁 FE = 33 ; all 33 reverse-time steps participate in editing. DRFS Uses 𝑇 steps = 50 descending latent-optimization steps, 𝜂 = 1.0, SGD with batch size 𝐵 = 1, and the released lr="custom" 
+
+schedule without modification. RIDGE Uses the same editable interval, tail-denoising schedule, and per-step fresh-noise sampling as FlowEdit. RIDGE-specific guidance settings are reported in Table 9. 
+
+## C.3 Per-Method Configuration under FLUX.1-dev 
+
+Tables 6–8 summarize the sampling setup, prompt-guidance settings, and method-specific schedules under FLUX.1-dev. FlowEdit and RIDGE use sequential CPU offload. 
+
+Table 6: Sampling and numerical setup under FLUX.1-dev. Steps denote the full scheduler trajectory.                     
+
+> Method Steps Scheduler Seed Precision RF-Inversion 28 FLUX FlowMatch Euler 42 bf16 UniEdit 30 Uni Euler 8bf16 FlowEdit 28 FLUX FlowMatch Euler 42 fp16 RIDGE 28 FLUX FlowMatch Euler 42 fp16
+
+12 Table 7: Prompt-guidance settings under FLUX.1-dev. A dash indicates that no separate source-side guidance scale is defined by the released implementation; it does not imply that the source prompt is unused. Method Source-side scale Target/edit scale RF-Inversion — 1.0 UniEdit 1.0 1.0 FlowEdit 1.5 5.5 RIDGE 1.5 5.5                                      
+
+> Table 8: Method-specific update schedules and additional settings under FLUX.1-dev. Method Setting RF-Inversion Uses 28 inversion and denoising steps, with 𝜂 =0.9and 𝛾 =0.5. Edit interpolation is applied over the normalized interval
+> [0.0,0.25 ].UniEdit Uses 15 inversion steps followed by 15 editing steps, with 𝛼 =0.6,𝜔 =5.0, and inversion and editing guidance scales of 1.0.FlowEdit Uses 𝑇 steps =28 ,𝑛 max =24 ,𝑛 min =0, and 𝑛 avg =1. Editing is applied for 𝑛 =24 , . . . , 1.RIDGE Uses the same editable interval and per-step fresh-noise sampling as FlowEdit. RIDGE-specific guidance settings are reported in Table 9.
+
+## C.4 RIDGE-Specific Guidance Configuration 
+
+For controlled comparisons, RIDGE matches FlowEdit on the scheduler, editable interval, prompt-guidance settings, random seed, numerical precision, and per-step fresh-noise sampling under each backbone. Table 9 reports only the RIDGE-specific reverse-time guidance window and 𝜆 guide . The listed window specifies the steps at which both the soft dynamic mask and the guidance update are applied.                       
+
+> Table 9: RIDGE-specific guidance settings by backbone. In both cases, 𝛽 guide =0.02 , mask quantile 𝑞 =0.7, and temperature 𝜏 =0.2.Backbone Guidance window 𝜆 guide
+> SD3 Medium 𝑛 =36 , . . . , 30 0.012 FLUX.1-dev 𝑛 =24 , . . . , 18 0.024
+
+## C.5 Baseline Implementations 
+
+We use publicly released implementations for all baselines and retain their method-specific configurations without additional tuning. The repositories and revisions used in our experiments are listed below: 
+
+• FlowEdit (Kulikov et al., 2025): https://github.com/fallenshock/FlowEdit, commit 9a2e05e .
+
+• FlowAlign (Kim et al., 2026): https://github.com/FlowAlign/FlowAlign, commit 29c6fe1 .
+
+• DRFS (Beaudouin et al., 2026): https://github.com/Harvard-AI-and-Robotics-Lab/DeltaVelocityRectifiedFlow, commit 
+
+c59ce9d .
+
+• UniEdit (Jiao et al., 2026): https://github.com/DSL-Lab/UniEdit-Flow, commit 2a5385e .
+
+• RF-Inversion under SD3 Medium (Rout et al., 2025): the public SD3 port at https://github.com/pureexe/rf-inversion-sd3, commit 0d303d3 .
+
+• RF-Inversion under FLUX.1-dev (Rout et al., 2025): the public Diffusers community pipeline at https://github.com/ huggingface/diffusers/blob/c9e4fab/examples/community/pipeline_flux_rf_inversion.py, commit c9e4fab .
+
+• PIE-Bench evaluation code (Ju et al., 2024): https://github.com/cure-lab/PnPInversion, commit 07f97f4 .Baseline algorithms and method-specific hyperparameters are unchanged. All methods use the same benchmark preprocessing protocol, which preserves the native image resolution while cropping both spatial dimensions to multiples of 16. For RF-Inversion under FLUX.1-dev, we make only tensor-reshaping compatibility adjustments required by our Diffusers environment; these adjustments do not change the algorithmic operations or hyperparameters. The exact experimental configurations used for all methods are reported in the tables above. 13 C.6 Metric Implementation Details 
+
+Structural preservation. We compute StructDist following the official PIE-Bench evaluation protocol (Ju et al., 2024). DINO ViT-B/8 (Caron et al., 2021) extracts key embeddings from the final self-attention block. After concatenating the attention heads for each token, including the CLS token, we construct a token-wise self-similarity matrix using pairwise cosine similarities. StructDist is the mean-squared discrepancy between the self-similarity matrices of the source and edited images (Tumanyan et al., 2022). Lower values indicate better structural preservation. 
+
+Unedited-region fidelity. PSNR u and LPIPS u are computed between the source and edited images over the complement of the annotated editing region. Following the official PIE-Bench implementation, PSNR uses a data range of 1, and LPIPS uses the SqueezeNet backbone (Zhang et al., 2018). Higher PSNR u and lower LPIPS u indicate better preservation. 
+
+Target alignment. CLIP tgt measures alignment between the edited image and its target prompt. Across all benchmark–backbone combinations, we use the official PIE-Bench evaluator (Ju et al., 2024), implemented with TorchMetrics CLIPScore and the 
+
+openai/clip-vit-large-patch14 checkpoint (Radford et al., 2021). The metric is applied to the full edited image and target prompt using the evaluator’s default preprocessing. Higher values indicate stronger target-prompt alignment. 
+
+Global consistency. Let 𝑓 cls denote the final CLS embedding produced by DINOv2-Base (Oquab et al., 2024). We use the 
+
+facebook/dinov2-base checkpoint and define the distance between a source image 𝐼 src and edited image 𝐼 edit as 
+
+𝐷 DINO = 1 − ⟨ 𝑓 cls (𝐼 src ), 𝑓 cls (𝐼 edit )⟩ ∥ 𝑓 cls (𝐼 src )∥ 2 ∥ 𝑓 cls (𝐼 edit )∥ 2
+
+. (23) Lower values indicate greater global visual consistency. Unlike StructDist, which compares token-level DINO self-similarity matrices to assess structural consistency, this metric compares full-image CLS embeddings. Prior editing evaluation has similarly used full-image DINO features to compare input and edited images (Sheynin et al., 2024); we use DINOv2 CLS features and report cosine distance rather than similarity. Images are processed independently using the checkpoint’s Hugging Face image processor. 
+
+Aesthetic quality. Aes. is computed by applying the improved LAION aesthetic predictor MLP (Schuhmann, 2022) to 
+
+ℓ2-normalized OpenAI CLIP ViT-L/14 image features (Radford et al., 2021). We use the checkpoint sac+logos+ava1-l14-linearMSE.pth . Higher values indicate higher predicted aesthetic quality. 
+
+Dataset-level aggregation. Each dataset-level metric is the arithmetic mean over samples with finite values. Non-finite sample values are excluded for the corresponding metric, and the aggregate is set to NaN if no finite value remains. 
+
+Average score. Avg Score provides an additional summary of the overall performance balance within each table. Let 𝑥 𝑗,𝑚 
+
+denote the dataset-level result of method 𝑗 on metric 𝑚 , and let 𝑥 min  
+
+> 𝑚
+
+and 𝑥 max  
+
+> 𝑚
+
+denote the minimum and maximum values across the methods compared in that table. The normalized score is 
+
+𝑠 𝑗,𝑚 =
+
+
+
+𝑥 𝑗,𝑚 − 𝑥 min 
+
+> 𝑚
+
+𝑥 max  
+
+> 𝑚
+
+− 𝑥 min 
+
+> 𝑚
+
+, if higher is better ,𝑥 max  
+
+> 𝑚
+
+− 𝑥 𝑗,𝑚 
+
+𝑥 max  
+
+> 𝑚
+
+− 𝑥 min 
+
+> 𝑚
+
+, if lower is better .
+
+(24) If 𝑥 max  
+
+> 𝑚
+
+= 𝑥 min  
+
+> 𝑚
+
+, all methods receive 𝑠 𝑗,𝑚 = 1 for that metric. Avg Score is then computed as 
+
+AvgScore 𝑗 = 1
+
+|M| ∑︁ 𝑚 ∈ M 
+
+𝑠 𝑗,𝑚 , (25) where M contains StructDist, PSNR u, LPIPS u, CLIP tgt , DINO distance, and Aes. Normalization is performed separately within each dataset and comparison table. All dataset-level values used in the reported tables are finite. 
+
+# D Additional Quantitative Results 
+
+Table 10 reports quantitative results under FLUX.1-dev on PIE-Bench Official and PIE-Bench++. RIDGE consistently achieves the lowest StructDist, LPIPS, and DINO distance on both benchmarks, demonstrating strong source preservation and global visual consistency under a different backbone. These results further support the cross-backbone robustness of RIDGE. 14 Table 10: Quantitative comparison under FLUX.1-dev on PIE-Bench Official and PIE-Bench++. RF-Inv. denotes RF-Inversion. PSNR and LPIPS are computed in unedited regions. Dataset Type Method Source Preservation Target Alignment Aesthetic Avg Sc. ↑
+
+Struct. ↓ PSNR ↑ LPIPS ↓ DINO ↓ CLIP tgt ↑ Aes. ↑
+
+PIE-Bench Inv-B RF-Inv. 0.037 21.025 0.167 0.372 23.878 5.538 0.000 Inv-B UniEdit 0.011 29.012 0.063 0.224 25.837 5.682 0.773 Inv-F FlowEdit 0.028 21.787 0.112 0.326 26.312 5.871 0.511 Inv-F RIDGE 0.010 26.145 0.047 0.113 24.644 5.801 0.791 PIE-Bench++ Inv-B RF-Inv. 0.037 21.624 0.154 0.408 23.193 5.521 0.000 Inv-B UniEdit 0.014 29.083 0.064 0.301 25.565 5.649 0.701 Inv-F FlowEdit 0.031 22.288 0.103 0.388 26.181 5.889 0.475 Inv-F RIDGE 0.010 26.796 0.044 0.133 23.384 5.804 0.754 
+
+# E Human Preference Study 
+
+## E.1 Setting 
+
+We conduct a human preference study comparing FlowEdit (Kulikov et al., 2025), FlowAlign (Kim et al., 2026), DRFS (Beaudouin et al., 2026), and RIDGE on 20 editing cases sampled from PIE-Bench Official and PIE-Bench++. For each case, participants are shown the source image, source and target prompts, and four anonymized outputs labeled A–D, with label assignments randomized across cases. They rank the outputs from first to fourth for target alignment and source consistency , which respectively assess fulfillment of the requested edit and preservation of unrelated source content. Fig. 7 shows an example question. 
+
+Figure 7: Example question from the human preference study interface. Participants rank anonymized edits A–D under target alignment and source consistency. 
+
+We collected 15 complete responses, resulting in 15 × 20 = 300 rank observations for each method under each criterion. We report the average rank, where lower is better, and the top-1 rate, which measures how often a method is ranked first. 
+
+## E.2 Results 
+
+As shown in Table 11, RIDGE achieves the best average rank and the highest top-1 rate under both criteria. It is ranked first in 58 .0% of the target-alignment judgments and 68 .7% of the source-consistency judgments. When aggregating both criteria, RIDGE is ranked first in 380 out of 600 method-level rankings, corresponding to a top-1 rate of 63 .3% .15 Table 11: Human preference study results over 15 complete responses and 20 editing trials. Participants rank all four methods under target alignment and source consistency. Method Target Alignment Source Consistency Combined Avg. rank ↓ Top-1 ↑ Avg. rank ↓ Top-1 ↑ Avg. rank ↓ Top-1 ↑                        
+
+> FlowEdit 2.757 13.7% 3.047 7.0% 2.902 10.3% FlowAlign 3.187 11.7% 3.040 14.7% 3.113 13.2% DRFS 2.347 16.7% 2.443 9.7% 2.395 13.2%
+> RIDGE 1.710 58.0% 1.470 68.7% 1.590 63.3%
+
+The method-to-label assignments are randomized across cases but are not perfectly counterbalanced, so small residual position effects may remain. We therefore interpret the study as descriptive supporting evidence rather than as a population-level estimate. 
+
+# F Clean Target State Prediction Analysis 
+
+RIDGE uses a clean target state prediction to guide the edited state during the early high-noise steps. Its one-step delayed guidance relies on the most recent available prediction to guide the following update. We examine how these predictions evolve using two complementary latent-space diagnostics over all 700 PIE-Bench Official samples. At each reverse-time step 𝑛 ∈ { 36 , . . . , 30 }, we record the clean target state prediction ˆ𝑍 tgt 0 (𝑡 𝑖 ), where 𝑛 corresponds to timestep 𝑡 𝑖 and the following reverse-time step 𝑛 − 1
+
+corresponds to 𝑡 𝑖 +1. All distances are measured using per-element latent RMSE, where 𝐷 denotes the number of latent elements. 
+
+Adjacent-prediction distance. To measure consistency between predictions at consecutive guidance steps, we define 
+
+𝑑 adj (𝑛 ) = 1
+
+√𝐷 
+
+ˆ𝑍 tgt 0 (𝑡 𝑖 ) − ˆ𝑍 tgt 0 (𝑡 𝑖 +1) 2 . (26) This quantity is reported for 𝑛 = 36 , . . . , 31 , since 𝑛 = 30 is the final step in the guidance window and has no subsequent prediction. Lower values indicate greater consistency between predictions at adjacent steps. 
+
+Distance to the final edited state. We additionally measure the distance from each prediction to the final edited state produced by the same RIDGE trajectory: 
+
+𝑑 final (𝑛 ) = 1
+
+√𝐷 
+
+ˆ𝑍 tgt 0 (𝑡 𝑖 ) − 𝑍 edit 0 2 . (27) Because 𝑍 edit 0 is the endpoint produced by RIDGE rather than a ground-truth clean target state, 𝑑 final measures proximity to the trajectory endpoint and should not be interpreted as prediction accuracy. Figure 8 reports the mean distances over all 700 samples. The shaded regions show the standard errors of the sample means, computed as the sample standard deviation divided by √700 . The adjacent-prediction distance decreases consistently toward lower noise levels, indicating that consecutive clean target state predictions become more temporally consistent as editing proceeds. This observation supports using the most recent available prediction as a one-step delayed approximation for the following update. The distance to the final edited state also exhibits an overall decreasing trend, although it is not strictly monotonic at every step. Later predictions therefore tend to lie closer to the final trajectory endpoint. This diagnostic characterizes how the predictions evolve along the RIDGE trajectory, rather than their accuracy with respect to an unavailable ground-truth target state. Figure 9 further visualizes the clean target state predictions for one editing example. In this example, earlier predictions exhibit broader and less coherent spatial changes, whereas later predictions become more consistent with the final edited result. Together with the quantitative trends above, this observation is consistent with the motivation for the soft dynamic mask, which restricts the spatial influence of guidance when early high-noise predictions may contain changes outside the intended edit region. 16 Figure 8: Clean target state prediction diagnostics over all 700 PIE-Bench Official samples. Left: per-element latent RMSE between predictions at consecutive guidance steps. Right: per-element latent RMSE between each prediction and the final edited state from the same RIDGE trajectory. Curves show the sample means, and shaded regions show the standard errors of the means. 
+
+Figure 9: Clean target state predictions across guidance steps. The source image and final edited result are shown as references. Example edit: “a cat sitting on a wooden chair” → “a dog sitting on a wooden chair”. 
+
+# G Additional Ablation Results 
+
+The default SD3 Medium configuration was fixed before the full-benchmark evaluation. The following sweeps are reported as post-hoc sensitivity analyses. 
+
+## G.1 Guidance-Window Sweep 
+
+Fig. 10 reports the same guidance-window sweep as in the main text, with additional metrics beyond StructDist and CLIP tgt . The same trade-off holds: longer guidance improves target alignment but weakens source preservation and related source-similarity metrics. The default setting 𝑛 end = 30 lies near the observed trade-off. 17 Figure 10: Full guidance-window sweep on PIE-Bench Official under SD3 Medium. We fix 𝑛 start = 36 and vary 𝑛 end . The dashed line marks the default setting ( 𝑛 end = 30 ). 
+
+## G.2 Guidance-Strength Sweep 
+
+Fig. 11 reports the same 𝜆 guide sweep as in the main text, with additional metrics beyond StructDist and CLIP tgt . Larger 
+
+𝜆 guide improves target alignment but weakens source preservation and related source-similarity metrics. The default setting 
+
+𝜆 guide = 0.012 lies near the observed trade-off. 
+
+Figure 11: Full guidance-strength sweep on PIE-Bench Official under SD3 Medium. We vary 𝜆 guide while keeping the guidance window fixed. The dashed line marks the default setting ( 𝜆 guide = 0.012 ). 
+
+18

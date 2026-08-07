@@ -1,0 +1,798 @@
+Title: Coupled Continuous-Discrete Generation for Scene Text Image Super-Resolution
+
+URL Source: https://arxiv.org/pdf/2608.04525v1
+
+Published Time: Thu, 06 Aug 2026 00:35:05 GMT
+
+Number of Pages: 18
+
+Markdown Content:
+# Coupled Continuous–Discrete Generation for Scene Text Image Super-Resolution 
+
+## Axi Niu 1, Kang Zhang 2, Qingsen Yan 1,Hao Jin 1, Jinqiu Sun 1, Yangning Zhang 1 
+
+> 1
+
+Northwestern Polytechnical University, Xi’an, China  
+
+> 2
+
+Korea Advanced Institute of Science and Technology (KAIST), Daejeon, Republic of Korea 
+
+Abstract 
+
+Scene text image super-resolution (STISR) aims to recover visually plausible appearance while preserving character se-mantics from degraded inputs. Existing STISR systems of-ten rely on externally generated priors or separate image and text models, resulting in error propagation and costly multi-stage inference. We present DualTSR, a unified framework that formulates STISR as coupled continuous–discrete gener-ation. Conditional flow matching restores continuous image latents, while absorbing-state discrete diffusion reconstructs text tokens. Both processes share a multimodal transformer backbone, allowing the evolving image and text states to in-teract throughout generation without an external OCR prior at inference. On CTR-TSR, DualTSR achieves the best FID, LPIPS, ACC, and NED among the compared methods at both 
+
+×2 and ×4. On an aligned RealCE subset, it obtains the best FID, ACC, and NED with competitive LPIPS. Compared with DiffTSR at ×4, DualTSR improves ACC by 12.78 percent-age points while reducing the parameter count from 1.23B to 203M and end-to-end latency from 13.3s to 132ms. These results establish DualTSR as an accurate and efficient method for STISR. 
+
+## 1 Introduction 
+
+Scene Text Image Super-Resolution (STISR) aims to recon-struct high-quality scene text images from low-resolution inputs. The task is especially challenging because charac-ter structures are sensitive to degradation: small distortions, missing strokes, or blending with background clutter can alter the underlying semantics. Unlike general image super-resolution, which primarily enhances textures, STISR must simultaneously guarantee textual fidelity and stylistic real-ism . Any structural error directly causes recognition failure, while inconsistencies in font, color, or orientation reduce vi-sual plausibility. These difficulties are further amplified in languages with large character sets such as Chinese. To reduce the inherent ambiguity of STISR, recent work (Chen, Li, and Xue 2021; Ma, Guo, and Zhang 2023; Ma et al. 2023; Wang et al. 2020) incorporates textual pri-ors extracted from a pre-trained OCR model. Knowing the expected text sequence significantly constrains the solution 
+
+Copyright © 2027, Association for the Advancement of Artificial Intelligence (www.aaai.org). All rights reserved. 
+
+space and often improves reconstruction quality. This OCR-guided paradigm has therefore become dominant, and sev-eral recent methods (Noguchi, Fukuda, and Yamanaka 2024; Zhang et al. 2024) explicitly condition the SR process on predicted text tokens to enforce semantic correctness. How-ever, its reliability is fundamentally limited by the accuracy of the external OCR: erroneous predictions propagate into the SR network, leading to hallucinated strokes, incorrect glyphs, and overall degraded results. To mitigate this depen-dency, subsequent works introduced stronger low-level pri-ors. MARCONet (Li, Zuo, and Loy 2023) learns a discrete codebook of character structures to provide robust struc-tural guidance, while GlyphSR (Wei et al. 2025) goes fur-ther by generating explicit glyph masks using SAM to su-pervise fine-grained stroke reconstruction. Although these structural priors alleviate the brittleness of OCR guidance, they require increasingly complex and multi-stage pipelines for prior extraction. This growing reliance on external mod-ules highlights a core limitation of existing approaches and motivates a unified framework that can learn both semantic and structural cues internally without handcrafted or exter-nally produced priors. To this end, diffusion-based generative models (Song, Meng, and Ermon 2020; Lipman et al. 2023) have re-cently been adopted for STISR, particularly for complex scripts (Noguchi, Fukuda, and Yamanaka 2024; Zhang et al. 2024). DiffTSR (Zhang et al. 2024) reports strong results by modeling text and image with separate modules connected through a multi-modality fusion block. While effective, this multi-stage architecture is cumbersome: it increases system size, complicates training, and limits the depth of cross-modal interaction because textual and visual information are only exchanged at specific fusion points. To address these limitations, we propose DualTSR , a uni-fied STISR framework that formulates restoration as coupled continuous-discrete generation. Conditional flow matching generates the high-resolution image latent, while discrete diffusion reconstructs the corresponding character sequence. Both processes are parameterized by a shared multimodal transformer, allowing image and text representations to in-teract throughout the network. Instead of receiving a text sequence from an external OCR model, DualTSR predicts the text internally from the low-resolution observation and the evolving image state. During training, synchronized cor-arXiv:2608.04525v1 [cs.CV] 5 Aug 2026 ruption presents partially corrupted image and text states at a shared timestep. During inference, the shared backbone updates both states jointly, allowing the current text hypoth-esis to guide glyph restoration and the evolving image to refine text prediction. DualTSR therefore replaces separate image and text generative backbones with a compact joint formulation. Our contributions are as follows: 
+
+• We introduce DualTSR , a unified STISR framework that jointly models continuous image restoration and discrete text prediction within a shared multimodal transformer, without requiring an external OCR prior at inference. 
+
+• We formulate a coupled training and inference scheme that combines conditional flow matching for image gen-eration with absorbing-state discrete diffusion for text pre-diction. Synchronized corruption and joint updates enable the evolving image and text states to condition each other throughout generation. 
+
+• DualTSR achieves the best FID, LPIPS, ACC, and NED among the compared methods on CTR-TSR at both ×2
+
+and ×4, and the best FID, ACC, and NED with com-petitive LPIPS on the aligned RealCE subset. Compared with DiffTSR at ×4, it improves ACC by 12.78 percent-age points while using 6.1× fewer parameters, 4.5× less peak memory, and running approximately 101 × faster. 
+
+## 2 Related Work 
+
+Text Image Super-Resolution 
+
+Research in Text Image Super-Resolution (TISR) addresses the unique challenges of simultaneously enhancing image details and improving text legibility. While general-purpose blind super-resolution methods such as BSRGAN (Zhang et al. 2021) and Real-ESRGAN (Wang et al. 2021) restore natural images well, they often fail to preserve the fine-grained structures and appearance cues required for text. This has motivated specialized STISR methods that intro-duce text-specific priors or auxiliary supervision. Early and mid-stage STISR work explored complemen-tary cues for restoration. Text Gestalt (Chen et al. 2022) emphasizes stroke-aware reconstruction, TATT (Ma, Liang, and Zhang 2022) introduces text attention to improve ro-bustness to spatial deformation, and C3-STISR (Zhao et al. 2022) combines multiple clues to recover both semantics and structure. A large line of work then adopts OCR-guided pri-ors, where a pre-trained recognizer predicts text that is fed into the SR network to enforce semantic correctness (Wang et al. 2020; Ma, Guo, and Zhang 2023; Noguchi, Fukuda, and Yamanaka 2024; Zhang et al. 2024). These methods can substantially improve recognition-oriented metrics, but their performance remains tied to the quality of the external OCR prior. More recent methods instead emphasize structural priors. MARCONet (Li, Zuo, and Loy 2023) learns a character-structure codebook, MARCONet++ (Li, Zuo, and Loy 2025) further strengthens this line with improved character priors, and GlyphSR (Wei et al. 2025) uses explicit glyph masks gen-erated from an auxiliary pipeline. These approaches reduce dependence on raw OCR predictions, but they also introduce additional stages, modules, or prior-generation procedures. DualTSR differs from both families: rather than injecting a separately predicted text prior or a handcrafted structural prior, it learns image restoration and text prediction jointly within one multimodal backbone, so semantic cues are pro-duced inside the model instead of being imported from a separate pipeline. 
+
+Diffusion Models in Super-Resolution 
+
+Diffusion probabilistic models have demonstrated state-of-the-art performance in image synthesis and restoration, ow-ing to their powerful ability to model complex data distribu-tions (Ho, Jain, and Abbeel 2020; Lipman et al. 2023). This success has naturally led to their application in both natural image super-resolution (Niu et al. 2024; Shang et al. 2024; Moser et al. 2024) and TISR (Zhao et al. 2024; Zhou et al. 2024; Liu et al. 2025). Furthermore, research has shown that diffusion models are not only suitable for continuous data like images but can also effectively model discrete data dis-tributions, such as text sequences (Austin et al. 2021; Meng et al. 2022; Lou, Meng, and Ermon 2023; Sahoo et al. 2024). In the context of TISR, diffusion models have been used in several ways to mitigate unreliable priors and ambiguous degradations. PEAN (Zhao et al. 2024) refines text-aware features with diffusion-based priors, TextDiff (Liu et al. 2023) uses mask-guided residual diffusion for restoration, and recognition-guided or text-conditional diffusion mod-els (Zhou et al. 2024; Noguchi, Fukuda, and Yamanaka 2024) strengthen the coupling between restoration and text predic-tion. DiffTSR (Zhang et al. 2024) pushes this direction fur-ther by separating image generation and text generation into dedicated diffusion branches connected by a multi-modality module, which is particularly effective for Chinese scene text. DualTSR keeps the central diffusion-based idea of joint image-text modeling, but replaces the modular design with a single multimodal transformer trained by two coupled ob-jectives: flow matching for the image branch and discrete diffusion for the text branch. The key distinction is therefore architectural: we trade explicit cross-model fusion for shared representations and layer-wise multimodal interaction. 
+
+## 3 Method 
+
+We introduce DualTSR , an end-to-end multimodal diffu-sion framework for scene text image super-resolution. The central design choice is to model high-resolution image synthesis and text prediction inside a single shared back-bone rather than through separately trained priors. Given a low-resolution input image xlr , our objective is to learn the conditional joint distribution p(xhr , xtxt |xlr ), where xhr de-notes the restored high-resolution image and xtxt denotes the text sequence contained in that image. As illustrated in Figure 1, DualTSR combines three components: (1) a condi-tional flow matching process for high-resolution image syn-thesis p(xhr |xlr , xtxt ); (2) a discrete diffusion process for text prediction p(xtxt |xlr , xhr ); and (3) a multimodal transformer that shares representations across both processes to learn the joint distribution end to end. This allows the evolving image Transformer           
+
+> HR
+> 𝑞 (𝑥 !|𝑥 )
+> Noisy latents
+> VAE Encoder
+> LR
+> VAE Encoder
+> 𝑋 -pred
+> (a) Baseline SiT (b) DiffTSR
+> Multimodal Transformer
+> HR
+> 𝑞 (𝑥 !|𝑥 )
+> Text
+> 𝑞 (𝑥 !|𝑥 )
+> Masked Text
+> Text Encoder Noisy latents
+> VAE Encoder
+> LR
+> VAE Encoder
+> 𝑋 -pred 𝑉 -pred
+> (b) Ours
+> U-Net Denoiser
+> HR
+> 𝑞 (𝑥 !|𝑥 )
+> Text
+> 𝑞 (𝑥 !|𝑥 )
+> Masked Text
+> Text Encoder Noisy latents
+> VAE Encoder
+> LR
+> VAE Encoder
+> 𝑋 -pred 𝑉 -pred
+> Transformer
+> M
+> o
+> M
+> 𝑡 𝑡 𝑡
+
+Figure 1: Comparison of representative STISR architectures. DualTSR unifies image generation and text prediction within a single model. (a) Baseline: Directly models the conditional distribution of high-resolution images from low-resolution inputs, without a text-based prior. (b) DiffTSR (Zhang et al. 2024): Independently models the image and text priors, subsequently fusing their representations using a Multi-modality Module (MoM). (c) DualTSR: A unified multimodal transformer jointly optimizes image generation and text prediction through two coupled diffusion processes. and text states to inform one another throughout training and inference. 
+
+Preliminaries 
+
+Our model builds upon two key generative modeling paradigms: conditional flow matching for continuous data like images, and discrete diffusion for textual data. 
+
+Conditional Flow Matching for Image Generation Flow matching (Lipman et al. 2023; Tong et al. 2024) is a recent generative modeling paradigm that formulates sample gen-eration as solving an ordinary differential equation (ODE) defined by a time-dependent velocity field. At inference, the goal is to generate a high-resolution image x0 by solving an ODE over a time interval t ∈ [0 , 1] . The process starts with a random noise sample x1 drawn from a standard normal distribution, p1(x1) = N (0 , I ). The ODE solver then inte-grates a learned conditional velocity field, vθ (xt, t, c), which guides the transformation from noise to an image. This ve-locity field is conditioned on external information c (in our case, the low-resolution image and optionally text labels) and is parameterized by the image head of our multimodal network. During training, the network vθ is optimized to predict the velocity of a simple linear trajectory between a noise sample 
+
+x1 and a target data sample x0. The path is defined as 
+
+xt = (1 − t)x0 + tx1, (1) and its corresponding constant velocity is ut = x1 − x0.The CFM objective minimizes the discrepancy between the predicted velocity and this ground-truth velocity: 
+
+LCFM = Et,q (x1),q (x0,c) ∥vθ (xt, t, c) − ut∥2 (2) where t is sampled uniformly from [0 , 1] , q(x1) = N (0 , I ) is the standard normal distribution, and q(x0, c) samples from the training dataset. 
+
+Discrete Diffusion for Text Generation For text gener-ation, we require a diffusion process tailored for discrete data, where each token x belongs to a finite vocabulary 
+
+X = {1, . . . , N }. While some methods apply diffusion in a continuous latent space (Li et al. 2022; Chen, Zhang, and Hinton 2022; Dieleman et al. 2022; Lovelace et al. 2024; Gulrajani and Hashimoto 2024), this can introduce mapping errors. We instead adopt a diffusion process that operates di-rectly in the discrete token space, a paradigm that has shown strong empirical results (Austin et al. 2021; Meng et al. 2022; Lou, Meng, and Ermon 2023; Sahoo et al. 2024). Our approach is based on a continuous-time Markov chain (CTMC) that defines a forward corruption process. Specif-ically, we use an absorbing-state diffusion process (Lou, Meng, and Ermon 2023; Sahoo et al. 2024; Shi et al. 2024), where tokens in the original text sequence x are progres-sively replaced by a special mask token m. The marginal distribution of the corrupted text xt at time t is a categorical distribution conditioned on the original text x:
+
+q(xt|x) = Cat [xt|αtx + (1 − αt)m], (3) where Cat (·| π) is the categorical distribution with probabil-ities π, and αt is a noise schedule. The goal of the reverse process is to learn a denoising dis-tribution pθ (x | xt, t ) that predicts the original clean text x
+
+from its corrupted version xt. Following recent work (Sahoo et al. 2024; Shi et al. 2024), we train the model by directly predicting the denoised variate. This leads to a simplified negative variational lower bound (NELBO) objective under the continuous-time limit: 
+
+LNELBO = Eq(xt|x)
+
+Z 10
+
+−α′
+
+> t
+
+1 − αt
+
+log pθ (x | xt, t ) dt 
+
+
+
+. (4) In practice, this integral is approximated using Monte-Carlo sampling. For the noise schedule, we follow Sahoo et al. (2024) and use a simple log-linear schedule where αt = 1 −t.
+
+Multimodal Transformer 
+
+To enable effective interaction between image and text modalities, we adopt a multimodal transformer architecture inspired by the MM-DiT block design from SD3 (Esser et al. 2024). Unlike prior DiffTSR approaches (Zhang et al. 2024), which rely on separate modality-specific models connected through an auxiliary communication module, our framework employs a unified transformer backbone. This unified design allows the model to dynamically attend to different modal-ities depending on the input, thereby supporting joint opti-mization of both the super-resolution task (LR-to-HR) and the recognition task (LR-to-text). A detailed description can be find at Appendix B 
+
+Training 
+
+To enable synchronized image and text generation at in-ference time, we optimize the continuous image process and the discrete text process jointly. Given a training triple 
+
+(xhr , xlr , xtxt ), the HR image is encoded by a variational au-toencoder (Esser, Rombach, and Ommer 2021) into the latent space used by the flow-matching branch, while the text se-quence is embedded into discrete tokens. For simplicity, we keep the notation xhr and xlr for the corresponding latent variables in the equations below. Let vθ denote the image-velocity head and pθ denote the text-denoising head of the shared multimodal transformer. We sample 
+
+xhr  
+
+> t
+
+= (1 − t)xhr + tϵ, ϵ ∼ N (0 , I ),
+
+and corrupt the text with the absorbing process in Equation 3 to obtain xtxt  
+
+> t
+
+. The corresponding image target velocity is 
+
+ut = ϵ − xhr .We first optimize modality-specific conditional objectives. For image generation, the model predicts the HR velocity conditioned on the LR image and the clean text: 
+
+LIMG = Et,q vθ
+
+ xhr  
+
+> t
+
+, t, cimg  − ut 
+
+> 22
+
+, (5) where cimg = {xlr , xtxt }. For text prediction, the model re-constructs the clean text from corrupted tokens conditioned on the LR image and the clean HR image: 
+
+LTXT = Eq(txt )
+
+"
+
+− 1
+
+K
+
+> K
+
+X
+
+> i=1
+
+log pθ
+
+ xtxt | xtxt  
+
+> ti
+
+, t i, ctxt #
+
+, (6) where ctxt = {xlr , xhr }. Following Li et al. (2025), we ap-proximate the continuous-time objective with antithetic sam-pling (Kingma et al. 2021) over K timesteps ti uniformly covering (δ, 1] , where δ is a small constant for numerical stability. To strengthen joint modeling, we further corrupt both modalities with the same timestep and train the model to recover them simultaneously. This synchronized corruption is important because it exposes the transformer to partially observed image and text states at matched noise levels, forc-ing the two branches to cooperate rather than behave like loosely coupled auxiliaries: 
+
+LJoint = Et,q (hr,lr,txt )
+
+h
+
+vθ
+
+ xhr  
+
+> t
+
+, t, ˜cimg  − ut
+
+> 22
+
+− log pθ
+
+ xtxt | xtxt  
+
+> t
+
+, t, ˜ctxt  i
+
+, (7) where ˜cimg = {xlr , xtxt  
+
+> t
+
+} and ˜ctxt = {xlr , xhr  
+
+> t
+
+}. The overall training objective is 
+
+LOverall = LIMG + LTXT + LJoint . (8) 
+
+Model-Guided Training via Classifier-Free Guidance 
+
+To improve sample quality and controllability at inference time, we incorporate model guidance (MG) directly into training, following Tang et al. (2025). We apply this idea to the image-flow target in Equation 2. Let vema  
+
+> θ
+
+(xt, t, c) be the conditioned velocity predicted by the EMA teacher model and vema  
+
+> θ
+
+(xt, t, ∅) be the corresponding unconditional pre-diction. The flow-matching objective is then reformulated as 
+
+LCFM-MG = Et,q (x0),q (x1,c) ∥vθ (xt, t, c) − u′
+
+> t
+
+∥2 (9) where the rectified target u′ 
+
+> t
+
+is defined as: 
+
+u′
+
+> t
+
+(xt, t, c) = ut+w·(sg (vema  
+
+> θ
+
+(xt, t, c)) − vema  
+
+> θ
+
+(xt, t, ∅)) ,
+
+(10) where w denotes the guidance scale factor and sg (·) is the stop-gradient operator. Using the EMA teacher stabilizes the target prediction throughout training. During optimization, the condition vector c is randomly replaced with ∅ with probability ψ so that the network learns both conditional and unconditional predictions. Applying this rectified target to the image-only and joint image losses gives 
+
+LIMG-MG = Et,q (img )
+
+vθ
+
+ xhr  
+
+> t
+
+, t, cimg  − u′
+
+> t
+
+(xhr  
+
+> t
+
+, t, cimg ) 22 ,
+
+LJoint-MG = Et,q (img,txt )
+
+h
+
+vθ
+
+ xhr  
+
+> t
+
+, t, ˜cimg  − u′
+
+> t
+
+(xhr  
+
+> t
+
+, t, ˜cimg ) 22
+
+− log pθ
+
+ xtxt | xtxt  
+
+> t
+
+, t, ˜ctxt  i
+
+.
+
+(11) Our final training objective is then defined as: 
+
+LOverall = LIMG-MG + LTXT + LJoint-MG . (12) 
+
+Joint inference 
+
+At inference time, given a low-resolution image xlr , we ini-tialize the image branch from Gaussian noise xhr  
+
+> 1
+
+and the text branch from a fully masked sequence xtxt  
+
+> 1
+
+. The shared transformer then updates both modalities synchronously, so the current text hypothesis can immediately influence image refinement and vice versa. For a step from t to s
+
+(0 < s < t < 1), the model predicts 
+
+ˆut = vθ
+
+ xhr  
+
+> t
+
+, t, {xlr , xtxt  
+
+> t
+
+} , (13) 
+
+pt = pθ
+
+ · | xtxt  
+
+> t
+
+, t, {xlr , xhr  
+
+> t
+
+} . (14) The image latent is updated with an Euler step, 
+
+xhr  
+
+> s
+
+= xhr  
+
+> t
+
+− (t − s)ˆ ut, (15) while the text latent is updated by the reverse absorbing-state transition parameterized by pt, with only masked positions being resampled and already generated tokens kept fixed. After obtaining the final image latent xhr  
+
+> 0
+
+, we decode it back to RGB space using the VAE decoder. Detailed pseudocode for training and sampling is provided in Appendix H. Method ×2 ×4PSNR ↑ LPIPS ↓ FID ↓ ACC ↑ NED ↑ PSNR ↑ LPIPS ↓ FID ↓ ACC ↑ NED ↑                                                                                
+
+> ESRGAN (Wang et al. 2018) 24.09 0.3046 15.06 67.08% 83.79% 22.18 0.3986 18.25 43.69% 62.15% MSRResNet (Zhang et al. 2019) 28.03 0.3030 30.47 68.94% 85.37% 24.52 0.4029 50.60 49.04% 67.96% SwinIR (Liang et al. 2021) 28.39 0.2983 31.54 70.01% 86.10% 24.73 0.3957 50.89 50.09% 68.93% SRFormer (Zhou et al. 2023) 28.89 0.2829 26.93 70.93% 86.91% 25.05 0.3801 46.23 51.83% 70.70% MARCONet (Li, Zuo, and Loy 2023) 23.14 0.4518 88.06 57.93% 76.43% 21.44 0.4941 99.64 41.30% 59.86% DiffTSR (Zhang et al. 2024) 23.21 0.3304 18.57 63.51% 80.99% 20.62 0.3952 22.24 44.87% 63.20% MARCONet++ (Li, Zuo, and Loy 2025) 24.02 0.4281 64.27 59.34% 77.49% 22.06 0.5072 86.18 39.92% 58.30%
+> DualTSR (Ours) 22.43 0.2682 8.73 73.23% 88.50% 20.54 0.3292 16.42 57.65% 76.64%
+
+Table 1: Quantitative comparison on the synthetic CTR-TSR . Best in bold .                                                                                           
+
+> Method ×2×4PSNR ↑LPIPS ↓FID ↓ACC ↑NED ↑PSNR ↑LPIPS ↓FID ↓ACC ↑NED ↑
+> ESRGAN (Wang et al. 2018) 20.08 0.3833 103.50 58.80% 86.30% 19.97 0.3721 87.18 58.50% 87.65% MSRResNet (Zhang et al. 2019) 19.25 0.3033 43.82 62.80% 89.08% 19.28 0.3590 60.81 58.00% 86.87% SwinIR (Liang et al. 2021) 20.24 0.3810 87.98 59.30% 86.44% 20.23 0.3271 56.77 62.10% 87.55% SRFormer (Zhou et al. 2023) 20.85 0.3081 50.81 62.90% 89.47% 20.29 0.3732 83.47 57.50% 85.79% MARCONet (Li, Zuo, and Loy 2023) 18.93 0.4144 87.54 60.58% 87.11% 19.09 0.4189 92.14 61.52% 88.39% DiffTSR (Zhang et al. 2024) 18.95 0.3179 38.13 62.60% 88.13% 18.09 0.3382 41.13 58.00% 84.44% MARCONet++ (Li, Zuo, and Loy 2025) 19.38 0.3839 75.47 61.20% 87.47% 19.48 0.3953 81.72 59.40% 87.76%
+> DualTSR (Ours) 18.94 0.3133 35.95 63.80% 89.97% 18.85 0.3277 40.78 62.20% 88.49%
+
+Table 2: Quantitative comparison on RealCE . Best in bold .
+
+## 4 Experiments 
+
+Experimental Setup 
+
+Datasets. We evaluate on two benchmarks. First, we con-struct a Chinese scene text super-resolution dataset, denoted as CTR-TSR , by strictly following the construction pipeline described in DiffTSR (Zhang et al. 2024): we create training and testing splits from CTR (Yu et al. 2021) using the same filtering criteria, canonical HR resizing, and blind degrada-tion recipe. Because the exact DiffTSR split is not publicly released, we re-implemented the pipeline per their descrip-tion; the resulting CTR-TSR contains 64,139 training and 8,690 testing images. Detailed construction procedures are in Appendix A. Second, we evaluate on the RealCE bench-mark (Ma et al. 2023), which contains real-world Chinese text images. Following DiffTSR (Zhang et al. 2024), which also notes that RealCE contains samples with partial annotations, inaccurate localization, and severe LR–HR misalignment, we report paired metrics on a curated subset of 300 clean, well-aligned LR–HR pairs. Since the exact subset used in DiffTSR is not publicly released, we construct our own sub-set according to the same considerations to ensure reliable evaluation. 
+
+Evaluation Metrics. For both CTR-TSR and RealCE, we report PSNR ( ↑), LPIPS ( ↓), FID ( ↓), and two text fidelity metrics: ACC ( ↑) and NED ( ↑) (Zhang et al. 2024). ACC is the exact-match recognition accuracy (word-level); NED measures character level similarity by normalizing the Lev-enshtein distance (Zhang et al. 2024). To avoid evaluator drift, we use a fixed pretrained OCR recognizer (TransOCR from CTR (Yu et al. 2021)) for all methods unless other-wise noted; computation details for the text metric are in Appendix F. 
+
+Degradation and Resolutions. Unless specified, HR im-ages are resized to 128 × 512 (text-line layout preserved). LR images are synthesized by a blind, stochastic pipeline (blur + noise + compression + downsampling, with random ordering/magnitudes) adapted from BSRGAN (Zhang et al. 2021) and Real-ESRGAN (Wang et al. 2021); full recipe and randomization ranges are summarized in Appendix A. 
+
+Training Configuration. Our model is implemented in Py-Torch and trained on 4 ×NVIDIA A100 (40 GB) GPUs. We use AdamW (Loshchilov and Hutter 2019) with learning rate 
+
+1 × 10 −4, cosine decay, and weight decay 0.05 . For CTR-TSR, we train for 700k iterations with batch size 32 (global). By default, we adopt K = 8 discrete-text timesteps for an-tithetic sampling in the text diffusion loss and a 4-step ODE sampler for joint inference unless otherwise stated. Unless noted otherwise, we set the guidance scale factor w in Equa-tion 10 to 1.0, which provides the best overall trade-off in Table 6. Code, dataset construction scripts, and pretrained checkpoints will be released. 
+
+Baselines. We compare with general SR methods (ES-RGAN (Wang et al. 2018), MSRResNet (Zhang et al. 2019), SwinIR (Liang et al. 2021), SRFormer (Zhou et al. 2023)) and text-specific approaches (MARCONet (Li, Zuo, and Loy 2023), MARCONet++ (Li, Zuo, and Loy 2025), DiffTSR (Zhang et al. 2024)). General SR baselines are re-trained on CTR-TSR-Train. For text-specific methods, we use official checkpoints: our CTR-TSR dataset strictly follows the construction pipeline described in DiffTSR (Zhang et al. 2024) (same source corpus, filtering criteria, and degradation recipe), so the evaluation is comparable even without retrain-ing. MARCONet/MARCONet++ ship their own synthetic pipelines and are designed to generalize to unseen degra-dations, making official-checkpoint evaluation the standard practice. Full reproduction details are in Appendix D. SRFormer 
+
+> Marconet
+> DiffTSR
+> Marconet ++
+> LR
+> DualTSR
+> GT
+
+Figure 2: Qualitative comparison for RealCE with different methods on ×4 scale. The comparison methods include ESRGAN (Wang et al. 2018), MSRResNet (Zhang et al. 2019), SwinIR (Liang et al. 2021), SRFormer (Zhou et al. 2023), MARCONet (Li, Zuo, and Loy 2023), MARCONet++ (Li, Zuo, and Loy 2025), DiffTSR (Zhang et al. 2024) and our method. 
+
+Main Results 
+
+Quantitative. Tables 1 and 2 report performance on the synthetic CTR-TSR benchmark and the real-world RealCE benchmark. On CTR-TSR, generic SR models (ESRGAN, MSRResNet, SwinIR, SRFormer) achieve strong PSNR but poor LPIPS/FID and low ACC/NED at both scales, confirm-ing that pixel-level reconstruction alone is insufficient for re-covering structured text. MARCONet and MARCONet++ in-troduce text-aware supervision, yet their compositing-based training often disrupts scene consistency and limits percep-tual performance. DiffTSR improves FID through its dual diffusion branches, but the separation of text and image pathways still leaves room for semantic errors. DualTSR achieves the best FID, LPIPS, ACC, and NED on CTR-TSR across both ×2 and ×4 settings. As expected for a generative model, PSNR is lower than regression-based baselines; this reflects the well-known perception-distortion trade-off (Xue et al. 2023), where perceptual realism and pixel-wise fidelity are inherently at odds. On the curated RealCE subset, real-world degradations amplify the weaknesses of prior approaches: generic SR models preserve coarse textures but often fail to reconstruct valid glyphs, while text-specific baselines show limited ro-bustness beyond their synthetic training assumptions. Du-alTSR achieves the best ACC and NED at both scales together with competitive perceptual quality, demonstrating that the unified backbone transfers effectively to real-world imagery. 
+
+Qualitative. Figures 2 provide ×4 visual comparisons on RealCE. We provide more visual comparisons on both CTR-TSR and RealCE at Appendix G. Three recurring patterns emerge. (i) Structural distortion. Generic SR models (ESR-GAN, MSRResNet, SwinIR, SRFormer) tend to oversmooth strokes or introduce spurious edges, reflecting their lack of text-specific supervision. (ii) Style inconsistency. MAR-CONet and MARCONet++ sometimes produce correct char-acter identities but generate glyphs that appear stylistically pasted onto the background, breaking scene coherence. (iii)                       
+
+> Method Params NFE Latency ↓Peak Mem. ↓ACC ↑
+> DiffTSR 1,231 M 200 ×313,316 ms 5.4 GB 44.87% SRFormer 20 M 170 ms 0.3 GB 51.83%
+> DualTSR (Ours) 203 M 4132 ms 1.2 GB 57.65%
+
+Table 3: Efficiency comparison on CTR-TSR ×4. Runtime is measured on a single NVIDIA A100 with batch size 1 and an output resolution of 128 × 512 . NFE denotes the number of network function evaluations. 
+
+Semantic errors. DiffTSR yields sharper characters than MARCONet variants, yet its separately trained text and im-age branches can produce semantically incorrect glyphs. Du-alTSR mitigates all three failure modes: the shared backbone preserves local appearance cues (font, color, background) while the internal text hypothesis guides glyph structure, producing characters that are both semantically correct and visually integrated with the scene. Failure cases remain un-der severe corruption when color or font cues are largely missing; additional ×2 results are in Appendix G. 
+
+Efficiency Analysis 
+
+We evaluate end-to-end inference efficiency on CTR-TSR 
+
+×4 using a single NVIDIA A100, batch size 1, and an out-put resolution of 128 × 512 . Parameters and peak memory include all modules required at inference. As shown in Ta-ble 3, DualTSR requires only four network function evalu-ations (NFEs), completing inference in 132 ms with 1.2 GB peak memory. Compared with DiffTSR, DualTSR uses 150 ×
+
+fewer NFEs, runs 100 .9× faster, and reduces the parameter count and memory footprint by 6.1× and 4.5×, respectively, while improving ACC by 12.78 percentage points. Moreover, its latency is within the range of feed-forward SR models, demonstrating that the unified image–text backbone substan-tially reduces the cost of generative STISR while retaining strong text fidelity. Method Internal OCR on SR            
+
+> ACC ↑NED ↑ACC ↑NED ↑
+> DiffTSR (Zhang et al. 2024) 26.09% 47.27% 44.87% 63.20%
+> DualTSR (Ours) 45.44% 69.66% 57.65% 76.64%
+
+Table 4: Internal text evaluation on CTR-TSR ×4. “OCR on SR” denotes TransOCR evaluation of the restored images. Setting FID ↓ PSNR ↑ LPIPS ↓ ACC ↑ NED ↑                        
+
+> (a) LJoint-MG 13.73 19.82 0.3804 49.85% 68.28% (b) LJoint-MG +LTXT 13.39 19.79 0.3782 52.72% 72.17% (c) LJoint-MG +LTXT +LIMG-MG 9.92 20.12 0.3550 53.71% 73.60%
+
+Table 5: Loss ablation on CTR-TSR ×4. All variants are trained for 300k iterations with batch size 128 for efficient comparison. 
+
+Internal Text-Branch Evaluation 
+
+We directly evaluate the text predictions produced by Du-alTSR on CTR-TSR ×4 against the ground-truth transcrip-tions. Table 4 compares its internal text branch with that of DiffTSR and reports OCR results obtained by applying TransOCR to the restored images. DualTSR substantially outperforms DiffTSR in both internal prediction and OCR-based evaluation. Its smaller gap between internal and OCR accuracy further suggests better alignment between predicted text semantics and restored glyphs. 
+
+Ablation Study 
+
+Loss design ablation study. Table 5 presents an abla-tion on our loss components. Starting with the baseline (a) 
+
+LJoint-MG , the model already achieves strong results by jointly corrupting image and text with synchronized timesteps, yielding a balanced performance across both image qual-ity (FID 13.73, LPIPS 0.3804) and text reconstruction (ACC 49.85%, NED 68.28%). Adding the discrete text diffusion loss (b) LJoint-MG + LTXT further improves the text metrics substantially (ACC +2.87, NED +3.89) while slightly reduc-ing FID and LPIPS, indicating that explicit supervision on the text pathway stabilizes the shared Transformer and benefits both modalities. Finally, incorporating the full image–text training objec-tive (c) LJoint-MG + LTXT + LIMG-MG yields the best overall performance, improving FID from 13.39 to 9.92 and LPIPS from 0.3782 to 0.3550, while also boosting text accuracy to 53.71%. These gains show that the image MG loss com-plements the discrete text diffusion: image–level gradient signals regularize the latent Transformer and ensure that text reconstruction aligns with visually plausible high-resolution structures. These results show that Joint-MG effectively cou-ples image and text generation, while the modality-specific losses further refine their respective outputs. We also provide a effect of sampling on Appendix C. 
+
+Effect of guidance scale. Table 6 shows the impact of the guidance scale w (Equation 10) on our model. In con-trast to typical image synthesis, where stronger guidance of-ten improves perceptual sharpness (Ho and Salimans 2021), we find that increasing w consistently worsens FID, while Steps 1 
+
+> Steps 40
+> Steps 160
+> Steps 10
+> Steps 80
+> Steps 4
+
+Figure 3: Visual examples across sampling steps. More steps improve texture smoothness but can blur fine character strokes. Table 6: Effect of guidance scale w on CTR-TSR ×4. In-creasing w worsens FID and eventually harms NED.                 
+
+> Guidance scale w11.45 246
+> FID ↓16.10 19.59 24.19 35.35 39.49
+> NED ↑76.66% 76.71% 75.95% 73.09% 72.20%
+
+NED remains nearly unchanged at w=1 .45 and then de-clines as guidance becomes stronger. Larger w values push the model toward overly confident predictions that deviate from the true data distribution, leading to unnatural textures and distorted character structures. We therefore use w=1 .0,which offers the best overall trade-off. We hypothesize that strong guidance amplifies high-frequency hallucinations dur-ing sampling, which harms both visual naturalness and the fine-grained stroke patterns essential for accurate text recon-struction. 
+
+## 5 Conclusion 
+
+We introduced DualTSR , a unified and efficient STISR framework that couples continuous image restoration and discrete text prediction within a shared multimodal trans-former. By predicting text internally and allowing image and text states to interact throughout generation, DualTSR avoids externally predicted OCR priors and separate image and text generative backbones. It achieves the best FID, LPIPS, ACC, and NED among the compared methods on CTR-TSR, and the best FID, ACC, and NED with competitive LPIPS on the aligned RealCE subset. At ×4, compared with DiffTSR, DualTSR improves ACC by 12.78 percentage points while reducing the parameter count from 1.23 B to 203 M, and latency from 13.3 s to 132 ms. Its internal text branch also substantially outperforms DiffTSR’s dedicated text module, supporting shared continuous-discrete generation as a prac-tical effective STISR method. 
+
+## References 
+
+Austin, J.; Johnson, D. D.; Ho, J.; Tarlow, D.; and Van Den Berg, R. 2021. Structured denoising diffusion models in discrete state-spaces. NeurIPS .Chen, J.; Li, B.; and Xue, X. 2021. Scene text telescope: Text-focused scene image super-resolution. In CVPR .Chen, J.; Yu, H.; Ma, J.; Li, B.; and Xue, X. 2022. Text gestalt: Stroke-aware scene text image super-resolution. In 
+
+AAAI .Chen, T.; Zhang, R.; and Hinton, G. 2022. Analog bits: Generating discrete data using diffusion models with self-conditioning. arXiv preprint arXiv:2208.04202 .Dieleman, S.; Sartran, L.; Roshannai, A.; Savinov, N.; Ganin, Y.; Richemond, P. H.; Doucet, A.; Strudel, R.; Dyer, C.; Durkan, C.; et al. 2022. Continuous diffusion for categorical data. arXiv preprint arXiv:2211.15089 .Esser, P.; Kulal, S.; Blattmann, A.; Entezari, R.; Müller, J.; Saini, H.; Levi, Y.; Lorenz, D.; Sauer, A.; Boesel, F.; Podell, D.; Dockhorn, T.; English, Z.; and Rombach, R. 2024. Scal-ing Rectified Flow Transformers for High-Resolution Image Synthesis. In ICML .Esser, P.; Rombach, R.; and Ommer, B. 2021. Taming Trans-formers for High-Resolution Image Synthesis. In CVPR .Gulrajani, I.; and Hashimoto, T. B. 2024. Likelihood-based diffusion language models. NeurIPS .Ho, J.; Jain, A.; and Abbeel, P. 2020. Denoising diffusion probabilistic models. NeurIPS .Ho, J.; and Salimans, T. 2021. Classifier-Free Diffusion Guidance. In NeurIPS 2021 Workshop on Deep Generative Models and Downstream Applications .Kingma, D.; Salimans, T.; Poole, B.; and Ho, J. 2021. Vari-ational Diffusion Models. In NeurIPS .Li, X.; Thickstun, J.; Gulrajani, I.; Liang, P. S.; and Hashimoto, T. B. 2022. Diffusion-lm improves controllable text generation. NeurIPS .Li, X.; Zuo, W.; and Loy, C. C. 2023. Learning genera-tive structure prior for blind text image super-resolution. In 
+
+CVPR .Li, X.; Zuo, W.; and Loy, C. C. 2025. Enhanced Generative Structure Prior for Chinese Text Image Super-Resolution. 
+
+TPAMI .Li, Z.; Li, H.; Shi, Y.; Farimani, A. B.; Kluger, Y.; Yang, L.; and Wang, P. 2025. Dual Diffusion for Unified Image Generation and Understanding. In CVPR .Liang, J.; Cao, J.; Sun, G.; Zhang, K.; Van Gool, L.; and Timofte, R. 2021. Swinir: Image restoration using swin transformer. In ICCV .Lipman, Y.; Chen, R. T. Q.; Ben-Hamu, H.; Nickel, M.; and Le, M. 2023. Flow Matching for Generative Modeling. In 
+
+ICLR .Liu, B.; Yang, Z.; Chiu, C.; and Xiong, Y. 2025. TextDiff: En-hancing scene text image super-resolution with mask-guided residual diffusion models. PR .Liu, B.; Yang, Z.; Wang, P.; Zhou, J.; Liu, Z.; Song, Z.; Liu, Y.; and Xiong, Y. 2023. Textdiff: Mask-guided residual diffusion models for scene text image super-resolution. arXiv preprint arXiv:2308.06743 .Loshchilov, I.; and Hutter, F. 2019. Decoupled Weight Decay Regularization. In ICLR .Lou, A.; Meng, C.; and Ermon, S. 2023. Discrete diffu-sion language modeling by estimating the ratios of the data distribution. arXiv preprint arXiv:2310.16834 .Lovelace, J.; Kishore, V.; Wan, C.; Shekhtman, E.; and Wein-berger, K. Q. 2024. Latent diffusion for language generation. 
+
+NeurIPS .Ma, J.; Guo, S.; and Zhang, L. 2023. Text prior guided scene text image super-resolution. TIP .Ma, J.; Liang, Z.; Xiang, W.; Yang, X.; and Zhang, L. 2023. A benchmark for chinese-english scene text image super-resolution. In ICCV .Ma, J.; Liang, Z.; and Zhang, L. 2022. A text attention net-work for spatial deformation robust scene text image super-resolution. In CVPR .Meng, C.; Choi, K.; Song, J.; and Ermon, S. 2022. Con-crete score matching: Generalized score matching for dis-crete data. NeurIPS .Moser, B. B.; Shanbhag, A. S.; Raue, F.; Frolov, S.; Palacio, S.; and Dengel, A. 2024. Diffusion models, image super-resolution, and everything: A survey. TNNLS .Niu, A.; Pham, T. X.; Zhang, K.; Sun, J.; Zhu, Y.; Yan, Q.; Kweon, I. S.; and Zhang, Y. 2024. ACDMSR: Accel-erated conditional diffusion models for single image super-resolution. TBC .Noguchi, C.; Fukuda, S.; and Yamanaka, M. 2024. Scene text image super-resolution based on text-conditional diffusion models. In WACV .Sahoo, S. S.; Arriola, M.; Gokaslan, A.; Marroquin, E. M.; Rush, A. M.; Schiff, Y.; Chiu, J. T.; and Kuleshov, V. 2024. Simple and Effective Masked Diffusion Language Models. In NeurIPS .Shang, S.; Shan, Z.; Liu, G.; Wang, L.; Wang, X.; Zhang, Z.; and Zhang, J. 2024. Resdiff: Combining cnn and diffusion model for image super-resolution. In AAAI .Shi, J.; Han, K.; Wang, Z.; Doucet, A.; and Titsias, M. K. 2024. Simplified and Generalized Masked Diffusion for Dis-crete Data. arXiv:2406.04329. Song, J.; Meng, C.; and Ermon, S. 2020. Denoising Diffusion Implicit Models. In ICLR .Tang, Z.; Bao, J.; Chen, D.; and Guo, B. 2025. Diffu-sion models without classifier-free guidance. arXiv preprint arXiv:2502.12154 .Tong, A.; FATRAS, K.; Malkin, N.; Huguet, G.; Zhang, Y.; Rector-Brooks, J.; Wolf, G.; and Bengio, Y. 2024. Improving and generalizing flow-based generative models with mini-batch optimal transport. Transactions on Machine Learning Research .Wang, W.; Xie, E.; Liu, X.; Wang, W.; Liang, D.; Shen, C.; and Bai, X. 2020. Scene text image super-resolution in the wild. In ECCV .Wang, X.; Xie, L.; Dong, C.; and Shan, Y. 2021. Real-esrgan: Training real-world blind super-resolution with pure synthetic data. In ICCV .Wang, X.; Yu, K.; Wu, S.; Gu, J.; Liu, Y.; Dong, C.; Qiao, Y.; and Loy, C. C. 2018. ESRGAN: Enhanced Super-Resolution Generative Adversarial Networks. In ECCV Workshops .Wei, B.; Zhou, Y.; Gao, L.; and Tang, Z. 2025. GlyphSR: A Simple Glyph-Aware Framework for Scene Text Image Super-Resolution. In AAAI .Xue, D.; Herranz, L.; Corral, J. V.; and Zhang, Y. 2023. Burst Perception-Distortion Tradeoff: Analysis and Evaluation. In 
+
+ICASSP .Yu, H.; Chen, J.; Li, B.; Ma, J.; Guan, M.; Xu, X.; Wang, X.; Qu, S.; and Xue, X. 2021. Benchmarking chinese text recog-nition: Datasets, baselines, and an empirical study. arXiv preprint arXiv:2112.15093 .Zhang, K.; Gu, S.; Timofte, R.; Hui, Z.; Wang, X.; Gao, X.; Xiong, D.; Liu, S.; Gang, R.; Nan, N.; Li, C.; Zou, X.; Kang, N.; Wang, Z.; Xu, H.; Wang, C.; Li, Z.; Wang, L.; Shi, J.; Sun, W.; Lang, Z.; Nie, J.; Wei, W.; Zhang, L.; Niu, Y.; Zhuo, P.; Kong, X.; Sun, L.; and Wang, W. 2019. AIM 2019 Challenge on Constrained Super-Resolution: Methods and Results. In 
+
+ICCVW .Zhang, K.; Liang, J.; Van Gool, L.; and Timofte, R. 2021. Designing a practical degradation model for deep blind image super-resolution. In ICCV .Zhang, Y.; Zhang, J.; Li, H.; Wang, Z.; Hou, L.; Zou, D.; and Bian, L. 2024. Diffusion-based Blind Text Image Super-Resolution. In CVPR .Zhao, M.; Wang, M.; Bai, F.; Li, B.; Wang, J.; and Zhou, S. 2022. C3-stisr: Scene text image super-resolution with triple clues. arXiv preprint arXiv:2204.14044 .Zhao, Z.; Xue, H.; Fang, P.; and Zhu, S. 2024. Pean: A diffusion-based prior-enhanced attention network for scene text image super-resolution. In ACM MM .Zhou, Y.; Gao, L.; Tang, Z.; and Wei, B. 2024. Recognition-Guided Diffusion Model for Scene Text Image Super-Resolution. In ICASSP .Zhou, Y.; Li, Z.; Guo, C.-L.; Bai, S.; Cheng, M.-M.; and Hou, Q. 2023. Srformer: Permuted self-attention for single image super-resolution. In ICCV .Coupled Continuous–Discrete Generation for Scene Text Image Super-Resolution A CTR-TSR dataset construction 
+
+We build the CTR-TSR dataset from the CTR (Yu et al. 2021) corpus following the preprocessing and synthesis procedure described in DiffTSR (Zhang et al. 2024). In brief, the construction pipeline is: 1. Source images. Start from the scene part of CTR dataset (Yu et al. 2021) as the pool of high-quality HR text line images. 2. Filtering and selection. Retain only HR images that satisfy all of the following criteria: 
+
+• resolution (longer side) ≥ 64 pixels; 
+
+• width-to-height ratio > 2 (to focus on text line images); 
+
+• length of text annotation ≤ 24 characters. After filtering and resizing (next step), this yields 64139 HR images which we denote CTR-TSR-Train. 3. HR normalization. Resize each selected HR image to a canonical HR size of 128 × 512 for training (preserving the overall layout of text lines). 4. LR synthesis (degradation). We generate LR images using a blind, high-complexity degradation pipeline inspired by BSRGAN (Zhang et al. 2021) and Real-ESRGAN (Wang et al. 2021). During training, one of the two degradation strategies is randomly selected with equal probability ( p = 0 .5) for each sample, and the corresponding LR image is synthesized online. 5. Synthetic test set. For the synthetic evaluation set (CTR-TSR-Test) we select images from the scene CTR test split, apply the same filtering/resizing and the same degradation pipeline as above. The resulting CTR-TSR-Test contains 8690 LR–HR pairs. All synthesized LR images used for training and synthetic testing are generated with the same stochastic degradation pipeline so that training and evaluation are comparable across methods. value       
+
+> 𝐹 !"# 𝐹 $%$
+> adaLN adaLN
+> Linear Linear
+> Joint Attention
+> MLP MLP
+> 𝐹 !"# 𝐹 !"#
+> query key
+
+Figure 4: Illustration of the joint attention mechanism. Following the MM-DiT block design in SD3 (Esser et al. 2024), we incorporate a joint attention module that enables the image latent refinement and text reconstruction processes to operate in parallel. 
+
+## B Joint attention mechanism 
+
+At the heart of this design is a joint attention mechanism (Esser et al. 2024). As illustrated in Figure 4, latent tokens from the image and text processes are first projected into modality-specific streams. During attention, tokens from both modalities are concatenated to form shared query, key, and value representations and passed through a single self-attention block; the outputs are then split back into image and text streams. This mechanism provides layer-wise multimodal fusion rather than occasional cross-branch communication, enabling visual features to guide text reconstruction and textual cues to influence image restoration at every layer. 1 2 345 10 20 40 80 160 
+
+Sampling steps 
+
+10 
+
+20 
+
+30 
+
+> FID
+> (1 - NED)
+
+0.23 
+
+0.24 
+
+0.25 Figure 5: Trade-off between perceptual quality and text fidelity across sampling steps. FID improves with more sampling steps, reaching its best value around ∼ 40 , while NED worsens as text strokes become over-smoothed. We select 4 steps as a balanced operating point. 
+
+## C Effect of sampling steps. 
+
+Figure 5 illustrates the trade-off between perceptual realism and text fidelity as we vary the total number of sampling steps during inference. Increasing the number of steps generally improves FID, with the best perceptual quality achieved around 40 steps, reflecting more effective refinement of textures and global coherence. In contrast, NED peaks at only 2 steps and degrades steadily as additional refinement is applied, indicating diminished character legibility. We hypothesize that with very few sampling steps, the model focuses on reconstructing coarse structures and high-contrast edges, which are crucial cues for recognizing fine-grained glyph shapes. As the total steps increase, the sampler devotes more iterations to enhancing textural realism and smoothing artifacts (see Fig. 3), but this refinement can inadvertently erode subtle, high-frequency stroke patterns—particularly problematic for dense scripts like Chinese where small details distinguish similar characters. Balancing these two factors, we adopt 4 sampling steps as our default setting, which provides a favorable compromise between natural image appearance and accurate text reconstruction. 
+
+## D Reproduction Details for Different Methods 
+
+For MSRResNet (Zhang et al. 2019) and ESRGAN (Wang et al. 2018), we use the BasicSR 1 codebase to train the models on our CTR-TSR-Train dataset with the default settings. For SwinIR (Liang et al. 2021), we train using the official code with the default configuration on CTR-TSR-Train. For SRFormer (Zhou et al. 2023), we likewise use the official code and training settings from the original paper. All four generic SR baselines are retrained on CTR-TSR-Train to ensure a fair comparison under the same data distribution. For DiffTSR (Zhang et al. 2024), we use the official checkpoint for direct inference on our test splits. Our CTR-TSR dataset strictly follows the construction pipeline described in DiffTSR (same source corpus, filtering criteria, and degradation recipe), so the evaluation is directly comparable. For MARCONet (Li, Zuo, and Loy 2023) and MARCONet++ (Li, Zuo, and Loy 2025), we use the publicly available checkpoints because these models rely on carefully designed data-synthesis pipelines and are intended to generalize to unseen degradations. We observe that MARCONet++ requires detectable text in the LR image; when the model fails to detect text, inference raises an error. In such cases, we use the LR image directly as the model output. This issue is especially common in real-world samples whose text can barely be recognized. 
+
+## E Protocol Note on RealCE 
+
+RealCE was originally released for real-world text image super-resolution, but paired metric evaluation is difficult when adapting it to line-level Chinese STISR because some samples contain partial annotations, inaccurate localization, or severe LR–HR misalignment. We therefore curate a subset of 300 clean LR–HR pairs with verified annotations and accurate alignment. This protocol improves measurement stability and reproducibility; we will release the exact sample list to enable future comparisons under the same protocol. 
+
+## F Text-Related Metrics 
+
+ACC (word accuracy / recognition accuracy). ACC is the exact-match recognition accuracy: the fraction of test samples for which the predicted text sequence equals the ground-truth transcription. In all experiments in this paper, we use the pretrained TransOCR recognition model from (Yu et al. 2021) (as in DiffTSR) to obtain predictions used in ACC calculation. Higher ACC indicates better preservation of textual content in the restored image. 
+
+> 1https://github.com/XPixelGroup/BasicSR/tree/master
+
+NED (Normalized Edit Distance). NED quantifies character-level similarity by normalizing the Levenshtein (edit) distance between the predicted and ground-truth strings. For a single sample with ground truth g and prediction p we compute: 
+
+NED( p, g ) = 1 − ED( p, g )max( |g|, |p|) ,
+
+where ED( ·, ·) is the Levenshtein distance and |g|, and |p| is the length of the ground truth and prediction. We report the dataset mean NED; larger values indicate better (closer) recognition. In CTR-TSR evaluations ACC and NED are computed using the pretrained TransOCR recognizer, as in DiffTSR. 
+
+## G More Qualitative examples 
+
+On synthetic CTR-TSR 
+
+For the synthetic CTR-TSR test set, we provide additional ×2 results in Figures 6 and 8, and additional ×4 results in Figure 9. ESRGAN 
+
+> MSRRseNet
+> SwinIR
+> SRFormer
+> Marconet
+> DiffTSR
+> Marconet ++
+> LR
+> DualTSR
+> GT
+
+Figure 6: Visual comparison for the synthetic dataset CTR-TSR-Test with different methods on ×2 scale. The comparison methods include ESRGAN (Wang et al. 2018), MSRResNet (Zhang et al. 2019), SwinIR (Liang et al. 2021), SRFormer (Zhou et al. 2023), MARCONet (Li, Zuo, and Loy 2023), MARCONet++ (Li, Zuo, and Loy 2025), DiffTSR (Zhang et al. 2024) and our method. ESRGAN 
+
+> MSRRseNet
+> SwinIR
+> SRFormer
+> Marconet
+> DiffTSR
+> Marconet ++
+> LR
+> DualTSR
+> GT
+
+Figure 7: Qualitative comparison for the synthetic dataset CTR-TSR-Test with different methods on ×4 scale. The comparison methods include ESRGAN (Wang et al. 2018), MSRResNet (Zhang et al. 2019), SwinIR (Liang et al. 2021), SRFormer (Zhou et al. 2023), MARCONet (Li, Zuo, and Loy 2023), MARCONet++ (Li, Zuo, and Loy 2025), DiffTSR (Zhang et al. 2024) and our method. ESRGAN 
+
+> MSRRseNet
+> SwinIR
+> SRFormer
+> Marconet
+> DiffTSR
+> Marconet ++
+> LR
+> DualTSR
+> GT
+
+Figure 8: Visual comparison for the synthetic dataset CTR-TSR-Test with different methods on ×2 scale. The comparison methods include ESRGAN (Wang et al. 2018), MSRResNet (Zhang et al. 2019), SwinIR (Liang et al. 2021), SRFormer (Zhou et al. 2023), MARCONet (Li, Zuo, and Loy 2023), MARCONet++ (Li, Zuo, and Loy 2025), DiffTSR (Zhang et al. 2024) and our method. ESRGAN 
+
+> MSRRseNet
+> SwinIR
+> SRFormer
+> Marconet
+> DiffTSR
+> Marconet ++
+> LR
+> DualTSR
+> GT
+
+Figure 9: Visual comparison for the synthetic dataset CTR-TSR-Test with different methods on ×4 scale. The comparison methods include ESRGAN (Wang et al. 2018), MSRResNet (Zhang et al. 2019), SwinIR (Liang et al. 2021), SRFormer (Zhou et al. 2023), MARCONet (Li, Zuo, and Loy 2023), MARCONet++ (Li, Zuo, and Loy 2025), DiffTSR (Zhang et al. 2024) and our method. 
+
+On real-world dataset RealCE 
+
+For the real-world RealCE benchmark, we provide additional ×2 results in Figures 10 and 11, and additional ×4 results in Figures 12 and 13. ESRGAN 
+
+> MSRRseNet
+> SwinIR
+> SRFormer
+> Marconet
+> DiffTSR
+> Marconet ++
+> LR
+> DualTSR
+> GT
+
+Figure 10: Visual comparison for the real-world dataset RealCE with different methods on ×2 scale. The comparison methods include ESRGAN (Wang et al. 2018), MSRResNet (Zhang et al. 2019), SwinIR (Liang et al. 2021), SRFormer (Zhou et al. 2023), MARCONet (Li, Zuo, and Loy 2023), MARCONet++ (Li, Zuo, and Loy 2025), DiffTSR (Zhang et al. 2024) and our method. ESRGAN 
+
+> MSRRseNet
+> SwinIR
+> SRFormer
+> Marconet
+> DiffTSR
+> Marconet ++
+> LR
+> DualTSR
+> GT
+
+Figure 11: Visual comparison for the real-world dataset RealCE with different methods on ×2 scale. The comparison methods include ESRGAN (Wang et al. 2018), MSRResNet (Zhang et al. 2019), SwinIR (Liang et al. 2021), SRFormer (Zhou et al. 2023), MARCONet (Li, Zuo, and Loy 2023), MARCONet++ (Li, Zuo, and Loy 2025), DiffTSR (Zhang et al. 2024) and our method. ESRGAN 
+
+> MSRRseNet
+> SwinIR
+> SRFormer
+> Marconet
+> DiffTSR
+> Marconet ++
+> LR
+> DualTSR
+> GT
+
+Figure 12: Visual comparison for the real-world dataset RealCE with different methods on ×4 scale. The comparison methods include ESRGAN (Wang et al. 2018), MSRResNet (Zhang et al. 2019), SwinIR (Liang et al. 2021), SRFormer (Zhou et al. 2023), MARCONet (Li, Zuo, and Loy 2023), MARCONet++ (Li, Zuo, and Loy 2025), DiffTSR (Zhang et al. 2024) and our method. ESRGAN 
+
+> MSRRseNet
+> SwinIR
+> SRFormer
+> Marconet
+> DiffTSR
+> Marconet ++
+> LR
+> DualTSR
+> GT
+
+Figure 13: Visual comparison for the real-world dataset RealCE with different methods on ×4 scale. The comparison methods include ESRGAN (Wang et al. 2018), MSRResNet (Zhang et al. 2019), SwinIR (Liang et al. 2021), SRFormer (Zhou et al. 2023), MARCONet (Li, Zuo, and Loy 2023), MARCONet++ (Li, Zuo, and Loy 2025), DiffTSR (Zhang et al. 2024) and our method. 
+
+## H Training and Sampling Pseudocode 
+
+Here, we provide pseudocode for the DualTSR training process in Algorithm 1 and the inference process in Algorithm 2. Algorithm 1: PyTorch-style pseudocode for the proposed DualTSR training strategy. We utilize an EMA teacher model to provide guidance targets for the flow matching objective. 
+
+1 def train_step(model, model_ema, optimizer, batch, w=1.0, psi=0.1): 
+
+2 x_hr, x_lr, text = batch # Unpack data batch 
+
+34 # 1. Image-Only Guided Loss (Flow Matching + Model Guidance) 
+
+5 t = torch.rand(x_hr.shape[0]) 
+
+6 x_1 = torch.randn_like(x_hr) # Sample Noise 
+
+7 x_t = (1 - t) * x_hr + t * x_1 # Linear Interpolation 
+
+89 # Calculate Guidance Target using EMA Teacher 
+
+10 with torch.no_grad(): 
+
+11 out_cond = model_ema(x_t, t, cond={’img’: x_lr, ’txt’: text}) 
+
+12 out_unc = model_ema(x_t, t, cond={’img’: x_lr, ’txt’: None}) 
+
+13 14 # Target = Base_Velocity + w * (Cond_Pred - Uncond_Pred) 
+
+15 u_target = (x_1 - x_hr) + w * (out_cond - out_unc) 
+
+16 17 # Student Prediction (with CFG dropout) 
+
+18 cond = {’img’: x_lr, ’txt’: text} if rand() > psi else {’img’: x_lr, ’txt’: None} 
+
+19 u_pred = model(x_t, t, cond) 
+
+20 loss_img = F.mse_loss(u_pred, u_target) 
+
+21 22 # 2. Text-Only Loss (Masked Generative Training) 
+
+23 t_txt = sample_timesteps() 
+
+24 text_masked = mask_tokens(text, ratio=1-t_txt) 
+
+25 26 logits_txt = model(text_masked, t_txt, cond={’img’: x_hr}, mode=’text’) 
+
+27 loss_txt = F.cross_entropy(logits_txt, text) / t_txt 
+
+28 29 # 3. Joint Guided Loss (Simultaneous Generation) 
+
+30 t_j = torch.rand(x_hr.shape[0]) 
+
+31 x_t_j = (1 - t_j) * x_hr + t_j * x_1 
+
+32 txt_t_j = mask_tokens(text, ratio=1-t_j) 
+
+33 34 with torch.no_grad(): 
+
+35 # Joint guidance targets from EMA 
+
+36 c_j = {’txt_in’: txt_t_j, ’lr’: x_lr} 
+
+37 u_j_c = model_ema(x_t_j, t_j, c_j) 
+
+38 u_j_u = model_ema(x_t_j, t_j, {’txt_in’: None, ’lr’: x_lr}) 
+
+39 u_target_j = (x_1 - x_hr) + w * (u_j_c - u_j_u) 
+
+40 41 c_stud = c_j if rand() > psi else {’txt_in’: None, ’lr’: x_lr} 
+
+42 u_pred_j, logits_j = model(x_t_j, t_j, c_stud, mode=’joint’) 
+
+43 loss_joint = F.mse_loss(u_pred_j, u_target_j) + F.cross_entropy(logits_j, text) 
+
+44 45 # Optimization Step 
+
+46 loss = loss_img + loss_txt.mean() + loss_joint 
+
+47 loss.backward() 
+
+48 optimizer.step() 
+
+49 update_ema(model, model_ema) Algorithm 2: PyTorch-style inference algorithm. The image is generated via ODE flow integration, while the text is generated via iterative unmasking (discrete diffusion) synchronized with the image generation steps. 
+
+1 def joint_inference(model, x_lr, steps=50, seq_len=25): 
+
+2 # 1. Initialization 
+
+3 bs = x_lr.shape[0] 
+
+4 x = torch.randn_like(x_lr) # Image Latent (t=1) 
+
+5 text = torch.full((bs, seq_len), MASK_TOKEN) # Text Latent (All Masked) 
+
+67 # Time schedule from 1.0 down to 0.0 
+
+8 timesteps = torch.linspace(1.0, 0.0, steps + 1) 
+
+9 dt = 1.0 / steps 
+
+10 11 # 2. Generation Loop 
+
+12 for k in range(steps): 
+
+13 t = timesteps[k] 
+
+14 s = timesteps[k+1] # Next timestep 
+
+15 16 # Predict Velocity and Text Logits 
+
+17 u_pred, logits_txt = model(x, t, text, cond=x_lr) 
+
+18 19 # --- A. Image Update (Euler ODE Step) ---
+
+20 # Reverse the flow: subtract velocity to go from Noise -> Data 
+
+21 x = x - dt * u_pred 
+
+22 23 # --- B. Text Update (Reverse Discrete Diffusion) ---
+
+24 # Determine probability to unmask at this step 
+
+25 alpha_t, alpha_s = 1 - t, 1 - s
+
+26 prob_unmask = (alpha_s - alpha_t) / (1.0 - alpha_t + 1e-8) 
+
+27 28 # Sample candidate tokens from model prediction 
+
+29 probs = F.softmax(logits_txt, dim=-1) 
+
+30 candidates = torch.multinomial(probs.view(-1, probs.size(-1)), 1).view(bs, seq_len )
+
+31 32 # Update Logic: 
+
+33 # If token is [MASK] AND random < prob_unmask -> Update with candidate 
+
+34 # Else -> Keep current state (either already generated or still [MASK]) 
+
+35 is_masked = (text == MASK_TOKEN) 
+
+36 should_sample = torch.rand_like(text.float()) < prob_unmask 
+
+37 38 update_mask = is_masked & should_sample 
+
+39 text[update_mask] = candidates[update_mask] 
+
+40 41 return x, text

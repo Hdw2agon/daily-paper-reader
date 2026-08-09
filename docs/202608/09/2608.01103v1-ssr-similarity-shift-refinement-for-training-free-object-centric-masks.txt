@@ -1,0 +1,475 @@
+Title: SSR: Similarity-Shift Refinement for Training-Free Object-Centric Masks
+
+URL Source: https://arxiv.org/pdf/2608.01103v1
+
+Published Time: Tue, 04 Aug 2026 01:13:02 GMT
+
+Number of Pages: 8
+
+Markdown Content:
+# SSR: Similarity-Shift Refinement for Training-Free Object-Centric Masks 
+
+Xiaoqian Lu 1, Guangfu Guo 2
+
+> 1
+
+University of Ottawa 2Clemson University 
+
+Abstract 
+
+Object-centric models often produce fragmented masks, boundary leakage, and incorrect region merging. We intro-duce Similarity-Shift Refinement (SSR), a training-free post-hoc method for improving object-centric masks with a frozen self-supervised Vision Transformer. SSR measures changes in pairwise patch similarity before and after self-attention value aggregation, retains positively strengthened relations, and constructs a sparse affinity graph. This graph propa-gates the initial soft slot assignments in a single refinement step, without retraining or modifying either model. Across natural-image, synthetic-video, and real-world-video bench-marks, SSR improves all-pixel Adjusted Rand Index in all 24 evaluated model–dataset combinations, with an average gain of 8.5 percentage points. Ablations show that value-space similarity shifts outperform query- and key-space variants as well as static Transformer affinities. However, texture-dense scenes may cause visually similar regions to be over-grouped. Overall, SSR provides a simple and transferable signal for training-free object-centric mask refinement. 
+
+1 Introduction 
+
+Object-centric learning models decompose visual scenes into a set of object-level slot representations and corresponding masks (Locatello et al. 2020). These models have progressed from synthetic scenes to more challenging natural images by reconstructing self-supervised visual features or introducing stronger slot-learning objectives (Seitzer et al. 2023; Kako-georgiou et al. 2024). However, the resulting slot masks often remain noisy in real-world scenes. A single object may be fragmented across multiple slots, adjacent objects may be incorrectly merged, and foreground regions may leak into visually similar background areas. These errors reduce the usefulness of object-centric representations for unsupervised segmentation and downstream scene-understanding tasks. A straightforward solution is to retrain the object-centric model or add a model-specific mask-refinement module. Such approaches, however, commonly depend on the ar-chitecture, training objective, and checkpoint of the base model. In parallel, self-supervised Vision Transformers have been shown to encode object-related structures in their patch features and attention maps (Caron et al. 2021; Oquab et al. 2024). Training-free object-discovery methods such as LOST and TokenCut use frozen patch representations or attention-derived affinities for object localization and graph-based seg-mentation (Siméoni et al. 2021; Wang et al. 2023). Never-theless, these methods primarily rely on static information already encoded in a feature space or attention map. Unlike static affinity methods that ask which patches are already similar, SSR measures which patch relations are strength-ened by a patch-restricted attention aggregation derived from the frozen Transformer. Our key observation is that self-attention does not merely produce another set of patch representations; it changes the relationships among patches during value aggregation. Un-like static affinity methods that ask which patches are already similar, SSR asks which patches become more similar af-ter attention aggregation. We treat such positive relational changes as contextual grouping signals for refining the ini-tial slot assignments. Based on this observation, we propose SSR, a training-free post-hoc method for refining object-centric masks. SSR extracts positive value-space relational shifts from selected layers and heads of a frozen DINOv2 encoder, converts them into a sparse patch-level propagation graph, and uses this graph to update the initial soft slot as-signments. It does not modify the object-centric model, the DINOv2 encoder, or either model checkpoint. Experiments across multiple image and video object-centric baselines show that SSR provides a transferable re-finement signal. It consistently improves all-pixel cluster-ing quality and produces particularly stable improvements on natural-image and real-world-video benchmarks, where noisy slot masks frequently contain fragmented regions and background leakage. However, the signal is not uniformly re-liable across visual domains. In texture-dense scenes such as ClevrTex, positive relational shifts may follow repeated tex-ture or background co-occurrence rather than object-instance boundaries. Unconstrained propagation can consequently over-group visually similar but semantically distinct regions, improving all-pixel consistency while degrading foreground and overlap metrics. We treat this behavior as an important applicability boundary of the proposed signal. Our contributions are summarized as follows: 
+
+• We introduce attention-induced relational shift, which captures patch relations strengthened by value aggrega-tion in a frozen self-supervised Transformer. 
+
+• We propose SSR, a training-free method that propagates existing soft slot assignments over the resulting relation graph. arXiv:2608.01103v1 [cs.CV] 2 Aug 2026 • We validate SSR across image and video models, distin-guish it from simpler attention and affinity baselines, and analyze its texture-induced failure mode on ClevrTex. 
+
+2 Related Work 
+
+Object-Centric Learning. Slot Attention represents ascene with an unordered set of object-like slots (Locatello et al. 2020). Later methods improve object discovery through stronger decoders, self-supervised feature reconstruction, and more stable slot optimization, including SLATE, DI-NOSAUR, SlotDiffusion, SPOT, DIAS, and SmoothSA (Singh et al. 2022; Seitzer et al. 2023; Wu et al. 2023; Kakogeorgiou et al. 2024; Zhao et al. 2025, 2026b). Video methods such as VideoSAUR, SlotContrast, and RandSF.Q additionally model temporal consistency (Zadaianchuk et al. 2023; Manasyan et al. 2025; Zhao et al. 2026a). Unlike these training-based approaches, SSR refines the soft masks of an already trained model without changing its architecture, objective, or checkpoint. 
+
+Self-Supervised Transformers for Object Discovery. 
+
+Self-supervised Vision Transformers encode object-related structure in their patch features and attention maps (Caron et al. 2021; Oquab et al. 2024). Training-free methods such as LOST and TokenCut use frozen patch similarities or attention-derived graphs for object localization and segmen-tation (Siméoni et al. 2021; Wang et al. 2023). These ap-proaches mainly rely on static information already present in a feature or attention space. SSR instead measures how pairwise patch similarity changes after attention aggregates the value tokens, using the strengthened relations to refine an existing multi-slot decomposition. 
+
+Training-Free Propagation and Mask Refinement. At-tention rollout, attention flow, and Transformer attribution propagate attention or relevance to estimate token influence (Abnar et al. 2020; Chefer et al. 2021). Classical refine-ment methods instead use RGB consistency or static feature graphs, as in DenseCRF, label propagation, and normalized cuts (Krähenbühl et al. 2011; Zhou et al. 2003; Shi et al. 2000). SSR neither propagates raw attention weights nor di-rectly uses static feature similarity. It constructs a graph from positive value-space relational shifts and propagates existing slot assignments over this graph. 
+
+3 Method 
+
+Problem Setting. Consider a frozen object-centric model that produces soft slot assignments M ∈ RN ×K , where each row is a probability distribution over K slots, i.e., Mik ≥ 0
+
+and PKk=1 Mik = 1 .Our goal is to refine M without updating the object-centric model or its checkpoint. If the native mask resolution differs from the DINOv2 patch grid, we bilinearly resize the soft assignments to this grid and renormalize them across slots. We process the same input with a frozen DINOv2 ViT-S/14 encoder with register tokens (Oquab et al. 2024; Darcet et al. 2024). For layer ℓ and attention head h, let Vℓh ∈ RN ×dh de-note the value tokens after head splitting. We remove the class Algorithm 1: SSR Mask Refinement                       
+
+> 1: Input: Soft slot assignments M, frozen DINOv2 blocks, layers
+> L
+> 2: for each layer ℓ∈ L and head hdo
+> 3: Extract patch values Vℓh and attention Aℓh
+> 4: Compute attended values: Zℓh =Aℓh Vℓh
+> 5: Compute similarity shifts: ∆ℓh =ReLU
+
+ cos( Zℓh ) −
+
+> cos( Vℓh )
+
+       
+
+> 6: Keep the row-wise Top-kpositive values:
+
+e∆ℓh =TopK +     
+
+> k(∆ℓh )
+> 7: Normalize the graph: Pℓh =
+
+e∆ℓh 
+
+ P  
+
+> j
+
+e∆ℓh,ij       
+
+> 8: Compute the reliability score sℓh
+> 9: end for
+> 10: Compute fusion weights: wℓh =esℓh /τ
+
+P     
+
+> ℓ′,h ′esℓ′h′/τ
+> 11: Fuse the graphs: D=
+
+P  
+
+> ℓ,h wℓh Pℓh
+> 12: Propagate slot assignments:
+
+cM = (1 − α)M + αDT M    
+
+> 13: Normalize across slots: M′
+> ik =
+
+bMik 
+
+ P  
+
+> k′
+
+bMik ′     
+
+> 14: Return: Refined masks using arg max kM′
+> ik
+
+and register tokens before constructing the patch-only atten-tion matrix. Using the normalized and scaled patch queries and keys, we reconstruct the patch-only, post-softmax atten-tion matrix Aℓh ∈ RN ×N . Each row of Aℓh therefore sums to one over the patch tokens. DINOv2 is used in evaluation mode, so attention dropout is disabled. The attended-value representation is    
+
+> Zℓh =Aℓh Vℓh .(1)
+
+Here, Zℓh is computed before the output projection, residual connection, and MLP. 
+
+Attention-Induced Relational Shift. For each patch pair 
+
+(i, j ), we compare their cosine similarities before and after attended-value aggregation:          
+
+> ∆ℓh,ij = ReLU (cos( Zℓh,i ,Zℓh,j )−cos( Vℓh,i ,Vℓh,j )) .(2)
+
+The vectors are ℓ2-normalized, and cosine similarity is com-puted independently within each attention head. A positive value indicates that the two patches become more similar af-ter value aggregation. We discard negative changes because SSR propagates assignments only along relations strength-ened by attention. 
+
+Sparse Graph Construction and Fusion. For each row of ∆ℓh , we first set the diagonal to zero and retain at most the k largest strictly positive entries. If fewer than k positive entries exist, all available positive entries are kept. Let e∆ℓh 
+
+denote the resulting sparse graph. We normalize it by its row sum: 
+
+e∆ℓh = TopK +   
+
+> k(∆ℓh ),Pℓh,ij =
+
+e∆ℓh,ij 
+
+> max
+
+P 
+
+> j′
+
+e∆ℓh,ij ′ , ϵ 
+
+ . (3) 
+
+This is ℓ1 row normalization rather than an edge-wise soft-max, and no temperature is applied to individual graph edges. Different heads are weighted according to the concentra-tion and magnitude of their positive relational shifts. For each 1 Frozen inputs 2 Similarity shift 3 Sparse graph fusion 4 Mask propagation                                                        
+
+> Input image x
+> VOC2007 val #3
+> ∗Frozen DINOv2, layers 8–11
+> Transformer self-attention QKVAℓh
+> Value-space change
+> Vℓh Zℓh =Aℓh Vℓh
+> Before / after attention
+> cos( V,V)cos( Z,Z)
+> Positive similarity shift
+> Sℓh,ij = ReLU [cos( Zi,Zj)
+> −cos( Vi,Vj)]
+> N×N
+> Per-head Top-k
+> +ℓ1row norm
+> 12345
+> Pℓh (directed)
+> Layer–head graphs
+> ℓ=8 , h =1
+> 12345
+> ℓ=9 , h =6
+> 12345
+> ℓ=11 , h =12
+> 12345
+> different (ℓ, h )
+> Reliability-weighted fusion
+> wℓh = softmax (sℓh /τ )
+> D=∑
+> ℓ,h wℓh Pℓh
+> rownorm + identity fallback
+> 0 learned weights
+> Fused graph D
+> 12345
+> row-stochastic N×NKey signal: positive ∆-similarity
+> ∗Frozen object-centric model
+> SmoothSA DIAS SPOT / etc.
+> soft slot assignments
+> Base slots MOne-step propagation ̂
+> M= (1 −α)M+αDTMM′= slotnorm( ̂M)
+> α= 0 .75 one step
+> Refined slots M′
+> M′ ∈RN×K
+> Base mask Refined mask Upsample + argmax
+
+Figure 1: Overview of SSR. SSR extracts positive attention-induced changes in patch similarity from a frozen DINOv2 encoder, builds a sparse fused graph, and uses one-step propagation to refine the soft masks of a frozen object-centric model. layer-head graph, we first normalize the raw positive shifts: 
+
+pℓh,ij = ∆ℓh,ij 
+
+max 
+
+P 
+
+> j′
+
+∆ℓh,ij ′ , ϵ 
+
+ . (4) 
+
+We define the dispersion and average magnitude of the pos-itive shifts as 
+
+Hℓh = − 1
+
+N log N
+
+X
+
+> i,j
+
+pℓh,ij log ( pℓh,ij + ϵ) ,mℓh = 1
+
+N 2
+
+X
+
+> i,j
+
+∆ℓh,ij .
+
+(5) 
+
+The corresponding reliability score is 
+
+sℓh =  1 − Hℓh 
+
+ log (1 + mℓh ) . (6) 
+
+This score favors positive relational shifts that are sufficiently strong without being overly dispersed. We compute 
+
+wℓh = exp( sℓh /τ )
+
+P 
+
+> ℓ′,h ′
+
+exp( sℓ′h′ /τ ) , D =
+
+X
+
+> ℓ,h
+
+wℓh Pℓh . (7) 
+
+Here, τ is used only for the layer-head weight softmax. We row-normalize D to obtain D. If a fused row is empty, it is replaced by the corresponding identity row. The graph is intentionally not symmetrized. Although ∆ℓh 
+
+is symmetric before sparsification, row-wise Top-k selection produces a directed graph in which each patch selects its own strongest neighbors. The final matrix D is nonnegative and row-stochastic. 
+
+Slot Assignment Propagation. Because Dij represents propagation from source patch i to target patch j, SSR up-dates the assignments as 
+
+cM = (1 − α)M + αDT M, M ′ 
+
+> ik
+
+= bMik 
+
+max 
+
+P 
+
+> k′
+
+bMik ′ , ϵ 
+
+ .
+
+(8) 
+
+The refined soft assignments M′ are bilinearly upsampled to the evaluation resolution before taking the slot-wise arg max .All metrics are computed at this resolution. We do not ap-ply nearest-neighbor upsampling to hard patch labels or any connected-component post-processing. 
+
+Semantic/local-boundary SSR. Let C denote the nonneg-ative cosine similarity of frozen DINOv2 tokens averaged over the last four blocks. Let Sb retain the row-wise Top-kb
+
+entries of C. For b ∈ { h, s }, we define 
+
+Gb = fb1 + (1 − fb)C ⊙ Sb,
+
+Db = RowNorm  D ⊙ Gb
+
+, (9) 
+
+where (kh, f h) = (48 , 0.05) and (ks, f s) = (96 , 0.30) .Let m denote the average mass of Ds within the Top-48 
+
+token-similarity neighbors. We adapt the graph and propa-gation strength as 
+
+r = clip  (m − 0.30) /0.15 , 0, 1,
+
+Dsem = RowNorm  (1 − r)Dh + rDs,α = 0.50 + 0 .25 r. 
+
+(10) 
+
+Pseudo-superpixels are connected components of adjacent patches whose RGB–Sobel distance is below the median. We set Bij = 1 for patches in the same component and 
+
+Bij = 0 .30 otherwise. The final transition is 
+
+q = clip  (0 .45 − r)/0.15 , 0, 1,
+
+Dsafe = RowNorm  Dsem ⊙ WB
+
+,
+
+WB = 1 + q(B − 1).
+
+(11) 
+
+The semantic and boundary cues only reweight directed edges. All parameters are fixed across checkpoints, and no labels are used at inference. 
+
+4 Experiments 
+
+Experimental Setup. We evaluate SSR as a training-free post-hoc refiner for frozen image and video object-centric models. COCO is a diverse natural-image benchmark with complex multi-object scenes (Lin et al. 2014), while PAS-CAL VOC contains natural images with pixel-level object annotations (Everingham et al. 2015). MOVi-C and MOVi-E are synthetic video benchmarks with increasing scene com-plexity and object interactions (Greff et al. 2022), whereas YTVIS-2022 evaluates instance segmentation in real-world videos (Yang et al. 2019). We additionally use ClevrTex, a texture-rich synthetic benchmark, to study failures caused by repeated visual patterns (Karazija, Laina, and Rupprecht 2021). We report Adjusted Rand Index (ARI) for all-pixel clustering and foreground ARI (ARI-FG) for clustering re-stricted to foreground pixels (Hubert et al. 1985). Mean Best Table 1: Image object-discovery results on COCO and VOC. Each cell reports ARI / ARI-FG / mBO / mIoU, with standard deviations shown in gray. Bold marks the best result within each base-model block and metric.       
+
+> Dataset Refiner SLATE DINOSAUR SlotDiff. SPOT DIAS SmoothSA i
+> COCO Frozen 17.5/28.8/26.8/25.4 (0.6/0.3/0.3/0.3) 18.2/37.0/28.3/26.9 (1.0/1.2/0.5/0.5) 17.7/29.0/27.0/25.6 (0.5/0.1/0.4/0.4) 23.7/40.4/30.9/29.3 (0.5/0.5/0.2/0.2) 25.6/41.2/31.7/30.2 (0.1/0.3/0.1/0.1) 29.3/41.3/33.4/31.8 (1.0/1.2/0.2/0.2) +DenseCRF 23.1/21.6/29.6/28.2 (0.5/0.2/0.2/0.2) 26.0/25.8/31.4/29.9 (1.3/0.6/0.4/0.4) 23.1/22.0/29.6/28.1 (0.6/0.1/0.4/0.3) 28.1/27.1/32.8/31.2 (0.5/0.2/0.1/0.1) 29.5/27.3/33.1/31.6 (0.1/0.1/0.1/0.1) 33.8/26.1/33.6/32.0 (1.2/0.8/0.1/0.2) +LP 22.3/30.7/28.8/27.3 (0.7/0.1/0.4/0.4) 24.9/39.3/31.1/29.6 (1.1/1.1/0.4/0.5) 22.4/31.0/28.8/27.3 (0.5/0.0/0.4/0.3) 25.8/41.6/32.1/30.4 (0.7/0.4/0.3/0.3) 27.1/41.4/32.6/31.0 (0.2/0.2/0.1/0.1) 31.1/41.2/33.9/32.3 (1.1/1.1/0.1/0.2) +SS-Ncut 23.1/30.8/29.2/27.7 (0.7/0.2/0.4/0.4) 25.8/39.1/31.5/29.9 (1.2/1.1/0.4/0.5) 23.2/31.1/29.2/27.7 (0.5/0.1/0.3/0.3) 26.6/41.3/32.3/30.6 (0.8/0.6/0.3/0.3) 28.1/41.4/33.0/31.4 (0.2/0.2/0.2/0.2) 32.2/40.9/34.1/32.4 (1.2/1.1/0.2/0.3) +SSR 25.1 /31.4 /30.0 /28.6
+> (0.9/0.2/0.4/0.5)
+> 27.7 /39.6 /32.1 /30.5
+> (1.4/1.1/0.5/0.5)
+> 25.3 /31.8 /30.1 /28.6
+> (0.7/0.2/0.4/0.4)
+> 29.1 /42.2 /33.1 /31.3
+> (0.9/0.8/0.3/0.3)
+> 31.2 /42.8 /34.0 /32.4
+> (0.3/0.2/0.1/0.1)
+> 36.1 /42.1 /35.0 /33.3
+> (1.5/1.3/0.2/0.3) VOC Frozen 18.6/26.2/37.2/36.1 (0.1/0.8/0.5/0.4) 21.5/36.2/40.6/39.7 (0.7/1.3/0.6/0.6) 17.0/21.7/35.2/34.0 (1.2/1.8/0.9/1.0) 24.5/31.0/40.1/38.6 (0.3/0.8/0.2/0.3) 30.9/33.5/43.4/42.4 (0.5/0.7/0.5/0.5) 35.0/33.6/45.2/43.9 (0.5/1.2/0.3/0.3) +DenseCRF 23.1/18.3/39.5/38.1 (0.0/0.8/0.5/0.5) 30.1/23.9/43.7/42.4 (0.5/0.6/0.4/0.4) 21.8/15.9/38.0/36.5 (1.0/1.3/0.8/0.8) 29.3/19.2/ 42.8 /41.0 (0.3/0.9/0.1/0.2) 33.1/21.4/44.3/43.0 (0.4/0.6/0.2/0.2) 38.3/20.0/45.1/43.5 (0.5/0.5/0.2/0.2) +LP 23.9/28.2/39.2/37.9 (0.1/0.7/0.3/0.2) 29.4/37.4/43.8/42.7 (0.6/1.8/0.4/0.4) 21.9/23.0/37.2/35.8 (1.3/1.2/1.2/1.2) 26.8/35.8/41.6/40.0 (0.5/1.3/0.5/0.5) 31.8/33.0/44.1/43.0 (0.1/0.2/0.3/0.2) 36.3/33.8/45.8/44.4 (0.2/0.8/0.2/0.2) +SS-Ncut 24.6/27.5/39.8/38.5 (0.2/1.1/0.2/0.2) 30.7/37.3/44.5/43.4 (0.6/2.0/0.3/0.3) 22.8/23.1/37.8/36.4 (1.4/1.3/1.1/1.1) 28.0/35.8/42.1/40.4 (0.5/1.7/0.5/0.6) 33.2/32.6/44.8/43.7 (0.2/0.2/0.2/0.1) 37.7/33.5/46.2/44.8 (0.4/0.6/0.4/0.4) +SSR 26.9 /29.0 /41.1 /39.9
+> (0.4/0.8/0.0/0.1)
+> 33.5 /38.3 /45.6 /44.5
+> (0.6/2.3/0.2/0.2)
+> 24.7 /24.3 /39.0 /37.6
+> (1.3/1.0/1.0/1.1)
+> 29.6 /36.8 /42.8 /41.2
+> (0.8/1.2/0.4/0.4)
+> 36.2 /34.9 /46.1 /45.0
+> (0.4/0.4/0.5/0.4)
+> 41.6 /35.5 /47.5 /46.0
+> (0.3/1.2/0.3/0.4)
+
+Overlap (mBO) measures how well each ground-truth object is covered by its best predicted mask, while mean Intersec-tion over Union (mIoU) measures average mask overlap after prediction-to-ground-truth matching. Main results are aver-aged over three checkpoint seeds, and each SSR result is paired with the frozen base checkpoint from the same seed before aggregation. 
+
+Implementation Details. SSR uses a frozen DINOv2 ViT-S/14 encoder with four register tokens. Inputs are resized to 224 × 224 and normalized using the standard ImageNet statistics, producing a 16 × 16 patch grid. We use all atten-tion heads from zero-indexed layers 8–11 and remove the class and register tokens. Video frames are processed inde-pendently. Unless otherwise specified, SSR uses k = 48 ,
+
+τ = 0 .1, α = 0 .75 , and one propagation step. We selected 
+
+k = 48 , τ = 0 .1, and α = 0 .75 once on the PASCAL VOC validation split using three development checkpoints, and then froze this configuration for all other models and datasets without dataset-specific retuning. 
+
+Base Models and Comparators. For images, we evaluate SLATE (Singh et al. 2022), DINOSAUR (Seitzer et al. 2023), SlotDiffusion (Wu et al. 2023), SPOT (Kakogeorgiou et al. 2024), DIAS (Zhao et al. 2025), and SmoothSA i (Zhao et al. 2026b). For videos, we evaluate VideoSAUR (Zadaianchuk et al. 2023), SlotContrast (Manasyan et al. 2025), RandSF.Q (Zhao et al. 2026a), and SmoothSA v (Zhao et al. 2026b). Together, these baselines cover a range of image- and video-based object-centric architectures, allowing us to evaluate whether SSR transfers across different slot-learning formu-lations. All base models and checkpoints remain frozen, and no model is retrained for this work. We compare SSR with DenseCRF (Krähenbühl et al. 2011), label propagation (LP) (Zhou et al. 2003), and slot-seeded normalized cuts (SS-Ncut) (Shi et al. 2000). Dense-CRF uses RGB appearance and spatial information, whereas LP and SS-Ncut construct static affinity graphs using the same frozen DINOv2 encoder as SSR. SSR differs by con-structing its graph from attention-induced changes in pair-wise value-space similarity. Detailed checkpoint, slot-count, seed, and comparator configurations are provided in the sup-plementary material. 
+
+Main Results. Tables 1 and 2 summarize the image and video results. SSR provides the most consistent gains in all-pixel ARI and performs particularly well on natural-image and real-world-video benchmarks. Across the evaluated base-model and dataset pairings, the all-pixel ARI increases con-sistently after applying SSR. On COCO and VOC, SSR improves all four metrics for the evaluated image models. These results indicate that attention-induced relational shifts can reconnect fragmented slot re-gions and reduce isolated background assignments when the relational graph is aligned with the scene structure. The gains also transfer across substantially different object-centric ar-chitectures, suggesting that the signal is not tied to one spe-cific slot decoder or checkpoint. The video results highlight the consistency of SSR across models and domains. SSR improves all-pixel ARI in all 12 
+
+video model–dataset combinations, while also improving mBO and mIoU in 9 of 12 settings. The gains are partic-ularly balanced on YTVIS-2022, where SSR improves all four metrics for every evaluated model. Although Dense-CRF occasionally achieves a higher ARI, its behavior is less balanced: large global-clustering gains often coincide with substantial reductions in ARI-FG. SSR instead provides a more stable cross-dataset trade-off, consistently improving global clustering while preserving foreground and overlap quality more reliably. On the more challenging MOVi-C and MOVi-E benchmarks, some foreground metrics still decline, but the degradation is generally less severe than that pro-Table 2: Video object-discovery results on MOVi-C, MOVi-E, and YTVIS-2022. Each cell reports ARI / ARI-FG / mBO / mIoU, with standard deviations shown in gray. Bold marks the best result within each base-model block and metric.                                                       
+
+> Dataset Refiner VideoSAUR SlotContrast RandSF.Q SmoothSA v
+> MOVi-C Frozen 41.9(1.1)/53.3(2.1)/16.1(0.4)/14.8(0.4) 64.6(9.4)/ 59.9 (5.3)/ 27.7 (3.0)/ 25.8 (2.9) 65.4(10.7)/ 67.4 (2.1)/ 29.2 (3.8)/ 26.8 (3.7) 50.9(1.6)/ 69.0 (0.3)/31.7(0.8)/30.2(0.8) +DenseCRF 59.6 (9.8)/49.4(2.8)/ 21.0 (3.3)/ 19.2 (3.1) 69.9(14.8)/53.9(7.4)/26.7(4.1)/24.6(4.0) 71.3(19.0)/58.3(5.6)/28.6(6.8)/26.1(6.6) 74.4 (1.0)/59.4(0.9)/ 40.1 (0.6)/ 38.1 (0.7) +LP 47.3(5.8)/ 54.5 (2.6)/17.7(1.8)/16.1(1.7) 68.6(11.4)/59.3(6.6)/27.6(2.6)/25.6(2.5) 67.2(12.7)/63.7(4.0)/28.2(3.7)/25.8(3.4) 56.5(1.9)/68.0(1.1)/31.5(1.0)/29.9(1.0) +SS-Ncut 50.0(7.7)/53.0(3.1)/18.0(2.2)/16.3(2.1) 69.3(11.9)/58.1(6.7)/26.9(2.3)/24.8(2.1) 68.2(14.0)/62.1(4.5)/27.4(3.6)/24.9(3.2) 59.3(2.0)/66.7(1.2)/32.0(1.0)/30.3(1.0) +SSR 56.4(9.6)/53.2(3.8)/19.8(2.8)/18.0(2.6) 70.2 (10.9)/56.6(9.0)/25.9(0.9)/24.0(0.9) 71.7 (16.8)/63.3(5.2)/28.8(4.7)/26.3(4.4) 70.4(1.7)/65.9(0.4)/36.0(0.8)/34.2(0.8) MOVi-E Frozen 17.4(2.5)/34.6(20.7)/8.3(4.9)/7.5(4.3) 29.9(4.9)/70.6(3.8)/20.7(1.4)/19.3(1.2) 30.5(1.2)/ 82.1 (3.1)/ 23.0 (1.2)/ 21.6 (1.4) 36.7(0.6)/73.6(0.6)/28.6(0.1)/27.4(0.1) +DenseCRF 19.9(2.8)/34.3(21.6)/ 8.6 (5.2)/ 7.8 (4.6) 39.9(13.6)/63.6(7.2)/21.2(3.5)/19.8(3.2) 29.7(0.7)/72.8(2.1)/19.2(1.0)/17.9(1.2) 63.9 (0.5)/59.5(0.2)/31.6(0.1)/30.0(0.1) +LP 19.2(3.4)/ 35.6 (21.3)/8.4(5.1)/7.6(4.4) 36.7(8.0)/ 70.9 (6.6)/22.1(1.2)/20.5(0.9) 31.8(1.1)/80.0(2.2)/22.6(1.1)/21.2(1.3) 43.8(0.8)/ 74.1 (0.4)/28.5(0.6)/27.1(0.6) +SS-Ncut 19.8(3.8)/34.9(20.8)/8.4(5.1)/7.5(4.4) 39.3(8.6)/69.6(7.2)/22.4(1.3)/20.8(1.0) 32.8(0.8)/78.3(1.7)/22.6(1.1)/21.2(1.3) 47.0(0.8)/72.6(0.5)/29.1(0.6)/27.7(0.6) +SSR 20.6 (4.5)/35.3(21.2)/ 8.6 (5.3)/7.7(4.6) 42.7 (9.1)/70.0(7.6)/ 22.5 (1.5)/ 21.0 (1.3) 33.5 (0.5)/81.4(2.2)/22.1(1.3)/20.7(1.4) 57.2(0.9)/71.9(0.5)/ 31.7 (0.3)/ 30.3 (0.4) YTVIS-2022  Frozen 33.4(0.8)/48.2(0.7)/27.2(0.3)/26.8(0.3) 35.2(0.8)/51.4(0.7)/29.7(0.5)/29.3(0.6) 37.9(1.3)/51.8(1.2)/32.2(1.8)/31.5(1.8) 42.0(0.6)/59.0(2.1)/36.0(0.5)/34.9(0.6) +DenseCRF 42.9 (0.7)/44.3(0.7)/32.0(0.1)/31.5(0.1) 44.4 (1.3)/47.3(0.3)/34.6(0.5)/34.0(0.5) 46.6 (1.3)/46.0(1.4)/35.5(1.5)/34.6(1.4) 52.2 (0.1)/54.4(1.9)/38.9(0.3)/37.6(0.5) +LP 37.6(0.8)/52.0(1.3)/31.0(0.3)/30.6(0.3) 39.3(1.1)/55.3(0.9)/33.7(0.6)/33.1(0.6) 39.8(1.3)/53.4(2.0)/33.2(1.8)/32.5(1.8) 44.1(0.3)/62.2(1.5)/36.9(0.4)/35.7(0.5) +SS-Ncut 39.1(0.9)/ 52.4 (1.6)/31.9(0.3)/31.4(0.3) 40.7(1.2)/ 55.9 (0.9)/34.6(0.6)/34.0(0.6) 41.1(1.4)/54.3(2.4)/34.0(2.0)/33.2(1.9) 45.7(0.4)/62.9(1.6)/37.5(0.5)/36.3(0.6) +SSR 42.1(1.2)/ 52.4 (1.7)/ 33.4 (0.3)/ 32.9 (0.4) 43.2(1.4)/55.8(0.6)/ 35.7 (0.7)/ 35.2 (0.7) 44.4(1.6)/ 54.8 (2.3)/ 35.6 (2.0)/ 34.9 (1.9) 50.4(0.4)/ 63.2 (1.8)/ 39.6 (0.6)/ 38.4 (0.7)
+
+duced by aggressive appearance-based refinement. Overall, SSR offers a consistent and transferable post-processing sig-nal rather than optimizing a single metric or dataset. 
+
+Comparison with Training-Free Post-Processing. 
+
+DenseCRF, LP, SS-Ncut, and SSR refine the same frozen slot assignments but rely on different evidence. DenseCRF primarily sharpens masks according to local RGB and edge consistency. LP diffuses slot evidence through a static feature graph, while SS-Ncut combines static feature affinity with a graph-partitioning transition. SSR instead constructs its graph from the change in pairwise similarity caused by the attention operator. It asks which patches are drawn closer together during value aggregation rather than which patches are already similar in a frozen representation. The results show that this dynamic signal yields the most consistent all-pixel ARI gains and is particularly effective on COCO, VOC, and YTVIS-2022. 
+
+Transfer Across Base Models. To examine whether SSR depends on a particular object-centric architecture, we apply the same refinement rule and hyperparameters to multiple in-dependently trained image and video models. The improve-ments on SLATE, DINOSAUR, SlotDiffusion, SPOT, DIAS, SmoothSA, VideoSAUR, SlotContrast, and RandSF.Q show that the relation-change signal can be used with different initial slot assignments without modifying the underlying model. The DIAS results are particularly useful because DIAS differs from SmoothSA in its slot initialization and refinement procedure. SSR improves the DIAS results on VOC, indicating that the observed gains are not specific to one SmoothSA checkpoint or update rule. We therefore de-scribe SSR as a transferable post-hoc signal rather than a universal mask-refinement rule. 
+
+5 Ablation Study and Analysis 
+
+We analyze SSR from five perspectives: the choice of value-space relational shift, validity controls against resiz-ing and generic attention smoothing, attention construction and layer–head fusion, hyperparameter robustness, and fail-ure mitigation on ClevrTex. These experiments clarify the source of SSR’s gains, its robustness, and the conditions under which graph-safety constraints are needed. 
+
+Why Value-Space Relational Change? Figure 2 com-pares dynamic value-space shifts with static affinities and al-ternative target spaces. Static key-, value-, and output-space graphs obtain 36 .2–36 .6 ARI, whereas ∆-V reaches 41 .6
+
+and also improves mBO and mIoU. This shows that the gain does not arise from propagating masks over frozen Trans-former similarities alone. Replacing Aℓh Vℓh with Aℓh Kℓh 
+
+or Aℓh Qℓh reduces ARI-FG by 11 .8 and 12 .5 points and mIoU by 8.5 and 9.7 points, respectively. Queries and keys primarily determine attention routing, whereas values carry the content mixed by attention. These results support value-space relational change as a more suitable refinement signal than static affinity or routing-space alternatives. 
+
+Validity and Graph-Signal Controls. Panel A of Table 3 tests whether SSR’s improvement can instead be attributed to mask resampling, generic attention smoothing, or shared at-tention neighborhoods. The aligned identity baseline follows the same resize–renormalize–upsample pipeline as SSR but disables propagation by setting α = 0 . It obtains 34 .11 ±0.41 
+
+ARI, compared with 41 .62 ±0.31 for SSR, showing that mask alignment alone does not explain the improvement. Using post-attention similarity cos( Zi, Zj ) without subtract-ing the original value-space similarity reaches 36 .16 ±0.33 
+
+ARI. Attention-row overlap AA ⊤ performs somewhat bet-ter at 37 .98 ±0.31 , but both remain substantially below SSR. before V after attention positive Δ    
+
+> Attention acts as an operator; SSR keeps positive shifts in V-space patch similarity.
+> A. SSR similarity-shift signal
+> Static K 8-11 Static V 8-11 Static O 8-11 SSR 8-11
+> Fixed VOC checkpoint protocol; cells are metric values ARI ARI-FG mBO mIoU
+> 36.2 35.5 45.9 44.6 36.6 33.3 46.0 44.6 36.3 35.1 45.8 44.4 41.6 35.5 47.5 46.0
+> B. Static similarity vs similarity shift
+> ARI ARI-FG mBO mIoU −14 −12 −10 −8 −6 −4 −2 0Change vs SSR (points)
+> -4.0 -11.8 -7.5 -8.5 -5.3 -12.5 -8.6 -9.7
+> SSR baseline
+> C. VOC target-swap under same rule
+> Shift-K Shift-Q
+> 34 36 38 40 42 44 46 48
+> metric value
+
+Figure 2: Mechanism analysis of SSR. (A) SSR retains positive pairwise similarity changes after value aggregation. (B) Dynamic 
+
+∆-V relations improve ARI and overlap over static key-, value-, and output-space affinities while remaining competitive on ARI-FG. (C) Applying the same construction to queries or keys degrades foreground and overlap quality. Moreover, spatially shuffling the attention correspondence reduces ARI to 31 .81 ±0.88 , ARI-FG to 20 .99 ±0.28 , mBO to 33 .39 ±0.12 , and mIoU to 28 .69 ±0.10 . These controls indicate that SSR does not merely exploit preprocessing, post-attention smoothing, or shared attention patterns. Its ef-fectiveness depends on preserving the spatial correspondence of the change between pre- and post-aggregation value rela-tions. 
+
+Attention Construction, Sparsification, and Layer–Head Fusion. Panel A of Table 3 examines whether SSR depends on the treatment of special tokens, the density of the attention aggregation, or the proposed layer–head weighting scheme. Including class and register tokens during value aggregation slightly increases ARI from 41 .62 to 41 .95 and mIoU from 
+
+45 .95 to 46 .02 , but reduces ARI-FG from 35 .52 to 34 .74 .Thus, prefix tokens mainly shift the balance toward global clustering rather than explaining the SSR improvement. We retain patch-only aggregation as the default because it pro-vides the strongest foreground score and defines a direct patch-to-patch refinement operator. Restricting each patch to its Top-64 attention neighbors re-duces ARI to 40 .86 and lowers both overlap metrics, suggest-ing that sparsifying the attention operator before computing the relational shift removes useful contextual information. SSR therefore applies Top-k sparsification to the resulting similarity-shift graph rather than to the attention matrix it-self. Finally, replacing reliability-weighted layer–head fusion with a uniform mean produces nearly identical performance: ARI-FG decreases from 35 .52 to 35 .10 , while ARI, mBO, and mIoU change by at most 0.12 points. This result shows that the main gain arises from the value-space similarity-shift signal rather than from a specialized layer–head weighting rule. Reliability weighting is retained as the default because it provides a slightly better balance of foreground and overlap metrics. 
+
+Hyperparameter Robustness and Layer Selection. 
+
+Panel B of Table 3 varies one hyperparameter at a time around the default configuration. Changing the neighbor-hood size from k = 48 to k = 40 slightly reduces ARI from 
+
+41 .6 to 41 .2, whereas increasing it to k = 56 raises ARI to 
+
+41 .8 but slightly reduces ARI-FG. This indicates that larger neighborhoods provide only marginal global-clustering gains while increasing the risk of cross-instance propagation. The method is insensitive to the layer-head weighting tempera-ture: τ ∈ { 0.05 , 0.1, 0.2} produces nearly identical overlap scores and only small ARI variations. Increasing the prop-agation strength from α = 0 .75 to α = 0 .80 raises ARI from 41 .6 to 42 .1 but reduces ARI-FG from 35 .5 to 34 .6.We therefore select k = 48 , τ = 0 .1, and α = 0 .75 as a bal-anced operating point. Panel C compares different DINOv2 layer ranges. Using all layers increases all-pixel ARI but re-duces ARI-FG, suggesting that earlier layers introduce local appearance and texture relations that do not always respect instance boundaries. Capped broader ranges slightly improve overlap metrics but retain the same global-clustering versus foreground- preservation trade-off. We consequently use lay-ers 8–11 as the default balance between global grouping, foreground quality, and implementation simplicity. VOC     
+
+> Image GT SmoothSA Plain SSR Local repair
+> ClevrTex
+
+Figure 3: Qualitative behavior of SSR on VOC and Clevr-Tex. On VOC, relation propagation repairs fragmented re-gions and improves consistency. On ClevrTex, unconstrained propagation may connect texture-similar regions across dis-tinct instances, motivating reciprocal graph sparsification. The semantic/local-boundary variant suppresses such cross-instance propagation and recovers foreground separation. 
+
+Failure Boundary on Texture-Dense Scenes. Table 4 and Figure 3 analyze texture-induced over-grouping on ClevrTex Table 3: VOC analysis over three SmoothSA checkpoints (mean ±std); bold marks the best per panel. SSR uses relia-bility fusion, patch-only dense attention, k = 48 , τ = 0 .1,
+
+α = 0 .75 , and layers 8–11. 
+
+A. Graph signal, fusion, and attention construction 
+
+ARI ARI-FG mBO mIoU 
+
+Graph-signal controls 
+
+Aligned masks ( α = 0 ) 34.11 ±0.41 33.53 ±0.88 44.97 ±0.04 43.73 ±0.05 Post-attention Z 36.16 ±0.33 35.12 ±1.13 45.72 ±0.24 44.34 ±0.29 Overlap AA T 37.98 ±0.31 34.55 ±1.63 46.47 ±0.18 45.07 ±0.21 Shuffled shift 31.81 ±0.88 20.99 ±0.28 33.39 ±0.12 28.69 ±0.10 
+
+SSR design choices 
+
+Uniform fusion 41.74 ±0.35 35.10 ±1.16 47.45 ±0.37 45.93 ±0.43 Reliability fusion (default) 41.62 ±0.31 35.52 ±1.17 47.46 ±0.34 45.95 ±0.41 All-token aggregation 41.95 ±0.32 34.74 ±1.07 47.53 ±0.36 46.02 ±0.43 Top-64 attention 40.86 ±0.41 35.14 ±1.75 47.14 ±0.36 45.61 ±0.42 
+
+B. Local sensitivity (default: k = 48 , τ = 0 .10 , α = 0 .75 )
+
+k τ α ARI ARI-FG mBO mIoU 48 0.10 0.75 41.62 ±0.31 35.52 ±1.17 47.46 ±0.34 45.95 ±0.41 48 0.05 0.75 41.30 ±0.40 35.70 ±1.20 47.50 ±0.40 46.00 ±0.40 56 0.10 0.75 41.80 ±0.30 35.30 ±0.90 47.60 ±0.40 46.10 ±0.50 40 0.10 0.75 41.20 ±0.40 35.50 ±1.30 47.40 ±0.40 45.90 ±0.40 48 0.20 0.75 41.60 ±0.20 35.50 ±0.90 47.50 ±0.40 46.00 ±0.40 48 0.10 0.80 42.10 ±0.30 34.60 ±0.80 47.50 ±0.50 45.90 ±0.60 
+
+C. Layer range 
+
+ARI ARI-FG mBO mIoU Layers 8–11 (default) 41.62 ±0.31 35.52 ±1.17 47.46 ±0.34 45.95 ±0.41 All layers 43.30 ±0.10 32.70 ±2.00 47.50 ±0.50 45.90 ±0.50 All layers, cap 2/layer 42.40 ±0.40 32.80 ±1.60 47.90 ±0.40 46.30 ±0.40 All layers, cap 4/layer 42.60 ±0.40 33.40 ±2.10 48.00 ±0.40 46.50 ±0.40 Layers 6–11 41.60 ±0.50 35.30 ±1.40 47.70 ±0.40 46.20 ±0.50 Layers 4–11, cap 4/layer 41.40 ±0.40 35.20 ±1.40 48.10 ±0.40 46.60 ±0.50 
+
+using two base models, SmoothSA and SPOT. For both mod-els, directed SSR improves all-pixel ARI but substantially degrades foreground and overlap metrics. Mutual-kNN par-tially recovers this loss by removing nonreciprocal edges. Semantic/local-boundary SSR provides the strongest re-covery. For SmoothSA, it raises ARI-FG from 14 .50 to 73 .89 
+
+and mIoU from 23 .84 to 57 .45 , while retaining an ARI of 
+
+81 .19 . For SPOT, it improves all four metrics over the aligned identity baseline, reaching 29 .62 ARI, 78 .11 ARI-FG, 50 .60 
+
+mBO, and 48 .42 mIoU. These results show that reciprocal sparsification and local semantic-boundary constraints sub-stantially reduce texture-driven cross-instance propagation. However, the foreground performance of SmoothSA is not fully restored, so SSR is best viewed as a global clustering refiner with optional graph-safety constraints. 
+
+Computational Cost. For |L| selected layers, H atten-tion heads, N patches, and head dimension dh, constructing the pairwise similarity-shift graphs requires O(|L| HN 2dh)
+
+time and O(|L| HN 2) temporary storage. SSR introduces no learned parameters and requires no additional training. As shown in Table 5, SSR increases latency from 4.06 ±0.03 to 
+
+4.66 ±0.03 ms per image, corresponding to a 14 .8% over-Table 4: ClevrTex graph-safety results over three check-points. Directed SSR uses the original incoming propa-gation D⊤M. Mutual-kNN retains only reciprocal edges. Semantic/local-boundary SSR additionally uses frozen to-ken similarity, adaptive update strength, and local pseudo-superpixel boundaries.                                      
+
+> Model Variant ARI ARI-FG mBO mIoU SmoothSA Aligned identity 76 .89 ±0.74 82 .20 ±1.69 60 .64 ±0.44 58 .90 ±0.62
+> Directed SSR 82 .15 ±0.23 14 .50 ±2.44 25 .60 ±1.87 23 .84 ±1.99
+> Mutual-kNN SSR 77 .63 ±0.13 58 .59 ±3.48 47 .11 ±1.84 44 .55 ±2.01
+> Semantic/local-boundary SSR 81 .19 ±0.27 73 .89 ±3.28 59 .51 ±1.77 57 .45 ±1.97
+> SPOT Aligned identity 25 .56 ±1.25 77 .10 ±0.51 48 .24 ±0.50 46 .32 ±0.61
+> Directed SSR 41 .86 ±6.35 56 .23 ±1.31 45 .26 ±1.34 43 .01 ±1.20
+> Mutual-kNN SSR 31 .61 ±1.08 72 .03 ±0.58 46 .30 ±0.20 43 .86 ±0.22
+> Semantic/local-boundary SSR 29 .62 ±0.92 78 .11 ±0.49 50 .60 ±0.57 48 .42 ±0.67
+
+Table 5: Efficiency on VOC validation using the same frozen SmoothSA i checkpoint, batch size 16, and one Tesla V100S. Values are mean ±standard deviation over three interleaved repeats; CUDA memory denotes peak allocated memory. Method Latency (ms/image) ↓ vs. Base Throughput (image/s) ↑ Peak CUDA (MiB) ↓            
+
+> Base 4.06 ±0.03 1.00 ×246 .27 ±2.03 489.3 SSR 4.66 ±0.03 1.15 ×214 .70 ±1.30 718.2 DenseCRF 84 .73 ±0.28 20 .87 ×11 .80 ±0.04 513.6
+
+head on the evaluated setup. Peak allocated CUDA memory increases by 228 .9 MiB. DenseCRF requires 84 .73 ±0.28 ms per image, or 20 .87 × the Base latency. These measurements use one SmoothSA i seed-42 checkpoint, batch size 16, and a Tesla V100S. 
+
+6 Conclusion 
+
+We introduce SSR, a training-free post-hoc method that re-fines object-centric masks using attention-induced changes in value-space patch relationships. Across multiple image and video baselines, SSR provides consistent gains in all-pixel ARI. Matched controls show that the gain is not explained by mask resizing, post-attention smoothing, attention overlap, or shuffled spatial correspondence. Texture-dense ClevrTex scenes reveal that unconstrained propagation may over-group distinct foreground instances; reciprocal sparsification sub-stantially mitigates this failure on two base models but does not restore every metric. SSR is therefore best viewed as a transferable global clustering refiner rather than a universally safe instance-mask refiner. 
+
+References 
+
+Abnar, S.; et al. 2020. Quantifying Attention Flow in Trans-formers. In Jurafsky, D.; Chai, J.; Schluter, N.; and Tetreault, J., eds., Proceedings of the 58th Annual Meeting of the Asso-ciation for Computational Linguistics , 4190–4197. Online: Association for Computational Linguistics. Caron, M.; Touvron, H.; Misra, I.; et al. 2021. Emerging Properties in Self-Supervised Vision Transformers. In 2021 IEEE/CVF International Conference on Computer Vision (ICCV) , 9630–9640. Chefer, H.; et al. 2021. Transformer Interpretability Beyond Attention Visualization. In 2021 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , 782–791. Darcet, T.; Oquab, M.; Mairal, J.; and Bojanowski, P. 2024. Vision Transformers Need Registers. In The Twelfth Inter-national Conference on Learning Representations .Everingham, M.; Eslami, S. M.; Gool, L.; et al. 2015. The Pascal Visual Object Classes Challenge: A Retrospective. 
+
+Int. J. Comput. Vision , 111(1): 98–136. Greff, K.; Belletti, F.; Beyer, L.; et al. 2022. Kubric: A scalable dataset generator. In 2022 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , 3739– 3751. Hubert, L.; et al. 1985. Comparing partitions. Journal of classification , 2(1): 193–218. Kakogeorgiou, I.; Gidaris, S.; Karantzalos, K.; et al. 2024. SPOT: Self-Training with Patch-Order Permutation for Object-Centric Learning with Autoregressive Transformers. In 2024 IEEE/CVF Conference on Computer Vision and Pat-tern Recognition (CVPR) , 22776–22786. Karazija, L.; Laina, I.; and Rupprecht, C. 2021. ClevrTex: A Texture-Rich Benchmark for Unsupervised Multi-Object Segmentation. In Proceedings of the Neural Information Processing Systems Track on Datasets and Benchmarks , vol-ume 1. Krähenbühl, P.; et al. 2011. Efficient inference in fully con-nected CRFs with Gaussian edge potentials. In Proceedings of the 25th International Conference on Neural Informa-tion Processing Systems , NIPS’11, 109–117. Red Hook, NY, USA: Curran Associates Inc. ISBN 9781618395993. Lin, T.; Maire, M.; Belongie, S. J.; et al. 2014. Microsoft COCO: Common Objects in Context. In Fleet, D. J.; Pa-jdla, T.; Schiele, B.; and Tuytelaars, T., eds., Computer Vi-sion - ECCV 2014 - 13th European Conference, Zurich, Switzerland, September 6-12, 2014, Proceedings, Part V ,volume 8693 of Lecture Notes in Computer Science , 740– 755. Springer. Locatello, F.; Weissenborn, D.; Unterthiner, T.; et al. 2020. Object-centric learning with slot attention. In Proceedings of the 34th International Conference on Neural Information Processing Systems , NIPS ’20. Red Hook, NY, USA: Curran Associates Inc. ISBN 9781713829546. Manasyan, A.; Seitzer, M.; Radovic, F.; et al. 2025. Tem-porally Consistent Object-Centric Learning by Contrasting Slots . In 2025 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , 5401–5411. Los Alamitos, CA, USA: IEEE Computer Society. Oquab, M.; Darcet, T.; Moutakanni, T.; et al. 2024. DI-NOv2: Learning Robust Visual Features without Supervi-sion. Transactions on Machine Learning Research . Featured Certification. Seitzer, M.; Horn, M.; Zadaianchuk, A.; et al. 2023. Bridg-ing the Gap to Real-World Object-Centric Learning. In The Eleventh International Conference on Learning Representa-tions .Shi, J.; et al. 2000. Normalized cuts and image segmenta-tion. IEEE Transactions on Pattern Analysis and Machine Intelligence , 22(8): 888–905. Siméoni, O.; Puy, G.; Vo, H. V.; et al. 2021. Localizing Objects with Self-Supervised Transformers and no Labels. arXiv:2109.14279. Singh, G.; et al. 2022. Illiterate DALL-E Learns to Compose. In International Conference on Learning Representations .Wang, Y.; Shen, X.; Yuan, Y.; et al. 2023. TokenCut: Seg-menting Objects in Images and Videos With Self-Supervised Transformer and Normalized Cut. IEEE Transactions on Pattern Analysis and Machine Intelligence , 45(12): 15790– 15801. Wu, Z.; Hu, J.; Lu, W.; et al. 2023. SlotDiffusion: Object-Centric Generative Modeling with Diffusion Models. In 
+
+Thirty-seventh Conference on Neural Information Process-ing Systems .Yang, L.; et al. 2019. Video Instance Segmentation. In 
+
+Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV) .Zadaianchuk, A.; et al. 2023. Object-Centric Learning for Real-World Videos by Predicting Temporal Feature Similar-ities. In Thirty-seventh Conference on Neural Information Processing Systems .Zhao, R.; Li, J.; Kannala, J.; and Pajarinen, J. 2026a. Pre-dicting video slot attention queries from random slot-feature pairs. In Proceedings of the Fortieth AAAI Conference on Artificial Intelligence and Thirty-Eighth Conference on In-novative Applications of Artificial Intelligence and Sixteenth Symposium on Educational Advances in Artificial Intelli-gence , AAAI’26/IAAI’26/EAAI’26. AAAI Press. ISBN 978-1-57735-906-7. Zhao, R.; Yang, W.; Kannala, J.; and Pajarinen, J. 2026b. Smoothing Slot Attention Iterations and Recurrences. In 
+
+Forty-third International Conference on Machine Learning .Zhao, R.; Zhao, Y.; Kannala, J.; and Pajarinen, J. 2025. Slot Attention with Re-Initialization and Self-Distillation. In Pro-ceedings of the 33rd ACM International Conference on Mul-timedia , MM ’25, 4185–4192. New York, NY, USA: Asso-ciation for Computing Machinery. ISBN 9798400720352. Zhou, D.; Bousquet, O.; Lal, T. N.; et al. 2003. Learning with local and global consistency. In Proceedings of the 17th International Conference on Neural Information Processing Systems , NIPS’03, 321–328. Cambridge, MA, USA: MIT Press.

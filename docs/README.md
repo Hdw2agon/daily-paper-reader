@@ -6,34 +6,32 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-08-08
-- 运行时间：2026-08-08 20:19:10 UTC
+- 最新运行日期：2026-08-09
+- 运行时间：2026-08-09 19:58:44 UTC
 - 运行状态：成功
-- 本次总论文数：4
-- 精读区：1
+- 本次总论文数：3
+- 精读区：0
 - 速读区：3
 
 ### 今日简报（AI）
-今日攻克移动端去噪与细粒度视觉增强，深度解析 4 项前沿图像修复技术。
-高分论文 LiteKD-Net 揭秘了高效的轻量化蒸馏框架，PixelUp 则展示了零样本特征上采样的惊人潜力。
-建议优先研读 LiteKD-Net，探索如何平衡模型性能与移动端部署的算力约束。
-- 详情：[/202608/08/README](/202608/08/README)
+今日聚焦视觉感知与编辑前沿，涵盖免训练掩码优化、红外图像超分及 3D 资产局部编辑三大领域。
+重点推荐 SSR 的免训练目标掩码细化技术，以及 FaithIR 对红外超分中感知清晰度与任务保真度的深度权衡。
+建议关注 EditFlow3D 如何通过轨迹保持实现 3D 资产的自动化局部编辑，探索高效内容创作新路径。
+- 详情：[/202608/09/README](/202608/09/README)
 
 ### 精读区论文标签
-1. [LiteKD-Net: Lightweight Knowledge-Distilled Network for Mobile Image Denoising](/202608/08/2608.05739v1-litekd-net-lightweight-knowledge-distilled-network-for-mobile-image-denoising)  
-   标签：评分：8.0/10、query:q7
-   evidence：用于图像修复的自监督噪声模拟
+- 本次无精读推荐。
 
 ### 速读区论文标签
-1. [PixelUp: Zero-Shot Semantic Feature Upsampling for Fine-Grained Vision Tasks](/202608/08/2608.02792v1-pixelup-zero-shot-semantic-feature-upsampling-for-fine-grained-vision-tasks)  
-   标签：评分：7.0/10、query:q3
-   evidence：用于视觉任务的零样本语义特征上采样
-2. [Coupled Continuous-Discrete Generation for Scene Text Image Super-Resolution](/202608/08/2608.04525v1-coupled-continuous-discrete-generation-for-scene-text-image-super-resolution)  
+1. [SSR: Similarity-Shift Refinement for Training-Free Object-Centric Masks](/202608/09/2608.01103v1-ssr-similarity-shift-refinement-for-training-free-object-centric-masks)  
    标签：评分：6.0/10、query:q7
-   evidence：通过扩散模型进行图像修复与超分辨率
-3. [Rethinking Pixel Mean Flows via Interval Denoiser](/202608/08/2608.04818v1-rethinking-pixel-mean-flows-via-interval-denoiser)  
+   evidence：用于掩码优化的自监督视觉Transformer
+2. [FaithIR: Rethinking Infrared Image Super-Resolution from Perceptual Sharpness to Task Relevant Fidelity](/202608/09/2608.03106v1-faithir-rethinking-infrared-image-super-resolution-from-perceptual-sharpness-to-task-relevant-fidelity)  
+   标签：评分：6.0/10、query:q7
+   evidence：红外图像超分辨率与像素级修复
+3. [EditFlow3D: Automated Local Editing of 3D Assets with Trajectory Preservation](/202608/09/2608.03179v1-editflow3d-automated-local-editing-of-3d-assets-with-trajectory-preservation)  
    标签：评分：6.0/10、query:q4
-   evidence：基于流模型的无潜空间生成
+   evidence：基于生成模型的免训练局部3D编辑框架
 
 
 <div class="dpr-home-promo-card">

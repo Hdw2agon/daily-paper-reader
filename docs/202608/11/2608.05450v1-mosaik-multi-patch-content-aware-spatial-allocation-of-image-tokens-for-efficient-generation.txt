@@ -1,0 +1,454 @@
+Title: MOSAIK: Multi-Patch Content-Aware Spatial Allocation of Image Tokens for Efficient Generation
+
+URL Source: https://arxiv.org/pdf/2608.05450v1
+
+Published Time: Fri, 07 Aug 2026 00:17:51 GMT
+
+Number of Pages: 16
+
+Markdown Content:
+# MOSAIK: Multi-Patch Content-Aware Spatial Allocation of Image Tokens for Efficient Generation 
+
+## Mohammadreza Hami *, Mohammadreza Samadi *, Chao Gao, Negar Hassanpour 
+
+Huawei Technologies Canada mohammadreza.hami@h-partners.com {mohammadreza.samadi1, chao.gao4, negar.hassanpour2}@huawei.com  
+
+> *
+
+Equal contribution 
+
+Abstract 
+
+Pixel-space diffusion models avoid the reconstruction ceil-ing of latent diffusion models by generating directly in im-age space. However, their substantially higher token count makes generation expensive due to the quadratic complex-ity of self-attention. Several existing efficiency methods re-duce this cost by using larger patches at selected denoising steps, thereby representing the image with fewer tokens. Yet, each step still uses a single patch size uniformly across the entire image, overlooking that different regions suffer differ-ent fidelity losses when coarsened. We introduce MOSAIK, a damage-guided framework that varies patch size across re-gions and denoising steps. MOSAIK adapts the PixelDiT back-bone to generate arbitrary heterogeneous patch layouts, and a lightweight predictor uses intermediate denoising features to estimate the fidelity loss caused by coarsening each region. Given a token budget, our damage-guided layout predictor assigns fine patches to sensitive regions and coarse patches elsewhere. Remarkably, while reducing FLOPs by 70% and token count by 83%, MOSAIK matches the full-compute Pix-elDiT on GenEval and its DPG-Bench score drops by only 1.0 point. Compared to diverse efficiency paradigms, including temporal patch scheduling and feature caching, our approach delivers highly competitive performance at moderate budgets and consistently outperforms these baselines in highly con-strained compute regimes. 
+
+## 1 Introduction 
+
+Diffusion models (Ho, Jain, and Abbeel 2020; Peebles and Xie 2023; Lipman et al. 2023) have become a leading paradigm for high-fidelity image synthesis, generating com-plex images through an iterative denoising process often pa-rameterized by large transformers (Vaswani et al. 2017). To contain the computational cost of this process, most diffu-sion models operate in a compressed latent space produced by a pretrained variational autoencoder (VAE) (Kingma and Welling 2014; Rezende, Mohamed, and Wierstra 2014), as in latent diffusion models (LDMs) (Rombach et al. 2022; Chen et al. 2025a). This efficiency, however, comes with an inherent reconstruction ceiling: information discarded by the VAE, particularly fine-grained and high-frequency spatial details, cannot be recovered by the diffusion model. Recent pixel-space diffusion models (PDMs) (Li and He 2026; Yu et al. 2026; Ma et al. 2025; Chen et al. 2025c; He et al. 2026) avoid this ceiling by generating directly in image Non-Uniform 
+
+> Patchi fi cation Uniform
+> Patchi fi cation
+> MOSAIK (ours)
+> 59% Fewer Tokens PixelDiT (P=16)
+> 4096 tokens
+
+Figure 1: Mixed-patch generation is highly efficient. Left: 
+
+MOSAIK matches uniform patch-16 quality with a 50% re-duction in compute (FLOPs) by allocating smaller patches to proper regions. Right: Unlike temporal scheduling or step reduction, MOSAIK sustains image quality as compute de-creases. space. However, this exposes the denoising transformer to substantially more image tokens. At a fixed image resolu-tion, each patch is represented by one token. As shown in Fig. 2 (left), larger patches reduce the token count by encod-ing a broader spatial area within each token. A p16 token represents 256 pixels, whereas a p64 token represents 4096 pixels using the same embedding dimension. This stronger spatial aggregation improves efficiency but can discard lo-cal structure and sharp boundaries, while smaller patches preserve these details and support higher visual fidelity. Existing efficiency methods navigate this trade-off by vary-ing the patch size across denoising timesteps (Kim, Ghadi-yaram, and Gadde 2026; Anagnostidis et al. 2025; Li et al. 2025) or network depth (Dao and Metaxas 2026). Neverthe-less, at any given timestep and layer, they apply a spatially uniform patch layout across the entire image. This subjects every image region to the same degree of spatial compres-sion, creating either an efficiency concern by overspending computation on simple regions or a quality concern by con-straining representational capacity in sensitive regions. This observation motivates spatially adaptive patchification : re-taining small patches where coarsening is harmful while assigning larger patches elsewhere to reduce computation arXiv:2608.05450v1 [cs.CV] 5 Aug 2026 P=16 (4096 tokens)    
+
+> Multi-patch Student
+> (LoRA+PixelDiT)
+> Teacher
+> (PixelDiT)
+> 50% Fewer Tokens
+> Stage 2: Mixed-patch Adaptation P=Mixed (2010 tokens) Sample Random Patch Layout
+> Stage 1: Multi-patch Fluency
+> P=64 (256 tokens)
+> P=32 (1024 tokens)
+> P=16 (4096 tokens)
+> Sample P {16, 32, 64}
+> Multi-patch Student
+> (LoRA+PixelDiT)
+> Teacher
+> (PixelDiT)
+> 1024x1024
+> 4,096 Pixels 1024 Pixels 256 Pixels
+> Stage 3: Damage-Guided Layout Predictor
+> "a bald eagle portrait with razor-sharp feather detail against a sky"
+> Multi-patch Student
+> (LoRA+PixelDiT)
+> Sample Random Patch Layout & Prompt
+> Internal Activation ( )
+> Pooled Embedding ( )
+> Damage Map ( )
+> Layout Predictor
+> Teacher
+> (PixelDiT)
+
+Figure 2: MOSAIK training pipeline. The model is trained in three stages via self-distillation from a frozen PixelDiT teacher. 
+
+Stage 1 trains a model to render all uniform patch sizes ( P ∈ { 16 , 32 , 64 }). Stage 2 adapts the model to process arbitrary mixed-patch layouts in a single forward pass, yielding a mixed-patch generator. Stage 3 trains an offline layout predictor to regress a per-region coarsening damage map from intermediate activations ( h6) and prompt embeddings ( cpool ). without sacrificing visual quality, as illustrated in Fig. 1. 
+
+Contributions. We introduce MOSAIK (Multi-patch cOntent-aware Spatial Allocation of Image to Kens), a frame-work that employs spatially heterogeneous patch layouts to reduce computation while preserving fine-grained visual de-tails. MOSAIK first equips a pretrained diffusion model to operate at multiple patch sizes (§4.1) and then trains it to reliably execute arbitrary heterogeneous layouts (§4.2). We further formulate patch allocation as a damage-prediction problem and train a lightweight predictor to estimate the lo-cal degradation caused by coarsening each region (§4.3; Fig. 3). At inference, layout predictor dynamically allocates tokens up to a user-specified budget at each denoising step, assigning finer patches to regions where coarsening is pre-dicted to cause the greatest degradation, without retraining. Through controlled ablations and extensive experiments, we show that damage-guided patchification consistently im-proves the quality/computation trade-off over competing methods across multiple benchmarks and efficiency budgets. Specifically, MOSAIK consistently maintains stable perfor-mance across aggressive FLOPs reductions, matching full-resolution quality at a 60% reduction and sustaining perfor-mance at an 80% reduction when integrated with caching methods. 
+
+## 2 Related Work 
+
+From latent to pixel space. Latent diffusion mod-els (LDMs) (Rombach et al. 2022; Peebles and Xie 2023) have significantly reduced the computational burden of it-erative denoising by operating within the compressed la-tent space of a pretrained VAE (Kingma and Welling 2014; Rezende, Mohamed, and Wierstra 2014). However, this ef-ficiency imposes a hard fidelity ceiling because aggressive spatial compression inevitably removes fine-grained infor-mation (Chen et al. 2025a). Pixel-space diffusion mod-els (PDMs) (Li and He 2026; Ma et al. 2025; Chen et al. 2025c; Yu et al. 2026; He et al. 2026) bypass this limitation by generating directly in pixel space, replac-ing the representational-capacity bottleneck of VAE with a computational-scalability bottleneck of PDMs: modeling raw pixels substantially increases the token count processed by the transformer at every denoising step. Recent architectures reduce the cost of uniformly fine to-kenization while retaining fixed spatial grids. DiP (Chen et al. 2025c) uses a coarse backbone for efficient global pro-cessing and adds a dedicated branch to recover fine details. DeCo (Ma et al. 2025) separates the image into frequency bands and processes them through distinct pathways. Pix-elDiT (Yu et al. 2026) combines patch-level representations for global structure with pixel-level representations for local detail. HyperDiT (He et al. 2026) retains selected fine tokens and connects them to semantic anchors in the coarse repre-sentation. Crucially, across all these methods, the patch size is fixed in advance and applied uniformly across the image, without accounting for spatial differences in sensitivity to coarsening. 
+
+Adaptive computation in diffusion transformers. Recent literature explores adaptive computation along three primary axes: time, depth, and token count. DDiT (Kim, Ghadiyaram, and Gadde 2026) uses a test-time scheduler based on finite differences of the latent trajectory to select a global patch size at each denoising step. In contrast, PPFlow (Li et al. 2025) partitions the denoising trajectory into predefined stages, us-ing larger patches at high noise levels and smaller patches in later stages. Despite this difference between adaptive and fixed temporal scheduling, both methods apply a single patch size across all spatial regions at each step. Unlike these ap-proaches, which treat spatial uniformity as a fixed constraint, our framework recognizes that visual information density is inherently heterogeneous, establishing the need for dynamic, per-region spatial allocation at every denoising step. Along the depth axis, MPDiT (Dao and Metaxas 2026) applies larger patches in early transformer blocks to capture global context and finer patches in later blocks for local-ized refinement, yet this schedule remains input-agnostic. Other token-reduction strategies merge, prune, or adapt to-ken widths inside the network (Bolya et al. 2023; Wang et al. 2024; Zhao et al. 2025; You et al. 2025). Ultimately, these depth-level and token-level methods optimize the compu-tation of a static initial token set, rather than dynamically scaling the underlying pixel-to-token representation itself. 73% Fewer Tokens  44% Fewer Tokens Figure 3: Damage-guided patch layout across denoising. Per-region patch size ( 16 /32 /64 px; orange/teal/blue) set from the predicted coarsening damage at each step, over the running estimate ( xpred  
+
+> 0
+
+). Fine patches concentrate on high-damage regions, coarse patches on low-damage ones. 
+
+Content-aware spatial allocation. Motivated by the spa-tial heterogeneity of natural images, a line of research adapts patch sizes to image content. In discriminative tasks, mixed-scale tokenization and adaptive patching process homoge-neous regions with larger patches while retaining smaller patches where fine spatial information is important for recog-nition (Havtorn et al. 2023; Choudhury et al. 2025). In gen-erative modeling, however, applying dynamic spatial alloca-tion within LDM faces a structural bottleneck: the standard VAE performs a uniform, offline compression that prema-turely consumes spatial redundancy and obscures the local signals needed to efficiently determine where coarsening is safe. D 2iT (Jia et al. 2025) applies region-dependent granu-larity but necessitates a fully retrained VAE. Foveated Diffu-sion (Chao et al. 2026) determines the spatial patch granular-ity from an externally provided gaze mask rather than directly inferring it from image content. Similarly, PatchScaler (Liu et al. 2025c) assigns region groups different diffusion start-ing points and sampling-step counts based on reconstruction difficulty, rather than varying their patch sizes. Concurrent to our work, DynaPatch (Li et al. 2026a) per-forms dynamic patchification for video diffusion. Operating in the highly compressed latent space of a 3D-VAE (Li et al. 2026b), it finds that heuristic content statistics are insufficient for predicting effective patch layouts in latent space and there-fore jointly optimizes its router with the generative objective. Our findings reveal that PDMs naturally resolve these bottle-necks. Because there is no uniform VAE pre-compression, a higher capacity of spatial redundancy remains available for the diffusion model to dynamically utilize (see Appendix). Furthermore, intermediate diffusion features in PDMs re-main directly aligned with spatial image regions, providing a transparent signal of where coarsening is safe. We use these features to train the layout predictor separately from the gen-erator, allowing it to estimate where coarse processing would cause the greatest degradation. This enables dynamic spatial allocation without the end-to-end joint optimization required by latent-space routing methods. 
+
+## 3 Preliminaries 
+
+3.1 PixelDiT as the Diffusion Backbone 
+
+We build on PixelDiT (Yu et al. 2026), a pixel-space diffu-sion model for 1024 × 1024 image generation. Given a noisy image xt, noise level σ, and text condition y, the model pre-dicts the velocity field vθ (xt, σ, y ). PixelDiT partitions an 
+
+H × W image into non-overlapping P × P patches, pro-ducing HW/P 2 image tokens. The pretrained model exclu-sively uses a uniform patch size of 16 . Throughout this work, the teacher denotes the original PixelDiT, whose prediction 
+
+v16 teacher serves as the fidelity reference. PixelDiT consists of a patch-level DiT and a lightweight pixel-level decoder (PiT). The DiT can process different patch sizes, while the PiT operates on a fixed uniform p16 grid to preserve high-frequency details. Patch-size dependence is confined to the tokenizer, output projection head, and posi-tional embeddings; the internal DiT blocks operate on the resulting token sequence. This separation enables us to in-troduce dynamic patchification without modifying the PiT. 
+
+3.2 Nomenclature 
+
+We use the following terminology throughout the paper: 
+
+Region. We partition each 1024 × 1024 image into a 16 × 16 
+
+grid of non-overlapping 64 × 64 pixel regions. We denote the set of all 256 regions by R. Each region is the smallest unit to which we independently assign a patch size. 
+
+Patch size. We support three patch sizes, P = {16 , 32 , 64 },denoted by p16 , p32 , and p64 . Within a 64 × 64 region, these patch sizes produce 16 , 4, and 1 token, respectively. 
+
+Layout. A layout specifies the patch size assigned to every region. Formally, a layout is a mapping ℓ : R → P , where 
+
+ℓ(r) denotes the patch size assigned to region r. A layout is 
+
+uniform if all regions use the same patch size, and heteroge-neous otherwise. We denote the uniform p16 , p32 , and p64 
+
+layouts by ℓ16 , ℓ32 , and ℓ64 , respectively. 
+
+Coarsening and refinement. Changing a region from a smaller to a larger patch size is called coarsening , and the vice-versa is called refinement .4 Method 
+
+The core principle of MOSAIK is to decouple the execu-tion of heterogeneous patch layouts from the policy that de-termines their spatial allocation. We achieve this through a three-stage training pipeline: aligning the multi-patch gener-ator with the teacher’s high-resolution prior across different uniform patch sizes (§4.1), extending the generation capabil-ity across spatially heterogeneous patch layouts (§4.2), and training a standalone predictor that estimates the local degra-dation incurred by coarsening and dictates token routing at inference (§4.3). Figure 2 illustrates these three stages. 
+
+4.1 Stage 1: Multi-Patch Fluency 
+
+Architectural Modifications. To induce multi-patch flu-ency without catastrophically forgetting the original genera-tive prior, we freeze the backbone weights and inject Low-Rank Adaptation (LoRA) (Hu et al. 2022) modules into the DiT blocks. We also introduce separate tokenizers for p32 
+
+and p64 , allowing each patch size to learn an appropriate input projection without modifying the pretrained p16 tok-enizer. Moreover, we add a learned patch-size embedding to each token, similar to time embeddings, allowing the model to identify the patch size from which the token originates. To bridge the spatial mismatch with the fixed uniform p16 
+
+PiT, we introduce a learned pixel-shuffle conditioning up-sampler that lifts the coarse DiT representations back onto the uniform p16 grid the PiT requires. 
+
+Training Strategy. To prevent the spatial compression from degrading generation quality, we force the manifold of these newly introduced modules to closely match the high-fidelity prior of the teacher. At each training step, given a sampled noisy image xt, noise level σ, text prompt y, and a uniform patch size P ∈ { 16 , 32 , 64 }, the multi-patch gener-ator parameterized by θ is optimized via self-distillation to match the velocity predictions of the frozen teacher: 
+
+Lself-distill = Ext,σ,y,P 
+
+h
+
+vPθ (xt, σ, y ) − v16 teacher (xt, σ, y ) 22
+
+i
+
+.
+
+(1) 
+
+4.2 Stage 2: Mixed-Patch Adaptation 
+
+Positional Embedding. Under heterogeneous patchifica-tion, p16 , p32 , and p64 tokens coexist within a single im-age. Because these tokens cover different spatial extents, they no longer lie on the uniform token grid assumed by the pretrained Rotary Positional Embeddings (RoPE) (Su et al. 2024). Therefore, assigning positions by sequence order would no longer reflect their actual locations in the image. We address this by anchoring each token to the geometric center of its patch in the normalized p16 coordinate frame. For ex-ample, a p32 token receives the center coordinate of the 2×2
+
+block of p16 positions that it replaces. This layout-agnostic remapping seamlessly preserves the original positional ge-ometry without requiring architectural changes. 
+
+Training Strategy. We train the generator on randomly sampled heterogeneous patch layouts, deliberately decou-pling the spatial arrangement of patch sizes from the image content (see Fig. 2 (middle)). In each iteration, with proba-bility 0.6, we apply a mixed layout spanning a broad range of token budgets, and with probability 0.4, we apply a uniform layout to preserve performance on the uniform configurations learned in Stage 1. By retaining the objective in Equation (1) and matching v16  
+
+> teacher
+
+across all configurations, we force the generator to reliably execute arbitrary layouts regardless of how they align with the underlying visual features. 
+
+4.3 Stage 3: Damage-Guided Layout Predictor 
+
+One of our key insights is that the degradation caused by spatial coarsening provides a direct allocation signal: re-gions that are more sensitive to larger patches should receive finer resolution. Rather than learning this behavior indirectly through the generative objective, we explicitly formulate dy-namic patch allocation as a damage-prediction problem. At denoising step t, we compute the squared difference be-tween the prediction of the multi-patch generator under a uniform p64 layout and that of the frozen p16 teacher. We then average-pool this error over the non-overlapping 64 ×64 
+
+regions to obtain the target damage map: 
+
+˜dt = AvgPool 
+
+
+
+v64  
+
+> θ
+
+(xt, σ, y ) − v16 teacher (xt, σ, y ) 22
+
+
+
+.
+
+(2) The damage assigned to region r is given by the corre-sponding entry of this map, denoted ˜dtr . A larger value of ˜dtr
+
+indicates that uniform p64 processing causes greater devia-tion from the fine-grained teacher in region r. Such regions are assigned finer patches, while regions with lower damage remain coarse. Exact evaluation of Equation (2) at inference requires a secondary forward pass, which negates the compu-tational savings of adaptive patchification. Instead, we train a lightweight convolutional network fϕ with FiLM condition-ing (Perez et al. 2018) to regress the damage map directly from intermediate backbone features. This design is moti-vated by representation-alignment works such as RePA (Yu et al. 2025) that found intermediate denoising features en-code meaningful visual information. As shown in Fig. 2 (right), using an offline dataset of trajectories, the predictor learns to estimate the damage map 
+
+˜dt from the DiT block-6 activations ht−16 , conditioned on noise level σ and pooled text embeddings cpool , via a Huber loss, which we employ to robustly handle extreme damage outliers while maintaining smooth convergence for minor prediction errors: 
+
+Lrgrs = E
+
+h
+
+Huber  fϕ(ht−16 , σ, cpool ), ˜dt i
+
+. (3) During inference, only the first step uses a uniform p16 lay-out to produce the initial activations. Later, at each denoising step t, the predictor uses the activation from the previous timestep ht−16 . The predictor assigns a damage score dtr to each region r. We initialize all regions at p64 and consider two successive refinement actions. Refining a region from 
+
+p64 to p32 adds three tokens and is assigned priority dtr /3,while refining it from p32 to p16 adds twelve tokens and is assigned priority dtr /12 . At each iteration, we apply the highest-priority available refinement that fits within the re-maining budget. We empirically found that p64 to p16 dam-MOSAIK (n=50) DDiT (n=50) PixelDiT (n=50) TaylorSeer (n=19) TeaCache (n=19) Figure 4: Qualitative comparisons of MOSAIK against DDiT, TeaCache, and TaylorSeer at a 60% FLOPs reduction ( ∼73% token reduction). The base model (i.e., PixelDiT) with the highest FLOPs is included as a reference. Zoomed-in regions are provided to better illustrate fine-grained details. age reliably guides both refinements across scales (see Ap-pendix). Regions with high predicted damage are therefore more likely to reach p16 , while regions with lower damage remain at coarser patch sizes. As illustrated in Fig. 3, fine patches follow high-damage regions over the denoising tra-jectory, while low-damage regions remain coarse. Because training is budget-agnostic, the same model can operate at any inference budget, determining how many patches of each size to use and assigning finer patches where coarsening would cause the greatest degradation. 
+
+## 5 Results and Discussions 
+
+5.1 Experimental Setup 
+
+We adopt PixelDiT (Yu et al. 2026) at 1024px resolution as our pixel-space diffusion backbone, paired with a Gemma-2 text encoder (Team et al. 2024). PixelDiT’s architecture is extended for heterogeneous patch processing via LoRA with rank 32. Stages 1 and 2 are trained using AdamW (Loshchilov and Hutter 2017) on BLIP3o-60k (Chen et al. 2025b) and text-to-image-2M-1024 (Zou 2024) with a batch size of 96 for 114,000 and 20,000 steps, respectively. The layout pre-dictor is subsequently trained offline on intermediate features extracted from the Stage 2 multi-patch generator. Implemen-tation and training details are provided in the Appendix. All images are generated at 1024px with a 50-step Euler sampler and classifier-free guidance (CFG) (Ho and Sali-mans 2022) of 2.75 , with fixed random seeds so that every comparison starts from identical initial noise. We report qual-ity on GenEval (Ghosh, Hajishirzi, and Schmidt 2023) (553 prompts, 4 samples each) and DPG-Bench (Hu et al. 2024) (1065 prompts, 4 samples each). As the official DDiT code is not public, we replicate its method on PixelDiT (marked †), applying its temporal patch schedule with the proposed third-order finite-difference heuristic and thresholds calibrated to our compute tiers. We utilize the stage 1 checkpoint for DDiT, as it is optimized for uniform generation. To closely follow the evaluation protocol of our primary baseline (DDiT), we also include TeaCache (Liu et al. 2025a) and TaylorSeer (Liu et al. 2025b) as representative caching-based efficiency baselines. Efficiency is measured by the mean tokens per sampling step and relative FLOPs, defined as total image FLOPs as a fraction of the uniform p16 , 50-step baseline, with per-step FLOPs averaged over the trajectory. 
+
+5.2 Main Results 
+
+In Table 1, we present a quantitative comparison with the baseline and competing methods and group all methods into tiers of matched FLOPs reduction, so every ranking is read at approximately equal cost. The baseline achieves 0.74 on GenEval and 83 .5 on DPG with 4096 tokens per step. MO-SAIK reaches 0.74 on GenEval and 82 .5 on DPG with 683 
+
+tokens per step, corresponding to an 83% token reduction and a 70% reduction in FLOPs. Despite this aggressive to-ken reduction, MOSAIK matches the baseline on GenEval and remains only 1.0 point below it on DPG. This supports DPG-Bench ↑ GenEval ↑                                                                                                                                                                                                                       
+
+> Method TR (%) Avg Attr Ent Rel Glob Oth Avg S.Obj T.Obj Cnt Col Pos C.Att
+> PixelDiT ( n=50 )-83.5 87.8 88.6 91.2 83.0 89.6 0.74 1.00 0.95 0.55 0.88 0.41 0.68
+> Light: ∼20% FLOPs reduction
+> PixelDiT ( n=38 )-83.3 87.7 89.3 93.3 84.5 70.8 0.70 0.98 0.88 0.56 0.84 0.40 0.53 TeaCache -83.5 88.3 89.3 93.4 83.6 72.8 0.72 0.98 0.92 0.54 0.86 0.40 0.62
+> TaylorSeer -83.7 88.5 89.7 93.6 83.9 72.4 0.71 0.98 0.90 0.53 0.84 0.40 0.58 DDiT †27 83.1 87.9 89.1 93.3 83.0 73.6 0.69 0.97 0.85 0.51 0.88 0.41 0.55 MOSAIK (ours) 25 83.6 87.9 89.7 93.0 83.9 73.6 0.74 0.99 0.89 0.59 0.89 0.47 0.60
+> Moderate: ∼50% FLOPs reduction
+> PixelDiT ( n=24 )-82.5 87.9 88.4 92.6 83.6 68.8 0.67 0.98 0.86 0.51 0.81 0.39 0.48 TeaCache -83.5 88.2 89.3 92.9 83.3 72.8 0.72 0.99 0.91 0.54 0.85 0.41 0.62 TaylorSeer -83.6 88.0 89.6 93.3 83.9 73.2 0.71 0.98 0.91 0.53 0.84 0.41 0.61 DDiT †64 81.6 86.8 88.0 92.6 79.6 69.6 0.65 0.96 0.78 0.49 0.82 0.35 0.51 MOSAIK (ours) 59 83.4 87.8 89.5 92.8 83.9 72.4 0.74 1.00 0.91 0.55 0.88 0.46 0.64
+> Aggressive: ∼60% FLOPs reduction
+> PixelDiT ( n=19 )-81.5 87.2 87.9 92.5 83.0 67.2 0.65 0.98 0.84 0.52 0.81 0.34 0.43 TeaCache -82.8 87.7 88.9 93.2 83.6 71.2 0.71 0.99 0.88 0.55 0.84 0.41 0.60 TaylorSeer -82.7 87.1 89.2 93.0 82.4 68.4 0.68 0.98 0.87 0.50 0.80 0.40 0.51 DDiT †72 81.5 86.4 88.8 93.2 81.2 71.6 0.65 0.96 0.77 0.48 0.82 0.34 0.52 MOSAIK (ours) 74 83.1 87.7 89.8 93.0 84.2 72.0 0.74 0.99 0.88 0.58 0.88 0.47 0.61
+> Maximal: ∼70% FLOPs reduction
+> PixelDiT ( n=16 )-80.6 86.2 87.2 92.5 81.2 67.2 0.64 0.98 0.83 0.47 0.81 0.35 0.40 TeaCache -82.6 87.6 88.8 92.9 81.8 69.6 0.71 0.99 0.88 0.54 0.84 0.41 0.60 TaylorSeer -82.4 86.8 89.0 92.9 81.8 69.6 0.68 0.98 0.88 0.50 0.80 0.39 0.49 DDiT †84 80.8 86.4 88.2 92.4 80.2 70.4 0.64 0.95 0.76 0.44 0.83 0.36 0.47 MOSAIK (ours) 83 82.5 87.3 89.1 92.5 82.1 72.0 0.74 0.99 0.88 0.57 0.88 0.47 0.62
+
+Table 1: Quantitative comparison against step reduction, feature caching, and temporal patch scheduling. TR (%) is the token reduction relative to the patch-16 baseline ( 4096 tokens). Bold and underline mark the best and second-best score per column within each compute tier. †: Derived from schedule-averaged tokens. our claim that uniform fine patchification spends unnecessary computation in regions that are less sensitive to coarsening. MOSAIK also exhibits strong stability across compute bud-gets. Spanning a 25% to 83% token reduction, GenEval stays close to 0.74 and DPG varies by only one point, while all other methods steadily degrade. By prioritizing low-damage regions for coarsening, the layout predictor preserves qual-ity until tighter budgets force larger patches in sensitive re-gions (see Fig. 5). In contrast, other methods coarsen all regions uniformly, causing fidelity to decline simultaneously in both foreground subjects and background areas. This contrast is visually evident in our qualitative com-parisons (Fig. 4). Under a similar FLOPs budget, whether by reducing the token count by 73% (for DDiT and MOSAIK) or setting n = 19 sampling steps (for TaylorSeer and TeaCache), MOSAIK preserves a level of fine-grained, high-frequency detail comparable to that of the full-compute PixelDiT base-line. In contrast, DDiT suffers from localized blurring and artifacts. As seen in the zoomed-in regions, it tends to over-smooth high-frequency areas and lose granular details such as flower pollen and tiger textures. This demonstrates the clear advantage of MOSAIK to effectively avoid such degra-dation and maintain structural integrity. 
+
+Better than temporal patch scheduling. In DDiT, patch size cannot vary across spatial regions within the same for-ward pass. When DDiT detects rapid change along the de-noising trajectory, it switches the entire layout to a finer patch size, allocating additional tokens even to smooth background regions. Once the trajectory stabilizes, it applies a coarser patch size globally, which can remove important details from the primary subject. As detailed in Fig. 5, DDiT’s temporal scheduling locks its relative compute allocation at exactly 
+
+1.0× across all semantic regions. In contrast, MOSAIK ac-tively redirects compute based on demand. As the FLOPs reduction scales to 60% , MOSAIK progressively starves the background (dropping to 0.8× relative allocation) to route tokens to the subject. Crucially, it dynamically distinguishes within the subject itself, prioritizing the highly complex sub-ject boundary over the subject interior. Table 1 also shows that, at a modest 27% token reduction, DDiT already falls 0.05 GenEval points below MOSAIK, and 20% 50% 60% 70% FLOPs Reduction 0.8× 1.0× 1.5× 2.0× 2.5× Relative Allocation by Semantic Region  DDiT (Temporal Allocation) Subject Boundary Subject Interior Background 
+
+> 2× more share for the subject
+
+Figure 5: Subject Compute Allocation vs. Budget. Token allocation is measured against ground-truth semantic refer-ence masks. 
+
+Method TR (%) DPG-Bench GenEval 
+
+∼70% FLOPs reduction 
+
+TeaCache - 82.6 0.71 MOSAIK + TeaCache 73 82.8 0.74 
+
+TaylorSeer - 82.4 0.68 MOSAIK + TaylorSeer 73 82.8 0.74 
+
+∼80% FLOPs reduction 
+
+TeaCache - 80.7 0.67 MOSAIK + TeaCache 83 82.2 0.73 
+
+TaylorSeer - 72.9 0.43 MOSAIK + TaylorSeer 83 82.2 0.73 
+
+Table 2: Composing the spatial and temporal axes. MO-SAIK integrates seamlessly with caching to enhance perfor-mance under aggressive compression. at its most aggressive setting, DDiT’s performance collapses to 0.64 , while MOSAIK maintains a score of 0.74 . The DPG metric exhibits a similar trend. These results demonstrate that a purely temporal schedule cannot adequately capture the spatial heterogeneity of representational demand. 
+
+Better than fewer denoising steps. Reducing PixelDiT steps matches our FLOPs reductions, but quality falls mono-tonically to 0.64 GenEval and 80 .6 DPG at 70% : truncating the denoising trajectory removes the late refinement steps required across the image. In contrast, MOSAIK retains all 50 steps while reducing the total cost, and leads at 70% by great margin of 0.1 on GenEval and 1.9 on DPG. 
+
+Complementary to feature caching. TeaCache and Tay-lorSeer reuse activations across denoising steps, whereas MOSAIK spatially coarsens regions within each step. Be-cause caching preserves quality better than step truncation, these methods provide strong baselines at matched computa-tional budgets (Table 1). Even against these baselines, MO-SAIK consistently achieves the highest GenEval scores, with its margin over TeaCache widening under tighter compute constraints. This advantage stems from their differing ap-proximations: caching skips temporal computation, whereas 
+
+Benchmark Patch layout FLOPs reduction (%) 
+
+20 50 60 70 
+
+DPG Random 83.0 82.1 82.1 81.6 Damage-guided 83.6 83.4 83.1 82.5 
+
+GenEval Random 0.72 0.72 0.71 0.70 Damage-guided 0.74 0.74 0.74 0.74 
+
+Table 3: The gain is placement. The same multi-patch gen-erator at an identical token budget, driven by a random layout vs. the damage-guided predictor. MOSAIK performs a cheaper forward pass at every step, reducing computation only in insensitive regions. Conse-quently, the mechanisms are complementary, naturally com-bining temporal efficiency across steps with spatial efficiency through adaptive token allocation. Table 2 shows what the composition buys: when we combine with caching, we can use more tokens while maintaining low FLOPs. At a matched budget, adding MOSAIK on top of either caching method improves both benchmarks over that method alone, and the gain grows precisely where caching is weakest: at an 80% re-duction, caching alone degrades sharply and TaylorSeer col-lapses, while the composed arms hold near-headline GenEval and restore DPG. The composition therefore extends the compute-quality frontier in both directions: at moderate bud-gets it recovers the composition caching loses, and at aggres-sive budgets it sustains quality at reductions neither axis reaches by itself. 
+
+Efficacy of the damage-guided layout predictor. Our Stage 2 enables multi-patch generation, but it is the damage-guided layout predictor that unlocks the efficiency gains driv-ing our core motivation. Under a fixed multi-patch genera-tor, computational budget, and initialization seed, substitut-ing our damage-guided layout predictor with a content-blind baseline results in both GenEval and DPG-bench degradation across budgets (Table 3). This performance gap widens under tighter computational constraints, demonstrating the efficacy of the damage predictor, which preserves quality by prioritiz-ing finer patches in highly sensitive regions. We validate the causal role of the damage predictor and its near-optimality compared to ground-truth measurements in Appendix. 
+
+## 6 Conclusion 
+
+We introduce MOSAIK, a damage-guided framework that dynamically varies patch size across image regions and de-noising steps. A lightweight predictor estimates the fidelity loss caused by coarsening, enabling MOSAIK to allocate fine patches where they are most needed. Consequently, it matches full-compute PixelDiT fidelity while substantially reducing the token count and compute overhead. Compared to temporal patch scheduling techniques, MOSAIK consis-tently outperforms temporal patch scheduling, with its ad-vantage widening under aggressive budget cuts. Moreover, it can be combined with caching techniques to achieve fur-ther FLOPs reduction while maintaining quality. Future work will extend this to video diffusion, where redundancy can be exploited jointly across space and time. References 
+
+Anagnostidis, S.; Bachmann, G.; Kim, Y.; Kohler, J.; Geor-gopoulos, M.; Sanakoyeu, A.; Du, Y.; Pumarola, A.; Thabet, A.; and Schönfeld, E. 2025. FlexiDiT: Your Diffusion Trans-former Can Easily Generate High-Quality Samples with Less Compute. arXiv preprint arXiv:2502.20126 .Bolya, D.; Fu, C.-Y.; Dai, X.; Zhang, P.; Feichtenhofer, C.; and Hoffman, J. 2023. Token Merging: Your ViT But Faster. In International Conference on Learning Representations (ICLR) .Chao, B.; Yariv, L.; Xiao, H.; and Wetzstein, G. 2026. Foveated Diffusion: Efficient Spatially Adaptive Image and Video Generation. arXiv preprint arXiv:2603.23491 .Chen, J.; Cai, H.; Chen, J.; Xie, E.; Yang, S.; Tang, H.; Li, M.; and Han, S. 2025a. Deep Compression Autoencoder for Ef-ficient High-Resolution Diffusion Models. In International Conference on Learning Representations (ICLR) .Chen, J.; Xu, Z.; Pan, X.; Hu, Y.; Qin, C.; Goldstein, T.; Huang, L.; Zhou, T.; Xie, S.; Savarese, S.; Xue, L.; Xiong, C.; and Xu, R. 2025b. BLIP3-o: A Family of Fully Open Uni-fied Multimodal Models-Architecture, Training and Dataset. arXiv:2505.09568. Chen, Z.; Zhu, J.; Chen, X.; Zhang, J.; Hu, X.; Zhao, H.; Wang, C.; Yang, J.; and Tai, Y. 2025c. DiP: Taming Diffusion Models in Pixel Space. arXiv preprint arXiv:2511.18822 .Choudhury, R.; Kim, J.; Park, J.; Yang, E.; Jeni, L. A.; and Kitani, K. M. 2025. Accelerating Vision Transformers with Adaptive Patch Sizes. arXiv preprint arXiv:2510.18091 .Dao, Q.; and Metaxas, D. 2026. MPDiT: Multi-Patch Global-to-Local Transformer Architecture For Efficient Flow Match-ing and Diffusion Model. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , 33000–33011. Ghosh, D.; Hajishirzi, H.; and Schmidt, L. 2023. Geneval: An object-focused framework for evaluating text-to-image alignment. Advances in Neural Information Processing Sys-tems , 36: 52132–52152. Havtorn, J. D.; Royer, A.; Blankevoort, T.; and Bejnordi, B. E. 2023. MSViT: Dynamic Mixed-Scale Tokenization for Vision Transformers. In Proceedings of the IEEE/CVF Inter-national Conference on Computer Vision (ICCV) Workshops ,838–848. He, Y.; Ma, L.; Guo, Z.; Shan, X.; Fu, J.; Chen, D.; Huang, J.; and Li, Y. 2026. HyperDiT: Hyper-Connected Transform-ers for High-Fidelity Pixel-Space Diffusion. arXiv preprint arXiv:2605.15741 .Ho, J.; Jain, A.; and Abbeel, P. 2020. Denoising Diffusion Probabilistic Models. In Advances in Neural Information Processing Systems (NeurIPS) .Ho, J.; and Salimans, T. 2022. Classifier-free diffusion guid-ance. arXiv preprint arXiv:2207.12598 .Hu, E. J.; Shen, Y.; Wallis, P.; Allen-Zhu, Z.; Li, Y.; Wang, S.; Wang, L.; Chen, W.; et al. 2022. Lora: Low-rank adaptation of large language models. Iclr , 1(2): 3. Hu, X.; Wang, R.; Fang, Y.; Fu, B.; Cheng, P.; and Yu, G. 2024. Ella: Equip diffusion models with llm for enhanced semantic alignment. arXiv preprint arXiv:2403.05135 .Jia, W.; Huang, M.; Chen, N.; Zhang, L.; and Mao, Z. 2025. D2iT: Dynamic Diffusion Transformer for Accurate Image Generation. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , 12860– 12870. Kim, D.; Ghadiyaram, D.; and Gadde, R. 2026. DDiT: Dy-namic Patch Scheduling for Efficient Diffusion Transformers. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , 11459–11471. Kingma, D. P.; and Welling, M. 2014. Auto-Encoding Vari-ational Bayes. In ICLR .Li, H.; Chen, B.; Zhang, L.; Li, J.; Wang, J.; and Zhu, S. 2025. Pyramidal Patchification Flow for Visual Generation. 
+
+arXiv preprint arXiv:2506.23543 .Li, S.; Barnes, C.; Rizve, M. N.; Peng, H.; Li, Z.; Dibua, O.; Ganjdanesh, A.; Tang, X.; Kang, Y.; and Gong, Y. 2026a. Content-Aware Dynamic Patchification for Efficient Video Diffusion. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , 35936– 35945. Li, T.; and He, K. 2026. Back to Basics: Let Denoising Gen-erative Models Denoise. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , 36115–36125. Li, Y.; Tian, C.; Xia, R.; Liao, N.; Guo, W.; Yan, J.; Li, H.; Dai, J.; Li, H.; and Yang, X. 2026b. Learning Adaptive and Temporally Causal Video Tokenization in a 1D Latent Space. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) .Lipman, Y.; Chen, R. T. Q.; Ben-Hamu, H.; Nickel, M.; and Le, M. 2023. Flow Matching for Generative Modeling. In International Conference on Learning Representations (ICLR) .Liu, F.; Zhang, S.; Wang, X.; Wei, Y.; Qiu, H.; Zhao, Y.; Zhang, Y.; Ye, Q.; and Wan, F. 2025a. Timestep Embedding Tells: It’s Time to Cache for Video Diffusion Model. In 
+
+Proceedings of the Computer Vision and Pattern Recognition Conference , 7353–7363. Liu, J.; Zou, C.; Lyu, Y.; Chen, J.; and Zhang, L. 2025b. From reusing to forecasting: Accelerating diffusion models with taylorseers. In Proceedings of the IEEE/CVF International Conference on Computer Vision , 15853–15863. Liu, Y.; Dong, H.; Pan, J.; Dong, Q.; Chen, K.; Zhang, R.; Fu, L.; and Wang, F. 2025c. PatchScaler: An Efficient Patch-Independent Diffusion Model for Image Super-Resolution. In Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV) , 11283–11293. Loshchilov, I.; and Hutter, F. 2017. Decoupled weight decay regularization. arXiv preprint arXiv:1711.05101 .Ma, Z.; Wei, L.; Wang, S.; Zhang, S.; and Tian, Q. 2025. DeCo: Frequency-Decoupled Pixel Diffusion for End-to-End Image Generation. arXiv preprint arXiv:2511.19365 .Peebles, W.; and Xie, S. 2023. Scalable Diffusion Models with Transformers. In Proceedings of the IEEE/CVF Interna-tional Conference on Computer Vision (ICCV) , 4195–4205. Perez, E.; Strub, F.; de Vries, H.; Dumoulin, V.; and Courville, A. 2018. FiLM: Visual Reasoning with a General Conditioning Layer. In Proceedings of the AAAI Conference on Artificial Intelligence .Rezende, D. J.; Mohamed, S.; and Wierstra, D. 2014. Stochastic backpropagation and approximate inference in deep generative models. ICML .Rombach, R.; Blattmann, A.; Lorenz, D.; Esser, P.; and Om-mer, B. 2022. High-Resolution Image Synthesis With Latent Diffusion Models. In Proceedings of the IEEE/CVF Confer-ence on Computer Vision and Pattern Recognition (CVPR) ,10684–10695. Su, J.; Lu, Y.; Pan, S.; Murtadha, A.; Wen, B.; and Liu, Y. 2024. RoFormer: Enhanced Transformer with Rotary Position Embedding. Neurocomputing , 568: 127063. Team, G.; Riviere, M.; Pathak, S.; Sessa, P. G.; Hardin, C.; Bhupatiraju, S.; Hussenot, L.; Mesnard, T.; Shahriari, B.; Ramé, A.; et al. 2024. Gemma 2: Improving open language models at a practical size. arXiv preprint arXiv:2408.00118 .Vaswani, A.; Shazeer, N.; Parmar, N.; Uszkoreit, J.; Jones, L.; Gomez, A. N.; Kaiser, L.; and Polosukhin, I. 2017. At-tention Is All You Need. In Advances in Neural Information Processing Systems (NeurIPS) .Wang, H.; Liu, D.; Kang, Y.; Li, Y.; Lin, Z.; Jha, N. K.; and Liu, Y. 2024. Attention-Driven Training-Free Effi-ciency Enhancement of Diffusion Models. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , 16080–16089. You, H.; Barnes, C.; Zhou, Y.; Kang, Y.; Du, Z.; Zhou, W.; Zhang, L.; Nitzan, Y.; Liu, X.; Lin, Z.; Shechtman, E.; Amirghodsi, S.; and Lin, Y. C. 2025. Layer- and Timestep-Adaptive Differentiable Token Compression Ra-tios for Efficient Diffusion Transformers. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , 18072–18082. Yu, S.; Kwak, S.; Jang, H.; Jeong, J.; Huang, J.; Shin, J.; and Xie, S. 2025. Representation Alignment for Generation: Training Diffusion Transformers Is Easier Than You Think. In International Conference on Learning Representations (ICLR) .Yu, Y.; Xiong, W.; Nie, W.; Sheng, Y.; Liu, S.; and Luo, J. 2026. PixelDiT: Pixel Diffusion Transformers for Image Generation. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , 14273– 14282. Zhao, W.; Han, Y.; Tang, J.; Wang, K.; Song, Y.; Huang, G.; Wang, F.; and You, Y. 2025. Dynamic Diffusion Transformer. In International Conference on Learning Representations (ICLR) .Zou, K. 2024. text-to-image-2M: A high-quality, diverse text–image training dataset. A Implementation and Training Details 
+
+A.1 Experimental Setup for Stage 1 & Stage 2 
+
+Architecture and Initialization. LoRA is applied to the attention, MLP, and adaptive-normalization layers of the DiT blocks and to the attention, MLP, and conditioning projec-tions of the PiT decoder. The p32 and p64 tokenizers are initialized by composing the pretrained p16 projection with bilinear downsampling. Their pixel-shuffle upsamplers are identity initialized. Patch size embeddings are learned for p32 
+
+and p64 , while p16 retains the original path. All pretrained PixelDiT weights stay frozen. The self-distillation teacher is that same frozen network with the adapters switched off and the multi-patch generator the same network with them enabled, so no second set of weights is stored. 
+
+Multi-Patch Generator Training. In Stage 1, each opti-mization step samples one uniform patch size for the en-tire minibatch, with probabilities 0.2, 0.4, and 0.4 for p16 ,
+
+p32 , and p64 , respectively. We use a constant learning rate of 2 × 10 −4 and initialize Stage 2 from the checkpoint at 
+
+114 ,000 optimization steps. For the mixed-layout branch of Stage 2, we sample the relative proportions of p16 , p32 , and 
+
+p64 regions independently for each image, then assign each region a patch size according to those proportions. This spans a broad range of token budgets, and drawing the proportions without reference to the image leaves no spatial arrangement the generator could specialize to. The uniform layout branch samples one of the three patch sizes uniformly. Stage 2 uses a smaller learning rate of 10 −4, and we select the checkpoint at 20 ,000 optimization steps. 
+
+A.2 Stage 3: Damage-Guided Layout Prediction 
+
+Mixed-Layout Trajectory Collection. We collect one 50 -step trajectory for each of 4,000 prompts randomly sam-pled from the caption pool used in Stage 2, which combines BLIP3o-60k with a 10K native-1024 subset of text-to-image-2M. For each trajectory, we sample a heterogeneous layout using the procedure described in Section A.1, hold it fixed across denoising steps, and resample it for the next prompt. We retain eight approximately evenly spaced states after the initial step, producing 32 ,000 records. At each retained state 
+
+t ≥ 1, the target in Eq. 2 is computed by evaluating the same noisy state xt with the uniform p16 teacher and the uniform 
+
+p64 generator. The target is therefore a property of xt alone and cannot be biased by the mixed patch layout. The predic-tor input is the block-6 activation ht−16 from the preceding mixed-patch forward pass. Because its tokens cover different patch sizes, we reconstruct a dense feature map by repeating each token over its support on the p16 grid. We retain acti-vations from the conditional classifier-free guidance (CFG) branch, matching the inference procedure. 
+
+Damage Predictor Architecture and Training. Using a 
+
+1 × 1 projection, ht−16 is mapped to a hidden dimension of 
+
+192 . Two convolutional layers capture local spatial structure, while one self-attention layer models interactions between distant regions. FiLM modulation conditions the intermedi-ate features on the noise level σ and pooled text embedding. 0 5 10 15 20 25    
+
+> latency per image (s)
+> PixelDiT (p16)
+> MOSAIK (light) MOSAIK (moderate) MOSAIK (aggressive) MOSAIK (maximal)
+> PiT fl oor
+> 21.8 s
+> 18.0 s 12.2 s 9.8 s 8.4 s
+> DiT Blocks pixel_decoder(PiT) other
+
+Figure 6: Measured per-image latency on consumer level GPU. Speedups are relative to PixelDiT at uniform p16 .
+
+Module GFLOPs Max ↓
+
+p16 p32 p64 Dynamic Compute (Scales with Patch) 
+
+DiT_mlp_img 2227 557 139 33% 
+
+DiT_attn 1662 151 27 26% 
+
+DiT_qkv_img 834 209 52 12% 
+
+DiT_proj_img 282 70 18 4% 
+
+Fixed Overhead (Independent) 
+
+pixel_decoder (PiT) 1068 1068 1068 0% 
+
+text_stream 245 245 245 0% Token/Head/Embed/adaLN 13 13 13 0% Upsampler 0 19 19 0% 
+
+Table 4: Per-module GFLOPs breakdown across patch sizes. Max ↓ denotes each dynamic module’s contribution to the FLOPs reduction from p16 to p64 .The layout predictor contains approximately 1.63 M param-eters and is trained offline using AdamW with a constant learning rate of 2 × 10 −3, a batch size of 256 , and gradient clipping at 1.0. We validate every 500 optimization steps and select the checkpoint with the highest Spearman rank correla-tion between predicted and measured regional damage. Rank correlation, not absolute regression error, is what determines behavior: the allocator reads the damage map only through the ordering of candidate refinements by score per added to-ken, which is unchanged by a global rescaling. Because all inputs and targets are precomputed, predictor training does not require the diffusion backbone or text encoder. 
+
+One Damage Score Suffices for Both Refinements. 
+
+Across 11 ,600 denoising states from 232 trajectories cov-ering 120 prompts, we measure for every region the error reduction from refining p64 to p32 and p32 to p16 , and com-pare these gains with the shared damage score. The shared score closely matches both transition-specific rankings, with mean within-state Spearman correlations of 0.928 and 0.869 
+
+and 95% prompt-cluster bootstrap confidence intervals of 
+
+[0 .922 , 0.933] and [0 .856 , 0.881] . Ranking all eligible re-finements by gain per added token, the shared and transition-Configuration TR (%) GenEval S.Obj T.Obj Cnt Pos C.Att DPG                                                              
+
+> Baseline (Anchor)
+> Stage 2 (Uniform p16 )00.73 0.99 0.90 0.55 0.47 0.59 83 .4
+> Aggressive: ∼60% FLOPs reduction
+> Stage 2 (Uniform p32 )75 0.73 1.00 0.92 0.55 0.45 0.59 83 .2
+> MOSAIK (ours) 74 0.74 0.99 0.88 0.58 0.47 0.61 83 .1
+> Maximal: ∼70% FLOPs reduction
+> Stage 2 (Uniform p64 )94 0.65 0.97 0.78 0.47 0.42 0.49 80 .2
+> MOSAIK (ours) 83 0.74 0.99 0.88 0.57 0.48 0.63 82 .5
+> MOSAIK (ours) + TeaCache 74 0.74 0.99 0.88 0.59 0.47 0.62 82 .8
+> MOSAIK (ours) + TaylorSeer 74 0.74 0.99 0.87 0.58 0.47 0.63 82 .8
+
+Table 5: MOSAIK vs. Uniform Patchification. TR (%) is the token reduction relative to p16 (4096 tokens). All rows use the same Stage 2 checkpoint. Bold marks the best GenEval and DPG score within each compute tier. specific orderings remain strongly correlated at ρ = 0 .856 
+
+with a 95% confidence interval of [0 .834 , 0.876] . Replac-ing the shared score with the measured transition-specific gains reduces the remaining regional error relative to the p16 
+
+teacher by only 3.2% to 4.7% across token budgets of 15% 
+
+to 55% .
+
+## B Further Analysis 
+
+B.1 From FLOPs to Wall-Clock 
+
+Whole-Denoiser Accounting. To prevent overstated effi-ciency gains, we report FLOPs over the entire denoiser rather than over the dynamic components alone, as in Table 1 of the main paper. Table 4 separates the two. The four image-side DiT modules scale with patch size and account for the whole reduction, whereas the text stream, the token-embedding, output-head and adaLN blocks, and the PiT pixel decoder do not: the decoder emits the full 1024 × 1024 image irrespec-tive of the token layout. This fixed block, 21% of a p16 step, caps any purely spatial method at a 75% reduction. Our ac-counting is therefore conservative: a mixed layout averaging 
+
+∼1024 tokens is a 60% whole-denoiser reduction, but would read as 79% against the image stream alone. That account-ing also charges MOSAIK for the conditioning upsampler that lifts coarse tokens back onto the p16 grid the decoder requires, 19 GFLOPs at p32 and p64 and none at p16 .
+
+The FLOPs Savings Hold at Runtime. We measure end-to-end latency on a single consumer-level GPU at 1024 px (50 steps, batch one), with the adapter merged into the base weights so MOSAIK runs as one fused forward pass. Fusing the adapter does not inflate the p16 baseline ( 21 .78 against 
+
+21 .75 s). The overheads of varying patch size (token pack-ing, positional remapping, layout construction) do not con-sume the savings: at equal token count an irregular layout is as cheap as a uniform one ( 114 .0 against 113 .2 ms). The damage-guided predictor and allocator add 2.0 ms per step, and packing stay at or below 1.0 s in every configuration (Fig. 6). MOSAIK is faster than uniform p16 at every budget, reaching 2.59 × at the maximal one: 8.4 s against 21 .8 s, while peak memory stays flat at 9.7 GB. MOSAIK is therefore a latency and throughput optimization rather than a memory one. 
+
+Where the Residual Gap Goes. At the maximal budget the DiT blocks accelerate 5.40 × while the fixed block of Table 4 becomes a hard wall-clock floor (Fig. 6): of the 8.4 s, 
+
+3.1 s is DiT blocks, 4.4 s is the decoder, and 0.94 s is packing, remapping, and scheduling overhead. On consumer hardware the decoder, rather than memory bandwidth, is the binding constraint. 
+
+B.2 Quality Under Compression 
+
+Limits of Uniform Patchification. Uniform patch scaling offers only three operating points, and the step between them is large. All uniform baselines in Table 5 run the same Stage 2 checkpoint as MOSAIK and differ from it only in that the layout is fixed instead of heterogeneous, so any difference between those rows is attributable to the layout alone. At the aggressive tier, uniform p32 is a strong configuration. It is also an isolated one: transitioning to the next discrete scale 
+
+p64 , where GenEval falls to 0.65 and DPG to 80 .2, against 
+
+0.73 and 83 .2 for uniform p32 . The failure is compositional rather than per-object. Single-object accuracy is still 0.97 at 
+
+p64 , while counting and attribute binding fall, because a 64 -pixel patch merges the spatial detail that separates one entity from another. The drop also shows that both benchmarks still resolve layout quality in the compression range these methods operate in, and are not saturated. MOSAIK holds 
+
+0.74 GenEval at both tiers by spending its fine patches where predicted damage is highest and its coarse budget elsewhere (Section C). 
+
+Fidelity of the Generated Image. Prompt-alignment benchmarks score whether the requested objects, counts and attributes are present; they do not resolve texture. We there-fore score every configuration with DISTS and LPIPS, two reference-based perceptual distances, against the image the full-compute PixelDiT produces from the same initial noise. The comparison is per image rather than distributional: it measures how far a configuration moves the specific image the uncompressed model would have produced. Table 6 re-ports the result. MOSAIK at a 68% reduction sits at 0.194 Configuration FLOPs Red. (%) DISTS ↓ LPIPS ↓                                       
+
+> Homogeneous Patchification
+> Stage 2 (Uniform p16 )00.146 0.349
+> Stage 2 (Uniform p32 )63 0.173 0.371
+> Stage 2 (Uniform p64 )75 0.249 0.446
+> Temporal Patchification
+> DDiT 14 0.217 0.446
+> DDiT 21 0.227 0.453
+> DDiT 30 0.237 0.460
+> DDiT 58 0.258 0.485
+> Heterogeneous Patchification
+> MOSAIK 52 0.163 0.374
+> MOSAIK 62 0.178 0.381
+> MOSAIK 68 0.194 0.392
+> MOSAIK + TeaCache 80 0.198 0.391
+> MOSAIK + TaylorSeer 80 0.194 0.392
+
+Table 6: Perceptual Distance to Full-Compute Baseline. 
+
+DISTS and LPIPS are measured against the original PixelDiT image generated from the same initial noise. FLOPs Red. is the whole-denoiser reduction. DISTS and 0.392 LPIPS, closer to the full-compute target than DDiT at a 14% reduction ( 0.217 and 0.446 ), and every MOSAIK row is below every DDiT row on both metrics. The zero-coarsening row bounds what the coarsening itself costs. Stage 2 (Uniform p16 ) performs no coarsening and is already at 0.146 DISTS, because the adaptation training has moved the weights away from the original model; MOSAIK at a 52% reduction is at 0.163 . At a moderate budget, most of the measured distance is therefore the price of the adap-tation training rather than of the heterogeneous layout, and the distance grows gradually from there as the budget rises. Composing a step cache extends the budget without moving the distance: MOSAIK with TeaCache and with TaylorSeer, both at 80% , sit at 0.198 /0.391 and 0.194 /0.392 , level with MOSAIK alone at 68% . What a heterogeneous layout buys is the interval of budgets, not the single point inside it that uniform coarsening happens to reach. 
+
+B.3 Spatial Headroom in PDM 
+
+Matched Coarsening Protocol. We compare the percep-tual cost of coarsening a VAE latent against the cost of coars-ening native pixels on n = 500 real images from DIV2K and FFHQ. This is a data-side measurement: no generator, checkpoint or training recipe enters it. Coarsening is 4× area-pooling followed by bilinear upsampling, applied to each representation so that both sides are matched to the same effective pixel footprint per pooled unit and to the same post-coarsening token count. The denominator is the LPIPS dam-age from native pixel coarsening, measured against the origi-nal un-coarsened image. The numerator is the LPIPS damage from latent coarsening, measured against the VAE’s own un-coarsened reconstruction rather than against the original, so that the VAE’s inherent reconstruction error is excluded and Flux (16ch) SD3 (16ch) Z-Image (16ch) SDXL (4ch) 0.0× 0.5× 1.0× 1.5× 2.0×  
+
+> Latent-to-Pixel Damage Ratio (LPIPS @  4 ×  Coarsening)  1.68× 1.91× 1.68× 1.89× Equal Damage Baseline ( 1.0 × )
+
+Figure 7: Latent-to-Pixel Coarsening Damage Ratio. Each bar is the LPIPS damage from coarsening a VAE latent divided by the damage from coarsening native pixels at a matched factor. The dashed line marks the equal-damage reference at 1.0. only the coarsening is charged. That choice favours the latent side, since a latent diffusion model pays the reconstruction error in any case. 
+
+Preservation of Spatial Headroom. Coarsening the latent costs between 1.68 × and 1.91 × more perceptual damage than coarsening native pixels at a matched factor, for every autoencoder tested (Fig. 7). The gap holds for a 4-channel autoencoder (SDXL) as well as three 16-channel ones (Flux, SD3, Z-Image), so it is not specific to one latent channel width or one vendor’s autoencoder recipe. The reason is that the encoder has already spent the image’s spatial redundancy once, on a fixed grid and identically everywhere, before gen-eration begins: by the time a latent exists, little slack remains for a second pooling step to absorb, whereas the same opera-tion applied to raw pixels still finds redundancy to consume. Adaptive coarsening can only pay off where redundancy is still available to spend, which is why MOSAIK operates in pixel space. 
+
+B.4 Ablation of the Damage-Guided Layout Predictor 
+
+Every row of Table 7 shares the Stage 2 multi-patch generator, the damage-guided layout predictor that refines regions in decreasing order of score per added token until the budget is exhausted. The ceiling in the table is the measured oracle: the same allocator driven by the exact damage instead of the predic-tion, which requires a uniform p16 and a p64 forward pass at every denoising step to measure the deviation before a layout is committed. It is a measurement device rather than a deployable allocator, since by construction it costs more per step than running the uncoarsened model, whereas the predictor and its allocator together add 2.0 ms per step (Sec-tion B.1). At neither budget does the oracle’s advantage over Aggressive Maximal Allocator Score GenEval 95% CI ( ∆) GenEval 95% CI ( ∆)                    
+
+> Compute Ceiling (Costly Oracle)
+> Measured Oracle 0.7430 [−0.61 ,+2 .05] 0.7345 [−1.40 ,+1 .09]
+> Control Allocators
+> Content-blind (Random) 0.7118 [−3.97 ,−0.89] 0.7026 [−4.90 ,−1.84]
+> Inverted Damage 0.6586 [−9.66 ,−5.86] 0.6628 [−9.14 ,−5.53]
+> MOSAIK (ours) 0.7360 0.7361
+
+Table 7: Ablation of Allocator Mechanisms. Rows differ only in the score used to rank regions for refinement. Bracketed values are 95% confidence intervals on the GenEval difference ( ∆) from MOSAIK, in points. the predictor differ significantly from zero: the confidence interval on the gap is consistent with no true advantage, and bounds it at no more than +2 .05 points at the aggressive budget and +1 .09 points at the maximal one. The two control allocators together show that the pre-dicted damage ranking carries genuine information. The first, content-blind allocation, ignores the ranking entirely and serves as the random-baseline reference line; MOSAIK outperforms it by a statistically clear margin at both bud-gets. The second control inverts the ranking, sending coarse patches to the regions of highest predicted damage rather than the lowest, and this inverted allocator scores several points below random. If the ranking carried no information, invert-ing it would still perform like random in expectation, since inverting noise is still noise. Scoring reliably below random therefore shows that the predicted damage ranks regions by their true sensitivity to coarsening, and in the correct direc-tion. MOSAIK is also the only method in the table whose score stays unchanged across both budgets. 
+
+## C Detailed Allocation Behavior and Methodology 
+
+C.1 Token Allocation Metric and Mask Generation 
+
+Every method in Fig. 5 is scored against region masks taken from one shared reference image: the uniform p16 image generated for that prompt from the same initial noise. A seg-mentation model (Mask2Former) is applied to that reference image alone, and the resulting masks are reused unchanged for MOSAIK and DDiT so the area shares are identical across methods. The alternative, segmenting each method on its own image, would reward failure: a policy that coarsened the sub-ject away would shrink its own subject mask and raise its own score. Relative allocation is the ratio of a region’s token share to its area share, so it equals exactly 1.0× whenever a region receives tokens in proportion to its area, which is guaranteed whenever the patch size is spatially uniform within a step, regardless of how it varies across steps. DDiT is exactly this case: it changes patch size only over time, applying one uniform patch size to the entire frame at each step, so every region receives tokens in exact proportion to its area at every step. DDiT’s relative allocation of 1.0× in every region is therefore not an empirical result but a direct mathematical consequence of being spatially uniform. The same identity applies to a uniform p32 layout, which is competitive on quality at moderate budgets (Section B.2) but is likewise pinned to 1.0× everywhere, since it too never varies patch size across space and so cannot express region-dependent allocation. The three regions are read from the same 16 × 16 
+
+grid of cells on which the layout itself is decided, so relative-allocation values are directly comparable across methods. 
+
+C.2 Spatial Allocation Dynamics Under Budget Constraints 
+
+Fig. 5 covers FLOPs reductions of 20% , 50% , 60% , and 70% .Allocation is stratified inside the subject itself: at the 60% 
+
+reduction the subject boundary receives 2.17 × its area share and the subject interior 1.80 ×, while the background receives 
+
+0.8×. Predicted damage therefore varies across a single se-mantic object, and the layout is decided at a finer granular-ity than a subject-against-background split. Across the same sweep the fraction of the background assigned coarse patches rises from 22% to 75% , which is where the tokens kept for the subject come from. At the 70% reduction the realized subject premium eases slightly, while the premium theoretically attainable from the ground-truth mask keeps rising across the sweep, from 1.33 ×
+
+to 5.31 ×. The easing is therefore not the budget forbidding further concentration. Subject share is also not the quantity the allocator maximizes: it applies the refinement with the highest predicted damage per added token until the budget is spent. The easing does not appear as a loss in prompt adherence, since MOSAIK holds 0.74 on GenEval at that tier while uniform p64 falls to 0.65 (Table 5). 
+
+## D DDiT Reimplementation Details 
+
+DDiT is evaluated on the Stage 1 checkpoint from which Stage 2 is initialized (Section A.1): it selects one patch size per denoising step, so it only executes uniform p16 , p32 ,and p64 , the family Stage 1 is trained on (similar to DDiT training). Table 5 instead runs those uniform layouts on MO-SAIK’s own Stage 2 weights. Everything else is matched: PixelDiT backbone at 1024 px, rank-32 LoRA, Gemma-2 text encoder, 50 -step Euler sampler, guidance value, and fixed seeds. The schedule follows the published form: third-order finite difference of the sample trajectory, aggregated spatially at percentile ρ = 0 .4, thresholded at sensitivity τ . Because τ
+
+sets a sensitivity and not a budget, we swept it and report each run’s realized reduction from its own per-step token counts. MOSAIK’s lead is larger at every tighter tier.                     
+
+> FLOPs Red. (%) τDDiT MOSAIK Lead
+> 21.2 0.002634 0.6936 0.7385 +4.5 49.3 0.003026 0.6650 0.7408 +7.6 61.5 0.003449 0.6500 0.7360 +8.6 70.0 0.007304 0.6546 0.7361 +8.2
+
+Table 8: DDiT Reimplementation. τ is the schedule’s sen-sitivity threshold and FLOPs Red. the reduction each run realized. DDiT and MOSAIK columns are overall GenEval; Lead is MOSAIK minus DDiT, in points. PixelDiT DDiT TeaCache MOSAIK 
+
+Prompt: A red fox curled asleep on fresh snow, sharp fur detail, soft winter light Prompt: A red maple leaf resting on still re fl ective water Prompt: A dense tropical rainforest canopy seen from above 
+
+Prompt: A cobblestone European alley with ivy-covered walls 
+
+Prompt: A wolf portrait staring into the camera, dark plain background Figure 8: Additional Text-to-Image Generation Results. The caption beneath each image shows the corresponding generation prompt. MOSAIK against DDiT and TeaCache, all at a 70% FLOPs reduction. The base model with the highest FLOPs is included as a reference. PixelDiT MOSAIK (with 50% FLOPs reduction) Figure 9: Additional Text-to-Image Generation Results. The caption beneath each image shows the corresponding generation prompt. PixelDiT vs MOSAIK at 50% FLOPs reduction.

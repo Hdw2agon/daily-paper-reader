@@ -1,0 +1,590 @@
+Title: FiRe: Fixed-Noise Refinement for Visual Counterfactual Explanations
+
+URL Source: https://arxiv.org/pdf/2608.08664v1
+
+Published Time: Tue, 11 Aug 2026 01:18:26 GMT
+
+Number of Pages: 18
+
+Markdown Content:
+> arXiv:2608.08664v1 [cs.CV] 9 Aug 2026
+
+ZENG ET AL.: FIRE 1
+
+# FiRe: Fixed-Noise Refinement for Visual Counterfactual Explanations 
+
+Yan Zeng 
+
+s242652@dtu.dk 
+
+Changlu Guo 
+
+chagu@dtu.dk 
+
+Oskar Kristoffersen 
+
+ofhkr@dtu.dk 
+
+Anders Nymark Christensen 
+
+anym@dtu.dk 
+
+Morten Rieger Hannemose 
+
+mohan@dtu.dk 
+
+Anders Bjorholm Dahl 
+
+abda@dtu.dk 
+
+Department of Applied Mathematics and Computer Science, Technical University of Denmark 
+
+Abstract 
+
+Visual counterfactual explanations aim to change classifier decisions through realistic and localized edits while preserving decision-irrelevant content. Existing DDPM-based methods typically perform classifier-guided editing along a long reverse denoising tra-jectory. The changing noise levels make semantic editability and spatial control difficult to balance, and the editable state is noisy, whereas the target classifier is trained on clean images. As a result, these methods require either costly recursive denoising or low-quality one-step estimates to obtain classifier-facing clean images. We propose FiRe, a Fixed-noise Refinement framework for visual counterfactual explanations. Rather than following a reverse denoising trajectory, FiRe maps the input to a fixed noise level and iteratively refines the noisy state at that level. To provide clean images for classifier guid-ance, FiRe first adapts Pixel Mean Flow to visual counterfactual explanation, enabling direct clean-image prediction from noisy states. To make fixed-noise refinement produce minimal and localized counterfactual edits, FiRe introduces three FiRe-specific controls: a dynamic dual-mask strategy, adaptive guidance, and early stopping, which determine where edits accumulate, which changes become visible, and when refinement stops. Ex-periments on five tasks across three datasets show that, compared with the strongest recent baseline, FiRe achieves about 3 × faster online inference and 8 × fewer FLOPs while obtaining comparable or state-of-the-art counterfactual quality. The project page is available at https://yan-zen9.github.io/FiRe/. 
+
+# 1 Introduction 
+
+Recent visual counterfactual explanation methods [10, 18, 36] often use Denoising Diffusion Probabilistic Models (DDPMs) [7, 15] because they provide strong image priors. However, 
+
+© 2026. The copyright of this document resides with its authors. It may be distributed unchanged freely in print or electronic forms. 2 ZENG ET AL.: FIRE Original  Image     
+
+> DiME MaskDiME
+> FID = 18.10 FID = 2.51 FID = 1.98
+> FiRe
+> 𝑁𝑜 𝑆𝑚𝑖𝑙𝑒 → 𝑆𝑚𝑖𝑙𝑒 𝐷𝑖𝑓𝑓𝑒𝑟𝑒𝑛𝑐𝑒 𝑀𝑎𝑝
+> Saliency Map
+
+Figure 1: Compared with DiME and MaskDiME, FiRe produces a cleaner and more localized edit that better matches the classifier-relevant region. most DDPM-based methods [2, 11, 19, 44] perform classifier-guided editing along a reverse denoising trajectory [15], so counterfactual optimization must proceed through a sequence of changing noise levels. This introduces a timestep-dependent conflict between semantic editability and spatial control. At early high-noise stages, the model has a larger editing space, but the resulting changes are difficult to localize and may affect irrelevant regions. At later low-noise stages, the state is closer to the clean image domain, but the editable space has become more restricted and may no longer support the required semantic change. Another key difficulty is the mismatch between the noisy editable state and the clean-image input required by the classifier. Since the target classifier is trained on clean images, DDPM-based methods must construct a classifier-facing clean image from the noisy state at each guidance step. One line of methods obtains a more reliable clean image through recursive denoising [2, 19], but at a high computational cost; another line uses a one-step clean-image estimate [11, 44], which is more efficient but produces lower-quality images. As a result, these two types of methods are respectively limited by speed and quality bottlenecks. To address these limitations, we introduce FiRe, reformulating visual counterfactual ex-planation as fixed-noise refinement. Instead of editing along a DDPM reverse trajectory with changing noise levels, FiRe maps the input image to an intermediate noise level and itera-tively refines the noisy state at this level. This design preserves sufficient semantic editability for the target change while reducing the uncontrolled global changes caused by high-noise editing. To obtain high-quality classifier-facing clean images efficiently, FiRe uses Pixel Mean Flow (PMF) [34] as a clean-image predictor. PMF directly predicts a clean image from a noisy state in one step, avoiding both recursive denoising and low-quality one-step estimates. In this way, FiRe addresses the timestep-varying editability of reverse-trajectory editing and alleviates the speed and quality bottlenecks of existing DDPM-based methods. While fixed-noise refinement and PMF address the trajectory and clean-image predic-tion issues, visual counterfactual explanations still require localized and minimal edits. This requires a spatial control mechanism designed for the fixed-noise setting. Existing DDPM-based masks [11, 44] operate along changing noise levels, where each timestep is usually ZENG ET AL.: FIRE 3
+
+visited only once and the mask controls the current update. In FiRe, all updates occur at the same fixed noise level, so counterfactual changes are accumulated through multiple refine-ment steps in the same noisy state. Edit regions discovered early should therefore remain active later; otherwise, partially formed counterfactual changes may be weakened or inter-rupted. FiRe further separates noisy-state control from clean-image visibility control. The noisy state is the optimization space and should keep sufficient editable regions for accumu-lating target-related changes, whereas the clean image is both the classifier-facing input and the final output, whose visible changes should be more tightly constrained. FiRe therefore uses one mask to control where changes accumulate in the noisy state and another to con-trol which changes become visible in the clean image. This preserves edit continuity while limiting unnecessary visible modifications. Even with dynamic dual-mask spatial control, FiRe still needs to regulate the guidance strength. Since all updates act on the same fixed noisy state, a fixed guidance strength can ei-ther over-edit easy samples after the target decision has already been reached, or be too weak for hard samples to cross the decision boundary. Fixed-noise refinement therefore requires update strength to adapt to both refinement progress and target confidence. FiRe uses adap-tive guidance and early stopping: the guidance is strengthened when more editing is needed, weakened as the target decision is approached, and stopped once the counterfactual is suffi-cient to change the classifier decision. This prevents redundant changes from accumulating in the fixed noisy state and leads to more localized counterfactual edits. The main contributions of this work are summarized as follows: 1. We present FiRe, a framework that reformulates classifier-guided visual counterfactual explanation as iterative refinement at a single intermediate noise level, avoiding the timestep-dependent limitations of DDPM reverse trajectories. 2. FiRe enables direct classifier-facing clean-image prediction from noisy states without recursive denoising or low-quality one-step estimates. 3. We design controls tailored to fixed-noise refinement, including a dynamic dual-mask strategy, adaptive guidance, and early stopping, to preserve edit continuity and reduce unnecessary visible modifications, as shown in Figure 1. 4. We evaluate FiRe on five tasks across CelebA, CelebA-HQ, and CheXpert. Compared with the strongest recent baseline, FiRe achieves about 3 × faster inference and 8 ×
+
+fewer FLOPs, with comparable or state-of-the-art counterfactual quality. 
+
+# 2 Related Work 
+
+## 2.1 Explainable Artificial Intelligence and Visual Counterfactuals 
+
+Explainable artificial intelligence (XAI) [1] aims to make model decisions more understand-able. A common setting is post-hoc explanation, where a pretrained model is explained with-out modifying its architecture. Representative methods include saliency maps [39, 40, 41], concept attribution [26], model distillation [13], and counterfactual explanations [10, 43]. This work focuses on visual counterfactual explanations (VCEs) [10, 18, 36], which generate alternative images that change a classifier’s prediction while preserving decision-irrelevant content. In contrast to saliency maps and concept attribution, which identify regions or 4 ZENG ET AL.: FIRE 
+
+concepts associated with a prediction, VCEs explain a decision by showing what visual evi-dence would need to change for the classifier to predict a different class. Sparse image-space VCEs [3] optimize a sparse perturbation model with Auto-Frank-Wolfe to produce localized counterfactuals without relying on a generative reverse trajectory. 
+
+## 2.2 Diffusion-Based Visual Counterfactual Explanations 
+
+Visual counterfactual explanations have been studied with several classes of generative mod-els, including VAEs [23], GANs [6, 12, 28], and diffusion models [2, 11, 19, 44]. Among them, diffusion-based methods have become a major direction because of their strong im-age priors. DiME [19] first introduced DDPM reverse denoising trajectories [15] into visual counterfactual explanation by guiding the reverse process with target-class classifier gradi-ents, which allows the method to produce realistic counterfactual images. This formulation, however, is computationally expensive, since obtaining classifier-facing clean images from noisy states usually requires recursive denoising. ACE [20] instead starts from adversarial optimization and uses a diffusion prior to regularize the perturbation, making the resulting changes more semantic. Its main effect is to improve semantic plausibility, rather than to reduce the high computational cost of DiME. FastDiME [44] addresses this efficiency bot-tleneck by using Tweedie’s formula [35] to obtain a one-step clean-image estimate from the DDPM noise prediction. This reduces computation, but the estimated clean image may introduce approximation errors, which can lead to unstable classifier gradients, and spatial locality remains limited. RCSB [42] improves locality by restricting edits to selected re-gions, but fixed-region constraints may not adapt well to the changing semantic evidence during counterfactual generation. MaskDiME [11] further addresses this issue by construct-ing adaptive masks from classifier gradients, allowing the edited region to change with the classifier evidence. Despite these improvements in efficiency and locality, these methods still operate within the DDPM reverse denoising trajectory [2, 19], where changing noise levels make semantic editability and spatial control difficult to balance. They also depend on either costly recur-sive denoising [2, 19] or lower-quality one-step approximations [11, 44] to obtain the clean images required by the classifier. FiRe addresses this shared limitation by replacing reverse-trajectory editing with fixed-noise refinement and using Pixel Mean Flow (PMF) [34] to directly predict classifier-facing clean images. Other recent visual counterfactual explanation methods build on latent diffusion mod-els [37], such as LDCE [8]; use text guidance, such as TiME [21] and PRISM [27]; or in-troduce additional supervision, such as DeCoDEx [9]. These methods are relevant to visual counterfactual explanation, but they rely on additional conditioning or supervision beyond the target classifier. Therefore, they are not directly comparable baselines in this work. 
+
+## 2.3 Clean-Image Prediction and Pixel Mean Flow 
+
+Flow Matching [29] provides a generative modeling framework that differs from the DDPM reverse process by learning a vector field between noise and data distributions. Rectified Flow [30, 31] further straightens the transport trajectories, enabling accurate generation with fewer integration steps. InstaFlow [32] demonstrates one-step generation, while rectified-flow priors [45] extend this family to image inversion and editing. Although these methods reduce sampling cost or provide efficient editing priors, they are not designed for classifier-ZENG ET AL.: FIRE 5𝑋 𝑐𝑓          
+
+> 𝑋 𝑘 Forward
+> Noising
+> 𝑋 0
+> 𝑍 𝑡
+> 0𝑍 𝑡 𝑘 𝑍 𝑡 𝑘+1
+> 𝜂 𝑘 𝛻 𝑍 𝑡
+> 𝑘 ℒ𝑗𝑜𝑖𝑛𝑡
+> 𝑘
+> Classifier
+> 𝑷 𝒕𝒂𝒓𝒈𝒆𝒕 𝑿 𝒌+𝟏
+> ≥ 𝑷 𝒇𝒍𝒊𝒑
+> or 𝒌 + 𝟏 = 𝑲
+> 𝑋 𝑘+1
+> One -step
+> Predict
+> Iterative refinement: k = 0, 1, ..., K-1 Blending Operation
+> Main Trajectory
+> Update Path
+> Early Stop / Finish
+> 𝑀 𝑜𝑟𝑖𝑔 𝑘
+> 𝑀 ℎ𝑎𝑟𝑑 𝑘 = 𝑀 𝑜𝑟𝑖𝑔 𝑘 ∪ 𝑀 ℎ𝑎𝑟𝑑 𝑘−1 𝑀 𝑠𝑜𝑓𝑡
+> 𝑘
+> No Smile
+> Smile
+
+Figure 2: Overview of FiRe. Given an input image X0, FiRe first applies forward noising to obtain a fixed noisy state Z0 
+
+> t
+
+, then performs iterative refinement at the same noise level. At step k, the current clean image Xk is used to compute a classifier-driven original mask 
+
+Mk 
+
+> orig
+
+and adaptive gradient guidance ηk∇Zkt Lk
+
+> joint
+
+. FiRe derives two masks from Mk
+
+> orig
+
+: a union hard mask Mk
+
+> hard
+
+, which keeps previously selected edit regions active and constrains the noisy-state update from Zkt to Zk+1 
+
+> t
+
+, and a soft mask Mk
+
+> soft
+
+, which constrains the clean-image update from the updated noisy state Zk+1 
+
+> t
+
+to the next clean image Xk+1. Refinement stops once ptarget (Xk+1) ≥ Pflip , or after K updates. guided VCE and do not specify how to change a classifier decision, localize the resulting edit, or determine when refinement should stop. Pixel Mean Flow (PMF) [34] directly predicts a clean image from a noisy input in one step. This property is particularly suitable for classifier-guided VCE, where the classifier requires a clean image at every refinement step to compute reliable guidance. PMF itself remains a general image generation model rather than a counterfactual explanation method. FiRe integrates PMF clean-image prediction into fixed-noise refinement and introduces dy-namic dual masking, adaptive guidance, and early stopping to produce localized and target-valid counterfactual explanations. 
+
+# 3 Method 
+
+## 3.1 Overview 
+
+Figure 2 shows the FiRe pipeline. Given an input image X0, FiRe first maps it to a fixed noisy state Z0 
+
+> t
+
+and then applies K refinement updates at the same noise level. At each step, PMF predicts a clean classifier-facing image. The classifier then provides attribution for spatial control and gradients for counterfactual guidance. Here, the refinement index k denotes an optimization step at fixed t, rather than a DDPM timestep. This fixed-noise formulation requires two types of control: spatial control to keep repeated edits localized, and guidance control to stop unnecessary updates once the target decision has been reached. 6 ZENG ET AL.: FIRE 
+
+## 3.2 Problem Setup 
+
+Let X0 ∈ [−1, 1]C×H×W be the input image and f be the fixed classifier to be explained. We denote the target label as ytarget . The goal is to generate a counterfactual image Xcf that changes the classifier prediction toward ytarget while preserving decision-irrelevant content from X0. The target probability is defined as 
+
+ptarget (X) = softmax ( f (X)) ytarget . (1) 
+
+## 3.3 Fixed-Noise State Initialization 
+
+FiRe first perturbs the input image to a fixed noise level [34]: 
+
+Z0 
+
+> t
+
+= ( 1 − t)X0 + tZ 0, Z0 ∼ N (0, I). (2) The noise level t is kept fixed throughout refinement. Thus, k indexes refinement updates rather than DDPM timesteps, and the sequence Z0 
+
+> t
+
+, Z1 
+
+> t
+
+, . . . , ZKt is not a reverse denoising trajectory. Each update modifies the noisy state at the same noise level, and a clean image is predicted from the updated noisy state for classifier guidance and output. We use X0 as the initial clean image for constructing the first original mask. 
+
+## 3.4 Classifier-Driven Dynamic Dual Mask 
+
+Given the current clean image Xk, FiRe uses the target classifier to locate the region most relevant to the decision. Let sytarget ( f (X)) denote the target-class logit. We compute the attribution heatmap as 
+
+Ak = ∇X sytarget ( f (X)) X=Xk . (3) In practice, we use SmoothGrad [41] to stabilize Ak by averaging gradients over N perturbed copies of Xk in parallel. FiRe then selects the top-ρ salient region, keeps the largest con-nected component, and dilates it to obtain the current binary original mask: 
+
+Ck = LCC (Top ρ (Ak)) , Mk 
+
+> orig
+
+= Dilate (Ck; r). (4) Here, ρ denotes the saliency ratio, so Top ρ (Ak) selects the top ρ fraction of pixels with the largest attribution values, and r is the dilation radius. The fixed-noise setting calls for a mask design different from MaskDiME [11]. MaskDiME builds dynamic masks along a DDPM reverse denoising trajectory, where both the editable state and noise level change at each timestep. FiRe instead performs all refinement steps at the same noise level. If the update uses only the current mask Mk
+
+> orig
+
+, regions selected in ear-lier steps may be removed after mask recomputation, weakening or interrupting accumulated counterfactual changes. To avoid this, FiRe uses a union hard mask as edit memory: 
+
+Mk 
+
+> hard
+
+= Mk−1hard ∪ Mk
+
+> orig
+
+, M−1hard = 0. (5) This mask is applied only to the noisy-state update, so previously selected regions remain editable throughout refinement. The binary mask Mk 
+
+> orig
+
+is not directly suitable for the visible clean image, since hard boundaries can introduce artifacts after blending. FiRe therefore constructs a feathered soft mask: 
+
+Mk 
+
+> soft
+
+= Feather (Mk
+
+> orig
+
+; w), (6) ZENG ET AL.: FIRE 7
+
+where w controls the smooth transition around the mask boundary. The soft mask is used only for clean-image blending and final visible modification control. In this design, the hard mask determines where counterfactual edits accumulate in the noisy state, while the soft mask determines which generated changes are visible in the classifier-facing clean image. 
+
+## 3.5 Adaptive Guidance for Fixed-Noise Refinement 
+
+FiRe computes classifier guidance on the current clean image Xk. The objective combines target classification with content-preserving regularization: 
+
+Lk 
+
+> joint
+
+= λcls Lcls (Xk, ytarget ) + λperc Lperc (Xk, X0) + λtv Ltv (Xk, X0). (7) The classification loss moves the counterfactual toward the target class, while the percep-tual [22, 46] and TV losses [38] discourage changes to decision-irrelevant content and sup-press local artifacts. The loss is evaluated on the clean image, but the update is applied to the noisy state. FiRe obtains the noisy-state gradient by backpropagating the clean-image gradient through the PMF [34] prediction and clean-image update path: 
+
+∇Zkt Lk 
+
+> joint
+
+=
+
+ ∂ Xk
+
+∂ Zkt
+
+⊤
+
+∇Xk Lk
+
+> joint
+
+. (8) Here, ∂ Xk/∂ Zkt follows the computation path that forms the current clean image from the current noisy state, including PMF prediction and soft-mask clean-image update. We nor-malize ∇Zkt Lk 
+
+> joint
+
+before applying it to the noisy-state update, and use the same notation below for simplicity. A fixed guidance strength is not well suited to fixed-noise refinement. Since FiRe repeat-edly updates the same noisy state at one noise level, a large constant step can over-edit easy samples after they are already close to the target decision, while a small constant step may fail on harder samples. We therefore use a confidence-progress adaptive guidance scale: 
+
+ηk =
+
+
+
+0.3η, k = 0,
+
+η kK−1
+
+h Pflip −ptarget (Xk)
+
+> Pflip
+
+i 
+
+> +
+
+, k > 0, (9) where η is the base guidance scale, K is the maximum number of refinement updates, Pflip is the target-probability threshold, and [·]+ clamps negative values to zero. The progress term increases guidance as refinement proceeds, while the confidence term suppresses guidance as the target probability approaches the stopping threshold. This makes the update stronger only when needed and reduces unnecessary refinement after the counterfactual becomes suf-ficient. The adaptive update is applied under the union hard mask: 
+
+Zk+1 
+
+> t
+
+= Mk 
+
+> hard
+
+⊙
+
+
+
+Zkt − ηk∇Zkt Lk
+
+> joint
+
+
+
++ ( 1 − Mk
+
+> hard
+
+) ⊙ Z0 
+
+> t
+
+. (10) Inside Mk
+
+> hard
+
+, FiRe accumulates counterfactual changes. Outside the mask, the noisy state is reset to the initial noisy reference Z0 
+
+> t
+
+, preventing drift in decision-irrelevant regions. 8 ZENG ET AL.: FIRE 
+
+Algorithm 1 FiRe: Fixed-noise Counterfactual Refinement 
+
+Require: X0, classifier f , target label ytarget , PMF predictor Gθ , noise level t, update budget 
+
+K, threshold Pflip 
+
+Ensure: Counterfactual image Xcf  
+
+> 1:
+
+Sample Z0 ∼ N (0, I) and initialize Z0 
+
+> t
+
+← (1 − t)X0 + tZ 0 
+
+> 2:
+
+Initialize M−1hard ← 0 and set X0 as the initial clean image  
+
+> 3:
+
+for k = 0, . . . , K − 1 do  
+
+> 4:
+
+Compute attribution Ak from the current clean image Xk 
+
+> 5:
+
+Build original mask Mk 
+
+> orig
+
+using Eq. (4)  
+
+> 6:
+
+Update union hard mask Mk 
+
+> hard
+
+← Mk−1hard ∪ Mk 
+
+> orig
+> 7:
+
+Build soft mask Mk 
+
+> soft
+
+using Eq. (6)  
+
+> 8:
+
+Compute Lk 
+
+> joint
+
+on Xk and obtain ∇Zkt Lk 
+
+> joint
+> 9:
+
+Compute ηk using Eq. (9)  
+
+> 10:
+
+Update Zkt under Mk 
+
+> hard
+
+to obtain Zk+1 
+
+> t
+
+using Eq. (10)  
+
+> 11:
+
+Predict bXk+1 ← Gθ (Zk+1 
+
+> t
+
+,t) 
+
+> 12:
+
+Blend bXk+1 with X0 using Mk 
+
+> soft
+
+to obtain Xk+1 using Eq. (12)  
+
+> 13:
+
+if ptarget (Xk+1) ≥ Pflip then  
+
+> 14:
+
+return Xcf ← Xk+1 
+
+> 15:
+
+end if  
+
+> 16:
+
+end for  
+
+> 17:
+
+return Xcf ← XK
+
+## 3.6 Clean-Image Update and Early Stopping 
+
+After the noisy-state update, the PMF predictor Gθ maps the updated noisy state to a clean prediction: ˆXk+1 = Gθ (Zk+1 
+
+> t
+
+,t). (11) FiRe then blends this prediction with the original image X0 using the soft mask: 
+
+Xk+1 = Mk 
+
+> soft
+
+⊙ ˆXk+1 + ( 1 − Mk
+
+> soft
+
+) ⊙ X0. (12) Inside the soft-mask region, Xk+1 takes content from the PMF prediction bXk+1; outside the mask, it keeps the original image X0. The target classifier evaluates this classifier-facing clean image. If ptarget (Xk+1) ≥ Pflip , FiRe returns Xcf = Xk+1; otherwise, refinement continues until the budget K is reached. Algorithm 1 summarizes the full fixed-noise refinement procedure. 
+
+# 4 Experiments 
+
+## 4.1 Experimental Setup 
+
+Datasets and tasks. We evaluate FiRe on three datasets and five binary counterfactual ex-planation tasks, covering both natural and medical images. For face counterfactuals, we use the aligned 128 × 128 CelebA dataset [33] and the 256 × 256 CelebA-HQ dataset [24], and evaluate two attributes on each dataset: Smile and Age . For medical counterfactuals, we use CheXpert [17] and evaluate the Pacemaker shortcut-removal task following FastDiME [44], extended to 512 × 512 resolution. ZENG ET AL.: FIRE 90 10 20 30 40 50 60 70 80 90 100 
+
+> Total Time (min)
+> 0.5 1.0 1.5 2.0 2.5 3.0 3.5 4.0 4.5
+> FID
+
+(a)          
+
+> FiRe MaskDiME FastDiME FastDiME-2 FastDiME-2+ ACE-1
+> ACE-2
+> RCSB
+> GPU Peak Memory
+> 1 GB 5 GB 12 GB
+> 010 20 30 40 50
+> Total PFLOPs
+> FiRe RCSB MaskDiME FastDiME FastDiME-2 FastDiME-2+ ACE- 1
+> ACE- 2
+
+(b) 
+
+> 1.28 9.31 10.09 16.14 36.44 39.31 43.22 43.22
+
+Figure 3: Computational cost and generation quality comparison for generating 1,000 counterfactual explanations on the CelebA Smile task (Batch size = 5). (a) Practical infer-ence time vs. FID, with marker size indicating peak GPU memory. (b) Theoretical compute comparison (Total Peta Floating-Point Operations). FiRe achieves the lowest FID while re-quiring only 6.37 min and 1.28 PFLOPs, yielding 3 × faster inference and 8 × fewer FLOPs than the strongest recent baseline, MaskDiME. 
+
+Evaluation metrics. For CelebA and CelebA-HQ, we follow the ACE evaluation proto-col [20] and report metrics for realism, identity preservation, sparsity, semantic plausibility, decision consistency, and validity. FID [14] and sFID [20] evaluate realism, with sFID re-ducing the influence of unchanged regions. FVA and FS [4] measure identity preservation and face similarity, while MNAC [36] measures non-target attribute changes. CD [19] evalu-ates consistency with training-data attribute correlations, COUT [25] measures the classifier-output transition, and FR measures whether the counterfactual is classified as the target class. For CheXpert, we follow the FastDiME medical-image protocol [44] and report FID [14], L1, MAD, S 3 [5], and FR. 
+
+Comparison protocol. For CelebA and CelebA-HQ, we use the same target classifiers and evaluation setup as ACE [20], and train only the unconditional PMF model required by FiRe. All methods are evaluated with the same data split, target tasks, classifier, and metrics. For CheXpert, directly comparable 512 × 512 results and pretrained classifier weights are not available, so we rerun all baselines using the same 512 × 512 data split, the same DenseNet-121 target classifier [16], and the same evaluation protocol as FastDiME [44]. The trained classifier is fixed and used for all counterfactual methods. For the efficiency comparison, we rerun all methods on the CelebA Smile task using the same hardware, batch size, classifier, and input resolution. Runtime includes counterfactual generation, classifier guidance, and mask construction when applicable, but excludes data loading, disk I/O, and image saving. We report the average runtime over the same set of test images for all methods. 
+
+Implementation details. Unless otherwise specified, FiRe uses the same fixed-noise re-finement setting across tasks. We set the fixed noise level to t = 0.4, use one PMF solver step, and allow at most K = 15 refinement updates. The early stopping threshold is Pflip = 0.85, and the base guidance scale is η = 0.02. We use mean-absolute gradient normalization and SmoothGrad with N = 20 parallel perturbed copies to stabilize attribution. The loss weights are λcls = 1.0, λperc = 0.20, and λtv = 0.01. Masks are built from target-only gradient at-10 ZENG ET AL.: FIRE 
+
+Table 1: Quantitative comparison on CelebA across the Smile and Age tasks. Best and second-best results are highlighted in bold and underline, respectively.                                                                                                                                                                                                                 
+
+> CelebA
+> Method FID ↓sFID ↓FVA ↑FS ↑MNAC ↓CD ↓COUT ↑FR(%) ↑
+> Smile
+> DiVE [36] 29.4 –97.3 –––––DiVE 100 [36] 36.8 –73.4 –4.63 2.34 ––STEEX [18] 10.2 –96.9 –4.11 –––DiME [19] 3.17 4.89 98.3 0.73 3.72 2.30 0.53 97.2 ACE [20] ℓ11.27 3.97 99.9 0.87 2.94 1.73 0.78 97.6 ACE ℓ2[20] 1.90 4.56 99.9 0.87 2.77 1.56 0.62 84.3 FastDiME [44] 4.18 6.13 99.8 0.76 3.12 1.91 0.45 99.0 FastDiME-2 [44] 3.33 5.49 99.9 0.77 3.06 1.89 0.44 99.4 FastDiME-2+ [44] 3.24 5.23 99.9 0.79 2.91 2.02 0.41 98.9 RCSB [42] 2.98 4.79 100.0 0.91 2.24 2.78 0.87 99.8 MaskDiME [11] 0.71 3.29 100.0 0.91 2.78 2.41 0.87 100.0
+> FiRe (Ours) 0.69 3.14 100.0 0.93 1.71 2.59 0.57 100.0
+> Age
+> DiVE [36] 33.8 –98.2 –4.58 –––DiVE 100 [36] 39.9 –52.2 –4.27 –––STEEX [18] 11.8 –97.5 –3.44 –––DiME [19] 4.15 5.89 95.3 0.67 3.13 3.27 0.44 99.0 ACE [20] ℓ11.45 4.12 99.6 0.78 3.20 2.94 0.72 96.2 ACE ℓ2[20] 2.08 4.62 99.6 0.80 2.94 2.82 0.56 77.5 FastDiME [44] 4.82 6.76 99.2 0.74 2.65 3.80 0.36 98.6 FastDiME-2 [44] 4.04 6.01 99.6 0.75 2.63 3.80 0.37 99.3 FastDiME-2+ [44] 3.60 5.59 99.7 0.77 2.44 3.76 0.32 98.7 RCSB [42] 2.94 4.94 99.9 0.88 2.14 3.63 0.81 99.3 MaskDiME [11] 0.77 3.33 100.0 0.83 2.22 3.21 0.79 100.0
+> FiRe (Ours) 0.73 3.29 100.0 0.85 1.81 3.43 0.54 100.0
+
+tribution with dilation radius r = 2 and feathering width w = 3. The top saliency ratio ρ
+
+is task-specific: 5% for CelebA Smile , 12% for CelebA Age , and 20% for CheXpert Pace-maker . FiRe requires training one PMF model per dataset, whereas several DDPM-based baselines reuse available pretrained weights. PMF training takes 20.4, 12.0, and 8.5 wall-clock hours on CelebA, CelebA-HQ, and CheXpert, respectively, using four AMD MI250X GPUs with 64 GB memory each. 
+
+## 4.2 Efficiency Comparison 
+
+Figure 3 compares practical runtime, theoretical compute, and generation quality on the CelebA Smile task. All methods are rerun under the same batch size and hardware set-ting, and runtime measures only counterfactual generation from input images to generated counterfactuals, excluding data loading, disk I/O, and image saving. As shown in Fig. 3(a), FiRe lies in the lower-left region, achieving the best quality-efficiency trade-off among the compared methods. It generates 1,000 counterfactual explanations in 6.37 minutes while also obtaining the lowest FID. Fig. 3(b) shows the same trend in theoretical compute. For generating 1,000 counterfactual explanations, FiRe requires only 1.28 PFLOPs for the full classifier-guided counterfactual generation process, including refinement updates, classifier guidance, and mask construction when applicable. This is about 8 × fewer FLOPs than the strongest recent DDPM-based baseline, MaskDiME. This efficiency comes from the fixed-noise refinement design. DDPM-based baselines [11, ZENG ET AL.: FIRE 11 
+
+Table 2: Quantitative comparison on CelebA-HQ across the Smile and Age tasks. Best and second-best results are highlighted in bold and underline, respectively. 
+
+CelebA-HQ 
+
+Method FID ↓ sFID ↓ FVA ↑ FS ↑ MNAC ↓ CD ↓ COUT ↑ FR(%) ↑
+
+Smile 
+
+DiVE [36] 107.0 – 35.7 – 7.41 – – –STEEX [18] 21.9 – 97.6 – 5.27 – – –DiME [19] 18.10 27.7 96.7 0.67 2.63 1.82 0.65 97.0 ACE [20] ℓ1 3.21 20.2 100.0 0.89 1.56 2.61 0.55 95.0 ACE ℓ2 [20] 6.93 22.0 100.0 0.84 1.87 2.21 0.60 95.0 LDCE-txt[8] 13.6 25.8 99.1 0.76 2.44 1.68 0.34 –TiME [21] 10.98 23.8 96.6 0.79 2.97 2.32 0.63 97.1 RCSB [42] 3.04 20.0 100.0 0.93 1.22 3.22 0.83 98.9 MaskDiME [11] 2.51 18.1 100.0 0.94 1.41 2.67 0.69 99.4 FiRe (Ours) 1.98 17.9 100.0 0.93 1.22 2.58 0.62 99.9 
+
+Age 
+
+DiVE [36] 107.5 – 32.3 – 6.76 – – –STEEX [18] 26.8 – – – 5.63 – – –DiME [19] 18.7 27.8 95.0 0.66 2.10 4.29 0.56 97.0 ACE [20] ℓ1 5.31 21.7 99.6 0.81 1.53 5.40 0.40 95.0 ACE ℓ2 [20] 16.4 28.2 99.6 0.77 1.92 4.21 0.53 95.0 LDCE-txt[8] 14.2 25.6 98.0 0.73 2.12 4.02 0.33 –TiME [21] 20.9 32.9 79.3 0.63 4.19 4.29 0.31 89.9 RCSB [42] 4.92 27.3 100.0 0.96 1.47 5.16 0.80 99.4 MaskDiME [11] 4.43 19.4 100.0 0.88 1.82 4.67 0.63 99.6 FiRe (Ours) 3.02 18.6 100.0 0.90 1.46 4.72 0.55 99.9 
+
+19, 20, 44] perform classifier-guided editing along reverse diffusion trajectories or require repeated clean-image estimation for guidance. In contrast, FiRe refines the noisy state at a fixed noise level and obtains a clean image from the PMF predictor at each refinement step. Its cost therefore scales with a small number of refinement updates rather than the length of a diffusion trajectory. Although FiRe is not the most memory-light method, its peak GPU memory remains moderate, and the reduction in runtime and FLOPs is substantial. 
+
+## 4.3 Quantitative Comparison 
+
+Table 3: Quantitative comparison on CheXpert for the Pacemaker task. Best and second-best results are highlighted in bold and underline, respectively.                                    
+
+> CheXpert
+> Method FID ↓L1 ↓MAD ↑S3↑FR(%) ↑
+> Pacemaker
+> DiME [19] 51.7 0.088 0.956 0.902 97.7 FastDiME [44] 29.2 0.058 0.959 0.927 100.0
+> FastDiME-2 [44] 30.4 0.069 0.953 0.881 99.8 FastDiME-2+ [44] 38.1 0.052 0.954 0.928 100.0
+> MaskDiME [11] 22.0 0.053 0.954 0.935 100.0
+> FiRe (Ours) 17.4 0.049 0.960 0.951 100.0
+
+Tables 1, 2, and 3 compare FiRe with prior VCE methods on face counterfac-tuals and a medical shortcut-removal task. Overall, FiRe improves real-ism and edit sparsity while maintain-ing high counterfactual validity, show-ing that the efficiency gain from fixed-noise refinement does not come at the cost of counterfactual quality or expla-nation reliability. On CelebA and CelebA-HQ, Ta-bles 1 and 2 evaluate FiRe on four face counterfactual tasks at 128 × 128 and 256 × 256 resolutions. FiRe achieves the best FID and sFID on all four tasks, indicating stronger realism under the reported distributional metrics. It also obtains the best or tied-12 ZENG ET AL.: FIRE 
+
+best MNAC in most cases while maintaining near-perfect FR, showing that FiRe reaches the target decision with fewer unintended changes to non-target attributes. This supports local-ized refinement in avoiding unnecessary global edits. On CelebA-HQ, FiRe keeps FVA and FS competitive with the strongest baselines, suggesting that improved FID and sFID do not come with a clear drop in identity-related similarity metrics. FiRe does not achieve the best CD or COUT on all face tasks. This behavior is consistent with its design goal. Once the classifier reaches the target decision, FiRe keeps the earliest sufficient counterfactual rather than continuing refinement to maximize classifier output shift or induce stronger correlated attribute changes. Lower COUT in some cases should therefore be read together with FiRe’s high FR, low FID/sFID, and low MNAC: the method favors sufficient and localized counter-factual edits over stronger but potentially less sparse decision shifts. A direct ablation of this trade-off is provided in Table 4. On CheXpert, Table 3 evaluates FiRe on the Pacemaker shortcut-removal task at 512 ×
+
+512 resolution. FiRe achieves the best FID, L1, MAD, and S 3, and reaches 100 .0% FR. These results indicate that FiRe can remove the shortcut cue while preserving pixel-level closeness and representation-level similarity. This suggests that the edit remains localized to the classifier-relevant cue. This experiment does not claim broad medical generalization, but shows that FiRe transfers well to a higher-resolution medical shortcut-removal setting with a data distribution different from face images. 
+
+## 4.4 Qualitative Comparison 
+
+Figure 4 shows a qualitative comparison between FiRe and MaskDiME [11], the strongest recent DDPM-based baseline, across CelebA, CelebA-HQ, and CheXpert. On CelebA, both methods change the target attributes for No Smile → Smile and Young → Old . FiRe pro-duces these changes with less visible alteration to non-target facial regions, such as hair, background, and overall face structure. On CelebA-HQ, FiRe similarly keeps the global face layout and fine facial details closer to the original image for Smile → No Smile and Old →
+
+Young , where unnecessary edits are easier to observe. On CheXpert, FiRe removes the high-lighted pacemaker cue while leaving fewer residual artifacts around the edited region and preserving nearby anatomical structure. These examples align with the quantitative results in Tables 1, 2, and 3, where FiRe improves realism and sparsity metrics while maintaining high counterfactual validity, supporting its goal of sufficient but localized editing. 
+
+## 4.5 Ablation Study 
+
+Table 4 and Figure 5 provide a progressive ablation of FiRe on the CelebA-HQ Smile task. Instead of removing individual components from the full model, we start from a basic PMF-guided counterfactual generator and progressively build toward the complete fixed-noise re-finement framework. This design examines whether PMF clean-image prediction [34] is sufficient to support classifier-guided counterfactual explanation, whether fixed-noise refine-ment is more suitable than a DDPM-based reverse denoising trajectory [15, 19], and whether FiRe-specific masking, adaptive guidance, and early stopping are necessary for localized and sufficient counterfactual edits. PMF-One Step uses PMF only as a clean-image interface and applies classifier guidance once. Although PMF can directly provide a classifier-facing clean image, one-step guidance is insufficient to reliably cross the classifier decision boundary, leading to a low flip rate and weak smile edits in the qualitative results. PMF-Reverse performs 15-step refinement ZENG ET AL.: FIRE 13 Original  Image 
+
+> MaskDiME
+> FiRe
+
+CelebA 
+
+CelebA  - HQ 
+
+CheXpert     
+
+> 𝑁𝑜 𝑆𝑚𝑖𝑙𝑒 → 𝑆𝑚𝑖𝑙𝑒 𝑌𝑜𝑢𝑛𝑔 → 𝑂𝑙𝑑 𝑆𝑚𝑖𝑙𝑒 → 𝑁𝑜 𝑆𝑚𝑖𝑙𝑒 𝑂𝑙𝑑 → 𝑌𝑜𝑢𝑛𝑔 𝑃𝑎𝑐𝑒𝑚𝑎𝑘𝑒𝑟 → 𝑁𝑜 𝑃𝑎𝑐𝑒𝑚𝑎𝑘𝑒𝑟
+
+Figure 4: Qualitative comparison. FiRe makes the target change while preserving non-target facial regions and surrounding anatomical structure better than MaskDiME. along a DDPM-based reverse denoising trajectory and substantially improves the flip rate. However, the difference map in Figure 5 shows that its modifications are not limited to the mouth region, but also spread strongly to hair and background regions. In contrast, PMF-Fixed keeps all 15 refinement steps at the same noise level. Compared with PMF-Reverse, it achieves better quantitative results and produces edits that are more concentrated around the mouth, indicating that fixed-noise refinement is a more suitable formulation for PMF-guided counterfactual explanation. Nevertheless, PMF-Fixed still lacks explicit spatial control, so its modifications remain insufficiently clean and localized. We then analyze the spatial and refinement controls in FiRe. Adding a MaskDiME-style mask [11] constrains the edited region to some extent and improves locality, but the qual-itative results still show scattered artifacts. This suggests that trajectory-style masking is not fully compatible with fixed-noise refinement. FiRe therefore adopts a dual-mask design: the hard-mask memory constrains noisy-state updates and preserves edited regions across refinement steps, while the soft visible mask controls the clean-image update and smooths visible edit boundaries. This design improves realism, sparsity, and validity, and further con-centrates the edit around the mouth region. Finally, we isolate early stopping by comparing FiRe with a variant that retains adaptive guidance but disables early stopping. Without early stopping, COUT increases from 0.62 to 0.66 while FR remains 99.9%, but FID degrades from 1.98 to 3.47, sFID from 17.9 to 22.9, and MNAC from 1.22 to 1.42. This result indi-cates that early stopping favors the earliest sufficient counterfactual, improving realism and sparsity at the cost of a modest reduction in classifier-output transition. Tables 5 and 6 analyze sensitivity to the refinement budget K and fixed noise level t.Increasing K from 5 to 15 improves both realism and validity, while increasing it to 20 gives no additional benefit and slightly degrades proximity. In practice, over 99% of successful counterfactuals stop within the first 10 refinement steps, and only a very small fraction re-quires the remaining steps. This suggests that K = 15 is a safe maximum budget, while early 14 ZENG ET AL.: FIRE 
+
+Table 4: Main ablation on CelebA-HQ Smile. We compare three PMF-based formula-tions: one-step guidance, reverse refinement with changing noise levels, and fixed-noise refinement. We then compare fixed-noise refinement using a MaskDiME-style mask, the FiRe mask, adaptive guidance without early stopping, and the full FiRe model with early stopping.                                                                 
+
+> Method FID ↓sFID ↓FVA ↑FS ↑MNAC ↓CD ↓COUT ↑FR(%) ↑
+> PMF-One Step 27.36 38.5 97.4 0.84 3.40 3.11 0.67 41.6 PMF-Reverse 31.49 42.2 97.4 0.85 2.98 2.94 0.81 90.3 PMF-Fixed 19.13 30.2 100.0 0.88 2.95 2.41 0.88 95.2 PMF-Fixed w/ MaskDiME Mask 9.41 25.8 99.8 0.88 1.75 2.63 0.71 93.7 PMF-Fixed w/ FiRe Mask 3.97 24.3 100.0 0.91 1.44 2.46 0.68 99.9 FiRe w/o Early Stop 3.47 22.9 100.0 0.91 1.42 2.51 0.66 99.9 FiRe 1.98 17.9 100.0 0.93 1.22 2.58 0.62 99.9
+
+Table 5: Sensitivity analysis of the refine-ment budget K on CelebA-HQ Smile .                         
+
+> KFID ↓sFID ↓FS ↑MNAC ↓FR(%) ↑
+> 53.60 21.4 0.91 1.41 92.4 10 2.44 19.5 0.93 1.28 99.1 15 1.98 17.9 0.93 1.22 99.9 20 2.25 18.6 0.90 1.25 99.9
+
+Table 6: Sensitivity analysis of the fixed noise level t on CelebA-HQ Smile .                         
+
+> tFID ↓sFID ↓FS ↑MNAC ↓FR(%) ↑
+> 0.2 5.37 23.8 0.87 3.16 87.3 0.4 1.98 17.9 0.93 1.22 99.9 0.6 8.14 27.2 0.91 1.78 99.9 0.8 12.6 35.1 0.87 2.20 99.9
+
+stopping avoids unnecessary refinement after the target decision is reached. For the noise level, a small value such as t = 0.2 preserves the input but limits editability, resulting in a lower flip rate. Larger values such as t = 0.6 and t = 0.8 keep high validity but degrade real-ism and sparsity. We therefore use K = 15 and t = 0.4 as the default setting, which provides the best overall trade-off. 
+
+# 5 Conclusion 
+
+We introduced FiRe, a fixed-noise refinement framework for classifier-guided visual counter-factual explanation. FiRe shows that counterfactual editing does not need to be formulated as guidance along changing DDPM reverse timesteps. Instead, refining a noisy state at a single intermediate noise level provides a more stable balance between semantic editabil-ity and spatial control. Together with PMF-based clean-image prediction, this formulation enables efficient and reliable classifier-facing guidance without relying on recursive denois-ing or lower-quality one-step DDPM estimates. FiRe further uses dynamic dual masking, adaptive guidance, and early stopping to keep edits localized and sufficient. Experiments on CelebA, CelebA-HQ, and CheXpert demonstrate that FiRe substantially improves efficiency while preserving competitive or state-of-the-art counterfactual quality. These results show fixed-noise refinement as a promising direction for efficient and controllable diffusion-based visual explanations. ZENG ET AL.: FIRE 15 𝑁𝑜 𝑆𝑚𝑖𝑙𝑒 → 𝑆𝑚𝑖𝑙𝑒 
+
+> Difference Map
+> PMF-One step
+> w/ MaskDiME Mask
+> w/ FiRe Mask
+> FiRe
+> PMF-Fixed
+> PMF-Reverse
+> Saliency Map
+> Original Image
+
+Figure 5: Qualitative ablation on the CelebA-HQ Smile task. PMF-One Step produces an insufficient target edit. PMF-Reverse strengthens the smile edit but introduces broad modifications across the face and background, while PMF-Fixed reduces part of this drift but remains spatially diffuse. A MaskDiME mask improves locality but still leaves scattered changes and artifacts. The FiRe mask concentrates the edit around the mouth, but spatial control alone cannot prevent overly strong updates within the selected region. Adaptive guidance and early stopping further regulate the refinement process, reducing unnecessary modifications while preserving a valid smile counterfactual. 
+
+# References 
+
+[1] Alejandro Barredo Arrieta, Natalia Díaz-Rodríguez, Javier Del Ser, Adrien Bennetot, Siham Tabik, Alberto Barbado, Salvador García, Sergio Gil-López, Daniel Molina, Richard Benjamins, Raja Chatila, and Francisco Herrera. Explainable artificial intelli-gence (XAI): Concepts, taxonomies, opportunities and challenges toward responsible AI. Information Fusion , 58:82–115, 2020. [2] Maximilian Augustin, Valentyn Boreiko, Francesco Croce, and Matthias Hein. Diffu-sion visual counterfactual explanations. Advances in Neural Information Processing Systems , 35:364–377, 2022. [3] Valentyn Boreiko, Maximilian Augustin, Francesco Croce, Philipp Berens, and Matthias Hein. Sparse visual counterfactual explanations in image space. In German Conference on Pattern Recognition , pages 133–148, 2022. [4] Qiong Cao, Li Shen, Weidi Xie, Omkar M. Parkhi, and Andrew Zisserman. VGGFace2: A dataset for recognising faces across pose and age. In Proceedings of the IEEE Inter-national Conference on Automatic Face and Gesture Recognition , pages 67–74, 2018. [5] Xinlei Chen and Kaiming He. Exploring simple Siamese representation learning. In 
+
+Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recogni-tion , pages 15750–15758, 2021. [6] Yunjey Choi, Minje Choi, Munyoung Kim, Jung-Woo Ha, Sunghun Kim, and Jaegul Choo. StarGAN: Unified generative adversarial networks for multi-domain image-to-image translation. In Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition , pages 8789–8797, 2018. [7] Prafulla Dhariwal and Alexander Nichol. Diffusion models beat GANs on image syn-thesis. Advances in Neural Information Processing Systems , 34:8780–8794, 2021. 16 ZENG ET AL.: FIRE 
+
+[8] Karim Farid, Simon Schrodi, Max Argus, and Thomas Brox. Latent diffusion counter-factual explanations. arXiv preprint arXiv:2310.06668 , 2023. [9] Nima Fathi, Amar Kumar, Brennan Nichyporuk, Mohammad Havaei, and Tal Arbel. DeCoDEx: Confounder detector guidance for improved diffusion-based counterfactual explanations. arXiv preprint arXiv:2405.09288 , 2024. [10] Yash Goyal, Ziyan Wu, Jan Ernst, Dhruv Batra, Devi Parikh, and Stefan Lee. Counter-factual visual explanations. In International Conference on Machine Learning , pages 2376–2384, 2019. [11] Changlu Guo, Anders Nymark Christensen, Anders Bjorholm Dahl, and Morten Rieger Hannemose. MaskDiME: Adaptive masked diffusion for precise and efficient visual counterfactual explanations. arXiv preprint arXiv:2602.18792 , 2026. [12] Zhenliang He, Wangmeng Zuo, Meina Kan, Shiguang Shan, and Xilin Chen. AttGAN: Facial attribute editing by only changing what you want. IEEE Transactions on Image Processing , 28(11):5464–5478, 2019. [13] Lisa Anne Hendricks, Zeynep Akata, Marcus Rohrbach, Jeff Donahue, Bernt Schiele, and Trevor Darrell. Generating visual explanations. In European Conference on Com-puter Vision , pages 3–19, 2016. [14] Martin Heusel, Hubert Ramsauer, Thomas Unterthiner, Bernhard Nessler, and Sepp Hochreiter. GANs trained by a two time-scale update rule converge to a local Nash equilibrium. Advances in Neural Information Processing Systems , 30, 2017. [15] Jonathan Ho, Ajay Jain, and Pieter Abbeel. Denoising diffusion probabilistic models. 
+
+Advances in Neural Information Processing Systems , 33:6840–6851, 2020. [16] Gao Huang, Zhuang Liu, Laurens Van Der Maaten, and Kilian Q. Weinberger. Densely connected convolutional networks. In Proceedings of the IEEE Conference on Com-puter Vision and Pattern Recognition , pages 4700–4708, 2017. [17] Jeremy Irvin, Pranav Rajpurkar, Michael Ko, Yifan Yu, Silviana Ciurea-Ilcus, Chris Chute, Henrik Marklund, Behzad Haghgoo, Robyn Ball, Katie Shpanskaya, et al. CheXpert: A large chest radiograph dataset with uncertainty labels and expert com-parison. In Proceedings of the AAAI Conference on Artificial Intelligence , volume 33, pages 590–597, 2019. [18] Paul Jacob, Éloi Zablocki, Hedi Ben-Younes, Mickaël Chen, Patrick Pérez, and Matthieu Cord. STEEX: Steering counterfactual explanations with semantics. In Eu-ropean Conference on Computer Vision , pages 387–403, 2022. [19] Guillaume Jeanneret, Loïc Simon, and Frédéric Jurie. Diffusion models for counterfac-tual explanations. In Proceedings of the Asian Conference on Computer Vision , pages 858–876, 2022. [20] Guillaume Jeanneret, Loïc Simon, and Frédéric Jurie. Adversarial counterfactual visual explanations. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pages 16425–16435, 2023. ZENG ET AL.: FIRE 17 
+
+[21] Guillaume Jeanneret, Loïc Simon, and Frédéric Jurie. Text-to-image models for coun-terfactual explanations: A black-box approach. In Proceedings of the IEEE/CVF Winter Conference on Applications of Computer Vision , pages 4757–4767, 2024. [22] Justin Johnson, Alexandre Alahi, and Li Fei-Fei. Perceptual losses for real-time style transfer and super-resolution. In European Conference on Computer Vision , pages 694–711, 2016. [23] Shalmali Joshi, Oluwasanmi Koyejo, Been Kim, and Joydeep Ghosh. xGEMs: Gener-ating exemplars to explain black-box models. arXiv preprint arXiv:1806.08867 , 2018. [24] Tero Karras, Timo Aila, Samuli Laine, and Jaakko Lehtinen. Progressive growing of GANs for improved quality, stability, and variation. arXiv preprint arXiv:1710.10196 ,2017. [25] Saeed Khorram and Li Fuxin. Cycle-consistent counterfactuals by latent transforma-tions. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pages 10203–10212, 2022. [26] Been Kim, Martin Wattenberg, Justin Gilmer, Carrie Cai, James Wexler, Fernanda Vié-gas, et al. Interpretability beyond feature attribution: Quantitative testing with concept activation vectors (TCAV). In International Conference on Machine Learning , pages 2668–2677, 2018. [27] Amar Kumar, Anita Kriz, Mohammad Havaei, and Tal Arbel. PRISM: High-resolution and precise counterfactual medical image generation using language-guided stable dif-fusion. arXiv preprint arXiv:2503.00196 , 2025. [28] Oran Lang, Yossi Gandelsman, Michal Yarom, Yoav Wald, Gal Elidan, Avinatan Has-sidim, William T. Freeman, Phillip Isola, Amir Globerson, Michal Irani, et al. Explain-ing in style: Training a GAN to explain a classifier in StyleSpace. In Proceedings of the IEEE/CVF International Conference on Computer Vision , pages 693–702, 2021. [29] Yaron Lipman, Ricky T. Q. Chen, Heli Ben-Hamu, Maximilian Nickel, and Matt Le. Flow matching for generative modeling. arXiv preprint arXiv:2210.02747 , 2022. [30] Qiang Liu. Rectified flow: A marginal preserving approach to optimal transport. arXiv preprint arXiv:2209.14577 , 2022. [31] Xingchao Liu, Chengyue Gong, and Qiang Liu. Flow straight and fast: Learning to generate and transfer data with rectified flow. In International Conference on Learning Representations , 2023. [32] Xingchao Liu, Xiwen Zhang, Jianzhu Ma, Jian Peng, and Qiang Liu. InstaFlow: One step is enough for high-quality diffusion-based text-to-image generation. In Interna-tional Conference on Learning Representations , 2024. [33] Ziwei Liu, Ping Luo, Xiaogang Wang, and Xiaoou Tang. Deep learning face attributes in the wild. In Proceedings of the IEEE International Conference on Computer Vision ,pages 3730–3738, 2015. 18 ZENG ET AL.: FIRE 
+
+[34] Yiyang Lu, Susie Lu, Qiao Sun, Hanhong Zhao, Zhicheng Jiang, Xianbang Wang, Tianhong Li, Zhengyang Geng, and Kaiming He. One-step latent-free image generation with Pixel Mean Flows. arXiv preprint arXiv:2601.22158 , 2026. [35] Herbert E. Robbins. An empirical Bayes approach to statistics. In Breakthroughs in Statistics: Foundations and Basic Theory , pages 388–394. Springer, 1992. [36] Pau Rodriguez, Massimo Caccia, Alexandre Lacoste, Lee Zamparo, Issam Laradji, Laurent Charlin, and David Vazquez. Beyond trivial counterfactual explanations with diverse valuable explanations. In Proceedings of the IEEE/CVF International Confer-ence on Computer Vision , pages 1056–1065, 2021. [37] Robin Rombach, Andreas Blattmann, Dominik Lorenz, Patrick Esser, and Björn Om-mer. High-resolution image synthesis with latent diffusion models. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pages 10684– 10695, 2022. [38] Leonid I. Rudin, Stanley Osher, and Emad Fatemi. Nonlinear total variation based noise removal algorithms. Physica D: Nonlinear Phenomena , 60(1–4):259–268, 1992. [39] Ramprasaath R. Selvaraju, Michael Cogswell, Abhishek Das, Ramakrishna Vedantam, Devi Parikh, and Dhruv Batra. Grad-CAM: Visual explanations from deep networks via gradient-based localization. In Proceedings of the IEEE International Conference on Computer Vision , pages 618–626, 2017. [40] Karen Simonyan, Andrea Vedaldi, and Andrew Zisserman. Deep inside convolutional networks: Visualising image classification models and saliency maps. arXiv preprint arXiv:1312.6034 , 2013. [41] Daniel Smilkov, Nikhil Thorat, Been Kim, Fernanda Viégas, and Martin Wattenberg. SmoothGrad: Removing noise by adding noise. arXiv preprint arXiv:1706.03825 ,2017. [42] Bartlomiej Sobieski, Jakub Grzywaczewski, Bartłomiej Sadlej, Matthew Tivnan, and Przemyslaw Biecek. Rethinking visual counterfactual explanations through region con-straint. In International Conference on Learning Representations , 2025. [43] Sandra Wachter, Brent Mittelstadt, and Chris Russell. Counterfactual explanations without opening the black box: Automated decisions and the GDPR. Harvard Journal of Law & Technology , 31(2):841–887, 2017. [44] Nina Weng, Paraskevas Pegios, Eike Petersen, Aasa Feragen, and Siavash Bigdeli. Fast diffusion-based counterfactuals for shortcut removal and generation. In European Con-ference on Computer Vision , pages 338–357, 2024. [45] Xiaofeng Yang, Cheng Chen, Xulei Yang, Fayao Liu, and Guosheng Lin. Text-to-image rectified flow as plug-and-play priors. In International Conference on Learning Representations , 2025. [46] Richard Zhang, Phillip Isola, Alexei A. Efros, Eli Shechtman, and Oliver Wang. The unreasonable effectiveness of deep features as a perceptual metric. In Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition , pages 586–595, 2018.

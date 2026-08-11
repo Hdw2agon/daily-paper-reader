@@ -6,52 +6,58 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-08-10
-- 运行时间：2026-08-10 21:02:50 UTC
+- 最新运行日期：2026-08-11
+- 运行时间：2026-08-11 20:13:57 UTC
 - 运行状态：成功
-- 本次总论文数：10
-- 精读区：4
-- 速读区：6
+- 本次总论文数：12
+- 精读区：1
+- 速读区：11
 
 ### 今日简报（AI）
-今日精选 10 篇视觉前沿论文，深度攻克精准图像编辑与即插即用修复难题。
-重点推荐 MaskFlow 实现的无缝区域编辑，以及基于局部不确定性引导的高效图像恢复方案。
-建议优先研读两篇 9 分佳作，并关注流匹配（Flow Matching）在图像翻译与生成中的最新应用。
-- 详情：[/202608/10/README](/202608/10/README)
+今日聚焦文档修复与图像增强，深度解析 DocPure 统一框架等 12 篇前沿进展。
+重点关注 DocPure 提出的无提示词统一文档修复技术，以及结合结构光与扩散模型的低光及水下图像增强新方案。
+建议优先研读 DocPure 的小波调制架构，探索如何利用退化感知技术提升复杂环境下的视觉质量。
+- 详情：[/202608/11/README](/202608/11/README)
 
 ### 精读区论文标签
-1. [MaskFlow: Precise, Consistent and Seamless Regional Image Editing](/202608/10/2608.06929v1-maskflow-precise-consistent-and-seamless-regional-image-editing)  
-   标签：评分：9.0/10、query:q1
-   evidence：区域图像编辑与无缝集成
-2. [Local Epistemic Uncertainty Guided Active Sampling for Plug-and-play Diffusive Image Restoration](/202608/10/2608.06981v1-local-epistemic-uncertainty-guided-active-sampling-for-plug-and-play-diffusive-image-restoration)  
-   标签：评分：9.0/10、query:q3
-   evidence：即插即用的扩散图像修复
-3. [HazeSpikeMamba: Coupling Spiking-Inspired and State-Space Features for Self-Supervised Real-World Dehazing](/202608/10/2608.06886v1-hazespikemamba-coupling-spiking-inspired-and-state-space-features-for-self-supervised-real-world-dehazing)  
+1. [DocPure: Prompt-Free Unified Document Restoration via Degradation-Aware Structure-Guided Wavelet Modulation](/202608/11/2608.09536v1-docpure-prompt-free-unified-document-restoration-via-degradation-aware-structure-guided-wavelet-modulation)  
    标签：评分：8.0/10、query:q7
-   evidence：自监督真实世界图像修复
-4. [Degradation-Aware Prompt Learning with Cross-Modal Compensation for Adverse Weather Removal](/202608/10/2608.06939v1-degradation-aware-prompt-learning-with-cross-modal-compensation-for-adverse-weather-removal)  
-   标签：评分：8.0/10、query:q7
-   evidence：图像修复与恶劣天气去除
+   evidence：统一文档修复与退化感知自编码器
 
 ### 速读区论文标签
-1. [Energy-Guided Flow Matching](/202608/10/2608.05811v2-energy-guided-flow-matching)  
-   标签：评分：7.0/10、query:q4
-   evidence：用于图像合成的生成模型
-2. [UniCycleFlow: Bidirectional Unpaired Image Translation with a Shared Rectified Flow](/202608/10/2608.06784v1-unicycleflow-bidirectional-unpaired-image-translation-with-a-shared-rectified-flow)  
-   标签：评分：7.0/10、query:q2
-   evidence：使用修正流在无配对监督的情况下进行非配对图像翻译
-3. [Bend the Basics: Degradation-Aware Deformable Tokenization for All-in-One Image Restoration](/202608/10/2608.06832v1-bend-the-basics-degradation-aware-deformable-tokenization-for-all-in-one-image-restoration)  
+1. [Learning Structural Illumination for Unsupervised Low-light Enhancement](/202608/11/2608.08153v1-learning-structural-illumination-for-unsupervised-low-light-enhancement)  
    标签：评分：7.0/10、query:q7
-   evidence：具有退化感知能力的一体化图像修复
-4. [GOPI: Generation-Oriented 3D Pose Inference for Furniture Insertion from Single-View RGB-D Indoor Scenes](/202608/10/2608.06836v1-gopi-generation-oriented-3d-pose-inference-for-furniture-insertion-from-single-view-rgb-d-indoor-scenes)  
+   evidence：无监督弱光图像增强与修复
+2. [SDDBMs: Soft Denoising Diffusion Bridge Models](/202608/11/2608.08594v1-sddbms-soft-denoising-diffusion-bridge-models)  
    标签：评分：7.0/10、query:q4
-   evidence：用于遮罩场景中家具插入的几何引导图像生成
-5. [InsertFuse: A Unified Framework for Multi-Category Reference-Guided Image Insertion](/202608/10/2608.06490v1-insertfuse-a-unified-framework-for-multi-category-reference-guided-image-insertion)  
+   evidence：用于图像修复的扩散桥模型
+3. [Degradation-Guided Underwater Image Restoration with Task-Oriented Latent Control](/202608/11/2608.08661v1-degradation-guided-underwater-image-restoration-with-task-oriented-latent-control)  
+   标签：评分：7.0/10、query:q7
+   evidence：水下图像修复与特征自适应
+4. [When Latents Forget Pixels: Restoring Fidelity in Diffusion Transformer Super-Resolution](/202608/11/2608.09133v1-when-latents-forget-pixels-restoring-fidelity-in-diffusion-transformer-super-resolution)  
+   标签：评分：7.0/10、query:q4
+   evidence：用于图像修复和超分辨率的生成模型
+5. [Beyond Uniform Restoration: Empowering All-in-One Restoration with Pixel-Level Multimodal Guidance](/202608/11/2608.09482v1-beyond-uniform-restoration-empowering-all-in-one-restoration-with-pixel-level-multimodal-guidance)  
+   标签：评分：7.0/10、query:q3
+   evidence：像素级引导的全能图像修复
+6. [UniWorld-Design: From Pixel Generation to Layer-Native Design](/202608/11/2608.03971v1-uniworld-design-from-pixel-generation-to-layer-native-design)  
    标签：评分：6.0/10、query:q4
-   evidence：参考引导的图像插入与合成
-6. [Multiple Hypothesis Flow Estimation for Video Frame Interpolation under Matching Ambiguity](/202608/10/2608.07120v1-multiple-hypothesis-flow-estimation-for-video-frame-interpolation-under-matching-ambiguity)  
+   evidence：用于图像合成和编辑的生成模型
+7. [MOSAIK: Multi-Patch Content-Aware Spatial Allocation of Image Tokens for Efficient Generation](/202608/11/2608.05450v1-mosaik-multi-patch-content-aware-spatial-allocation-of-image-tokens-for-efficient-generation)  
+   标签：评分：6.0/10、query:q4
+   evidence：用于图像生成的像素空间扩散模型
+8. [Retrieval-Augmented Generation-Based Color Restoration for Low-Light Image Enhancement](/202608/11/2608.08211v1-retrieval-augmented-generation-based-color-restoration-for-low-light-image-enhancement)  
+   标签：评分：6.0/10、query:q3
+   evidence：利用检索增强生成将颜色修复作为一个独立的子问题
+9. [Agentic AI-powered flexible fiber-bundle endoscopy for high-resolution NIR-II fluorescence imaging in vivo](/202608/11/2608.08402v1-agentic-ai-powered-flexible-fiber-bundle-endoscopy-for-high-resolution-nir-ii-fluorescence-imaging-in-vivo)  
    标签：评分：6.0/10、query:q7
-   evidence：通过图像级重建监督学习，无需直接流标注
+   evidence：AI驱动的内窥镜图像修复
+10. [FiRe: Fixed-Noise Refinement for Visual Counterfactual Explanations](/202608/11/2608.08664v1-fire-fixed-noise-refinement-for-visual-counterfactual-explanations)  
+   标签：评分：6.0/10、query:q4
+   evidence：利用扩散模型进行生成式编辑和局部修改
+11. [UniSpace: Unified Visual Representation and Scalable Multimodal Modeling](/202608/11/2608.08676v1-unispace-unified-visual-representation-and-scalable-multimodal-modeling)  
+   标签：评分：6.0/10、query:q4
+   evidence：使用语义ViT进行图像生成和编辑
 
 
 <div class="dpr-home-promo-card">

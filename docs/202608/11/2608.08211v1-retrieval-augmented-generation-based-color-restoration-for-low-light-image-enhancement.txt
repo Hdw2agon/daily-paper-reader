@@ -1,0 +1,499 @@
+Title: Retrieval-Augmented Generation-Based Color Restoration for Low-Light Image Enhancement
+
+URL Source: https://arxiv.org/pdf/2608.08211v1
+
+Published Time: Tue, 11 Aug 2026 00:47:59 GMT
+
+Number of Pages: 29
+
+Markdown Content:
+# Retrieval-Augmented Generation-Based Color Restoration for Low-Light Image Enhancement 
+
+Li-Wei Lu and Shaou-Gang Miaou *
+
+Department of Electronic Engineering, Chung Yuan Christian University, Taoyuan 320, Taiwan 
+
+Abstract 
+
+Recent low-light image enhancement (LLIE) methods have driven brightness and structural fidelity close to that of normally-exposed images, yet their outputs still exhibit systematic color shifts—skies drifting green, faces turning yellow, white objects reading warm. We attribute this to the fact that end-to-end LLIE training couples brightness, structure, and color within a single network, leaving the color channels weakly supervised. We recast color restoration as an independent sub-problem and decouple it from brightness enhancement, realizing it as a general-purpose post-processing module built on retrieval-augmented generation (RAG). Rather than relying solely on the parametric color priors learned during training, the module dynamically retrieves a reference image from an external high-quality color knowledge base and injects its color distribution into a color-restoration network to correct residual bias. The design comprises three components: (i) a dual-index FAISS retriever built on intermediate VGG19 features, capturing textural and structural similarity through global mean and variance statistics respectively; (ii) GlobalSPHistAdaIN, which reduces the reference image’s spatial-preserving color histogram to a global color vector and modulates network features via adaptive instance normalization, removing any dependence on pixel-level spatial correspondence; and (iii) a residual formulation that predicts a color correction over the front-end output rather than regenerating the color channels. Across LOLv1, LOLv2-Real, and LOLv2-Synthetic, the module consistently improves color-specific metrics: with CPGA-Net++ as the front end, it lowers ∆E2000 from 8.91 to 8.40 and MAE ab from 5.27 to 4.71 on LOLv1, with color gains markedly exceeding brightness gains. The module remains effective when the front end is swapped for LLFormer, FLIGHTNet, or IAT, confirming cross-front-end generality. Ablations isolate the contribution of each component and, notably, show that a VGG19 dual index outperforms CLIP-based retrieval—indicating that color restoration depends on textural and structural similarity rather than high-level semantics—while substituting the training-time knowledge base (DIV2K) with an unseen one (Flickr2K) retains most of the gain, confirming that the network learns to exploit retrieved color statistics rather than memorizing a fixed prior. 
+
+Keywords: low-light image enhancement, color restoration, retrieval-augmented generation, adaptive instance normalization, image colorization 
+
+# 1 Introduction 
+
+Human vision relies on adequate illumination to perceive the color, texture, and spatial structure of a scene. Many practical settings, however, cannot guarantee such conditions—nighttime surveillance, dashcam recording, indoor photography without flash, medical endoscopy, and the night-vision systems of autonomous vehicles all routinely produce low-light images marked by low contrast, elevated noise, lost detail, and 
+
+> *
+
+Corresponding author: Shaou-Gang Miaou (e-mail: miaou@cycu.edu.tw). Shaou-Gang Miaou and Li-Wei Lu are with the Department of Electronic Engineering, Chung Yuan Christian University, Taoyuan 320, Taiwan. 
+
+1arXiv:2608.08211v1 [eess.IV] 8 Aug 2026 distorted color. Beyond degrading the experience of a human observer, these degradations directly lower the accuracy of downstream vision tasks such as object detection, face recognition, and semantic segmentation. Recovering a clear and chromatically natural image from a low-light input has therefore been a long-standing problem in computer vision and image processing, studied under the name low-light image enhancement (LLIE). Early LLIE methods were dominated by classical image-processing techniques, chiefly histogram equalization and Retinex theory [1]. The former redistributes pixel intensities to expand the dynamic range, while the latter models an image as the product of illumination and reflectance and recasts enhancement as an illumination-estimation problem, a line of thought that later gave rise to methods such as LIME [2]. Deep learning has since moved the field into a new phase: RetinexNet [3] realized the Retinex decomposition with neural networks and introduced the first large-scale paired LOL dataset [3], and subsequent models— LLFormer [4], CPGA-Net [5] and its extension CPGA-Net++ [6], FLIGHTNet [7], and IAT [8]—have steadily pushed PSNR and SSIM on the LOL benchmarks to the point where brightness and detail recovery approach that of normally-exposed images. Progress in brightness recovery, however, has not translated into comparable progress in color recovery. Although the outputs of current LLIE models are competitive in luminance, they commonly display systematic color shifts—greenish skies, yellowish skin tones, warm-tinted white objects. The root of this behavior is that end-to-end training tends to couple brightness, structure, and color within a single network, where the correction of chromatic channels is easily dominated by the luminance- and structure-reconstruction objectives. Compounding this, most LLIE losses optimize overall pixel reconstruction error or perceptual similarity; in RGB, pixel losses are typically more sensitive to luminance than to chromatic error, and perceptual losses reward texture and structure rather than chromatic accuracy. Subtle color deviations are thus weakly constrained and remain a secondary concern throughout training. At inference, moreover, a model predicts largely from the parametric color priors absorbed during training, which cannot fully cover the diverse color distributions of real low-light scenes; inputs that fall outside the training distribution or involve complex illumination may yield results that are numerically plausible yet chromatically inconsistent with the true scene. This bottleneck echoes a challenge already addressed in natural language processing, where retrieval-augmented generation (RAG) [9] couples a parametric generator with an external non-parametric knowledge base, letting the model retrieve query-relevant information at inference time to supplement what its weights encode. Transposed to low-light color restoration, the residual color bias can be viewed as the visual uncertainty a model exhibits when it lacks an external chromatic reference, and an external repository of high-quality color images can play the role of the knowledge base. By dynamically retrieving a reference image similar to the input scene and injecting its color distribution as a conditional prior, the model no longer depends solely on its internal statistics but instead grounds its correction in real reference imagery. Building on this idea, we decouple color restoration from the front-end LLIE model and cast it as a general-purpose post-processing module that operates on top of a frozen enhancement network. Because the front end is never retrained, the module applies a consistent chromatic correction across different front ends. Three observations motivate its design. First, existing evaluations under-report color: PSNR, SSIM, and LPIPS [10] remain the default metrics, and although LPIPS [10] reflects perceptual similarity it is grounded in deep features attuned to structure and texture, leaving pure chromatic deviation relatively invisible—so color restoration deserves its own metrics and a dedicated design. Second, adding an external color prior without disturbing the recovered brightness is non-trivial: reference-guided colorization offers a template, but its methods assume grayscale inputs and pixel-level correspondence, whereas an LLIE front end already supplies an initial color estimate and a retrieved reference may differ substantially from the input in scene layout, making spatially-aligned injection unreliable. Third, RAG [9] has been extensively studied in language and multimodal tasks but rarely instantiated for low-level image restoration, so its use as a retrievable color prior for LLIE lacks concrete empirical validation. 2We address these points with a module comprising a dual-index FAISS [11] retriever over intermediate VGG19 [12] features, a global color-injection mechanism (GlobalSPHistAdaIN) that dispenses with spatial correspondence, and a residual learning formulation that focuses the network on correcting rather than regenerating color. Our contributions are as follows: • We instantiate RAG [9] for the color-restoration sub-problem of LLIE, establishing a complete and reproducible pipeline—external color knowledge base → dual-index FAISS [11] retrieval → neural color injection—and thereby introducing the notion of supplementing color priors from external knowledge into low-light enhancement. • We propose GlobalSPHistAdaIN, which pairs a globally-pooled SPHist color vector with AdaIN [13]-based modulation. Removing spatial correspondence lifts the computational ceiling on high-resolution inputs, avoids mis-injected color when the reference and input scenes diverge, and—together with residual learning—improves training stability and cross-dataset generalization. • We systematically compare retrieval strategies and find that a VGG19 [12] dual index outperforms CLIP [14]-based semantic retrieval, offering evidence that color restoration relies on textural and structural similarity rather than high-level semantic similarity—an observation of practical value for the design of visual retrieval systems. • We evaluate the module quantitatively on paired datasets and via no-reference metrics on unpaired data, showing stable improvement in color-specific metrics over front-end baselines and a consistent trend across different front ends, which demonstrates the module’s cross-model generality rather than a fit to one architecture. 
+
+# 2 Related Work 
+
+2.1 Low-Light Image Enhancement 
+
+Classical LLIE methods fall into two main lines. Histogram equalization improves contrast by remapping an image’s intensity distribution toward uniformity, but global equalization tends to over-enhance already-balanced regions and cannot adapt to spatially varying illumination; adaptive variants and contrast-limited adaptive histogram equalization (CLAHE) [15] mitigate this by equalizing local tiles and capping local histogram amplification to suppress noise. The Retinex line [1] instead models an observed image as the product of illumination and reflectance, turning enhancement into illumination estimation; multi-scale Retinex with color restoration (MSRCR) [16] adds a color-compensation term to counter the grayness and chromatic distortion that multi-scale enhancement can introduce, and LIME [2] initializes the illumination map from the per-pixel maximum across RGB channels and refines it with a structure prior, achieving good visual quality at low cost. These methods are interpretable, data-free, and inexpensive, but their reliance on hand-crafted priors and parameters makes it hard to jointly recover brightness, detail, and color under severe degradation. Deep learning has substantially advanced the field. RetinexNet [3] jointly trains an illumination-adjustment and a decomposition network end-to-end and contributes the first large-scale paired LOL dataset [3], laying the groundwork for supervised approaches. LLFormer [4] employs a Transformer to model long-range dependencies and reports competitive results across several benchmarks. More recent work emphasizes physical priors alongside efficiency: IAT [8] remains competitive at very low parameter counts and suits real-time use. CPGA-Net [5] combines a dark channel prior, a bright channel prior, YCbCr luminance, and gamma correction, integrating these cues through an intersection-aware adaptive fusion mod-ule to approach state-of-the-art quality at roughly 0.025 M parameters. Two extensions follow on the same architecture: CPGA-Net+ reintroduces atmospheric-scattering priors into the attention design and localizes 3gamma correction, while CPGA-Net++ [6] further exploits the local-processing branch with an improved fusion module and ConvNeXt blocks, attaining strong image quality across benchmarks. FLIGHTNet [7] adopts a lightweight design that improves restoration through progressive feature fusion. Despite this progress on luminance- and structure-related metrics, color-specific metrics rarely appear in mainstream evaluation—a gap that reflects a structural limitation of end-to-end training on the color channels. Most LLIE models are supervised primarily by L1 or L2 pixel losses with a perceptual loss as auxiliary; yet in RGB, pixel losses are generally more sensitive to luminance than to chromatic error, and perceptual losses are grounded in texture and structure rather than explicit color supervision. As a result, a model may recover luminance and texture well while still producing an overall color cast or local chromatic drift—distortions that PSNR, SSIM, and LPIPS [10] do not fully surface, since even LPIPS [10] is not designed to isolate chromatic accuracy and its color-sensitive component is easily diluted when brightness and structure improve markedly. Because low-light color information is itself compromised by noise and reduced saturation, end-to-end training alone struggles to reliably supply the missing chromatic cues; we therefore treat color restoration as a separate stage and provide an additional color prior from external high-quality imagery. 
+
+2.2 Color Restoration and Reference-Based Colorization 
+
+The design of a color-restoration network, its losses, and its metrics all depend on a color space that expresses chromatic difference reliably. RGB corresponds directly to sensor output but couples its three channels tightly, and Euclidean distance in RGB does not correspond linearly to perceived color difference. The CIE Lab space [17], defined by the CIE in 1976, decomposes color into a luminance channel L and two chromatic channels a (green–red) and b (blue–yellow), and offers two properties central to this work: perceptual uniformity—Euclidean distance in Lab aligns well with perceived difference, which underlies measures such as ∆E2000 —and a clear separation between luminance and chroma, so that adjusting a and b generally leaves the L-encoded brightness structure intact. When the front end has already restored luminance to near-normal levels, the color-restoration network can operate in Lab with L as a brightness condition and a, b
+
+as prediction targets, keeping luminance error from contaminating the color supervision. We accordingly define our color-injection mechanism, color losses, and color-specific metrics ( ∆E2000 , MAE ab ) in Lab. Automatic colorization predicts a full-color image from a grayscale input with no external reference. Iizuka et al. [18] jointly learn global and local priors, combining semantic classification with pixel-level color mapping, while CIC [19] casts colorization as classification over quantized color bins and rebalances classes to counter skewed color distributions. The core limitation is inherent ambiguity: a single grayscale input admits many plausible colorings, and because models learn the high-probability average of the training distribution, outputs tend toward desaturated, conservative colors that lack diversity. Reference-based colorization instead supplies a color-similar reference image as a prior, converting an ill-posed generation problem into a color-transfer problem. Early methods matched intensity and texture features to transfer reference color [20, 21], and Gupta et al. [22] retrieved similar images from a web gallery. In the deep-learning era, deep exemplar-based colorization [23] uses a similarity network built on intermediate VGG19 [12] features to establish cross-image correspondence and a colorization network to transfer color accordingly. Pik-Fix [24] is the most direct inspiration for our design: it models old-photo restoration as three cooperating sub-tasks—a restoration network based on a multi-level Residual Dense Network (multi-level RDN) that repairs degradation and structural damage, a similarity network that uses pretrained ResNet34 [25] features and a Similarity Sub-Net to build the input–reference spatial correspondence and spatially align the reference features, and a colorization network with a global U-Net [26] backbone into which the spatially-aligned color features are injected at each decoder layer. Pik-Fix [24] also introduces a VGG19 [12]-based reference-retrieval scheme that measures textural similarity by the feature global mean and structural similarity by variance and covariance, then selects the most similar reference from the training data by a weighted combination, showing stable color restoration and a degree of robustness to reference-selection 4error. Our retrieval design adopts this idea of describing an image by the mean and variance statistics of its VGG19 [12] features, and extends it into a dual-index FAISS [11] retriever so that texture and structure similarity are indexed separately and combined at query time. Color histograms have long served image retrieval and color transfer [27], being robust to spatial shifts, viewpoint, and partial occlusion; but a conventional global histogram discards spatial layout—two images with swapped sky and ground regions may share nearly identical global histograms while corresponding to entirely different spatial color arrangements—and its hard binning is non-differentiable, hindering integration into end-to-end frameworks. To overcome both issues, Pik-Fix [24] introduces the spatial-preserving color histogram (SPHist), which replaces hard assignment with a differentiable soft assignment, distributing each pixel probabilistically across color bins while retaining spatial dimensions; SPHist thus preserves color-distribution characteristics, supports back-propagation, and serves well as a color intermediary in deep frameworks. In style transfer and conditional generation, a recurring question is how to inject the global style of one image into another at low cost. Instance normalization (IN) [28] normalizes each channel of a single image by its own mean and standard deviation, reducing the influence of the image’s own style statistics, but it only standardizes features without introducing new style information and generalizes poorly across styles. Adaptive instance normalization (AdaIN) [13] addresses this by modulating content features with the statistics of a style feature—first standardizing with the content’s own mean and standard deviation, then rescaling to the style’s statistics—so that style injection completes in a single forward pass without per-style training. Because its modulation parameters can be computed on the fly from any input, AdaIN [13] generalizes flexibly and has been extended to conditional generation, image translation, and feature modulation. We build on this property, treating AdaIN [13] as a means of modulating intermediate features with external image statistics and applying it to inject an external color prior for low-light color restoration. 
+
+2.3 Retrieval-Augmented Generation and Its Extension to Vision 
+
+RAG [9], introduced by Lewis et al., integrates the parametric knowledge of a large language model with the non-parametric knowledge of an external base. A typical system pairs a retriever, which finds relevant fragments in the external base given a query, with a generator, which conditions on both query and retrieved content to produce output; this mitigates two limitations of purely parametric models—the high cost of updating knowledge and the lack of external grounding. Efficient similarity search over large high-dimensional collections is central to retrieval. FAISS [11] provides approximate-nearest-neighbor search with several index structures—flat inner-product (IndexFlatIP), inverted file, hierarchical navigable small-world graphs, and product quantization—that trade off speed, memory, and accuracy. When vectors are L2-normalized, the inner product computed by IndexFlatIP equals cosine similarity, which makes it a common choice for image and text feature retrieval; we adopt FAISS [11] as the basis of our retrieval pipeline. The choice of feature extractor strongly shapes retrieval behavior in vision. VGG19 [12], trained on ImageNet classification, yields intermediate feature maps that effectively capture textural and structural statistics; Zhang et al. [10] note that deep convolutional features align well with human perceptual judgments, with VGG features particularly reflecting texture and structure differences, and Pik-Fix [24] uses VGG19 [12] feature means for texture and variance/covariance for structure—a design that informs our dual index. CLIP [14], trained by contrastive learning on large image–text pairs, extracts features highly aligned with textual semantics, encoding concepts such as people, clothing, and color into a shared multimodal space, which suits cross-modal retrieval and semantic classification. The essential difference lies in how each defines similarity: VGG19 [12] leans toward textural and structural similarity, whereas CLIP [14] emphasizes cross-modal semantic similarity. For color restoration, an ideal reference should share texture, structure, and color distribution with the target, so an effective color prior likely depends more on low- to mid-level visual 5similarity than on semantic agreement—two semantically similar images may still differ markedly in color. Although RAG [9] is well studied in language, its extension to vision remains early. Multimodal RAG [29] focuses on cross-modal retrieval and joint generation for tasks requiring semantic reasoning, such as visual question answering and image captioning. In generation, retrieval-augmented diffusion models [30] introduce retrieved similar images as conditioning to improve diversity and consistency. Yet the specific problem of supplementing a color prior from an external image base to improve restoration quality lacks systematic empirical study. We extend RAG [9] to low-light color restoration, examine the feasibility of an external image knowledge base for color-prior supplementation, and analyze how retrieval quality affects the final result—shifting the focus from semantic reasoning and generation toward external color priors in a visual restoration task. 
+
+2.4 Research Gaps 
+
+Three gaps emerge from this review. First, existing LLIE methods bind brightness enhancement and color restoration in a single end-to-end pipeline, leaving color supervision comparatively weak and color-accuracy gains less pronounced than luminance gains; improving color accuracy independently, without disturbing existing brightness gains, is a key opening. Second, reference-guided colorization, though mature, is premised on grayscale inputs and physical-damage repair, which differs fundamentally from the low-light setting and leads to input-condition mismatch and unreliable cross-dataset spatial correspondence when applied directly. Third, RAG [9] is well established in language but has scarce concrete validation in visual color restoration; realizing external-base retrieval with conditional generation as a working LLIE color-restoration system and validating each design choice offers a reproducible application case for RAG [9] in vision. These observations frame the retrieval-based color-restoration framework developed in the following section. 
+
+# 3 Method 
+
+3.1 Overview 
+
+We propose a two-stage system for low-light color restoration (Fig. 1). The first stage uses an existing LLIE model as a brightness-enhancement front end; the second stage is a color-restoration module, designed around the RAG [9] concept, that uses the color distribution of an external reference image to correct the residual color bias and distortion left in the enhanced output. 
+
+Stage 1 — Brightness enhancement. Given a raw low-light image Ilow ∈ RH×W ×3, a pretrained front end produces a brightness-enhanced image I′. We evaluate four front-end configurations—CPGA-Net++ [6], LLFormer [4], FLIGHTNet [7], and IAT [8]—each representing a distinct architectural philosophy. Throughout second-stage training the front end stays frozen and receives no gradient updates; its output serves as the fixed input to the color-restoration module. We convert I′ from RGB to Lab and split it into a luminance channel L ∈ RH×W ×1 and chromatic channels ab ∈ RH×W ×2. The L channel is the brightness reference for all downstream modules, and ab retains the front end’s initial color estimate as a local color prior. 
+
+Stage 2 — RAG color restoration. The second stage comprises three sub-modules: reference retrieval, color-vector extraction, and color-residual prediction. A FAISS [11] retriever uses deep features of the enhanced image to retrieve the visually nearest reference R from a prebuilt DIV2K [31] index, converts it to Lab, and takes its chromatic channels Rab as the color source. The retriever uses a dual-index design: global mean and global variance vectors of VGG19 [12] features describe textural and structural characteristics respectively, and a weighted re-ranking selects the reference best suited to serve as a color prior. From Rab ,the color-vector extraction module computes a spatial-preserving color histogram (SPHist) and reduces it, by global average pooling, to a 512-dimensional color vector c. Finally, the color-restoration network takes 6cat( L, ab ) as its backbone input and injects c into encoder features through the proposed GlobalSPHistAdaIN module. Rather than predicting the full chromatic channels, the network predicts a color residual ∆ bab that is added back to the front end’s initial ab . The first stage thus improves brightness and visibility while the second focuses on correcting residual color bias. 
+
+3.2 Brightness-Enhancement Front End 
+
+Applying color restoration directly to a raw low-light image forces a single network to contend simultaneously with luminance degradation and color distortion, increasing learning difficulty. We therefore place an existing LLIE model first to produce a brightness-stabilized image, and let the second-stage RAG [9] module handle color correction—splitting the overall task into a brightness sub-problem and a color sub-problem so that the second stage can concentrate on residual color bias. CPGA-Net++ [6] is our primary front end, chosen for its lightweight, theory-driven design and stable enhancement; LLFormer [4], FLIGHTNet [7], and IAT [8] are used in a subset of experiments not to re-compare the front ends themselves but to supply differently-styled enhanced outputs, testing whether the color module retains its effect across front ends. Since these models differ in brightness lift, color preservation, noise suppression, and exposure correction, consistent color improvement across their outputs would indicate that the method is not tied to CPGA-Net++ [6] and possesses genuine modular, cross-model applicability. In implementation, each front end acts solely as a Stage-1 enhancer. The enhanced I′ is converted to Lab; the L channel becomes the luminance/structure reference for Stage 2, and the ab channels provide the front end’s initial color estimate. During data loading, training and validation images are cropped to multiples of 32 to satisfy the down-/up-sampling requirements of the Dense121 U-Net; at inference, images whose dimensions are not multiples of 32 are padded to the nearest multiple by reflect padding and cropped back to their original size afterward, so that padded regions do not affect the output. We normalize the channels to 
+
+[−1, 1] : L from [0 , 100] by dividing by 50 and subtracting 1, and ab from [−110 , 110] by dividing by 110. The color-restoration network outputs a residual ∆ bab , and the corrected chromatic channels and final image are bab = ab + ∆ bab (1) 
+
+ˆI = Lab2RGB( L, bab ) (2) 
+
+3.3 FAISS-Based Reference Retrieval 
+
+VGG19 feature extraction. We use an ImageNet-pretrained VGG19 [12] as the feature backbone for retrieval, with weights frozen, and take the output of the ReLU activation in the third convolutional block (256 channels) as the image representation. Relative to shallower features it offers more stable texture description, and relative to deeper features it is less biased toward object semantics, making it well suited to measuring cross-scene textural and structural similarity. Inputs are resized to 256 × 256 and normalized by the ImageNet mean and standard deviation; the extracted feature map is 
+
+Fi ∈ RC×H′×W ′
+
+, C = 256 (3) where i indexes the image and H′, W ′ are the spatial dimensions of the feature map. From it we compute a global mean vector mi and a global variance vector vi:
+
+mi = 1
+
+H′W ′
+
+X
+
+> h,w
+
+Fi(·, h, w ), mi ∈ RC (4) 
+
+vi = 1
+
+H′W ′
+
+X
+
+> h,w
+
+ Fi(·, h, w ) − mi
+
+2, vi ∈ RC (5) 7Input low-light image Pretrained LLIE model Enhanced image VGG19 Feature extraction FAISS dual-index retrieval Texture index +Structure index Top-1 DIV2K reference image Convert reference image to Lab and obtain SPHist + Global Pooling Generate 512-dim color vector Dense121 UNet with GlobalSPHistAdaIN 
+
+Predict color residual Convert RGB to Lab Residual fusion Corrected chromatic channels Lab2RGB Color vector Inject into encoder 
+
+Stage 1: 
+
+Brightness-enhancement 
+
+Output color-restored image Initial chromatic channels Front-end color prior Luminance channel 
+
+Stage 2: RAG Color restoration Figure 1: Overall system architecture. Stage 1 (frozen LLIE front end) produces a brightness-enhanced image; Stage 2 retrieves a reference from an external knowledge base and injects its color distribution to predict a color residual. 
+
+8where (·) denotes all elements along the channel dimension. The global mean mi corresponds to the image’s overall textural style and the global variance vi to local structure and contrast variation. Both are L2-normalized so that a subsequent inner product equals cosine similarity: 
+
+ˆmi = mi
+
+∥mi∥2
+
+, ˆvi = vi
+
+∥vi∥2
+
+(6) 
+
+Dual-index design. We use DIV2K [31] as the reference knowledge base for its diverse natural imagery. During index construction, VGG19 [12] features are extracted for every DIV2K [31] image, and ˆmi and 
+
+ˆvi are stored in two separate FAISS [11] indices: a texture index Index m holding the global mean vectors and a structure index Index v holding the global variance vectors (Fig. 2). Because the DIV2K [31] base is modest in scale, we adopt the exact-search IndexFlatIP; as all vectors are L2-normalized beforehand, its inner product equals cosine similarity, 
+
+sim( a, b) = a⊤b = ∥a∥∥ b∥ cos θ = cos θ (7) The dual-index design keeps texture and structure information independent. Concatenating the mean and variance vectors into a single index would fix their relative influence at concatenation time, whereas two indices can be queried separately and combined at re-ranking through weights α and β, giving the retrieval strategy greater flexibility. 
+
+Weighted re-ranking. At query time, the enhanced RGB image passes through the same VGG19 [12] pipeline to yield ˆmq and ˆvq, which are searched against Index m and Index v respectively. For the j-th candidate, with texture score score m,j and structure score score v,j , the combined similarity is 
+
+score j = α · score m,j + β · score v,j (8) with α and β controlling the influence of texture and structure similarity; we set α = β = 0 .5 for equal weighting. Each index first returns k2 = 2 × Top-k candidates; the two candidate sets are merged, and scores are accumulated per image, so an image appearing in both sets receives both contributions while an image in only one set receives only its own. Candidates are then sorted by score j in descending order and the Top-k are taken as references (Fig. 3). We set Top-k = 1 in training, validation, and inference. The selected reference R is converted to Lab and its chromatic channels Rab become the input to color-vector extraction. 
+
+3.4 Color-Restoration Module 
+
+We base the color-restoration module on the reference-based architecture of Pik-Fix [24], but because a FAISS [11]-retrieved reference does not necessarily hold pixel-level correspondence with the input, the origi-nal spatial-alignment similarity sub-network is not applicable here. We therefore design GlobalSPHistAdaIN as a global color-modulation module that treats the reference as a source of global color prior and injects its color distribution without assuming spatial alignment (Fig. 4). 
+
+3.4.1 Colorization Network 
+
+The colorization network is a U-Net [26] (Fig. 5) whose encoder is based on DenseNet-121 [32] with four dense blocks configured as (6 , 12 , 24 , 48) dense units and a growth rate of 32. Each dense block is followed by a transition layer that reduces spatial resolution and channel count—outputs of 128, 256, 512, and 1024 channels in turn—after which a GlobalSPHistAdaIN color-modulation module injects the reference’s color prior into the deep encoder features; the modulated features then feed the subsequent encoding stage, propagating the color prior layer by layer. The decoder consists of five Up modules (up0–up4) that progressively restore resolution, each containing a residual dense block (RDB) and a double convolution, combined with the corresponding encoder scale through skip connections to preserve spatial detail. 9DIV2K reference knowledge base 800 natural images Read each image Image preprocessing Resize 256×256 ImageNet Normalized VGG19 Feature extraction Feature map Compute global mean vector 
+
+L2 Normalize Build FAISS IndexFlatIP texture index Compute global variance  vector 
+
+L2 Normalize Build FAISS IndexFlatIP structure index Store image path Completed FAISS reference index Figure 2: Dual-index construction: VGG19 features of each knowledge-base image are reduced to global mean and variance vectors, stored in a texture index and a structure index respectively. 
+
+10 Front-end enhanced image RGB image Image preprocessing Resize 256×256 ImageNet Normalized VGG19 Feature extraction Query feature map Compute query mean vector L2 Normalize Texture-index query obtain texture candidate images and similarities Compute query variance vector L2 Normalize Structure-index query obtain structure candidate images and similarities Merge candidate sets Weighted re-ranking Select Top-1 
+
+reference image Convert reference image 
+
+to Lab Obtain as color-distribution source Input to SPHist / GlobalSPHistAdaIN Figure 3: Reference retrieval and weighted re-ranking. Each index returns candidates; scores are merged and re-ranked by α, β to select the Top-1 reference. 
+
+11 Reference chromatic channels SPHist Global average pooling Color vector 
+
+Color-prior path Input 
+
+Luminance channel Initial chromatic channels Channel concatenation Dense121 Encoder Decoder Output color residual 
+
+Colorization  Net 
+
+Residual fusion 
+
+Corrected chromatic channels Lab2RGB Final color-restored image 
+
+Output Figure 4: Color-restoration module: SPHist color-vector extraction from the retrieved reference, GlobalSPHistAdaIN injection into encoder features, and residual color prediction. 
+
+12 Input 
+
+Conv + ReLU + MaxPool (feature0) DenseBlock 1 
+
++ Transition 
+
+(feature1) GlobalSPHistAdaIN 1 DenseBlock 2 
+
++ Transition 2 
+
+(feature2) GlobalSPHistAdaIN 2 DenseBlock 3 
+
++ Transition 3 
+
+(feature3) GlobalSPHistAdaIN 3 DenseBlock 4 
+
++ Transition 4 
+
+(feature4) GlobalSPHistAdaIN 4 bottleneck feature Up0 Up1 Up2 Up3 Up4 Predict color residual feature1 skip feature2 skip feature3 skip feature4 skip 
+
+Dense121 Encoder Decoder 
+
+Reference chromatic channels SPHist  + Global average pooling Color vector feature0 skip 
+
+Color prior (reference image) Figure 5: Overall architecture of the color-restoration (colorization) network. The Dense-121 U-Net encoder injects the reference color prior through a GlobalSPHistAdaIN module after each transition layer; the decoder progressively restores resolution via skip connections and outputs the predicted color residual ∆ bab .
+
+13 Within a dense block, the ℓ-th layer takes the concatenation of all preceding feature maps as input, 
+
+xℓ = Hℓ
+
+ [x0, x 1, . . . , x ℓ−1] (9) where Hℓ(·) is the ℓ-th nonlinear transform and [·] denotes concatenation. The network input is the concate-nation of the luminance channel and the front end’s initial color channels, 
+
+cat( L, ab ) ∈ RH×W ×3 (10) where L provides brightness and structure and ab the front end’s initial color estimate. The first convolution maps this 3-channel input to 64 initial channels; after the encoder, GlobalSPHistAdaIN modulation, and decoder reconstruction, a final convolution outputs a 2-channel color residual corresponding to the a and b
+
+channels. 
+
+3.4.2 Spatial-Preserving Color Histogram (SPHist) 
+
+To inject the reference’s color information into the network effectively, we adopt the spatial-preserving color histogram introduced by Pik-Fix [24]. A conventional color histogram aggregates the whole image into a one-dimensional distribution and, in doing so, discards the spatial position of each pixel; SPHist instead preserves the per-pixel color distribution in a differentiable form suitable for training and inference (Fig. 6). SPHist approximates the a and b chromatic channels of Rab separately by Gaussian expansion. For the color value D(i, j ) at spatial position (i, j ), its response falling into the k-th bin is 
+
+h(i, j, k ) = exp 
+
+
+
+− (D(i, j ) − uk)2
+
+2σ2
+
+PKk=1 exp 
+
+
+
+− (D(i, j ) − uk)2
+
+2σ2
+
+ , k = 1 , 2, . . . , K (11) where uk is the k-th fixed bin center, uniformly distributed over [−1, 1] ; K = 256 is the number of bins per chromatic channel; and σ = 0 .01 is the Gaussian kernel width. A small σ makes each pixel’s color value activate mainly its nearest bin centers. Since the a and b channels each yield a 256-bin spatial histogram, their concatenation forms an SPHist tensor hR ∈ R512 ×H′×W ′
+
+. To reduce memory and computation, Rab is first 8× average-pooled from H × W to H′ × W ′ with H′ = H/ 8, W ′ = W/ 8, after which global average pooling over the spatial dimensions produces a one-dimensional color vector c ∈ R512 :
+
+c = 1
+
+H′W ′
+
+> H′
+
+X 
+
+> h=1
+> W′
+
+X
+
+> w=1
+
+hR(·, h, w ) (12) The color vector c represents the reference’s global color distribution over the a, b chromatic space and serves as the conditioning input to GlobalSPHistAdaIN. 
+
+3.4.3 Global Color-Modulation Module (GlobalSPHistAdaIN) 
+
+The original Pik-Fix [24] computes a spatial correspondence between input and reference and warps the SPHist color information into alignment. In our cross-dataset setting, however, when a FAISS [11]-retrieved reference differs substantially in scene from the input, this correspondence is error-prone, and forcing a spatial warp can inject color from the wrong locations, producing color artifacts or unnatural shifts. We therefore design GlobalSPHistAdaIN to modulate intermediate features with the reference’s global color distribution, improving stability and fault tolerance in cross-dataset inference (Fig. 7). 14 Reference chromatic channels 8 x average pooling Down-sampled 
+
+Spatial downsampling 
+
+chromatic channels Gaussian soft assignment 256 bins per-channel histogram features chromatic channels Gaussian soft assignment 256 bins per-channel histogram features 
+
+Gaussian histogram computation 
+
+Channel concatenation SPHist feature Global average pooling Color vector (512-dim) 
+
+Feature integration Figure 6: Spatial-preserving color histogram (SPHist) computation via differentiable Gaussian soft assignment over the a, b chromatic channels. 
+
+15 GlobalSPHistAdaIN Modulation core 
+
+Instance normalization Standardize Fully-connected layer Generate scale parameters Feature modulation Generate shift parameters Fully-connected layer Modulated features 
+
+Output 
+
+Feature map 
+
+Color vector (512-dim) 
+
+Input Figure 7: GlobalSPHistAdaIN modulation flow: the 512-dimensional color vector generates per-channel scale and shift parameters applied to instance-normalized features. 
+
+Its core mechanism is AdaIN [13]: given a feature map f with scale γ and shift β,
+
+AdaIN( f , γ, β ) = γ ·
+
+ f − μ(f )
+
+σ(f )
+
+
+
++ β (13) where μ(f ) and σ(f ) are the per-channel mean and standard deviation under instance normalization. For the feature map fi ∈ RCi×Hi×Wi produced after each dense block’s transition layer, the scale γi and shift 
+
+βi—vectors over the layer’s Ci channels—are generated from the color vector c by fully-connected layers: 
+
+γi = Wγ,i c + bγ,i , βi = Wβ,i c + bβ,i (14) where Wγ,i , Wβ,i ∈ RCi×512 and bγ,i , bβ,i ∈ RCi . The modulated feature map is 
+
+˜fi = γi · IN( fi) + βi (15) where IN( ·) is instance normalization and γi, βi are broadcast to the spatial dimensions. Because Glob-alSPHistAdaIN modulates only on the reference’s global color statistics and does not rely on pixel-level alignment, it still provides a stable color-distribution prior when reference and input scenes differ, at lower cost than spatial-correspondence methods. 
+
+3.4.4 Residual Learning 
+
+Rather than predicting the full ab channels, the network predicts a correction relative to the front end’s ab :
+
+∆ bab = fθ
+
+ cat( L, ab ), c (16) where fθ(·) is the network mapping with learnable parameters θ. The residual target in training is 
+
+∆ab = ab GT − ab (17) and the corrected color channels are bab = ab + ∆ bab (18) where ab GT is the ground-truth color and ab the front end’s initial estimate. The residual formulation requires the network only to learn the difference between the front-end output and the true color; when the predicted residual approaches zero the result stays close to the front end’s output, preserving the reasonable color the front end has already produced. The luminance channel L and corrected color bab are recombined and converted back to RGB, ˆI = Lab2RGB( L, bab ), ˆI ∈ RH×W ×3 (19) 16 3.5 Training Strategy 
+
+Because the front end stays frozen, training targets only the second-stage color-restoration network. To eliminate any train–inference gap in the reference distribution, training uses the same FAISS [11] dual-index retrieval as inference. 
+
+Reference acquisition. For each training sample, the front end’s full enhanced image is the query; VGG19 [12] extraction and FAISS [11] dual-index retrieval select the Top-1 reference from DIV2K [31], which—after Lab conversion—provides Rab to the SPHist and GlobalSPHistAdaIN modules. Input and ground-truth images use identically-positioned random crops, while the reference remains the complete retrieved DIV2K [31] image resized to match. Using retrieval rather than synthetic or randomly chosen references at training time ensures the model learns color modulation under the same reference conditions it meets at inference. 
+
+Loss functions. Although the network outputs a residual, the losses act not on ∆ bab but on the final result after adding back the front-end color. The output is first clamped, 
+
+bab = clamp( ab + ∆ bab, −1, 1) (20) and losses are computed between bab and ab GT . An L1 loss provides direct per-pixel chromatic supervision, 
+
+LL1 = 1
+
+N
+
+> N
+
+X
+
+> i=1
+
+bab i − ab GT ,i (21) where N is the pixel count. A histogram loss based on the Earth Mover’s Distance (EMD) constrains the color distribution: for the a and b channels we build 256-bin Gaussian histograms and approximate the EMD by the mean squared error of the cumulative distribution functions (CDF), 
+
+LEMD (P, Q ) = 1
+
+K
+
+> K
+
+X
+
+> k=1
+
+ CDF P (k) − CDF Q(k)2 (22) with K = 256 . In practice the histogram loss combines the distance to the ground truth with the distance to the retrieved reference, 
+
+LGT hist = LEMD 
+
+ H( bab ), H (ab GT ) (23) 
+
+Lref hist = LEMD 
+
+ H( bab ), H (Rab ) (24) 
+
+Lhist = 12
+
+ LGT hist + Lref hist 
+
+ (25) where H(·) maps color channels to a Gaussian-histogram representation, ab GT is the ground-truth color, and Rab is the retrieved reference color. An SSIM loss provides structural supervision by converting the prediction back to RGB, ˆIRGB = Lab2RGB( L, bab ) (26) 
+
+LSSIM = 1 − SSIM( ˆIRGB , I GT ) (27) A perceptual loss supplements pixel-level supervision using deep features from a pretrained VGG16 network. Note that this VGG16 is used only for the perceptual loss and is distinct from the VGG19 [12] used earlier for reference retrieval; the two serve different purposes. Rather than combining several layers, we use the feature map of a single fixed layer—the ReLU activation of the third convolutional block (relu3_3) of VGG16—so that the perceptual loss is defined on one feature representation: 
+
+Lperc = 1
+
+C H W ϕ( ˆIRGB ) − ϕ(IGT ) 22 (28) 17 where ϕ(·) denotes the relu3_3 feature map of VGG16 and C, H, W are its channel, height, and width. The total loss is 
+
+Ltotal = λL1 LL1 + λhist Lhist + λSSIM LSSIM + λperc Lperc (29) 
+
+Datasets and setup. We train and validate on LOLv1 [3], LOLv2-Real [33], and LOLv2-Synthetic [33] independently. Before training, low-light images are enhanced by the Stage-1 front end, whose output feeds the color-restoration network with the corresponding normally-exposed image as ground truth. Training applies identically-positioned 256 × 256 random crops and random horizontal flips; images are converted to Lab with L and ab normalized to [−1, 1] . Validation and inference use full images, padded to multiples of 32 by reflect padding and cropped back afterward. We use Adam with a linear warmup followed by cosine-annealing decay, and train separate color-restoration networks for LLFormer [4], FLIGHTNet [7], and IAT [8] to test adaptability across front ends. 
+
+# 4 Experiments 
+
+4.1 Experimental Setup 
+
+4.1.1 Datasets 
+
+We evaluate on both paired and unpaired data. For paired evaluation we use three datasets. LOLv1 [3] contains 485 training and 15 test pairs captured in real scenes at 400 × 600 resolution. LOLv2 [33] extends LOLv1 [3] into Real Captured (689 training, 100 test pairs) and Synthetic (900 training, 100 test pairs, generated with a camera-noise model) subsets. For unpaired evaluation we use LIME [2] (10 images), NPE [34] (84 images), MEF [35] (17 images), VV [36] (24 images), and DICM [37] (69 images), none of which provide normally-exposed ground truth. 
+
+4.1.2 Metrics 
+
+For paired data we report PSNR and SSIM for pixel- and structure-level fidelity, LPIPS [10] for perceptual similarity, and two color-specific metrics—CIEDE2000 ( ∆E2000 ) [38] and the mean absolute error of the ab 
+
+channels ( MAE ab ). ∆E2000 is computed per pixel in Lab and averaged (scikit-image implementation), and 
+
+MAE ab is computed in the original Lab ab range to preserve the native color-difference unit. For unpaired data we use NIQE [39], a no-reference measure of natural-image statistics, treated as an auxiliary indicator. 
+
+4.1.3 Implementation Details 
+
+All experiments run on Windows 11 with Python 3.9 and PyTorch 2.8.0+cu128 on a single NVIDIA RTX 5070 (12 GB); NIQE [39] is evaluated in MATLAB and LPIPS [10] with the AlexNet backbone. The colorization network uses a Dense-121 U-Net encoder with block_config = (6 , 12 , 24 , 48) —the first three blocks inherit DenseNet-121 [32] settings to load ImageNet-pretrained weights while the fourth is randomly initialized— and decoder RDBs with nDenseLayer = [8 , 12 , 6, 4] , growth rate 32, and dropout 0.3. GlobalSPHistAdaIN uses 256 fixed bin centers per ab channel, forming the 512-dimensional color vector c. Training uses Adam (β1 = 0 .9, β2 = 0 .999 , ε = 10 −8, weight decay 10 −5) with an initial learning rate of 10 −4, a 5-epoch linear warmup, and cosine annealing to 10 −6 over 100 epochs, at batch size 4 with 256 × 256 crops. Retrieval uses VGG19 [12] relu3_4 features (256-dim), two L2-normalized IndexFlatIP indices, a knowledge base of 800 DIV2K [31] training images, balanced weights α = β = 0 .5, and Top-k = 1 . The loss weights are 
+
+λhist = 2 .0, λL1 = 0 .5, λSSIM = 0 .1, and λperc = 0 .02 .18 4.2 Quantitative Results 
+
+We report the two-stage architecture—front end plus RAG [9] color-restoration module—against the corre-sponding front-end-only baseline. 
+
+4.2.1 LOLv1 
+
+Table 1 gives results on LOLv1 [3]. Adding the module improves most metrics across all four front ends, with ∆E2000 and MAE ab falling most clearly; the more pronounced the front end’s original color bias, the more room the module has to correct. The PSNR gain is largest for IAT [8] (+0.58 dB), followed by CPGA-Net++ [6] (+0.29 dB), FLIGHTNet [7] (+0.20 dB), and LLFormer [4] (+0.06 dB); for our primary front end CPGA-Net++ [6], the module also lowers ∆E2000 from 8.912 to 8.402 and MAE ab from 5.265 to 4.712. FLIGHTNet [7] + Proposed attains the best overall result (PSNR 25.16 dB, ∆E2000 6.903, MAE ab 
+
+4.611).                                                  
+
+> Table 1: Quantitative results on LOLv1 [3] (15 test pairs). Best per front-end pair in bold .Method PSNR ↑SSIM ↑LPIPS ↓∆E2000 ↓MAE ab ↓
+> CPGA-Net++ [6] 22.24 0.835 0.136 8.912 5.265 + Proposed 22.53 0.836 0.128 8.402 4.712
+> LLFormer [4] 23.65 0.816 0.169 7.938 4.877 + Proposed 23.71 0.817 0.168 7.881 4.789
+> FLIGHTNet [7] 24.96 0.849 0.134 7.206 4.905 + Proposed 25.16 0.851 0.132 6.903 4.611
+> IAT [8] 23.38 0.806 0.216 7.974 5.611 + Proposed 23.96 0.810 0.200 7.211 4.773
+
+4.2.2 LOLv2-Real Captured 
+
+Table 2 reports LOLv2-Real [33]; LLFormer [4] and IAT [8] are omitted as their official implementations provide no LOLv2 pretrained weights. The gain is more pronounced with FLIGHTNet [7]: FLIGHTNet [7] + Proposed raises PSNR by 0.26 dB, lowers ∆E2000 from 9.864 to 9.207 ( −6.7% ), and lowers MAE ab from 4.581 to 3.810 ( −16 .8% ). Under CPGA-Net++ [6] the gain is smaller and LPIPS rises slightly, likely because this front end already provides a stable initial color estimate on LOLv2-Real [33], leaving little residual to correct; even so, ∆E2000 and MAE ab still improve.                             
+
+> Table 2: Quantitative results on LOLv2-Real Captured [33] (100 test pairs). Method PSNR ↑SSIM ↑LPIPS ↓∆E2000 ↓MAE ab ↓
+> CPGA-Net++ [6] 21.29 0.851 0.162 9.419 3.445 + Proposed 21.37 0.851 0.164 9.378 3.423
+> FLIGHTNet [7] 21.71 0.834 0.186 9.864 4.581 + Proposed 21.97 0.835 0.176 9.207 3.810
+
+4.2.3 LOLv2-Synthetic 
+
+LOLv2-Synthetic [33] is the setting in which the module gains least (Table 3): under CPGA-Net++ [6] PSNR and SSIM even dip slightly. Because the synthetic degradation is regular and its color distribution relates 19 stably to the ground truth, the front end’s initial ab already sits close to the true color, leaving little residual; a reference retrieved from DIV2K [31] that does not match the synthetic distribution may induce unnecessary correction. The module is thus better suited to correcting the color bias typical of real low-light scenes.                             
+
+> Table 3: Quantitative results on LOLv2-Synthetic [33] (100 test pairs). Method PSNR ↑SSIM ↑LPIPS ↓∆E2000 ↓MAE ab ↓
+> CPGA-Net++ [6] 24.31 0.920 0.064 6.693 2.813
+> + Proposed 24.29 0.913 0.066 6.802 2.998 FLIGHTNet [7] 25.12 0.928 0.064 6.510 3.143 + Proposed 25.13 0.924 0.064 6.500 3.101
+
+4.2.4 Unpaired NIQE 
+
+Table 4 reports NIQE [39] for CPGA-Net++ [6] on the five unpaired datasets. Adding the module raises NIQE [39] slightly on every set (mean 2.735 →2.834, +0.099). Since NIQE [39] measures conformity to natural statistics rather than color accuracy, we read this as a trade-off between color correction and naturalness, to be judged with the visual results and paired-data color metrics.                       
+
+> Table 4: NIQE [39] on unpaired datasets (CPGA-Net++ [6] front end); lower is better. Dataset CPGA-Net++ [6] + Proposed ∆
+> LIME [2] 2.865 3.448 +0.583 NPE [34] 3.043 3.084 +0.041 MEF [35] 3.383 3.910 +0.527 VV [36] 1.959 2.111 +0.152 DICM [37] 2.524 2.618 +0.094 Average 2.735 2.834 +0.099
+
+4.3 Ablation Studies 
+
+All ablations use the LOLv1 [3] test set with CPGA-Net++ [6] as the front end and extend to LOLv2 [33] only for cross-dataset generalization. 
+
+4.3.1 Retrieval Strategy 
+
+We compare the front end alone, the module with a random reference, and the module with a FAISS [11]-retrieved reference (Table 5). Even a random reference improves on the front end (PSNR +0.24 dB, 
+
+∆E2000 −3.4% , MAE ab −8.7% ), showing the network can use an external image’s overall color distribution. FAISS [11] retrieval then pushes every metric further. The network and the retriever thus contribute at different levels: the former performs correction, the latter improves alignment by selecting a more suitable reference. 
+
+4.3.2 Residual vs. Direct Prediction 
+
+We compare predicting a residual against directly predicting the full ab across the three paired datasets (Table 6). On LOLv1 [3], direct prediction is marginally better in absolute numbers (underlined), but 20 Table 5: Retrieval-strategy ablation on LOLv1 [3]. Method PSNR ↑ SSIM ↑ LPIPS ↓ ∆E2000 ↓ MAE ab ↓
+
+CPGA-Net++ [6] (no module) 22.24 0.835 0.136 8.912 5.265 RAG (random ref) 22.48 0.833 0.131 8.608 4.806 RAG (FAISS ref) 22.53 0.836 0.128 8.402 4.712 
+
+cross-dataset testing exposes a fundamental difference: direct prediction collapses to 19.68 dB on LOLv2-Real [33] (1.69 dB below residual) and 19.77 dB on LOLv2-Synthetic [33]. Residual learning—needing only a correction over the initial ab —retains the front end’s estimate on unseen distributions and generalizes far more reliably. 
+
+Table 6: Residual vs. direct prediction across paired datasets (CPGA-Net++ [6] front end). The better value between Residual and Direct is underlined; the Baseline is listed for reference only and is not part of this comparison. Dataset Method PSNR ↑ SSIM ↑ LPIPS ↓ ∆E2000 ↓ MAE ab ↓
+
+LOLv1 [3] Baseline 22.24 0.835 0.136 8.912 5.265 + Residual 22.53 0.836 0.128 8.402 4.712 + Direct 22.58 0.835 0.128 8.298 4.630 LOLv2-Real [33] Baseline 21.29 0.851 0.162 9.419 3.445 + Residual 21.37 0.851 0.164 9.378 3.423 + Direct 19.68 0.815 0.199 10.90 6.448 LOLv2-Syn [33] Baseline 24.31 0.920 0.064 6.693 2.813 + Residual 24.29 0.913 0.066 6.802 2.998 + Direct 19.77 0.821 0.144 9.334 8.305 
+
+4.3.3 GlobalSPHistAdaIN 
+
+Removing GlobalSPHistAdaIN leaves the color network worse on every metric than the plain CPGA-Net++ [6] baseline (Table 7). Absent an effective external color-prior injection, an added color network does not reliably improve the front-end output and can even disturb the initial estimate through its nonlinear transforms. The full module surpasses the baseline on all metrics (PSNR +0.29 dB, ∆E2000 −5.7% , MAE ab 
+
+−10 .5% ), making GlobalSPHistAdaIN the key injection module. 
+
+Table 7: GlobalSPHistAdaIN ablation on LOLv1 [3]. Method PSNR ↑ SSIM ↑ LPIPS ↓ ∆E2000 ↓ MAE ab ↓
+
+CPGA-Net++ [6] 22.24 0.835 0.136 8.912 5.265 + Proposed (w/o SPHistAdaIN) 22.09 0.833 0.139 8.965 5.420 + Proposed (full) 22.53 0.836 0.128 8.402 4.712 
+
+4.3.4 Effectiveness of Retrieval 
+
+A natural concern is whether the gains come merely from the extra parameters and training of a post-processing network. We train a control that removes only the retrieval path—keeping the same backbone, residual design, losses, and training setup, but dropping the FAISS [11] dual index and GlobalSPHistAdaIN—so the network 21 must predict residuals from training-data statistics alone. (With no reference, the histogram loss reduces to its ground-truth term, doubled to preserve scale.) As Table 8 shows, this retrieval-free post-processing is slightly worse than the baseline on all five metrics. Color restoration requires a per-image color prior, which cannot be stored statically in weights and must be supplied dynamically at inference.                        
+
+> Table 8: Retrieval-path ablation on LOLv1 [3]. Method PSNR ↑SSIM ↑LPIPS ↓∆E2000 ↓MAE ab ↓
+> CPGA-Net++ [6] 22.24 0.835 0.136 8.912 5.265 + retrieval-free residual 22.09 0.833 0.139 9.064 5.448 + Proposed 22.53 0.836 0.128 8.402 4.712
+
+4.3.5 Knowledge-Base Interchangeability 
+
+To check whether the network learned to use retrieved statistics or merely memorized the DIV2K [31] prior, we replace DIV2K [31] with Flickr2K [40] (2,650 unseen natural images) at inference, rebuilding the indices identically and keeping all weights unchanged (Table 9). With the unseen base, every metric except SSIM still clearly beats the baseline, indicating a base-agnostic mechanism. Flickr2K [40] trailing DIV2K [31] slightly is expected, since training built its indices on DIV2K [31]. In practice, adapting to a domain with distinctive color characteristics requires only rebuilding the index with domain images—no retraining of the color network and no change to the frozen front end.                        
+
+> Table 9: Knowledge-base interchangeability on LOLv1 [3]. Method PSNR ↑SSIM ↑LPIPS ↓∆E2000 ↓MAE ab ↓
+> CPGA-Net++ [6] 22.24 0.835 0.136 8.912 5.265 + Proposed (Flickr2K [40]) 22.34 0.834 0.130 8.632 4.895 + Proposed (DIV2K [31]) 22.53 0.836 0.128 8.402 4.712
+
+4.3.6 Retrieval Features and Weights 
+
+Table 10 evaluates retrieval strategies. All the VGG19 [12] rows use the same features but differ in how those features are turned into an index: we describe each image by the global mean and variance of its VGG19 [12] feature map and index texture and structure separately, then combine them with weights α (texture, mean) and 
+
+β (structure, variance). Among five such weightings, texture-dominant ( α=1 , β =0 ) beats structure-dominant (α=0 , β =1 , worst on all metrics), and balanced weighting ( α=β=0 .5) is best or tied-best on most metrics. Replacing this VGG19 [12] mean/variance index with a CLIP [14] feature index (ViT-B/32 or ViT-B/16) is worse on all metrics. The last two rows are cross-feature re-ranking schemes, in which one feature (e.g. VGG19 [12]) first retrieves a candidate pool and the other feature (e.g. CLIP [14]) then re-ranks it; both orders also underperform the balanced VGG19 [12] index. Color restoration therefore has different retrieval needs from generic semantic search: the mean and variance of VGG19 [12] intermediate features better preserve texture, local structure, and low-level color statistics, making them the more appropriate similarity measure than high-level semantic features. 
+
+4.4 Visual Analysis 
+
+Main comparison. Figure 8 shows LOLv1 [3] results. All four front ends lift brightness to a recognizable level but retain some color bias—an overall warm cast, an under-saturated central green toy shifted toward 22 Table 10: Retrieval-strategy comparison on LOLv1 [3] (CPGA-Net++ [6] front end). Retrieval PSNR ↑ SSIM ↑ LPIPS ↓ ∆E2000 ↓ MAE ab ↓                                                      
+
+> VGG19 α=0 .5, β =0 .522.53 0.836 0.128 8.402 4.712 VGG19 α=1 .0, β =0 .022.50 0.835 0.129 8.412 4.754 VGG19 α=0 .7, β =0 .322.53 0.836 0.128 8.402 4.718 VGG19 α=0 .3, β =0 .722.49 0.836 0.128 8.416 4.668
+> VGG19 α=0 .0, β =1 .022.34 0.835 0.131 8.616 4.840 CLIP ViT-B/32 22.47 0.836 0.129 8.549 4.727 CLIP ViT-B/16 22.49 0.835 0.129 8.514 4.729 VGG19 →CLIP rerank 22.42 0.834 0.130 8.558 4.736 CLIP →VGG19 rerank 22.40 0.834 0.131 8.563 4.888
+
+yellow-green. After our module, the green toy’s hue returns toward grass green with higher saturation, the fruit and other objects read more naturally, and the warm cast is suppressed; on the color chart, neutral-gray patches show reduced cast, bringing white balance closer to the ground truth. The trend holds across all four front ends.  
+
+> Figure 8: Visual comparison on LOLv1. Top: low-light input and the four front-end outputs; bottom: ground truth and each front end paired with the proposed module.
+
+LOLv2 comparison. Figures 9 and 10 show LOLv2-Real [33] and LOLv2-Synthetic [33]. On real captures the module corrects front-end bias well—cool-blue indoor tones become natural warm white; cool-gray stairwell walls shift toward beige with improved saturation. On synthetic data the improvement is smaller and sometimes reversed, following from the reference source: retrieval from 800 DIV2K [31] natural images may not supply a prior consistent with algorithmically synthesized data. 
+
+Retrieval–restoration correspondence. Figure 11 illustrates the mechanism. In a bookshelf scene, a washed-out gray-brown wooden frame is corrected back to warm brown, guided by a retrieved warm-dominant streetscape, while the white cabinet stays neutral—saturation rises without a new cast. In a near-neutral storage scene, the retrieved low-saturation reference yields a near-zero residual and little change. The improvement thus depends on the residual color error left by the front end, not the module’s intrinsic strength—consistent with the limited gains on LOLv2-Synthetic [33]. 23 Figure 9: Visual comparison on LOLv2-Real Captured across CPGA-Net++ and FLIGHTNet front ends with and without the proposed module.  
+
+> Figure 10: Visual comparison on LOLv2-Synthetic; improvements are smaller due to the mismatch between synthetic color statistics and the natural-image knowledge base.
+
+4.5 Efficiency and Complexity 
+
+The system totals about 85.74 M parameters, of which the frozen CPGA-Net++ [6] (0.06 M) and the VGG19 [12] retrieval extractor (2.33 M) do not train; the trainable parameters are almost entirely in the colorization network (83.35 M), and the FAISS [11] index (1.65 MB) is a non-parametric vector store. Within the colorization network, the decoder Up modules dominate (65.0 M, 78.0%) while the four GlobalSPHis-tAdaIN modules together are just 1.97 M (2.4%). At 400 × 600 , the colorization network needs about 853.06 GFLOPs against 28.94 GFLOPs for CPGA-Net++ [6] and 29.34 GFLOPs for VGG19 [12], confirming that the main load is the second-stage network, not retrieval Retrieval scales well: growing the base from 100 to 800 images increases the index linearly from 0.206 to 1.648 MB, yet end-to-end retrieval time stays near 6.6 ms, with FAISS [11] search at just 0.23 ms for 800 images. Over the full pipeline, mean per-image time is about 211.99 ms: colorization-network inference is the largest share (83.47 ms, 39.4%), reference-image reading is the main non-compute cost (61.43 ms, 29.0%, from loading high-resolution DIV2K [31] references off disk), and RAG [9] retrieval is only 7.40 ms (3.5%). While not yet real-time, the compute is concentrated in the colorization network, and lightweighting that network and streamlining the I/O pipeline are the natural targets for future optimization. 24 Figure 11: Retrieval–restoration correspondence. Left: bookshelf scene, where a warm-dominant reference guides recovery of warm-brown tones. Right: near-neutral storage scene, where a low-saturation reference yields a near-zero residual. (a) ground truth; (b) front-end output; (c) proposed result; (d) retrieved reference. 
+
+# 5 Conclusion 
+
+We addressed the stalled progress of color restoration in low-light image enhancement with a framework built on retrieval-augmented generation. Our central observation is that although current LLIE models keep improving on luminance and structural metrics, gains in color accuracy lag well behind, and outputs still show systematic color shifts—indicating that color restoration is a relatively independent and under-addressed sub-problem. We therefore decoupled color restoration from the front-end LLIE model and realized it as a general-purpose post-processing module that retrieves a similar reference from an external color knowledge base and injects its color distribution to correct the front end’s residual bias. The design combines three elements. A dual-index FAISS [11] retriever over intermediate VGG19 [12] 25 features measures textural similarity through a global-mean index and structural similarity through a variance– covariance index, selecting the most suitable reference from a high-resolution DIV2K [31] base by weighted re-ranking. GlobalSPHistAdaIN injects color by reducing the reference’s SPHist to a 512-dimensional color vector via global average pooling and modulating each layer of the color-restoration network through AdaIN [13]; removing spatial correspondence resolves the cross-dataset color-misinjection problem. A color-residual formulation trains the network to predict the difference between the front-end output and the ground truth rather than the full ab , so the network concentrates on correcting existing bias, improving training stability and cross-dataset generalization. Systematic evaluation on three paired datasets bears this out. With CPGA-Net++ [6] as the front end, the module lifts PSNR from 22.24 to 22.53 dB on LOLv1 [3] while improving ∆E2000 from 8.91 to 8.40 and MAE ab from 5.27 to 4.71, with color-specific metrics improving markedly more than brightness metrics. Swapping the front end for LLFormer [4], FLIGHTNet [7], or IAT [8] yields stable color-metric gains and reveals a clear trend—the weaker the front end’s brightness enhancement, the larger the module’s gain (PSNR +0.58 dB for IAT [8], +0.20 dB for FLIGHTNet [7], +0.06 dB for LLFormer [4]). Ablations separate each design choice: precise FAISS [11] retrieval improves on random references, and both beat the no-RAG [9] baseline; residual learning differs only marginally on LOLv1 [3] but shows a decisive advantage (over 1.7 dB) on the more complex LOLv2 [33] scenes; removing GlobalSPHistAdaIN degrades the network below the front-end baseline; and the VGG19 [12] dual index beats CLIP [14] variants on all metrics, evidence that color restoration relies on textural and structural rather than semantic similarity. Replacing the training-time DIV2K [31] base with an unseen Flickr2K [40] base retains most of the gain, confirming that the network exploits retrieved color statistics rather than memorizing a fixed prior. Several limitations remain. First, the module’s effect depends heavily on the color-statistics match between input and reference base; with DIV2K [31] natural images it supplies effective priors on real captures but may misalign on synthetic data such as LOLv2-Synthetic [33]. Second, DIV2K [31] skews toward landscapes and architecture, offering limited coverage of professional scenes such as industrial inspection, medical imaging, or nighttime urban surveillance. Third, on synthetic data the residual space is minimal and the gain inherently small (PSNR change under 0.05 dB), suggesting such sets are ill-suited as the primary benchmark for a color-restoration module. Fourth, the module uses a Top-1 reference, leaving it dependent on a single retrieval’s quality. Finally, the unpaired-data NIQE [39] results show a small naturalness decline, reflecting a trade-off in which correcting hue and chroma may perturb local statistics—so quality should be judged across all metrics together rather than by any single one. These limitations point to four directions. The knowledge base can be expanded and made dynamic— switching the base by inference scene—corresponding to the Modular RAG [9] idea of composable retrievers. Multi-reference fusion and dynamic re-ranking offer another path: Top-k SPHist averaging, attention-based fusion, and input-adaptive adjustment of the retrieval strategy. More broadly, the “external knowledge base + retrieval + conditional generation” philosophy can transfer to other restoration tasks governed by color or structural priors, where the differences lie chiefly in the base’s content, the retrieval similarity measure, and the injection mechanism; building a unified visual-RAG [9] framework spanning several restoration tasks is a promising goal. In sum, this work introduces an independent color-restoration perspective to low-light image processing and provides a reproducible application case for RAG [9] in vision. 
+
+# Declarations 
+
+Competing interests. The authors declare no competing interests. 
+
+Data availability. All datasets used in this study (LOLv1/v2, LIME, NPE, MEF, VV, DICM, DIV2K, Flickr2K) are publicly available from their original publications. 26 References 
+
+[1] E. H. Land, “The retinex theory of color vision,” Scientific American , vol. 237, no. 6, pp. 108–129, 1977. [2] X. Guo, Y. Li, and H. Ling, “LIME: Low-light image enhancement via illumination map estimation,” 
+
+IEEE Trans. Image Process. , vol. 26, no. 2, pp. 982–993, 2016. [3] C. Wei, W. Wang, W. Yang, and J. Liu, “Deep retinex decomposition for low-light enhancement,” arXiv preprint arXiv:1808.04560 , 2018. [4] T. Wang, K. Zhang, T. Shen, W. Luo, B. Stenger, and T. Lu, “Ultra-high-definition low-light image enhancement: A benchmark and transformer-based method,” in Proc. AAAI Conf. Artificial Intelligence ,2023, vol. 37, no. 3, pp. 2654–2662. [5] S.-E. Weng, S.-G. Miaou, and R. Christanto, “A lightweight low-light image enhancement network via channel prior and gamma correction,” arXiv preprint arXiv:2402.18147 , 2024. [6] S.-E. Weng et al., “Rethinking theoretical illumination for efficient low-light image enhancement,” arXiv preprint arXiv:2409.05274 , 2024. [7] M. Ozcan, H. Ergezer, and M. Ayazo˘ glu, “Flight mode on: A feather-light network for low-light image enhancement,” in Proc. IEEE/CVF Conf. Computer Vision and Pattern Recognition , 2023, pp. 4226–4235. [8] Z. Cui et al., “You only need 90k parameters to adapt light: a lightweight transformer for image enhancement and exposure correction,” arXiv preprint arXiv:2205.14871 , 2022. [9] P. Lewis et al., “Retrieval-augmented generation for knowledge-intensive NLP tasks,” Advances in Neural Information Processing Systems , vol. 33, pp. 9459–9474, 2020. [10] R. Zhang, P. Isola, A. A. Efros, E. Shechtman, and O. Wang, “The unreasonable effectiveness of deep features as a perceptual metric,” in Proc. IEEE Conf. Computer Vision and Pattern Recognition , 2018, pp. 586–595. [11] J. Johnson, M. Douze, and H. Jégou, “Billion-scale similarity search with GPUs,” IEEE Trans. Big Data , vol. 7, no. 3, pp. 535–547, 2019. [12] K. Simonyan and A. Zisserman, “Very deep convolutional networks for large-scale image recognition,” 
+
+arXiv preprint arXiv:1409.1556 , 2014. [13] X. Huang and S. Belongie, “Arbitrary style transfer in real-time with adaptive instance normalization,” in Proc. IEEE Int. Conf. Computer Vision , 2017, pp. 1501–1510. [14] A. Radford et al., “Learning transferable visual models from natural language supervision,” in Proc. Int. Conf. Machine Learning , 2021, pp. 8748–8763. [15] K. Zuiderveld, “Contrast limited adaptive histogram equalization,” in Graphics Gems IV , 1994, pp. 474– 485. [16] D. J. Jobson, Z. Rahman, and G. A. Woodell, “A multiscale retinex for bridging the gap between color images and the human observation of scenes,” IEEE Trans. Image Process. , vol. 6, no. 7, pp. 965–976, 1997. 27 [17] Colorimetry — Part 4: CIE 1976 L*a*b* Colour Space , CIE 015:2018, International Commission on Illumination, Vienna, Austria, 2019. [18] S. Iizuka, E. Simo-Serra, and H. Ishikawa, “Let there be color! Joint end-to-end learning of global and local image priors for automatic image colorization with simultaneous classification,” ACM Trans. Graphics , vol. 35, no. 4, pp. 1–11, 2016. [19] R. Zhang, P. Isola, and A. A. Efros, “Colorful image colorization,” in Proc. European Conf. Computer Vision , 2016, pp. 649–666. [20] T. Welsh, M. Ashikhmin, and K. Mueller, “Transferring color to greyscale images,” in Proc. 29th Annu. Conf. Computer Graphics and Interactive Techniques , 2002, pp. 277–280. [21] R. Ironi, D. Cohen-Or, and D. Lischinski, “Colorization by example,” Rendering Techniques , vol. 29, pp. 201–210, 2005. [22] R. K. Gupta, A. Y.-S. Chia, D. Rajan, E. S. Ng, and H. Zhiyong, “Image colorization using similar images,” in Proc. 20th ACM Int. Conf. Multimedia , 2012, pp. 369–378. [23] M. He, D. Chen, J. Liao, P. V. Sander, and L. Yuan, “Deep exemplar-based colorization,” ACM Trans. Graphics , vol. 37, no. 4, pp. 1–16, 2018. [24] R. Xu et al., “Pik-Fix: Restoring and colorizing old photos,” in Proc. IEEE/CVF Winter Conf. Applica-tions of Computer Vision , 2023, pp. 1724–1734. [25] K. He, X. Zhang, S. Ren, and J. Sun, “Deep residual learning for image recognition,” in Proc. IEEE Conf. Computer Vision and Pattern Recognition , 2016, pp. 770–778. [26] O. Ronneberger, P. Fischer, and T. Brox, “U-Net: Convolutional networks for biomedical image segmentation,” in Proc. Int. Conf. Medical Image Computing and Computer-Assisted Intervention , 2015, pp. 234–241. [27] M. J. Swain and D. H. Ballard, “Color indexing,” Int. J. Computer Vision , vol. 7, no. 1, pp. 11–32, 1991. [28] D. Ulyanov, A. Vedaldi, and V. Lempitsky, “Instance normalization: The missing ingredient for fast stylization,” arXiv preprint arXiv:1607.08022 , 2016. [29] Y. Ma et al., “A survey of retrieval-augmented generation (RAG) for large language models,” in Proc. 2025 Int. Conf. Trustworthy Big Data and Artificial Intelligence (ICTBAI) , 2025, pp. 7–13. [30] A. Blattmann, R. Rombach, K. Oktay, J. Müller, and B. Ommer, “Semi-parametric neural image synthesis,” arXiv preprint arXiv:2204.11824 , 2022. [31] E. Agustsson and R. Timofte, “NTIRE 2017 challenge on single image super-resolution: Dataset and study,” in Proc. IEEE Conf. Computer Vision and Pattern Recognition Workshops , 2017, pp. 126–135. [32] G. Huang, Z. Liu, L. Van Der Maaten, and K. Q. Weinberger, “Densely connected convolutional networks,” in Proc. IEEE Conf. Computer Vision and Pattern Recognition , 2017, pp. 4700–4708. [33] W. Yang, W. Wang, H. Huang, S. Wang, and J. Liu, “Sparse gradient regularized deep retinex network for robust low-light image enhancement,” IEEE Trans. Image Process. , vol. 30, pp. 2072–2086, 2021. [34] S. Wang, J. Zheng, H.-M. Hu, and B. Li, “Naturalness preserved enhancement algorithm for non-uniform illumination images,” IEEE Trans. Image Process. , vol. 22, no. 9, pp. 3538–3548, 2013. 28 [35] K. Ma, K. Zeng, and Z. Wang, “Perceptual quality assessment for multi-exposure image fusion,” IEEE Trans. Image Process. , vol. 24, no. 11, pp. 3345–3356, 2015. [36] V. Vonikakis, R. Kouskouridas, and A. Gasteratos, “On the evaluation of illumination compensation algorithms,” Multimedia Tools and Applications , vol. 77, no. 8, pp. 9211–9231, 2018. [37] C. Lee, C. Lee, and C.-S. Kim, “Contrast enhancement based on layered difference representation of 2D histograms,” IEEE Trans. Image Process. , vol. 22, no. 12, pp. 5372–5384, 2013. [38] M. R. Luo, G. Cui, and B. Rigg, “The development of the CIE 2000 colour-difference formula: CIEDE2000,” Color Research & Application , vol. 26, no. 5, pp. 340–350, 2001. [39] A. Mittal, R. Soundararajan, and A. C. Bovik, “Making a ‘completely blind’ image quality analyzer,” 
+
+IEEE Signal Process. Lett. , vol. 20, no. 3, pp. 209–212, 2012. [40] B. Lim, S. Son, H. Kim, S. Nah, and K. M. Lee, “Enhanced deep residual networks for single image super-resolution,” in Proc. IEEE Conf. Computer Vision and Pattern Recognition Workshops , 2017, pp. 136–144. 29

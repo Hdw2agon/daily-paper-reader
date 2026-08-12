@@ -1,0 +1,621 @@
+Title: Diffusion Image Editing via Asynchronous Token Decoding
+
+URL Source: https://arxiv.org/pdf/2608.09322v1
+
+Published Time: Tue, 11 Aug 2026 02:40:04 GMT
+
+Number of Pages: 9
+
+Markdown Content:
+# Diffusion Image Editing via Asynchronous Token Decoding 
+
+# Yang Shi ∗
+
+Guangdong University of Technology Guangzhou, China sudo.shiyang@gmail.com 
+
+# Liangsi Lu ∗† 
+
+Guangdong University of Technology Guangzhou, China lu.liangsi.cn@gmail.com 
+
+# Minzhe Guo ∗
+
+Guangdong University of Technology Guangzhou, China guominzhe@mails.gdut.edu.cn 
+
+# Yifeng Xie 
+
+Hong Kong Baptist University Hong Kong, China evfxie@gmail.com 
+
+# Yanhui Chen 
+
+Guangdong University of Technology Guangzhou, China chenyanhui91@mails.gdut.edu.cn 
+
+# Jingchao Wang 
+
+Peking University Beijing, China ethanwangjc@163.com 
+
+# Xuhang Chen 
+
+Huizhou University Huizhou, China xuhangc@hzu.edu.cn sad opened closed pizza noodles serious angry yellow green bird butterfly river road spiderman robot w/ paraglider w/o paraglider 
+
+Edited image Real image Edited image Real image Edited image Real image 
+
+happy 
+
+Figure 1: ATDEdit. These examples demonstrate our inference-time, training-free framework operating on Diffusion Transform-ers. ATDEdit mitigates the global drift of synchronous decoding through token-wise condition switching driven by Token-wise Conditional Surprisal. Source-memory replacement and hard projection promote preservation of selected keep-token regions while editable tokens receive target-conditioned updates. Labels indicate the desired semantic change. 
+
+> ∗Yang Shi, Liangsi Lu, and Minzhe Guo contributed equally to this work.
+> †Corresponding author.
+> This work is licensed under a Creative Commons Attribution 4.0 International License.
+> MM ’26, Rio de Janeiro, Brazil
+> © 2026 Copyright held by the owner/author(s). ACM ISBN 979-8-4007-2213-4/2026/11 https://doi.org/10.1145/3767308.3834980
+
+## Abstract 
+
+Text-guided diffusion image editing aims to modify semantic at-tributes of an image while preserving its identity, layout, and back-ground. However, naïvely switching the text condition during sam-pling often causes global drift, as denoising dynamics propagate changes across tokens and can disrupt unedited regions. To ad-dress this issue, we propose Asynchronous Token Decoding Edit 
+
+(ATDEdit), an inference-time framework that views each sampler arXiv:2608.09322v1 [cs.CV] 10 Aug 2026 MM ’26, November 10–14, 2026, Rio de Janeiro, Brazil Shi et al. 
+
+step as a parallel update of a globally coupled token matrix and enables token-indexed condition switching with differentiated up-date policies. Instead of applying synchronous target-conditioned updates to all tokens, ATDEdit estimates editable locations using token-wise conditional surprisal and applies target-conditioned cor-rections to the selected token set. It supplies source key/value mem-ory at keep-token positions and projects selected keep-token latent rows back to their source values; these operations promote back-ground preservation but do not constitute a pixel-level invariance guarantee. This approach combines local editing and background preservation without external or user-provided spatial masks and without model fine-tuning. On PIE-Bench, ATDEdit achieves the strongest reported preservation metrics, including 27.44 dB PSNR and 0.055 LPIPS, while retaining competitive semantic alignment. 
+
+## CCS Concepts 
+
+• Computing methodologies → Computer vision problems ;
+
+Reconstruction .
+
+## Keywords 
+
+Text-Guided Image Editing, Diffusion Models, Diffusion Transform-ers, Asynchronous Token Decoding, Inference-Time Editing   
+
+> ACM Reference Format:
+> Yang Shi, Liangsi Lu, Minzhe Guo, Yifeng Xie, Yanhui Chen, Jingchao Wang, and Xuhang Chen. 2026. Diffusion Image Editing via Asynchronous Token Decoding. In Proceedings of the 34th ACM International Conference on Multi-media (MM ’26), November 10–14, 2026, Rio de Janeiro, Brazil. ACM, New York, NY, USA, 9 pages. https://doi.org/10.1145/3767308.3834980
+
+## 1 Introduction 
+
+Text-guided image editing has become a crucial tool across a range of domains [2, 22]. Its core mission is to empower users to modify specific semantic attributes of an image, such as altering the style of clothing, changing the time of day, or transforming the breed of an animal. Driven by the demand for high-fidelity results and fine-grained control, research in this area is rapidly advancing [3, 40]. Recently, the field has witnessed a paradigm shift with the ad-vent of Diffusion Transformers (DiTs) [24], which have largely supplanted U-Nets as the architecture of choice for high-quality synthesis. Building upon DiTs, a compelling line of work such as FlowEdit [14] has further refined the process by moving be-yond stochastic noise loops. These approaches reinterpret diffusion as a deterministic transport via Ordinary Differential Equations (ODEs) [28] or Rectified Flows [18], effectively leveraging the trans-former’s inherent parallelism to map source latents directly to target states. This theoretically offers a precise trajectory for semantic transformation. However, despite these advancements, a fundamental limitation persists: many trajectory-based editors treat the decoding trajec-tory as a monolithic, synchronous transformation. By updating all latent tokens uniformly under the new prompt, they do not exploit the token-indexed latent representation of DiTs; importantly, these tokens are still globally coupled through self-attention. Thus, mod-ifying the prompt (e.g., from “dog” to “cat”) and imposing a global update can trigger unwanted changes outside the intended region. Conversely, methods relying on pre-computed static masks (e.g., Cond DiT Blocks 
+
+# ~ Auto Select tokens 
+
+> Frozen Unedit Tokens Edit Tokens Image Tokens Edited Tokens
+> Cond DiT Blocks
+> Image Tokens
+
+Unedit Dim Data Space Edit Dim Unedit Dim Data Space Edit Dim 
+
+> Edited Tokens
+
+Synchronous Update Asynchronous Update 
+
+Figure 2: Comparison between Synchronous and Asynchro-nous Token Decoding. Top: Conventional synchronous edit-ing updates all latent tokens uniformly under the target con-dition. This uniform update causes the denoising trajectory to diverge globally (marked by ✗), leading to unwanted back-ground drift. Bottom: Our framework reformulates editing as an asynchronous process. It dynamically utilizes Token-wise Conditional Surprisal to identify editable regions. Se-lected keep-token latent rows are projected back to their source values after each step, while editable tokens receive the target-conditioned correction. 
+
+DiffEdit) [5] decouple the “where” from the “what” of generation. Yet, imposing rigid spatial constraints onto a dynamic process often fails to capture the scene’s subtle, evolving semantics [35, 36]. To address these limitations, we propose to shift the paradigm from imposing static external masks to enabling dynamic internal model introspection. In DiTs [24], we formulate diffusion editing as an asynchronous token-indexed process: all tokens remain coupled through the transformer, but different token rows may follow differ-ent condition-switching and state-update rules. This token-indexed representation provides the structural basis for trajectory-level asynchrony without assuming statistical independence between to-kens. Guided by this, we introduce Asynchronous Token Decoding 
+
+Edit (ATDEdit). Instead of imposing external constraints, ATDEdit uses the model’s token-wise counterfactual response to ask which locations are most sensitive to the new prompt. We quantify this using Token-wise Conditional Surprisal, a token-wise conditional sensitivity score measuring the magnitude of prediction change under a condition switch. This reformulates editing as a negotiation: high-surprisal tokens are permitted to receive target-conditioned updates, while selected keep-token latent states are reset to their source values and their key/value memory is supplied from the source branch. These operations reduce unwanted changes without Diffusion Image Editing via Asynchronous Token Decoding MM ’26, November 10–14, 2026, Rio de Janeiro, Brazil 
+
+claiming that the underlying transformer dynamics are decoupled. Figure 1 visually demonstrates the efficacy of ATDEdit. Figure 2 contrasts this token-indexed update with conventional synchronous decoding. We provide a scoped theoretical analysis. A deterministic sampler is a Markov recursion that updates the full token matrix in parallel, but this does not imply token inde-pendence. For common-noise coupling, the scalar difference has no larger variance than independent-noise evaluation when the paired source/target evaluations have nonnegative covariance, and strictly smaller variance when the covariance is positive. For hard projection, keep-token latent states are exactly reset to the source state at each step in exact arithmetic; this is a token-state guarantee rather than a pixel-level invariance claim. In summary, our key contributions are as follows: 
+
+• We propose ATDEdit, a framework that reformulates dif-fusion editing as asynchronous token decoding. Central to this is Token-wise Conditional Surprisal, a token-wise con-ditional sensitivity score that dynamically discovers editable regions online by quantifying each token’s response to a condition switch. 
+
+• We introduce an asynchronous update mechanism integrat-ing an Attention Memory Boundary Condition and Common-noise Coupling. Hard projection exactly resets selected keep-token latent states, while common noise aligns stochastic inputs and can reduce scalar estimator variance under a nonnegative-covariance condition. 
+
+• We clarify the scope of the method’s formal properties: sam-pler updates are parallel but globally coupled, top-quantile selection optimizes captured surprisal only under a fixed car-dinality budget, and the zero-drift result applies to projected keep-token latent states. 
+
+• We conduct extensive experiments on PIE-Bench, where ATDEdit obtains the strongest preservation metrics in the reported comparison while retaining competitive semantic alignment. 
+
+## 2 Related Work 2.1 Diffusion and Flow Backbones 
+
+Diffusion models [9, 28, 37] and latent diffusion models [26] enable high-quality generation, while recent Diffusion Transformers and flow-based formulations further improve scalability and sampling efficiency [19, 24]. More broadly, recent world foundation models such as Orca formulate multimodal understanding and generation through a unified latent state-transition space [31]. However, when the condition is changed within one reverse trajectory, existing samplers still update all tokens synchronously, which can propa-gate undesired changes beyond the edited region [40]. In contrast, ATDEdit keeps the backbone unchanged and modifies only the inference dynamics through token-asynchronous condition switch-ing. 
+
+## 2.2 Text Guided Image Editing 
+
+Text-guided image editing methods include noise-based approaches such as SDEdit [22], attention-control methods [3, 8, 29], inversion-based methods [12, 23], and instruction-following models [2]. Closely related composed retrieval work also combines visual content with modification text, with recent methods studying attribute-aware composition, robustness to noisy correspondences, and directional calibration across image/video retrieval [15–17]. Recent token-level controls [11, 33] provide finer spatial control, but they rely on addi-tional training and therefore differ from a training-free inference-time setting. A persistent difficulty is to improve instruction align-ment without sacrificing background preservation under synchro-nous conditioning [3, 20, 21]. In contrast, ATDEdit is training free and applies target-conditioned updates only to tokens selected on-line during sampling. 
+
+## 2.3 Mask Discovery and Attention Based Preservation 
+
+Mask-based approaches such as DiffEdit [5] and memory-based DiT editors such as KVEdit [40] constrain generation through discov-ered masks or attention reuse. PartEdit [6] further targets object-part editing by optimizing part-specific textual tokens to obtain localization masks during inference. Yet most of these methods de-pend on offline masks, external priors, or static heuristics, and they do not adapt the protected region to the time-varying reverse dy-namics [21]. In contrast, ATDEdit discovers editable tokens online and combines this discovery with an attention memory boundary and a state-space projection. 
+
+## 3 Method 
+
+In DiT or flow samplers, switching the condition from 𝑐 src to 𝑐 tar 
+
+within one sampling trajectory is equivalent to asking all tokens to synchronously rewrite their denoising explanations. However, a local edit may require only a subset of tokens to change, and forcing a synchronous rewrite can cause global drift on tokens that should remain stable [8]. A concrete prediction is that the same-state coun-terfactual response is strongly token-nonuniform and varies over time, defining a time-dependent editable set E ( 𝑡 ). However, this formulation faces two challenges. First, self-attention couples to-kens globally; even if we never explicitly update keep tokens in state space, they can still drift through message passing unless an internal boundary condition is imposed. Second, counterfactual differences estimated under mismatched randomness have high variance, destabilizing both E ( 𝑡 ) selection and target-conditioned updates [38]. To address these limitations, as illustrated in Figure 3, our ATDEdit framework reformulates the editing process into two parallel stages: sensitivity estimation and asynchronous updating. 
+
+## 3.1 Preliminaries and Notation 
+
+We use a token-indexed view of diffusion sampling. A deterministic sampler maps the current full token matrix to the next full token matrix, so token rows are updated simultaneously at each scheduler step. Self-attention nevertheless couples those rows; our “asynchro-nous” formulation means that token indices can receive different condition-switching and state-update rules, not that their dynamics are independent. This view is conceptually related to parallel to-ken decoding in masked generative transformers for text-to-image generation [4], while our formulation concerns continuous latent states in diffusion/flow samplers. We therefore describe diffusion sampling in DiTs as parallel token-state decoding along sampling time. Let z𝑡 ∈ R𝑆 ×𝑑 denote MM ’26, November 10–14, 2026, Rio de Janeiro, Brazil Shi et al. Tar Cond Select 
+
+𝐱 !"#$! Attention 
+
+> Tar Cond
+> Src Cond
+
+# ~
+
+> Difference
+> Attention
+> Src Cond
+
+# ~
+
+> Difference
+
+# +
+
+> Add Noise
+
+DiT Blocks 
+
+> Select
+> Image Token
+> Unselected Token
+> Condition Embedding Token-wise Conditional Surprisal
+> DiT Blocks DiT Blocks
+
+Same-point Sensitivity Estimation Token-Asynchronous Update   
+
+> Select Top-𝜌 𝑡 Tokens Selection
+
+# + ~1 − 𝑡 ! 𝐱 𝐤 + 𝑡 !𝜀 |𝑡𝑎𝑟 − 𝑠𝑟𝑐| 
+
+𝐳 !!"# 
+
+𝐳 !$#% 
+
+𝐱 !"#$! 
+
+𝐱 !%&! "#$! 
+
+Figure 3: Overview of ATDEdit for transforming a fox into a dog. (Top) Same-state source/target evaluations produce Token-wise Conditional Surprisal and an editable-token mask. (Bottom) Target-conditioned corrections are applied to editable tokens, while source key/value memory and hard projection constrain selected keep-token rows. 
+
+the latent token sequence at continuous time 𝑡 ∈ [ 0, 1], where 
+
+𝑆 is the number of tokens and 𝑑 is the token feature dimension; larger 𝑡 corresponds to noisier latents. For any matrix A ∈ R𝑆 ×𝑑 
+
+and any subset J ⊆ { 1, . . . , 𝑆 }, we write AJ ∈ R| J | × 𝑑 for the row-submatrix restricted to indices in J . For a single index 𝑖 ∈{1, . . . , 𝑆 }, A(𝑖 ) ∈ R𝑑 denotes the 𝑖 -th token row. We follow common diffusion notation and use bold lowercase for token sequences, which are 𝑆 × 𝑑 matrices; capital letters are reserved for attention matrices. Let 𝑐 src and 𝑐 tar denote the source and target conditions, and write 𝑐 for a generic condition. We use superscripts src /tar to indicate the source/target branches, and subscripts 𝑡 or 𝑡 𝑗 to denote scheduler time. A diffusion transformer with parameters 𝜃 can be abstractly written as a one-step decoder ˆz𝑡 𝑗 +1 = D𝜃 (z𝑡 𝑗 , 𝑡 𝑗 , 𝑐 ), (1) where {𝑡 𝑗 }𝑁 +1 
+
+> 𝑗 =1
+
+is a decreasing scheduler sequence with 𝑡 1 > 𝑡 2 >
+
+· · · > 𝑡 𝑁 +1 and 𝑁 is the number of reverse inference steps. We define the signed step size 
+
+Δ𝑡 𝑗 ≜ 𝑡 𝑗 +1 − 𝑡 𝑗 , (2) so Δ𝑡 𝑗 < 0 for a decreasing schedule. We use a rectified-flow pa-rameterization [19], in which the model predicts a velocity field 
+
+𝑣 𝜃 (z𝑡 , 𝑡, 𝑐 ) ∈ R𝑆 ×𝑑 .
+
+Under this parameterization, an estimate of the clean latent tokens x0 is recovered as ˆx0 (z𝑡 , 𝑡, 𝑐 ) = z𝑡 − 𝑡 𝑣 𝜃 (z𝑡 , 𝑡, 𝑐 ), (3) which is the form used throughout this section. Let xsrc  
+
+> 𝑡
+
+∈ R𝑆 ×𝑑 be the source 𝑥 0-space latent tokens (encoded from the source image). For notational alignment with the scheduler, we keep the subscript 𝑡 (or 𝑡 𝑗 ), although xsrc  
+
+> 𝑡
+
+is constant across 𝑡 .We maintain an editable 𝑥 0-space state xedit  
+
+> 𝑡
+
+∈ R𝑆 ×𝑑 , and use xedit 
+
+> 𝑡 𝑗
+
+to denote the state associated with scheduler time 𝑡 𝑗 . We initialize 
+
+xedit  
+
+> 𝑡 1
+
+← xsrc  
+
+> 𝑡 1
+
+.We execute the reverse process on the decreasing scheduler sequence {𝑡 𝑗 }𝑁 +1 
+
+> 𝑗 =1
+
+defined above. We use 0, 1 ∈ R𝑆 to denote the all-zeros and all-ones vectors. For token-wise masks, we use broadcast over the feature dimension: for a mask vector m ∈ { 0, 1}𝑆 and a token matrix A ∈ R𝑆 ×𝑑 , A ⊙ m
+
+denotes element-wise multiplication where m is broadcast to shape 
+
+𝑆 × 𝑑 . For an editable mask m(𝑡 ) ∈ { 0, 1}𝑆 , define the editable and keep sets as E ( 𝑡 ) ≜ {𝑖 : 𝑚 𝑖 (𝑡 ) = 1} and K ( 𝑡 ) ≜ {𝑖 : 𝑚 𝑖 (𝑡 ) = 0},with keep indicator k(𝑡 ) ≜ 1 − m(𝑡 ). We use the subscript “keep” to denote row selection by K ( 𝑡 ): for a token matrix A ∈ R𝑆 ×𝑑 ,
+
+Akeep = AK ( 𝑡 ) .
+
+## 3.2 Editing as a Constrained Token Dynamics 
+
+To formalize the part of background preservation that is directly controllable in latent state space, we define a keep-token constraint during the reverse process. We express this constraint as a state-space contract and enforce it by projection. Given a keep set K ( 𝑡 ) ⊆ {1, . . . , 𝑆 } at time 𝑡 , define the affine constraint set 
+
+C( 𝑡 ) ≜
+
+n
+
+x ∈ R𝑆 ×𝑑 : xK ( 𝑡 ) = (xsrc  
+
+> 𝑡
+
+)K ( 𝑡 )
+
+o
+
+. (4) We enforce this contract by Euclidean projection 
+
+ΠC ( 𝑡 ) (y) ≜ arg min   
+
+> x∈ C ( 𝑡 )
+
+∥x − y∥𝐹 , (5) where ∥ · ∥ 𝐹 denotes the Frobenius norm on matrices, ∥A∥𝐹 ≜√︃ Í𝑆 𝑖 =1
+
+Í𝑑 ℓ=1 𝐴 2 
+
+> 𝑖ℓ
+
+. Separating the Frobenius objective over keep and editable rows shows that Eq. (15) is the Euclidean projection onto this constraint set. It therefore yields exact zero drift for the cur-rently selected keep-token latent rows in the ideal arithmetic model. The remaining question is how to identify E ( 𝑡 ) online and how to compute a stable counterfactual update on that set. Diffusion Image Editing via Asynchronous Token Decoding MM ’26, November 10–14, 2026, Rio de Janeiro, Brazil 
+
+## 3.3 Common-Noise Coupling and Parallelogram Sampling 
+
+Reliable editing requires reducing noise mismatch when estimating the response associated with a condition switch, because stochastic variations can dominate comparisons based on independent noise. We construct the counterfactual comparison between 𝑐 src and 𝑐 tar 
+
+under aligned randomness using a common-noise coupling. Let 𝜺 ∈ R𝑆 ×𝑑 denote Gaussian noise with i.i.d. standard normal entries, equivalently vec (𝜺 ) ∼ N ( 0𝑆𝑑 , 𝐼 𝑆𝑑 ). At time 𝑡 , we construct a source noisy latent using the rectified-flow linear interpolation: 
+
+zsrc  
+
+> 𝑡
+
+= (1 − 𝑡 ) xsrc  
+
+> 𝑡
+
++ 𝑡 𝜺 . (6) Rather than sampling an independent target trajectory, we cou-ple the target noisy latent by a parallelogram construction [14]: 
+
+ztar  
+
+> 𝑡
+
+= zsrc  
+
+> 𝑡
+
++
+
+
+
+xedit  
+
+> 𝑡
+
+− xsrc 
+
+> 𝑡
+
+
+
+, (7) so both branches share the same noise realization 𝜺 while differing only by the current editable displacement xedit  
+
+> 𝑡
+
+− xsrc  
+
+> 𝑡
+
+. This cou-pling removes branch-wise randomness mismatch and can reduce estimator variance. For scalar target/source functionals 𝐹 and 𝐺 ,the coupled difference satisfies Var (𝐹 − 𝐺 ) = Var (𝐹 ) + Var (𝐺 ) − 
+
+2Cov (𝐹, 𝐺 ); relative to independent noise, its variance is no larger when Cov (𝐹, 𝐺 ) ≥ 0 and is strictly smaller when the covariance is positive. The difference can still reflect the condition switch, the current state displacement, and the applied memory boundary. 
+
+## 3.4 Online Editable-Token Discovery via Token-wise Conditional Surprisal 
+
+We characterize what the dynamic masking rule guarantees and what it does not. Conditional surprisal is exactly a scaled same-state velocity difference under Eq. (3). Under a fixed cardinality budget, selecting the largest scores maximizes only the sum of selected surprisal values; it is not a claim of global optimality for the final edited image. Unlike methods relying on external segmentation, we utilize Token-wise Conditional Surprisal to quantify condition sensitivity based on the model’s own counterfactual response. This metric measures the magnitude of prediction change under a condition switch; high values are treated as evidence that a token may require editing, whereas low values favor preservation. The score is a model-derived heuristic for editability rather than a semantic correctness certificate. Specifically, we wish to decide, at each time 𝑡 , which tokens should respond to the condition switch from 𝑐 src to 𝑐 tar .
+
+Same-state counterfactual evidence. We measure same-state con-ditional sensitivity with attention memory injection disabled. For coupled draw ℓ, Eq. (6) uses 𝜺 (ℓ ) to form zsrc ,ℓ 𝑡 , which is evaluated under both conditions: ˆx(ℓ ) 
+
+> 0,src
+
+= ˆx0 (zsrc ,ℓ 𝑡 , 𝑡, 𝑐 src ), ˆx(ℓ ) 
+
+> 0,tar
+
+= ˆx0 (zsrc ,ℓ 𝑡 , 𝑡, 𝑐 tar ). (8) Both predictions lie in R𝑆 ×𝑑 and differ only in the condition for that draw. For each token index 𝑖 ∈ { 1, . . . , 𝑆 }, let ˆ x(𝑖,ℓ ) 
+
+> 0,src
+
+and ˆ x(𝑖,ℓ ) 
+
+> 0,tar
+
+denote the predictions obtained from the ℓ-th coupled noise draw. Noise is shared within each source/target pair and independent across ℓ.We define Token-wise Conditional Surprisal by the Monte Carlo average 
+
+𝑠 𝑖 (𝑡 ) ≜ 1
+
+𝑛 avg 
+
+> 𝑛 avg
+
+∑︁ 
+
+> ℓ=1
+
+1
+
+𝑑 ˆx(𝑖,ℓ ) 
+
+> 0,tar
+
+− ˆx(𝑖,ℓ )  
+
+> 0,src 1
+
+, (9) where ∥ · ∥ 1 is the ℓ1 norm in R𝑑 . The term surprisal is descriptive here and does not refer to Shannon surprisal. For each draw, Eq. (3) gives ˆx(𝑖,ℓ ) 
+
+> 0,tar
+
+− ˆx(𝑖,ℓ ) 
+
+> 0,src
+
+= 𝑡 
+
+
+
+𝑣 𝜃 (zsrc ,ℓ 𝑡 , 𝑡, 𝑐 src ) (𝑖 ) − 𝑣 𝜃 (zsrc ,ℓ 𝑡 , 𝑡, 𝑐 tar ) (𝑖 ) 
+
+, (10) so 𝑠 𝑖 (𝑡 ) averages the magnitude of the same-state velocity change induced by switching only the condition. 
+
+Top-quantile mask with smoothing. We select a sparse editable set by taking the 𝐵 (𝑡 ) = max {1, ⌊𝜌 (𝑡 )𝑆 ⌋} largest values of the EMA-smoothed scores {¯𝑠 𝑖 (𝑡 )} 𝑆 𝑖 =1, where 𝜌 (𝑡 ) ∈ ( 0, 1] controls the editable fraction. Ties at the cutoff are resolved by a fixed token-index order, yielding exactly 𝐵 (𝑡 ) indices and the mask 𝑚 𝑖 (𝑡 ) = 1for 𝑖 ∈ E ( 𝑡 ) and 0 otherwise. Before optional dilation, this top-𝐵 (𝑡 )
+
+set maximizes Í𝑖 ∈ E ( 𝑡 ) ¯𝑠 𝑖 (𝑡 ) among sets of the same cardinality; no stronger optimality claim is implied. To reduce estimator noise across steps, we apply an exponential moving average (EMA) to the Monte Carlo score above. Let ¯ 𝑠 𝑖 (𝑡 ) be the EMA buffer, initialized as ¯ 𝑠 𝑖 = 0. Upon receiving a new estimate 
+
+𝑠 𝑖 (𝑡 ), we update ¯𝑠 𝑖 ← 𝛽 ¯𝑠 𝑖 + ( 1 − 𝛽 ) 𝑠 𝑖 , (11) where 𝛽 ∈ [ 0, 1) is the smoothing coefficient. Mask updates are performed only within a mid-noise detect window 𝑡 ∈ [ 𝑡 lo , 𝑡 hi ]. To save compute, we update the mask every 𝜅 
+
+steps (integer interval 𝜅 ≥ 1). Optionally, we apply 𝑟 ≥ 0 rounds of morphological dilation on the 2D token grid to encourage spatial coherence; the keep set remains the complement after dilation. 
+
+## 3.5 Attention Memory Boundary Condition via Partial Attention Memory Freezing 
+
+Since standard diffusion models couple tokens globally through self-attention [30], simply freezing token states does not control every message-passing pathway. Replacing the keys and values of keep tokens makes those token positions supply source-branch memory in the target attention readout. This boundary does not freeze target queries or attention weights and does not remove global coupling; it limits one route by which target-conditioned information enters through keep-token memory. A key challenge is enforcing that keep tokens preserve back-ground and structure under the target condition 𝑐 tar . We implement a boundary condition directly in the self-attention mechanism of the transformer. 
+
+Partial attention memory freezing (KV boundary). The memory-supply boundary is a concrete, token-aligned realization inspired by key/value reuse in prior attention-control methods [40]. Consider one attention head with query and key matrices 𝑄, 𝐾 ∈
+
+R𝑆 ×𝑑 ℎ and value matrix 𝑉 ∈ R𝑆 ×𝑑 𝑣 . During target-branch inference, we maintain two copies of attention memory: (𝐾 src , 𝑉 src ) computed from the source branch under 𝑐 src , and (𝐾 tar , 𝑉 tar ) computed from the target branch under 𝑐 tar . Let “keep” denote token indices with MM ’26, November 10–14, 2026, Rio de Janeiro, Brazil Shi et al. 
+
+𝑚 𝑖 (𝑡 ) = 0 (equivalently 𝑘 𝑖 (𝑡 ) = 1). We construct mixed memories 
+
+e𝐾, e𝑉 by replacing target rows at keep-token positions: 
+
+( e𝐾 𝑗 , e𝑉 𝑗 ) =
+
+((𝐾 src  
+
+> 𝑗
+
+, 𝑉 src  
+
+> 𝑗
+
+), 𝑗 ∈ K ( 𝑡 ),
+
+(𝐾 tar  
+
+> 𝑗
+
+, 𝑉 tar  
+
+> 𝑗
+
+), 𝑗 ∈ E ( 𝑡 ). (12) Queries remain untouched: the target branch uses 𝑄 tar computed under 𝑐 tar . Thus keep-token positions supply source value content, while target queries and the resulting attention weights remain condition dependent. 
+
+## 3.6 Asynchronous Target-Conditioned Update 
+
+We now construct the update rule that follows target-conditioned dynamics only on editable tokens, evaluated under aligned random-ness and under the attention boundary. At each reverse step, let m(𝑡 ) ∈ { 0, 1}𝑆 be the editable mask vector at time 𝑡 and k(𝑡 ) = 1 − m(𝑡 ) the keep indicator. We evaluate a source velocity at zsrc  
+
+> 𝑡
+
+under 𝑐 src , and a target velocity at the coupled ztar  
+
+> 𝑡
+
+under 𝑐 tar with the KV boundary condition enabled for keep tokens. For coupled draw ℓ, define Δ𝑣 (ℓ ) 
+
+> 𝑡
+
+= 𝑣 𝜃 (ztar ,ℓ 𝑡 , 𝑡, 𝑐 tar ) − 
+
+𝑣 𝜃 (zsrc ,ℓ 𝑡 , 𝑡, 𝑐 src ), where the target evaluation uses the mixed memory in Eq. (12). The steering estimator is 
+
+cΔ𝑣 𝑡 ≜ 1
+
+𝑛 avg 
+
+> 𝑛 avg
+
+∑︁ 
+
+> ℓ=1
+
+Δ𝑣 (ℓ ) 
+
+> 𝑡
+
+∈ R𝑆 ×𝑑 . (13) We update only editable tokens in the 𝑥 0-space state: 
+
+xedit   
+
+> 𝑡 𝑗 +1
+
+← xedit  
+
+> 𝑡 𝑗
+
++ Δ𝑡 𝑗 
+
+ cΔ𝑣 𝑡 𝑗 ⊙ m(𝑡 𝑗 ). (14) Finally, we enforce the state-space contract by projection, imple-mented as a hard reset on keep tokens: 
+
+
+
+xedit  
+
+> 𝑡 𝑗 +1
+
+  
+
+> K ( 𝑡 𝑗 )
+
+←
+
+
+
+xsrc 
+
+> 𝑡 𝑗
+
+  
+
+> K ( 𝑡 𝑗 )
+
+. (15) Equation (15) is the exact Euclidean projection onto C( 𝑡 𝑗 ) because the objective separates over keep and editable rows. In practice, attention memory freezing (12) and projection (15) are complemen-tary: the former constrains the memory supplied by keep-token positions but does not eliminate global message passing, while the latter enforces zero drift for the selected keep-token latent rows after each projection. 
+
+## 3.7 Scope of Formal Guarantees 
+
+Parallel update scope. For a deterministic scheduler, the reverse trajectory has the form z𝑡 𝑗 +1 = T𝑗,𝜃,𝑐 (z𝑡 𝑗 ), so it is a Markov recursion on the full state R𝑆 ×𝑑 and produces all token rows simultaneously. This establishes parallel token-state updates, not independence: 
+
+T𝑗,𝜃,𝑐 can couple every row through self-attention. 
+
+Common-noise scope. Let 𝐹 (𝜺 ) and 𝐺 (𝜺 ) be any scalar projections of the target and source evaluations with finite second moments. A one-sample common-noise difference and an independent-noise difference satisfy Var [𝐹 (𝜺 ) − 𝐺 (𝜺 )] = Var (𝐹 ) + Var (𝐺 ) − 2Cov (𝐹, 𝐺 ), (16) Var [𝐹 (𝜺 ) − 𝐺 (e𝜺 )] = Var (𝐹 ) + Var (𝐺 ), (17) where e𝜺 is independent. Thus common noise has no larger variance when Cov (𝐹, 𝐺 ) ≥ 0, and strictly smaller variance when the covari-ance is positive. Averaging 𝑛 avg independent coupled differences reduces their mean-squared fluctuation around the expectation by the standard factor 1 /𝑛 avg .
+
+Attention-memory scope. For target query row 𝑞 tar  
+
+> 𝑖
+
+, define e𝛼 𝑖 𝑗 =
+
+softmax 𝑗 (( 𝑞 tar  
+
+> 𝑖
+
+)⊤ e𝐾 𝑗 /√𝑑 ℎ ). The output row 𝑜 𝑖 = Í𝑆 𝑗 =1 e𝛼 𝑖 𝑗 e𝑉 𝑗 then has the exact decomposition 
+
+𝑜 𝑖 =∑︁   
+
+> 𝑗 ∈ K ( 𝑡 )
+
+e𝛼 𝑖 𝑗 𝑉 src  
+
+> 𝑗
+
++∑︁   
+
+> 𝑗 ∈ E ( 𝑡 )
+
+e𝛼 𝑖 𝑗 𝑉 tar  
+
+> 𝑗
+
+. (18) This identifies which values are supplied by keep-token positions, but e𝛼 𝑖 𝑗 still depends on target queries and mixed keys; memory freezing therefore does not guarantee an unchanged attention out-put. 
+
+Selection and projection scope. For nonnegative scores ¯ 𝑠 𝑖 (𝑡 ) and a fixed budget 𝐵 , the pre-dilation top-𝐵 set maximizes Í𝑖 ∈ E ¯𝑠 𝑖 (𝑡 )
+
+among sets with |E| = 𝐵 : replacing any selected lower-score index by an unselected higher-score index cannot decrease the objective. This statement concerns captured score mass only. For projection, the Frobenius objective separates over K ( 𝑡 ) and E ( 𝑡 ); consequently, the unique minimizer fixes the keep block to (xsrc  
+
+> 𝑡
+
+)K ( 𝑡 ) and leaves the editable block equal to the pre-projection value. The resulting zero-drift statement is exact for the selected latent rows in exact arithmetic, but it does not by itself imply pixel-level invariance after decoding. 
+
+## 4 Experiments 
+
+We evaluate ATDEdit on instruction-guided image editing. Since ATDEdit is an inference-time framework, all results are obtained without model fine-tuning. 
+
+## 4.1 Experimental Setup 
+
+Dataset and Evaluation Metrics. We evaluate on PIE-Bench [10], a standard benchmark for instruction-based image editing at 512 ×512 resolution. PIE-Bench contains 700 samples across 10 editing cat-egories. Each instance provides a source image, an edit instruc-tion, and a ground-truth region mask. ATDEdit does not use the ground-truth mask at inference time, and the mask is used only for evaluation. We report three groups of metrics. Structure is measured by Structure Distance (Dist.) to assess geometric consistency [10]. Background preservation is measured by PSNR, MSE, SSIM [32], and LPIPS [39] on the non-edited region. CLIP-Whole uses the full image, whereas CLIP-Edited keeps pixels inside the benchmark edited-region mask and zeros the complement before computing image–text similarity against the edit instruction [25]. Dist., MSE, SSIM, and LPIPS are displayed after multiplication by the scale factors stated in the table headers. 
+
+Implementation Details. ATDEdit uses SD3 [7] as the default backbone. For prior methods that are tightly coupled to specific released backbones, we follow their official implementations and report results on those native backbones. For SD3-based compar-isons, we match the image resolution and the inference-step budget whenever possible. All experiments are conducted on a single RTX 3090. Diffusion Image Editing via Asynchronous Token Decoding MM ’26, November 10–14, 2026, Rio de Janeiro, Brazil 
+
+Table 1: Quantitative comparison on PIE-Bench. Methods are reported on their released/native backbones; FlowEdit, FlowAlign, and ATDEdit form the primary same-backbone SD3 comparison, while the remaining rows provide cross-backbone references. The best, second, and third numeric results are highlighted in green, yellow, and blue, respectively. Type Method Struct. Background Preservation CLIP Semantics Dist. (× 10 3) ↓ PSNR ↑ MSE (× 10 3) ↓ SSIM (× 10 2) ↑ LPIPS (× 10 3) ↓ Whole ↑ Edited ↑
+
+Diffusion DiffEdit (SD1.4) 22.39 24.09 5.14 76.72 80.96 23.34 20.44 DDIM + MasaCtrl 28.79 21.25 8.58 80.11 106.59 24.13 21.13 Direct Inversion + MasaCtrl 24.46 21.78 7.99 81.74 87.38 24.42 21.38 DDIM + PnP 28.20 21.26 8.42 78.90 113.58 25.45 22.54 Direct Inversion + PnP 24.27 21.43 8.10 79.52 106.26 25.48 22.63 InfEdit (SD1.4) 18.06 25.62 5.88 85.02 55.69 24.92 22.08 Flow FlowEdit (SD3) 17.06 21.52 8.33 86.09 129.54 25.80 22.42 FlowAlign (SD3) 12.87 26.83 4.87 91.53 57.87 25.77 22.31 KVEdit (FLUX) 13.84 26.31 3.65 91.19 60.04 25.72 22.11 Stable Flow (FLUX) 15.46 24.33 4.64 89.45 92.08 25.73 22.26 
+
+ATDEdit (SD3) 11.10 27.44 2.70 93.03 55.35 25.80 22.40 Real image ATDEdit    
+
+> （SD3 ）
+> FlowEdit(SD3) InfEdit(SD1.4) DDIM + MasaCtrl Direct Inversion + MasaCtrl DDIM+PnP Direct Inversion+PnP KVEdit (FLUX) Stable Flow (FLUX) DiffEdit (SD1.4)
+
+a cat sitting in the grass -> a cat sitting in the rocks 
+
+Diffusion Flow 
+
+a yellow bird …sitting on a branch-> a crochet bird …sitting on a branch 
+
+a woman with gold makeup -> a woman with blue makeup 
+
+a calm beautiful woman…-> a laughing beautiful woman… 
+
+a young girl…-> a young girl…looking at the camera 
+
+> FlowAlign (SD3)
+
+Figure 4: Comparison of edited results. Real images are in the first column. 
+
+## 4.2 Comparison with Prior Methods 
+
+Baselines. We compare ATDEdit against ten representative base-lines spanning several major paradigms of text-guided image edit-ing. Specifically, the compared methods include diffusion-based editors such as DiffEdit [5] and InfEdit [34], recent flow-based or accelerated editors including FlowEdit [14], FlowAlign [13], KVEdit [40], and Stable Flow [1], as well as attention-control ap-proaches based on MasaCtrl [3] and Plug-and-Play (PnP) [29]. For fairness, we evaluate MasaCtrl and PnP under both DDIM [27] and Direct Inversion [10], yielding four variants in total. Overall, these baselines cover a broad spectrum of editing paradigms, from multi-step diffusion editing and inversion-based reconstruction to MM ’26, November 10–14, 2026, Rio de Janeiro, Brazil Shi et al. 
+
+Table 2: Ablation of the attention-memory boundary components. Point estimates are reported; small numerical differences should be interpreted descriptively. Variant Components Struct. Background Preservation Semantics Mem. Freeze Projection Dist. (× 10 3) ↓ PSNR ↑ MSE (× 10 3) ↓ SSIM (× 10 2) ↑ LPIPS (× 10 3) ↓ Whole ↑ Edit ↑
+
+w/o Boundary ✗ ✗ 19.46 21.41 8.17 78.47 110.13 25.91 22.53 w/o Hard Proj. ✓ ✗ 13.20 24.85 5.11 88.46 72.37 25.86 22.47 w/o Mem. Freeze ✗ ✓ 11.52 27.27 2.83 92.48 60.12 25.46 21.90 
+
+ATDEdit (Full) ✓ ✓ 11.10 27.44 2.70 93.03 55.35 25.80 22.40 Real image Edit image Chicken -> Duck Edit Preserve 𝑡 !" 
+
+(a) Editable-token masks at different 𝑡 hi values. 0.4 0.5 0.6 
+
+> Thi
+> 0.1 0.2 0.3 0.4 0.5 0.6
+> Tlo
+> 36 40 44 48
+> PSNR (dB)
+> 36 40 44 48
+
+(b) PSNR on unedited region ↑.0.4 0.5 0.6  
+
+> Thi
+> 0.1 0.2 0.3 0.4 0.5 0.6
+> Tlo
+> 13 15 17 19
+> CLIP score
+> 13 15 17 19
+
+(c) CLIP-Edited ↑.
+
+Figure 5: Sensitivity analysis. (a) Binary editable-token masks obtained by top-quantile selection of the smoothed condi-tional sensitivity scores for the “Chicken” to “Duck” task. (b) PSNR on the unedited region over (𝑡 hi , 𝑡 lo ). (c) CLIP-Edited over (𝑡 hi , 𝑡 lo ). Samples occupy the valid triangular domain 
+
+𝑡 lo ≤ 𝑡 hi ; surfaces are interpolated only for visualization. The values in (b) and (c) are not dataset-level PIE-Bench averages. 
+
+recent flow-based generation and attention manipulation, providing a comprehensive benchmark across different model architectures and editing mechanisms. 
+
+Quantitative Results. Quantitative results on PIE-Bench are sum-marized in Table 1. In the reported comparison, ATDEdit obtains the strongest Structure Distance, PSNR, MSE, SSIM, and LPIPS, ties FlowEdit on CLIP-Whole, and remains competitive on CLIP-Edited. Because several prior methods use their native backbones, we treat FlowEdit and FlowAlign as the primary same-backbone SD3 com-parisons and the other rows as cross-backbone references. The observed preservation gains are consistent with the intended roles of online token selection, source-memory replacement, and hard projection, but the table alone does not isolate backbone effects outside the SD3 subset. 
+
+Qualitative Results. Figure 4 provides qualitative examples in which ATDEdit applies the requested edits while preserving much of the surrounding layout and background. 
+
+## 4.3 Ablation Study 
+
+Sensitivity analysis. We analyze the impact of the detection win-dow [𝑡 lo , 𝑡 hi ] on the trade-off between pixel-level fidelity and seman-tic alignment. The feasible parameter space is triangular because our design requires 𝑡 lo ≤ 𝑡 hi .Figure 5 shows lower background PSNR but higher CLIP-Edited as either threshold increases. The stronger variation along 𝑡 hi sug-gests that 𝑡 hi is the primary knob for edit strength, whereas 𝑡 lo 
+
+mainly adjusts the baseline sensitivity. 
+
+Attention memory boundary condition. Table 2 shows that mem-ory freezing and hard projection are complementary rather than re-dundant. Removing both components substantially weakens preser-vation, removing hard projection degrades every preservation met-ric, and removing memory freezing reduces both preservation and CLIP scores. The measured effects are consistent with distinct roles: hard projection enforces the stated zero-drift constraint on selected latent rows, while memory freezing changes the source/target mem-ory supplied during attention. The ablation does not directly mea-sure boundary-local feature consistency. 
+
+Ablation takeaway. The sensitivity sweep characterizes the edit-strength trade-off, while the component-removal study supports distinct contributions from memory freezing and hard projection. These results do not establish higher-order synergy between com-ponents. 
+
+## 5 Conclusion 
+
+In this work, we present ATDEdit, an inference-time, token-level framework designed for image editing with Diffusion Transform-ers (DiTs). By conceptualizing the denoising process as a paral-lel yet globally coupled token-state update, our approach enables token-indexed condition switching to achieve fine-grained edit-ing control. To effectively safeguard unedited regions, we imple-ment source key/value memory substitution alongside hard pro-jection on designated keep-token rows. Extensive evaluations on PIE-Bench demonstrate that ATDEdit attains the strongest reported background preservation metrics while maintaining competitive semantic alignment, and our boundary-component ablation studies further confirm the essential contributions of memory freezing and hard projection. However, ATDEdit incurs computational overhead during mask discovery and relies heavily on the DiT’s calibration for accurate masking. Furthermore, its preservation-oriented hard projection is less suitable for global transformations unless most or all tokens are marked editable. Diffusion Image Editing via Asynchronous Token Decoding MM ’26, November 10–14, 2026, Rio de Janeiro, Brazil 
+
+## Acknowledgments 
+
+This work was supported by Guangdong Basic and Applied Ba-sic Research Foundation (Grant No. 2025A1515110445), National Training Program of Innovation and Entrepreneurship for Under-graduates (Grant No. 202511845040) and Guangdong University of Technology Training Program of Research for Undergraduates (Grant No. xj2026118450535). 
+
+## References 
+
+[1] Omri Avrahami, Or Patashnik, Ohad Fried, Egor Nemchinov, Kfir Aberman, Dani Lischinski, and Daniel Cohen-Or. 2025. Stable flow: Vital layers for training-free image editing. In Proceedings of the Computer Vision and Pattern Recognition Conference . 7877–7888. [2] Tim Brooks, Aleksander Holynski, and Alexei A Efros. 2023. Instructpix2pix: Learning to follow image editing instructions. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition . 18392–18402. [3] Mingdeng Cao, Xintao Wang, Zhongang Qi, Ying Shan, Xiaohu Qie, and Yinqiang Zheng. 2023. Masactrl: Tuning-free mutual self-attention control for consistent image synthesis and editing. In Proceedings of the IEEE/CVF international confer-ence on computer vision . 22560–22570. [4] Huiwen Chang, Han Zhang, Jarred Barber, AJ Maschinot, Jose Lezama, Lu Jiang, Ming-Hsuan Yang, Kevin Murphy, William T Freeman, Michael Rubinstein, et al. 2023. Muse: Text-to-image generation via masked generative transformers. arXiv preprint arXiv:2301.00704 (2023). [5] Guillaume Couairon, Jakob Verbeek, Holger Schwenk, and Matthieu Cord. 2022. Diffedit: Diffusion-based semantic image editing with mask guidance. arXiv preprint arXiv:2210.11427 (2022). [6] Aleksandar Cvejic, Abdelrahman Eldesokey, and Peter Wonka. 2025. Partedit: fine-grained image editing using pre-trained diffusion models. In Proceedings of the Special Interest Group on Computer Graphics and Interactive Techniques Conference Conference Papers . 1–11. [7] Patrick Esser, Sumith Kulal, Andreas Blattmann, Rahim Entezari, Jonas Müller, Harry Saini, Yam Levi, Dominik Lorenz, Axel Sauer, Frederic Boesel, et al. 2024. Scaling rectified flow transformers for high-resolution image synthesis. In Forty-first international conference on machine learning .[8] Amir Hertz, Ron Mokady, Jay Tenenbaum, Kfir Aberman, Yael Pritch, and Daniel Cohen-Or. 2022. Prompt-to-prompt image editing with cross attention control. 
+
+arXiv preprint arXiv:2208.01626 (2022). [9] Jonathan Ho, Ajay Jain, and Pieter Abbeel. 2020. Denoising diffusion probabilistic models. Advances in neural information processing systems 33 (2020), 6840–6851. [10] Xuan Ju, Ailing Zeng, Yuxuan Bian, Shaoteng Liu, and Qiang Xu. 2023. Direct inversion: Boosting diffusion-based editing with 3 lines of code. arXiv preprint arXiv:2310.01506 (2023). [11] Ronen Kamenetsky, Sara Dorfman, Daniel Garibi, Roni Paiss, Or Patashnik, and Daniel Cohen-Or. 2025. SAEdit: Token-level control for continuous image editing via Sparse AutoEncoder. arXiv preprint arXiv:2510.05081 (2025). [12] Bahjat Kawar, Shiran Zada, Oran Lang, Omer Tov, Huiwen Chang, Tali Dekel, Inbar Mosseri, and Michal Irani. 2023. Imagic: Text-based real image editing with diffusion models. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition . 6007–6017. [13] Jeongsol Kim, Yeobin Hong, Jonghyun Park, and Jong Chul Ye. 2025. Flowalign: Trajectory-regularized, inversion-free flow-based image editing. arXiv preprint arXiv:2505.23145 (2025). [14] Vladimir Kulikov, Matan Kleiner, Inbar Huberman-Spiegelglas, and Tomer Michaeli. 2025. Flowedit: Inversion-free text-based editing using pre-trained flow models. In Proceedings of the IEEE/CVF International Conference on Computer Vision . 19721–19730. [15] Zixu Li, Yupeng Hu, Zhiwei Chen, Qinlei Huang, Guozhi Qiu, Zhiheng Fu, and Meng Liu. 2026. ReTrack: Evidence-Driven Dual-Stream Directional Anchor Calibration Network for Composed Video Retrieval. In AAAI , Vol. 40. 23373– 23381. [16] Zixu Li, Yupeng Hu, Zhiwei Chen, Haokun Wen, Xuemeng Song, and Liqiang Nie. 2026. COMBINER: Composed Image Retrieval Guided by Attribute-based Neighbor Relations. IEEE TIP (2026). [17] Zixu Li, Yupeng Hu, Zhiwei Chen, Mingyu Zhang, Zhiheng Fu, and Liqiang Nie. 2026. Conesep: Cone-based robust noise-unlearning compositional network for composed image retrieval. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition . 16897–16909. [18] Qiang Liu. 2022. Rectified flow: A marginal preserving approach to optimal transport. arXiv preprint arXiv:2209.14577 (2022). [19] Xingchao Liu, Chengyue Gong, and Qiang Liu. 2022. Flow straight and fast: Learning to generate and transfer data with rectified flow. arXiv preprint arXiv:2209.03003 (2022). [20] Liangsi Lu, Xuhang Chen, Minzhe Guo, Shichu Li, Jingchao Wang, and Yang Shi. 2026. Chordedit: One-step low-energy transport for image editing. arXiv preprint arXiv:2602.19083 (2026). [21] Liangsi Lu, Minzhe Guo, Xuhang Chen, and Yang Shi. 2026. Semantic Granularity Navigation in Image Editing. arXiv preprint arXiv:2605.21190 (2026). [22] Chenlin Meng, Yutong He, Yang Song, Jiaming Song, Jiajun Wu, Jun-Yan Zhu, and Stefano Ermon. 2021. Sdedit: Guided image synthesis and editing with stochastic differential equations. arXiv preprint arXiv:2108.01073 (2021). [23] Ron Mokady, Amir Hertz, Kfir Aberman, Yael Pritch, and Daniel Cohen-Or. 2023. Null-text inversion for editing real images using guided diffusion models. In 
+
+Proceedings of the IEEE/CVF conference on computer vision and pattern recognition .6038–6047. [24] William Peebles and Saining Xie. 2023. Scalable diffusion models with transform-ers. In Proceedings of the IEEE/CVF international conference on computer vision .4195–4205. [25] Alec Radford, Jong Wook Kim, Chris Hallacy, Aditya Ramesh, Gabriel Goh, Sandhini Agarwal, Girish Sastry, Amanda Askell, Pamela Mishkin, Jack Clark, et al. 2021. Learning transferable visual models from natural language supervision. In International conference on machine learning . PmLR, 8748–8763. [26] Robin Rombach, Andreas Blattmann, Dominik Lorenz, Patrick Esser, and Björn Ommer. 2022. High-resolution image synthesis with latent diffusion models. In 
+
+Proceedings of the IEEE/CVF conference on computer vision and pattern recognition .10684–10695. [27] Jiaming Song, Chenlin Meng, and Stefano Ermon. 2020. Denoising diffusion implicit models. arXiv preprint arXiv:2010.02502 (2020). [28] Yang Song, Jascha Sohl-Dickstein, Diederik P Kingma, Abhishek Kumar, Stefano Ermon, and Ben Poole. 2020. Score-based generative modeling through stochastic differential equations. arXiv preprint arXiv:2011.13456 (2020). [29] Narek Tumanyan, Michal Geyer, Shai Bagon, and Tali Dekel. 2023. Plug-and-play diffusion features for text-driven image-to-image translation. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition . 1921–1930. [30] Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez, Łukasz Kaiser, and Illia Polosukhin. 2017. Attention is all you need. Advances in neural information processing systems 30 (2017). [31] Yihao Wang, Yuheng Ji, Mingyu Cao, Yanqing Shen, Runze Xiao, Huaihai Lyu, Senwei Xie, Euan Liu, Klara Tian, Tianfeng Long, et al. 2026. Orca: The World is in Your Mind. arXiv preprint arXiv:2606.30534 (2026). [32] Zhou Wang, Alan C Bovik, Hamid R Sheikh, and Eero P Simoncelli. 2004. Image quality assessment: from error visibility to structural similarity. IEEE transactions on image processing 13, 4 (2004), 600–612. [33] Zirui Wang, Zhizhou Sha, Zheng Ding, Yilin Wang, and Zhuowen Tu. 2024. Tokencompose: Text-to-image diffusion with token-level supervision. In Pro-ceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition .8553–8564. [34] Sihan Xu, Yidong Huang, Jiayi Pan, Ziqiao Ma, and Joyce Chai. 2023. Inversion-free image editing with natural language. arXiv preprint arXiv:2312.04965 (2023). [35] Renye Yan, Jikang Cheng, Yaozhong Gan, Shikun Sun, You Wu, Yunfan Yang, Liang Ling, Jinlong Lin, Yeshuang Zhu, Jie Zhou, et al. 2025. Entropy-adaptive diffusion policy optimization with dynamic step alignment. In Proceedings of the IEEE/CVF International Conference on Computer Vision . 1924–1934. [36] Renye Yan, Jikang Cheng, Shikun Sun, Yi Sun, You Wu, Wei Peng, Zongwei Wang, Ling Liang, Junliang Xing, and Yimao Cai. 2026. Do Less, Achieve More: Do We Need Every-Step Optimization for RL Fine-tuning of Diffusion Models? arXiv preprint arXiv:2605.15855 (2026). [37] Renye Yan, Jikang Cheng, You Wu, Ling Liang, Wei Peng, Athanasios V Vasilakos, Qingyu Zhao, Yu Zhang, Ehsan Adeli, Kilian M Pohl, et al. 2026. Pixel-Space Diffusion Transformers. arXiv preprint arXiv:2607.17585 (2026). [38] Wei-Ning Yang and Barry L Nelson. 1991. Using common random numbers and control variates in multiple-comparison procedures. Operations Research 39, 4 (1991), 583–591. [39] Richard Zhang, Phillip Isola, Alexei A Efros, Eli Shechtman, and Oliver Wang. 2018. The unreasonable effectiveness of deep features as a perceptual metric. In Proceedings of the IEEE conference on computer vision and pattern recognition .586–595. [40] Tianrui Zhu, Shiyi Zhang, Jiawei Shao, and Yansong Tang. 2025. Kv-edit: Training-free image editing for precise background preservation. arXiv preprint arXiv:2502.17363 (2025).

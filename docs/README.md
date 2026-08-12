@@ -6,58 +6,57 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-08-11
-- 运行时间：2026-08-11 20:13:57 UTC
+- 最新运行日期：2026-08-12
+- 运行时间：2026-08-12 21:16:36 UTC
 - 运行状态：成功
 - 本次总论文数：12
 - 精读区：1
 - 速读区：11
 
 ### 今日简报（AI）
-今日聚焦文档修复与图像增强，深度解析 DocPure 统一框架等 12 篇前沿进展。
-重点关注 DocPure 提出的无提示词统一文档修复技术，以及结合结构光与扩散模型的低光及水下图像增强新方案。
-建议优先研读 DocPure 的小波调制架构，探索如何利用退化感知技术提升复杂环境下的视觉质量。
-- 详情：[/202608/11/README](/202608/11/README)
+今日精选 12 篇视觉生成前沿论文，重点突破视频帧外推与高质量图像编辑技术。
+Amulet
+- 详情：[/202608/12/README](/202608/12/README)
 
 ### 精读区论文标签
-1. [DocPure: Prompt-Free Unified Document Restoration via Degradation-Aware Structure-Guided Wavelet Modulation](/202608/11/2608.09536v1-docpure-prompt-free-unified-document-restoration-via-degradation-aware-structure-guided-wavelet-modulation)  
-   标签：评分：8.0/10、query:q7
-   evidence：统一文档修复与退化感知自编码器
+1. [Amulet: Frame Extrapolation Through Sparse Layered Scene Representation and Adaptive Shading](/202608/12/2608.10423v1-amulet-frame-extrapolation-through-sparse-layered-scene-representation-and-adaptive-shading)  
+   标签：评分：8.0/10、query:q1
+   evidence：帧外推中新遮挡区域的修复
 
 ### 速读区论文标签
-1. [Learning Structural Illumination for Unsupervised Low-light Enhancement](/202608/11/2608.08153v1-learning-structural-illumination-for-unsupervised-low-light-enhancement)  
-   标签：评分：7.0/10、query:q7
-   evidence：无监督弱光图像增强与修复
-2. [SDDBMs: Soft Denoising Diffusion Bridge Models](/202608/11/2608.08594v1-sddbms-soft-denoising-diffusion-bridge-models)  
+1. [High-Quality Exposure Correction with Diffusion-Based Image Generation Priors](/202608/12/2608.08720v1-high-quality-exposure-correction-with-diffusion-based-image-generation-priors)  
    标签：评分：7.0/10、query:q4
-   evidence：用于图像修复的扩散桥模型
-3. [Degradation-Guided Underwater Image Restoration with Task-Oriented Latent Control](/202608/11/2608.08661v1-degradation-guided-underwater-image-restoration-with-task-oriented-latent-control)  
-   标签：评分：7.0/10、query:q7
-   evidence：水下图像修复与特征自适应
-4. [When Latents Forget Pixels: Restoring Fidelity in Diffusion Transformer Super-Resolution](/202608/11/2608.09133v1-when-latents-forget-pixels-restoring-fidelity-in-diffusion-transformer-super-resolution)  
+   evidence：基于扩散模型的图像生成先验用于修复
+2. [Model the Edit, Not the Image: Visual Autoregressive Editing from a Source-Centric Perspective](/202608/12/2608.09057v1-model-the-edit-not-the-image-visual-autoregressive-editing-from-a-source-centric-perspective)  
    标签：评分：7.0/10、query:q4
-   evidence：用于图像修复和超分辨率的生成模型
-5. [Beyond Uniform Restoration: Empowering All-in-One Restoration with Pixel-Level Multimodal Guidance](/202608/11/2608.09482v1-beyond-uniform-restoration-empowering-all-in-one-restoration-with-pixel-level-multimodal-guidance)  
+   evidence：用于图像编辑和合成的生成式范式
+3. [Diffusion Image Editing via Asynchronous Token Decoding](/202608/12/2608.09322v1-diffusion-image-editing-via-asynchronous-token-decoding)  
+   标签：评分：7.0/10、query:q4
+   evidence：扩散图像编辑与语义修改
+4. [MeanSR: Restoration Trajectory Learning for One-Step Perceptual Super-Resolution](/202608/12/2608.09405v1-meansr-restoration-trajectory-learning-for-one-step-perceptual-super-resolution)  
+   标签：评分：7.0/10、query:q7
+   evidence：感知超分辨率的修复轨迹学习
+5. [Flow Straight to Reality: Perceptually Consistent Flow Matching for Efficient Image Restoration](/202608/12/2608.10544v1-flow-straight-to-reality-perceptually-consistent-flow-matching-for-efficient-image-restoration)  
+   标签：评分：7.0/10、query:q4
+   evidence：用于图像修复的生成式流匹配
+6. [Beyond Fixed Luminance: Towards Panchromatic and Orthochromatic Image Colorization](/202608/12/2608.10798v1-beyond-fixed-luminance-towards-panchromatic-and-orthochromatic-image-colorization)  
    标签：评分：7.0/10、query:q3
-   evidence：像素级引导的全能图像修复
-6. [UniWorld-Design: From Pixel Generation to Layer-Native Design](/202608/11/2608.03971v1-uniworld-design-from-pixel-generation-to-layer-native-design)  
-   标签：评分：6.0/10、query:q4
-   evidence：用于图像合成和编辑的生成模型
-7. [MOSAIK: Multi-Patch Content-Aware Spatial Allocation of Image Tokens for Efficient Generation](/202608/11/2608.05450v1-mosaik-multi-patch-content-aware-spatial-allocation-of-image-tokens-for-efficient-generation)  
-   标签：评分：6.0/10、query:q4
-   evidence：用于图像生成的像素空间扩散模型
-8. [Retrieval-Augmented Generation-Based Color Restoration for Low-Light Image Enhancement](/202608/11/2608.08211v1-retrieval-augmented-generation-based-color-restoration-for-low-light-image-enhancement)  
-   标签：评分：6.0/10、query:q3
-   evidence：利用检索增强生成将颜色修复作为一个独立的子问题
-9. [Agentic AI-powered flexible fiber-bundle endoscopy for high-resolution NIR-II fluorescence imaging in vivo](/202608/11/2608.08402v1-agentic-ai-powered-flexible-fiber-bundle-endoscopy-for-high-resolution-nir-ii-fluorescence-imaging-in-vivo)  
+   evidence：无标签图像着色作为全 RGB 编辑
+7. [Degradation-Aware Prompt Learning with Cross-Modal Compensation for Adverse Weather Removal](/202608/12/2608.06939v2-degradation-aware-prompt-learning-with-cross-modal-compensation-for-adverse-weather-removal)  
    标签：评分：6.0/10、query:q7
-   evidence：AI驱动的内窥镜图像修复
-10. [FiRe: Fixed-Noise Refinement for Visual Counterfactual Explanations](/202608/11/2608.08664v1-fire-fixed-noise-refinement-for-visual-counterfactual-explanations)  
-   标签：评分：6.0/10、query:q4
-   evidence：利用扩散模型进行生成式编辑和局部修改
-11. [UniSpace: Unified Visual Representation and Scalable Multimodal Modeling](/202608/11/2608.08676v1-unispace-unified-visual-representation-and-scalable-multimodal-modeling)  
-   标签：评分：6.0/10、query:q4
-   evidence：使用语义ViT进行图像生成和编辑
+   evidence：恶劣天气下的图像修复
+8. [SegDem: Segmentation helps Demosaicing](/202608/12/2608.07916v1-segdem-segmentation-helps-demosaicing)  
+   标签：评分：6.0/10、query:q3
+   evidence：将图像去马赛克视为从不完整颜色测量中进行的重建
+9. [Three Necessary Principles for Self-Supervised Visual Representation Learning](/202608/12/2608.08309v1-three-necessary-principles-for-self-supervised-visual-representation-learning)  
+   标签：评分：6.0/10、query:q7
+   evidence：自监督视觉表示学习原则
+10. [Preserve More Details: Mitigating Content Drift in Real-World Image Super-Resolution](/202608/12/2608.09373v1-preserve-more-details-mitigating-content-drift-in-real-world-image-super-resolution)  
+   标签：评分：6.0/10、query:q7
+   evidence：使用扩散先验的图像修复
+11. [CoInS-Net: A Continuous Position-Aware Network for Joint Medical Image Interpolation and Segmentation](/202608/12/2608.09391v1-coins-net-a-continuous-position-aware-network-for-joint-medical-image-interpolation-and-segmentation)  
+   标签：评分：6.0/10、query:q1
+   evidence：医学图像插值与补全
 
 
 <div class="dpr-home-promo-card">

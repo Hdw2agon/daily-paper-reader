@@ -6,36 +6,31 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-08-13
-- 运行时间：2026-08-13 19:56:41 UTC
+- 最新运行日期：2026-08-14
+- 运行时间：2026-08-14 20:40:42 UTC
 - 运行状态：成功
-- 本次总论文数：5
+- 本次总论文数：3
 - 精读区：1
-- 速读区：4
+- 速读区：2
 
 ### 今日简报（AI）
-今日深度探索成像逆问题与扩散桥模型，重点解析如何通过时空信息分配优化图像重建效率。
-2) 9
-- 详情：[/202608/13/README](/202608/13/README)
+今日聚焦图像修复与编辑前沿，重点攻克了不完美草图引导下的高质量图像补全难题。
+满分论文 SketchSense 实现了对粗糙手绘的精准解读，同时 UniScale 与自回归编辑技术为工业缺陷检测和局部图像修改提供了新思路。
+建议优先研读 SketchSense，探索如何利用 AI 弥补人类绘画误差以实现专业级的图像修复效果。
+- 详情：[/202608/14/README](/202608/14/README)
 
 ### 精读区论文标签
-1. [Making Every Step Count: Spatio-Temporal Information Allocation for Imaging Inverse Problems](/202608/13/2608.11747v1-making-every-step-count-spatio-temporal-information-allocation-for-imaging-inverse-problems)  
-   标签：评分：9.0/10、query:q3
-   evidence：无需训练的逆问题求解，用于缺失区域恢复
+1. [SketchSense: Learning to Interpret Imperfect Sketch Guidance for Image Inpainting](/202608/14/2608.13186v1-sketchsense-learning-to-interpret-imperfect-sketch-guidance-for-image-inpainting)  
+   标签：评分：10.0/10、query:q1
+   evidence：草图引导的图像补全与修复框架
 
 ### 速读区论文标签
-1. [SDDBMs: Soft Denoising Diffusion Bridge Models](/202608/13/2608.08594v2-sddbms-soft-denoising-diffusion-bridge-models)  
-   标签：评分：7.0/10、query:q4
-   evidence：用于图像修复的扩散桥模型
-2. [VLMs Win a Systematic Evaluation of Underwater Image Reconstruction](/202608/13/2608.11425v1-vlms-win-a-systematic-evaluation-of-underwater-image-reconstruction)  
-   标签：评分：7.0/10、query:q3
-   evidence：使用视觉语言模型进行水下图像修复
-3. [MRI super-resolution in ten sampling steps using a diffusion bridge model](/202608/13/2608.08819v1-mri-super-resolution-in-ten-sampling-steps-using-a-diffusion-bridge-model)  
-   标签：评分：6.0/10、query:q7
-   evidence：用于图像修复的扩散桥接模型
-4. [Structural Guidance for Unified Joint Demosaicing and Denoising](/202608/13/2608.09995v1-structural-guidance-for-unified-joint-demosaicing-and-denoising)  
-   标签：评分：6.0/10、query:q7
-   evidence：带有结构引导的统一修复框架
+1. [UniScale: Arbitrary-Scale Industrial Anomaly Generation](/202608/14/2608.07864v2-uniscale-arbitrary-scale-industrial-anomaly-generation)  
+   标签：评分：6.0/10、query:q4
+   evidence：用于高保真异常生成和合成的生成模型
+2. [Model the Edit, Not the Image: Visual Autoregressive Editing from a Source-Centric Perspective](/202608/14/2608.09057v2-model-the-edit-not-the-image-visual-autoregressive-editing-from-a-source-centric-perspective)  
+   标签：评分：6.0/10、query:q1
+   evidence：无需训练的图像编辑与补全技术
 
 
 <div class="dpr-home-promo-card">

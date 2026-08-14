@@ -1,0 +1,1541 @@
+SketchSense: Learning to Interpret Imperfect Sketch Guidance for Image
+Inpainting
+Zian Yang
+Fudan University
+23307140016@m.fudan.edu.cn
+Abstract
+Sketch-guided image inpainting provides intuitive struc-
+tural control, yet real sketches often mix reliable global in-
+tent with locally crowded, displaced, incomplete, or deliber-
+ately unconventional strokes. Existing approaches typically
+either retain the input sketch as a fixed condition through-
+out denoising or refine it into a clean structure before RGB
+synthesis. The former assumes uniformly reliable strokes
+and can propagate local errors throughout generation; the
+latter must resolve ambiguous structure before emerging
+appearance and semantic context become available.
+We
+propose SketchSense, a framework that interprets imper-
+fect sketch guidance by synchronously denoising interact-
+ing RGB and structure streams. Bidirectional Attention Fu-
+sion couples appearance generation with structural recov-
+ery, producing a refined structure that exposes the model’s
+evolving sketch interpretation.
+A phrase-level objective
+aligns the semantic grounding of the two streams. Sketch-
+Aware Spatial Regulation further adapts sketch use to local
+generation states by modulating attention and the fusion
+process, while an optional signed prior injects preserve-
+versus-correct intent into feature representations and at-
+tention behavior. Experiments on natural and structurally
+complex imagery show substantial gains over existing meth-
+ods in both restoration quality and structural fidelity.
+1. Introduction
+Image inpainting synthesizes coherent content in masked
+regions while preserving compatibility with the observed
+image. Sketches complement prompts and masks by di-
+rectly specifying spatial layout, object boundaries, and lo-
+cal artistic intent.
+Their sparse, editable form lets users
+mark critical contours without providing a complete struc-
+tural map. Prior work has demonstrated their value for in-
+teractive, shape-guided, and structure-aware inpainting [13,
+14, 16, 21], particularly when plausible restoration depends
+on fine contours, ornamental patterns, or complex structural
+Fixed Imperfect Sketch
+Diffusion timestep: 1 → 0
+fix
+fix
+Sketch
+Interpretation
+Prompt:
+Chinese mural;
+a figure seated
+on a lotus flower…
+guidance
+Optional Signed
+Region Prior
+Ground-truth RGB
+(reference only)
+fix
+fix
+fix
+fix
+fix
+masked img
+sketch
+Plain Sketch-Guided Inpainting
+SketchSense: Sketch-Aware Dual-Stream Inpainting
+guidance
+guidance
+guidance
+Degraded
+details
+Adaptively Regulated Sketch Guidance
+Improved
+details
+attention
+modulations
+Refined structure /
+fixed sketch
+Figure 1. Motivation and overview of SketchSense. Fixed-sketch
+conditioning can propagate locally degraded strokes.
+Sketch-
+Sense synchronously denoises RGB and structure, regulates sketch
+use through learned attention modulations and an optional signed
+prior, and exposes its interpretation as refined structure.
+organization.
+The key challenge is that a user sketch is neither a uni-
+formly accurate target nor merely a weak hint.
+It often
+captures the intended global layout and useful boundaries,
+while local strokes may be crowded, displaced, incomplete,
+or distorted [13, 16]. Conversely, an unconventional shape
+may reflect deliberate artistic intent. Treating every stroke
+as equally reliable can transfer drawing errors to the re-
+stored image, whereas globally weakening the condition
+can discard structures the user wants to preserve. Sketch re-
+liability is therefore spatially heterogeneous, and geometry
+alone may not distinguish an error from deliberate design.
+The model must instead relate the sketch to evolving ap-
+pearance, structure, and semantics, then adapt its use across
+locations. This need is especially acute in murals, artworks,
+and illustrations, where dense contours and organized pat-
+terns amplify local interpretation errors [2, 9].
+1
+arXiv:2608.13186v1  [cs.CV]  13 Aug 2026
+
+
+As illustrated in Fig. 1, a fixed sketch can propagate er-
+rors from locally degraded strokes, whereas SketchSense
+interprets and regulates the same guidance during syn-
+chronous denoising.
+Many conditional generation pipelines use a sketch, edge
+map, or line drawing as a fixed external condition through-
+out denoising [18, 23].
+Spatial weighting and attention
+control can vary where or how strongly the condition is
+read [3, 7], but the underlying sketch remains fixed. These
+controls rescale its influence without exposing an evolving
+interpretation, so local errors may persist throughout de-
+noising.
+Another strategy first recovers a clean structure and then
+synthesizes RGB. Although this structure-first formulation
+exposes an intermediate result and is common in sketch re-
+finement and structure-prior inpainting [2, 9, 13], it must
+resolve structural ambiguity before appearance cues such as
+color, material, and texture emerge. Errors in that estimate
+are then inherited by the RGB generator as fixed conditions.
+This is restrictive in structurally complex imagery, where
+the meaning of a stroke and its visual realization are closely
+coupled. These limitations motivate recovering appearance
+and structure together.
+We present SketchSense, a sketch-guided inpainting
+framework built around synchronous RGB–structure under-
+standing. Two interacting branches jointly denoise RGB
+and structure latents: the RGB branch reconstructs the im-
+age, while the structure branch turns the imperfect sketch
+into refined structure at the same denoising step. Bidirec-
+tional Attention Fusion exchanges time-aligned informa-
+tion, allowing appearance and text context to inform struc-
+ture recovery while progressively refined structure guides
+RGB synthesis. The refined-structure trajectory exposes the
+model’s interpretation of the input sketch and supports in-
+spection or iterative revision.
+During training, modality differences can cause the same
+object to be localized differently by text-conditioned atten-
+tion in the RGB and structure branches. We therefore in-
+troduce Phrase-Level Cross-Branch Semantic Consistency,
+an auxiliary objective that aligns their phrase-conditioned
+spatial attention while retaining modality-specific represen-
+tations.
+Locally heterogeneous sketch evidence is not equally
+useful at every location or transformer block. Global scales
+and fixed region weights cannot capture this variation, es-
+pecially because blocks respond differently to condition-
+ing [3]. We therefore introduce Intrinsic Sketch-Aware Spa-
+tial Regulation, which uses evolving dual-branch states and
+local geometry to modulate attention according to sketch re-
+liability and gate the fusion process across space and blocks.
+Sketch geometry alone may not reveal whether an un-
+conventional stroke should be preserved or corrected. Ex-
+plicit Signed Sketch-Use Modeling addresses this ambigu-
+ity with an optional signed spatial prior that communicates
+local intent.
+The prior modulates token representations,
+sketch-source attention, and retrieved sketch features.
+In summary, our contributions are threefold:
+• We propose a synchronous RGB–structure framework
+for interpreting imperfect sketch guidance. Bidirectional
+Attention Fusion and phrase-level semantic consistency
+couple the two branches, which produce restored RGB
+and an observable refined structure.
+• We introduce Intrinsic Sketch-Aware Spatial Regulation,
+which learns to adapt sketch attention and the fusion pro-
+cess across locations and transformer blocks.
+• We introduce Explicit Signed Sketch-Use Modeling to
+express local preservation-or-correction intent when ge-
+ometry alone is ambiguous, using an optional prior to reg-
+ulate sketch representation and use.
+2. Related Work
+2.1. Sketch- and Structure-Guided Image Inpaint-
+ing
+Sketch- and structure-guided inpainting augments masks
+and text with visual conditions that specify missing ge-
+ometry.
+SmartBrush combines text with shape guidance
+for object inpainting, while Structure Matters introduces
+auxiliary structure to reduce semantic discrepancy in dif-
+fusion inpainting [14, 21]. Together, these methods estab-
+lish structural conditions as effective interfaces for control-
+lable restoration.
+When the input structure is imperfect,
+SketchRefiner refines a user sketch before inpainting, and
+structure-prior pipelines recover line or edge representa-
+tions before color and detail synthesis [2, 9, 13]. These
+approaches generally treat structure either as a condition
+to follow or as a completed intermediate result. The for-
+mer does not distinguish reliable strokes from ambiguous
+local evidence, whereas the latter resolves ambiguity before
+appearance cues emerge. Neither formulation directly ad-
+dresses a single sketch whose reliability and intended use
+vary across regions. SketchSense instead interprets struc-
+ture jointly with RGB recovery and retains the refined struc-
+ture as an observable result.
+2.2. Joint Multimodal Generation and Semantic
+Coupling
+Joint diffusion models couple RGB with dense modali-
+ties through interacting branches [8, 22], while diffusion-
+transformer control methods process image and condition
+tokens jointly for flexible visual conditioning [18]. Related
+text–region grounding methods associate textual concepts
+with spatial support: attention refocusing improves text–
+layout correspondence through cross- and self-attention
+control [15], and MTADiffusion combines edge prediction
+with mask–text alignment for object inpainting [6]. These
+2
+
+
+works establish effective multimodal interaction and spatial
+semantic alignment. Generic multimodal coupling, how-
+ever, does not ensure that two modality branches ground
+the same concept in the same spatial region, while exist-
+ing grounding mechanisms typically align text and layout
+within one generation path. SketchSense focuses on this
+cross-branch mismatch: concurrently denoised RGB and
+structure branches may localize the same object phrase dif-
+ferently.
+It therefore combines bidirectional feature ex-
+change with an auxiliary phrase-level objective that aligns
+spatial grounding across the two modalities.
+2.3. Spatially Adaptive Conditional Control
+Spatial control methods regulate where and how strongly
+a condition affects diffusion generation. S-CFG replaces a
+global classifier-free guidance scale with semantic-region-
+dependent guidance [17], Conditional Balance studies
+layer-dependent sensitivity to conditioning [3], and atten-
+tion modulation provides region-specific control over inter-
+mediate attention maps [7]. These methods provide useful
+mechanisms for spatial adherence, condition strength, and
+layer selection, generally assuming that the intended mean-
+ing of the condition is already known. Imperfect sketches
+add a distinct ambiguity because a local deviation may
+be an error to correct or an intentional shape to preserve.
+The model must infer the reliability of sketch evidence,
+while the user may also wish to specify its intended use.
+SketchSense addresses both cases through intrinsic state-
+dependent regulation and an optional signed spatial prior,
+without treating sketch reliability as a single global quan-
+tity.
+3. Method
+Figure 2 summarizes the inference path and training objec-
+tives. SketchSense synchronously denoises RGB and struc-
+ture streams, exchanges their evolving evidence through
+Bidirectional Attention Fusion, and spatially regulates
+sketch use. The RGB stream restores appearance, while
+the structure stream interprets imperfect guidance as refined
+structure.
+3.1. Synchronous RGB–Structure Understanding
+Let zx,t and ze,t be the noisy RGB and edge latents at the
+shared timestep, x and e the visible conditions, m the hole
+mask, p the prompt, and zs the sketch latent. Their initial
+image-token states are
+H0
+x = Px(zx,t, x, m, p),
+H0
+str = [H0
+e ; H0
+s ]
+= [Pe(ze,t, e, m, p); Ps(zs)].
+(1)
+Here Px and Pe abstract native FLUX Fill preparation, pro-
+jection, and prompt conditioning, Ps packs and projects
+the sketch, and the semicolon denotes token-axis concate-
+nation. Sketch tokens remain available as source evidence
+throughout denoising, while the edge-target tokens evolve
+under both structural and appearance context at every trans-
+former block. Edge supervision is used during training; at
+inference, this trajectory records the model’s progressive in-
+terpretation of the imperfect sketch.
+3.1.1. Bidirectional Attention Fusion
+As shown in Fig. 3, each fusion block reuses its na-
+tive image-token QKV and adds a dedicated joint-attention
+QKV LoRA [5]. For b ∈{x, str},
+( ¯Ql
+b, ¯Kl
+b, ¯V l
+b ) = QKVl
+b(Hl
+b) + Ll
+b(Hl
+b),
+(2)
+where Hl
+str = [Hl
+e; Hl
+s] and Ll
+b supplies the fusion-specific
+∆QKV . Using the edge-target query span ¯Ql
+e and the full
+structure-side key/value span, the block forms
+M l
+x←str = Attn
+  ¯Ql
+x, ¯Kl
+str, ¯V l
+str
+
+,
+M l
+e←x = Attn
+  ¯Ql
+e, ¯Kl
+x, ¯V l
+x
+
+.
+(3)
+RGB queries therefore retrieve the current edge hypothesis
+together with the original sketch evidence, and edge queries
+retrieve appearance and semantic context from the RGB
+state. Sharing the native projections retains their pretrained
+representation, while the low-rank residual specializes the
+cross-branch retrieval at each block.
+The two directional messages are jointly projected and
+split into branch-specific candidate residuals:
+(∆Hl
+x, ∆Hl
+e) = Split
+ W l
+0[M l
+x←str; M l
+e←x]
+
+.
+(4)
+The zero-initialized W l
+0 preserves the pretrained starting be-
+havior; Sec. 3.2.1 controls the spatial injection of both can-
+didate residuals. When branch resolutions differ, exchanged
+features are spatially aligned. The same construction is used
+in the double- and single-stream FLUX block families, with
+their respective native projections and dedicated low-rank
+adapters.
+3.1.2. Phrase-Level Cross-Branch Semantic Consistency
+Shared prompts can still yield different phrase grounding
+across branches. We extract local noun phrases P(p) =
+LLM(p), match each phrase to its prompt tokens, and ag-
+gregate its attention over the matched span and heads into
+Al
+b,k. The phrase-conditioned spatial distributions and their
+discrepancy are
+πl
+b,k = Norm
+ Poolb(Al
+b,k)
+
+,
+b ∈{x, e},
+dlk = JS(πl
+x,k∥πl
+e,k),
+Here Poolb aggregates each branch response onto the com-
+mon spatial support used by the loss, and Norm(a) =
+softmax(zscore(a)/T). Let cb,lk = 1 −H(πl
+b,k)/ log N be
+3
+
+
+RGB Transformer Block
+Structure Transformer Block
+A
+A
+QRGB
+KRGB
+VRGB
+QStr
+Kedge | Ksketch
+Vedge | Vsketch
+Bidirectional cross-branch attention
+×
+×
+×
+×
++
++
+Mrgb ← str
+Mstr ← rgb
+Intrinsic Sketch-Aware Spatial Regulation
+Self-Attention (reuse Q/K/V)
+spatial residual
+gate
+spatial residual
+gate
+A
+Explicit Signed Sketch-Use Modeling
+A
+Zero-
+init
+Fusion
+Linear
+W0
+ΔHx
+ΔHe
+HRGB
+l+1
+HStr
+l+1
+sketch-source 
+reliability modulation
+wrel
+Reliability Predictor
+Spatial Gate Predictor
+signed 
+sketch-value
+LoRA
+FluxPack
+FluxPack
+VAE Encoder
+VAE Encoder
+VAE Encoder
+RGB img
+RGB latent
+mask
+edge img
+edge latent
+RGB latent
+structure latent
+sketch latent
+imperfect sketch
+Prompt:
+Chinese mural;
+a figure seated
+on a lotus flower…
+Optional Signed
+Region Prior
+cat
+Hrgb
+Hstr
+RGB
+Loss
+Structure
+Loss
+Phrase-Level 
+Consistency 
+Loss 
+Inputs
+QRGB
+KRGB
+VRGB
+QStr
+Kedge | Ksketch
+Vedge | Vsketch
+Self-Attention (reuse Q/K/V)
+additive 
+signed-prior
+embedding
+Cross-branch attention
+Cross-branch attention
+DDF1ED
+DDF1ED
+DDF1ED
+DDF1ED
+DDF1ED
+DDF1ED
+Output & Loss
+VAE Decoder
+VAE Decoder
+A
+Attention operation (self/cross attention)
+Frozen parameters
+Trainable LoRA adapters
+Inputs / outputs & losses
+RGB stream (Transformer blocks)
+Structure stream (Transformer blocks)
+Sketch-Aware Spatial Regulation
+Legend
+signed source-key
+attention bias
+spatial residual gates
+gx, ge
+Figure 2. Overview of SketchSense. Synchronous RGB and structure branches exchange information through Bidirectional Attention Fu-
+sion. Spatial regulation adapts sketch attention and fusion injection, and an optional signed prior expresses local preservation or correction
+intent. Training uses edge supervision, phrase consistency, and branch losses; inference returns restored RGB and refined structure.
+FLUX block-family QKV paths
+Double Block
+Single Block
+Text
+W_QKV
+Q
+K
+V
+RGB image
+W_QKV
+d
+Q
+K
+V
+dQ
+dK
+dV
+Structure
+W_QKV
+d
+Q
+K
+V
+dQ
+dK
+dV
+Text + RGB
+W_QKV
+d
+Q
+K
+V
+dQ
+dK
+dV
+Text + Structure
+W_QKV
+d
+Q
+K
+V
+dQ
+dK
+dV
+RGB
+Base QKV
+Delta QKV
++
+Structure
+Base QKV
+Delta QKV
+Shared post-QKV attention and fusion
+SA: Text + RGB image
+Q
+K^T
+QK
+V
+attention
+message
+x
+x
+Cross-branch attention: image tokens only
+RGB gets edge | sketch
+Edge target gets RGB
+Q
+K^T
+QK
+V
+attention
+message
+x
+x
+Q
+K^T
+QK
+V
+attention
+message
+x
+x
+SA: Text | edge | sketch
+Q
+K^T
+QK
+V
+attention
+message
+x
+x
+Split
+ΔHx
+l
+ΔHe
+l
+W0
+Linear
+ Cat
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
+gx
+l, ge
+l
+×
+×
+Legend
+d
+Joint-attention QKV LoRA
+Figure 3. Bidirectional Attention Fusion with adapted QKV reuse.
+Native QKV provides the shared base, and a dedicated joint-
+attention QKV LoRA produces fusion-specific ∆QKV . Direc-
+tional messages pass through a zero-initialized projection, split
+into ∆Hl
+x and ∆Hl
+e, and enter their receiving branches through
+gl
+x and gl
+e.
+the normalized-entropy confidence over the N positions of
+the common support, and let clk = max(cx,lk, ce,lk). The
+soft weight and objective are
+ωlk = σ
+sg(dlk) −µ
+τ
+
+·
+
+c0 + c1 clip
+ clk
+cref
+, 0, 1
+
+,
+Lphrase = 1
+|Ω|
+X
+(l,k)∈Ω
+ωlkdlk.
+(5)
+Ωcontains successfully matched, numerically valid block–
+phrase pairs. Parser confidence screening removes unreli-
+able phrases, while ωlk emphasizes mismatched, spatially
+confident pairs without changing the JS gradient through its
+stop-gradient term.
+post-fusion × gx
+l
+post-fusion × ge
+l
+KRGB
+Kedge
+Ksketch
+QRGB
+Qedge
+Legend
+RGB query / key token
+edge / sketch token
+wrel: sketch-source reliability
+within illustrated mask extent
+u > 0: follow sketch more faithfully
+u < 0: allow contextual correction
+signed sketch-value LoRA
+VRGB
+Vedge
+Vsketch
+Figure 4. Locations of sketch-aware modulation. The reliability
+map wrel and signed signal u regulate sketch-source attention and
+value adaptation. Spatial gates gl
+x and gl
+e scale post-fusion residu-
+als; colors schematically mark mechanism roles.
+3.2. Sketch-Aware Spatial Regulation
+As summarized in Fig. 4, SketchSense combines intrinsic
+state-conditioned regulation with an optional explicit signed
+prior. Together, they modulate sketch-source attention and
+cross-branch residual injection; their mechanisms are de-
+tailed below.
+3.2.1. Intrinsic Sketch-Aware Spatial Regulation
+Figure 5 details the reliability and residual-gate predictors.
+Let Hl
+e and Hl
+s be paired edge and sketch states, S the raw
+sketch, M the hole mask, and tl the timestep embedding.
+Reliability combines a token-state path with a pixel-space
+4
+
+
+geometry path:
+zl
+state = Φl
+state
+ Hl
+e, Hl
+s, Hl
+s −Hl
+e, tl
+,
+zl
+geo = Zl
+0
+ Phl,wl
+ Φl
+geo([S, M, S ⊙M])
+
+,
+al = W l
+out,0(zl
+state + zl
+geo),
+wl
+rel = exp
+ log αmax · tanh(al)
+
+.
+(6)
+The adapter Zl
+0 and output W l
+out,0 are zero-initialized, so
+wl
+rel starts at one. With edge-side hole-mask tokens ml,
+source reliability is confined to restoration queries and sup-
+ported sketch sources:
+¯wl
+j = 1+ml
+j(wl
+rel,j−1),
+ℓe←s,l
+ij
+←ℓe←s,l
+ij
++ml
+i log ¯wl
+j.
+(7)
+The token-state path measures agreement between the cur-
+rent edge interpretation and the sketch.
+The pixel-space
+path extracts fine sketch and mask geometry before adap-
+tive pooling Phl,wl converts it into token features for the
+current transformer block. The bounded exponential con-
+verts their combined evidence into a positive multiplicative
+reliability: values above one promote sketch retrieval and
+values below one attenuate it.
+For fusion residual ∆Hl
+b, branch state Hl
+b, mask tokens
+ml
+b, and global conditioning vl, the block-specific injection
+is
+gl
+b = σ
+ Gl
+res
+ Hl
+b, ∆Hl
+b, ml
+b, vl
+,
+Ol
+b = Ol
+b,self + gl
+b ⊙∆Hl
+b.
+(8)
+where b ∈{x, e} and Ol
+b,self is the native update. On the
+structure side, ∆Hl
+e has support on the edge-target token
+span, while the sketch tokens retain their source role along
+this residual path. Thus reliability controls sketch-source
+selection, whereas gl
+b controls how much of the candidate
+cross-branch residual is injected. The gate jointly observes
+the receiving state and proposed message, while the mask
+and global vector provide restoration support and timestep–
+prompt conditioning.
+3.2.2. Explicit Signed Sketch-Use Modeling
+Figure 6 illustrates the explicit prior. Let q ∈[−1, 1]H×W
+express signed sketch-use intent and r ∈[0, 1]H×W its sup-
+port, with u = q ⊙r. Positive, negative, and zero u encour-
+age sketch preservation, permit contextual correction, and
+indicate neutral use, respectively. A zero-initialized spatial
+encoder adds a branch-specific prior embedding during ini-
+tial token preparation:
+eH0
+b = H0
+b + Eb(u, r, |u|),
+b ∈{x, e, s}.
+(9)
+The encoder converts [u, r, |u|] into branch-specific token
+embeddings and begins with Eb = 0.
+Here u carries
+supported direction and strength, r records prior support,
+tl
+Hsl
+Hel
+Hsl − Hel
+Fusion 
+Linear
+W0
+Adaptive Avg Pool to token grid
+Conv
+1 × 1 projections
+cat
+σ
+1 × 1
+scalar
+head
+Linear
+3 × 3 conv
+sketch-source reliability
+wrel
+l
+sketch
+mask
+(a) Sketch-source reliability predictor.
+Hbl
+current state
+ΔHbl
+candidate residual
+mbl
+mask tokens
+vl
+global conditioning
+reshape
+cat
+1 × 1 projections
+1 × 1
+conv
+DW 
+3 × 3
+conv
+GELU
+1 × 1
+scalar
+head
+σ
+Linear
+spatial residual gate
+gb
+l, b ∈ {x,e}
+(b) Spatial residual-gate predictor.
+Figure 5. Intrinsic Sketch-Aware Spatial Regulation. (a) Edge–
+sketch states and raw geometry produce source reliability wl
+rel.
+(b) Branch state, candidate residual, mask tokens, and global con-
+ditioning produce the residual gate gl
+b for b ∈{x, e}.
+signed sketch-use map q
+support map r
+u = q ⊙ r
+[u, r, |u|]
+pool
+reshape
+Eb(u,r,|u|) ∈ R^(Nb × Cb)
+Hb0 ∈ R^(Nb × Cb)
++
+1 × 1
+Conv
+3 → 64
+DW
+3 × 3 
+Conv
+GELU
+zero-init
+1 × 1 Conv
+64 → Cb
+H̃b0
+Figure 6. Additive signed-prior embedding. With u = q ⊙r, a
+zero-initialized encoder maps [u, r, |u|] to the branch-specific Eb,
+which forms e
+H0
+b = H0
+b + Eb. The support map r localizes prior
+activation.
+and the hole mask m supplies restoration support. Subse-
+quent block-wise signed modulation is applied through the
+source-key bias and sketch-value LoRA defined below.
+For restoration branch b ∈{x, e}, query i, sketch source
+j, and head h, the prior adjusts source selection by
+ℓl,h
+b,ij ←ℓl,h
+b,ij + ml
+b,i βl,h
+b uj,
+βl,h
+b
+= βmax tanh(¯βl,h
+b ).
+(10)
+The signed term raises or lowers supported sketch-key log-
+its with a learned layer-, head-, and branch-specific sensi-
+tivity. It consequently affects both the RGB path reading
+structure and the edge path reading sketch evidence. The
+bounded coefficient βl,h
+b
+keeps this modulation within a
+5
+
+
+C. Training-time sketch/prior mode sampling
+B. Base user-like sketch synthesis
+A. Paired source and targets
+×
+line extraction
+RGB image x
+hole mask m
+observed RGB x_obs
+edge target e
+after smooth field warp
+after line 
+control-point jitter
+base sketch s_base
+smooth field warp
+line 
+control-point
+ jitter
+binarize 
+&
+stroke width
+positive-prior mode
+u > 0
+negative-prior mode
+u < 0
+neutral mode
+u = 0
+resulting sketch s
+(neutral)
+resulting sketch s
+(negative region)
+resulting sketch s
+(positive region)
+configured training
+mode probabilities
+sample one
+of three
+modes
+Figure 7. Training example synthesis. Paired RGB and edge tar-
+gets produce a base sketch, followed by one sampled mode: faith-
+ful u > 0, neutral u = 0, or correction-oriented u < 0. The
+inpainting mask selects restoration pixels, and r selects signed-
+prior support.
+fixed scale while allowing different heads to respond dif-
+ferently to the prior.
+The value path applies intent-specific LoRA residuals to
+the normalized and modulated sketch hidden state bHl
+s be-
+fore splitting it into heads:
+∆V l
+s = ω+(u)Bl
++Al
++ bHl
+s + ω−(u)Bl
+−Al
+−bHl
+s,
+eV l,h
+s
+= V l,h
+s
++ Splith(∆V l
+s ),
+(11)
+where ω+(u) = max(u, 0) and ω−(u) = max(−u, 0). The
+embedding, source-key bias, and value transformation ex-
+pose the same signed intent to token state, sketch selection,
+and retrieved sketch content, respectively. Separate posi-
+tive and negative low-rank factors permit preservation and
+correction regions to transform the sketch contribution dif-
+ferently, while neutral regions retain the base value path.
+3.3. Training Example Construction
+We use paired edge annotations when available and other-
+wise extract edge targets with MuGE [25]. From each tar-
+get, we synthesize a base user-like sketch primarily through
+smooth deformation fields, following prior sketch augmen-
+tation practice [13, 16]. We then select a local region and
+sample one treatment: a positive mode replaces it with more
+faithful target-derived structure, a negative mode applies
+stronger warping with optional stroke removal or an unre-
+lated donor patch, and a neutral mode keeps the base sketch.
+These modes yield u > 0, u < 0, and u = 0 training ex-
+amples, respectively, while preserving the remaining sketch
+context, as shown in Fig. 7.
+3.4. Training Objective
+For RGB and edge latents zb, b ∈{x, e}, flow matching [4,
+12] uses noise ϵb ∼N(0, I) and schedule σt:
+zb,t = (1 −σt)zb + σtϵb,
+v⋆
+b = ϵb −zb.
+(12)
+Both streams share timestep t and predict velocities ˆvb.
+With binary restoration mask m and prior support r, let mb,i
+and rb,i be their pooled values at branch token i. The spatial
+weight and normalized branch objective are
+Wb,i = 1 + ηmmb,i + ηrrb,i,
+Lb = E
+"P
+i Wb,i∥ˆvb,i −v⋆
+b,i∥2
+2
+Db
+P
+i Wb,i
+#
+,
+(13)
+where Db is the token feature dimension. The RGB term
+supervises appearance restoration, the edge term supervises
+refined structure, and both operate at the same timestep. To-
+gether with Eq. (5), the complete objective is
+L = λxLx + λeLe
+λx + λe
++ λphraseLphrase.
+(14)
+Loss weights and sampling ratios are fixed throughout train-
+ing.
+4. Experiments
+4.1. Experimental Setup
+We
+train
+on
+ArtBench
+[10],
+COCO
+[11],
+and
+DhMural1714 [9], sampled with probabilities 0.3, 0.6,
+and 0.1, respectively.
+SketchSense builds on FLUX.1
+Fill [dev] [1] and operates at 512 × 512. Training takes
+approximately seven days on one NVIDIA A100 using
+BF16, a batch size of 12, and Adafactor with a learning rate
+of 10−5; inference uses a guidance scale of 25. All methods
+use matched input conditions, and PSNR, SSIM [20], and
+LPIPS [24] are computed within the inpainting mask.
+4.2. Quantitative Results
+4.2.1. Comparison with Existing Methods
+Table 1 shows that SketchSense consistently outperforms
+the compared methods across the Easy, Medium, and Hard
+subsets. The gains persist as difficulty increases, while the
+variants with and without the signed prior achieve similar
+aggregate RGB metrics.
+4.3. Qualitative Results
+4.3.1. Comparison with Existing Methods
+Figure 8 shows that SketchSense produces more coherent
+RGB restorations and refined structures than the compared
+methods across DhMural1714, ArtBench, and COCO. The
+improvement is especially visible in large or structurally
+complex holes, where the recovered appearance remains
+consistent with the predicted structure.
+6
+
+
+DhMural1714
+ArtBench
+COCO
+Input: Masked RGB
+Input: Sketch
+PDDP
+MaGIC (adapted)
+SketchRefiner (adapted)
+OminiControl
+Ours: RGB
+Ours: Refined structure
+GT: RGB
+GT: Edge
+Figure 8. Qualitative comparison on matched examples from DhMural1714, ArtBench, and COCO. Sketches are faded outside the inpaint-
+ing mask for visualization; SketchSense additionally outputs refined structure.
+Easy
+Medium
+Hard
+Method
+PSNR ↑
+SSIM ↑
+LPIPS ↓
+PSNR ↑
+SSIM ↑
+LPIPS ↓
+PSNR ↑
+SSIM ↑
+LPIPS ↓
+PDDP [16]
+12.714
+0.7820
+0.2050
+11.350
+0.6533
+0.3019
+10.450
+0.5237
+0.3883
+MaGIC (adapted) [19]
+15.972
+0.8176
+0.1306
+14.402
+0.6994
+0.2029
+12.712
+0.5658
+0.2876
+SketchRefiner (adapted) [13]
+17.602
+0.8359
+0.1285
+16.156
+0.7285
+0.2034
+14.386
+0.5916
+0.3020
+OminiControl [18]
+18.103
+0.8431
+0.0921
+16.083
+0.7274
+0.1609
+13.902
+0.5824
+0.2479
+SketchSense without signed prior
+19.428
+0.8584
+0.0720
+17.301
+0.7502
+0.1282
+14.933
+0.6121
+0.2040
+SketchSense with signed prior
+19.442
+0.8587
+0.0723
+17.290
+0.7506
+0.1299
+14.898
+0.6128
+0.2061
+Table 1. Quantitative comparison across the Easy, Medium, and Hard subsets. All metrics are computed within the inpainting mask.
+4.3.2. Effect of Local Region Guidance
+Figure 9 illustrates how local signed guidance changes
+the interpretation of selected sketch content while preserv-
+ing the overall composition. The corresponding RGB and
+refined-structure outputs show that the resulting changes re-
+main localized near the indicated structures.
+7
+
+
+Masked input
+Sketch
+Signed region
+Ground truth
+Without region
+With region
+Restored RGB
+Refined structure
+Figure 9. Effect of local signed region guidance. The upper row
+shows the masked input, sketch, signed region map, and ground
+truth; yellow indicates sketch preservation and cyan permits con-
+textual correction. The lower grid compares restored RGB and
+refined structure, with blue boxes marking the region of interest.
+Sketch inputs
+Restored RGB
+Figure 10. Effect of different sketch inputs under a shared restora-
+tion setting. Each column pairs a sketch with its RGB restoration;
+blue boxes mark the shared region of interest.
+4.3.3. Same Image with Different Sketch Inputs
+Figure 10 varies the sketch within a shared restoration set-
+ting. Local stroke differences produce distinct yet coher-
+ent RGB completions, demonstrating that SketchSense re-
+sponds to the supplied structural evidence.
+4.4. Ablation Studies
+4.4.1. Component Ablation
+Table 2 compares the complete model with component re-
+movals and a sequential variant that fixes the recovered
+structure before restoring RGB. SketchSense achieves the
+best SSIM, LPIPS, and Edge F1. Removing intrinsic regu-
+lation slightly raises PSNR but degrades the perceptual and
+structural metrics.
+Variant
+PSNR ↑SSIM ↑LPIPS ↓Edge F1@2px ↑
+w/o cross-branch fusion
+15.61
+0.6531
+0.2260
+0.6882
+Sequential RGB–structure recovery
+17.27
+0.6828
+0.1746
+0.6882
+w/o intrinsic spatial regulation
+17.50
+0.6736
+0.2242
+0.7325
+w/o explicit signed modeling
+17.23
+0.6835
+0.1720
+0.7398
+SketchSense
+17.49
+0.6848
+0.1707
+0.7469
+Table 2. Component ablation. All metrics are computed inside the
+inpainting hole.
+Mode
+Variant
+PSNR ↑SSIM ↑LPIPS ↓Region F1@2px ↑
+Neutral
+w/o explicit
+17.02
+0.6851
+0.1733
+0.7019
+SketchSense
+17.02
+0.6850
+0.1733
+0.7047
+Positive
+w/o explicit
+17.69
+0.6949
+0.1627
+0.7344
+SketchSense
+17.77
+0.6971
+0.1611
+0.8107
+Negative
+w/o explicit
+16.97
+0.6702
+0.1805
+0.5935
+SketchSense
+17.03
+0.6715
+0.1788
+0.6266
+Table 3. Results by signed-region mode. RGB metrics are mea-
+sured in the hole, and Region F1@2px in the evaluated region.
+4.4.2. Signed-Region Breakdown
+Table 3 compares SketchSense with a variant without ex-
+plicit signed modeling on balanced neutral, positive, and
+negative conditions, corresponding to no prior, faithful
+sketch use, and contextual correction. The explicit prior
+leaves neutral results nearly unchanged while improving
+Region F1 under both positive and negative guidance.
+4.4.3. Spatial Gate Analysis
+To inspect whether cross-branch residual injection varies as
+designed, we visualize one representative held-out example
+at denoising step 35 in Fig. 11. The maps and blockwise
+means exhibit both spatial and block-dependent variation,
+consistent with the intended block-specific gating. Because
+this is a single-example diagnostic, we do not treat it as ag-
+gregate performance evidence.
+5. Conclusion
+We presented SketchSense, a sketch-guided inpainting
+framework that jointly restores RGB content and interprets
+imperfect sketch guidance. Synchronous RGB and struc-
+ture streams exchange evidence through Bidirectional At-
+tention Fusion, while sketch-aware spatial regulation adapts
+sketch use to local generation states. An optional signed
+prior conveys local preserve-or-correct intent, and the re-
+fined structure makes the model’s interpretation observ-
+able.
+Experiments on natural images and complex art-
+work show consistent improvements over existing inpaint-
+ing and sketch-conditioned methods across all evaluated
+difficulty groups.
+Future work will focus on more effi-
+cient dual-stream modeling, higher-resolution restoration,
+and simpler interaction for specifying uncertain sketch re-
+gions.
+8
+
+
+Edge branch
+Block-specific mean gate activation
+D00
+0.53
+D01
+0.27
+D02
+0.44
+D03
+0.61
+D04
+0.62
+D05
+0.76
+D06
+0.86
+D07
+0.89
+D08
+0.83
+D09
+0.46
+D10
+0.53
+D11
+0.72
+D12
+0.77
+D13
+0.60
+D14
+0.80
+D15
+0.62
+D16
+0.67
+D17
+0.69
+D18
+0.74
+S00
+0.84
+S01
+0.68
+S02
+0.83
+S03
+0.73
+S04
+0.92
+S05
+0.68
+S06
+0.95
+S07
+0.93
+S08
+1.00
+S09
+0.98
+S10
+0.95
+S11
+1.00
+S12
+1.00
+S13
+0.84
+S14
+0.95
+S15
+0.86
+S16
+0.94
+S17
+0.91
+S18
+0.87
+S19
+1.00
+S20
+0.87
+S21
+0.94
+S22
+0.76
+S23
+0.92
+S24
+0.81
+S25
+0.63
+S26
+0.96
+S27
+0.53
+S28
+0.83
+S29
+0.76
+S30
+0.84
+S31
+0.79
+S32
+0.69
+S33
+0.81
+S34
+0.63
+S35
+0.69
+S36
+0.45
+S37
+0.01
+N/A
+N/A
+N/A
+N/A
+N/A
+N/A
+N/A
+Color contrast (raw P10–P90)
+0.53
+0.95
+RGB branch
+Spatial residual-gate
+strength
+Figure 11. Representative spatial residual-gate visualization at de-
+noising step 35. Gate activation varies across spatial locations,
+branches, and transformer blocks.
+References
+[1] Black Forest Labs. FLUX.1 Fill [dev]. Hugging Face model
+card, 2024. 6
+[2] Chenjie Cao, Qiaole Dong, and Yanwei Fu.
+Zits++: Im-
+age inpainting by improving the incremental transformer on
+structural priors, 2023. 1, 2
+[3] Nadav Z. Cohen, Oron Nir, and Ariel Shamir. Conditional
+balance: Improving multi-conditioning trade-offs in image
+generation.
+In Proceedings of the IEEE/CVF Conference
+on Computer Vision and Pattern Recognition (CVPR), pages
+2641–2650, 2025. 2, 3
+[4] Patrick Esser, Sumith Kulal, Andreas Blattmann, Rahim
+Entezari, Jonas M¨uller, Harry Saini, Yam Levi, Dominik
+Lorenz, Axel Sauer, Frederic Boesel, Dustin Podell, Tim
+Dockhorn, Zion English, and Robin Rombach. Scaling rec-
+tified flow transformers for high-resolution image synthesis.
+In Proceedings of the 41st International Conference on Ma-
+chine Learning, pages 12606–12633. PMLR, 2024. 6
+[5] Edward J. Hu, Yelong Shen, Phillip Wallis, Zeyuan Allen-
+Zhu, Yuanzhi Li, Shean Wang, Lu Wang, and Weizhu Chen.
+LoRA: Low-rank adaptation of large language models. In In-
+ternational Conference on Learning Representations, 2022.
+3
+[6] Jun Huang, Ting Liu, Yihang Wu, Xiaochao Qu, Luoqi
+Liu, and Xiaolin Hu.
+Mtadiffusion: Mask text alignment
+diffusion model for object inpainting.
+In Proceedings of
+the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition (CVPR), pages 18325–18334, 2025. 2
+[7] Yunji Kim, Jiyoung Lee, Jin-Hwa Kim, Jung-Woo Ha, and
+Jun-Yan Zhu. Dense text-to-image generation with attention
+modulation. In Proceedings of the IEEE/CVF International
+Conference on Computer Vision (ICCV), pages 7701–7711,
+2023. 2, 3
+[8] Byung-Ki Kwon, Qi Dai, Hyoseok Lee, Chong Luo, and
+Tae-Hyun Oh. JointDiT: Enhancing RGB-depth joint mod-
+eling with diffusion transformers.
+In Proceedings of the
+IEEE/CVF International Conference on Computer Vision
+(ICCV), pages 25261–25271, 2025. 2
+[9] Luxi Li, Qin Zou, Fan Zhang, Hongkai Yu, Long Chen,
+Chengfang Song, Xianfeng Huang, Xiaoguang Wang, and
+Qingquan Li. Line drawing-guided progressive inpainting
+for mural damage. Journal on Computing and Cultural Her-
+itage, 18(3):1–20, 2025. 1, 2, 6
+[10] Peiyuan Liao, Xiuyu Li, Xihui Liu, and Kurt Keutzer. The
+ArtBench dataset: Benchmarking generative models with
+artworks, 2022. 6
+[11] Tsung-Yi Lin, Michael Maire, Serge Belongie, James Hays,
+Pietro Perona, Deva Ramanan, Piotr Doll´ar, and C. Lawrence
+Zitnick. Microsoft COCO: Common objects in context. In
+Computer Vision – ECCV 2014, pages 740–755. Springer,
+Cham, 2014. 6
+[12] Yaron Lipman, Ricky T. Q. Chen, Heli Ben-Hamu, Maximil-
+ian Nickel, and Matt Le. Flow matching for generative mod-
+eling. In The Eleventh International Conference on Learning
+Representations, 2023. 6
+[13] Chang Liu, Shunxin Xu, Jialun Peng, Kaidong Zhang, and
+Dong Liu. Toward interactive image inpainting via robust
+sketch refinement. IEEE Transactions on Multimedia, 26:
+9973–9987, 2024. 1, 2, 6, 7
+[14] Haipeng Liu, Yang Wang, Biao Qian, Meng Wang, and Yong
+Rui. Structure matters: Tackling the semantic discrepancy in
+diffusion models for image inpainting.
+In Proceedings of
+the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition (CVPR), pages 8038–8047, 2024. 1, 2
+[15] Quynh Phung, Songwei Ge, and Jia-Bin Huang. Grounded
+text-to-image synthesis with attention refocusing. In Pro-
+ceedings of the IEEE/CVF Conference on Computer Vision
+and Pattern Recognition (CVPR), pages 7932–7942, 2024. 2
+[16] Nakul Sharma, Aditay Tripathi, Anirban Chakraborty, and
+Anand Mishra. Sketch-guided image inpainting with partial
+discrete diffusion process. In Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition
+(CVPR) Workshops, pages 6024–6034, 2024. 1, 6, 7
+[17] Dazhong Shen, Guanglu Song, Zeyue Xue, Fu-Yun Wang,
+and Yu Liu. Rethinking the spatial inconsistency in classifier-
+free diffusion guidance. In Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition
+(CVPR), pages 9370–9379, 2024. 3
+[18] Zhenxiong Tan, Songhua Liu, Xingyi Yang, Qiaochu Xue,
+and Xinchao Wang.
+Ominicontrol: Minimal and univer-
+sal control for diffusion transformer.
+In Proceedings of
+the IEEE/CVF International Conference on Computer Vision
+(ICCV), pages 14940–14950, 2025. 2, 7
+[19] Hao Wang, Yongsheng Yu, Tiejian Luo, Heng Fan, and Libo
+Zhang. MaGIC: Multi-modality guided image completion.
+In The Twelfth International Conference on Learning Repre-
+sentations, 2024. 7
+[20] Zhou Wang, Alan C. Bovik, Hamid R. Sheikh, and Eero P.
+Simoncelli. Image quality assessment: From error visibility
+to structural similarity. IEEE Transactions on Image Pro-
+cessing, 13(4):600–612, 2004. 6
+9
+
+
+[21] Shaoan Xie, Zhifei Zhang, Zhe Lin, Tobias Hinz, and Kun
+Zhang. Smartbrush: Text and shape guided object inpaint-
+ing with diffusion model. In Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition
+(CVPR), pages 22428–22437, 2023. 1, 2
+[22] Jingyang Zhang, Shiwei Li, Yuanxun Lu, Tian Fang,
+David Neil McKinnon, Yanghai Tsin, Long Quan, and Yao
+Yao. JointNet: Extending text-to-image diffusion for dense
+distribution modeling. In The Twelfth International Confer-
+ence on Learning Representations, 2024. 2
+[23] Lvmin Zhang, Anyi Rao, and Maneesh Agrawala. Adding
+conditional control to text-to-image diffusion models.
+In
+Proceedings of the IEEE/CVF International Conference on
+Computer Vision (ICCV), pages 3836–3847, 2023. 2
+[24] Richard Zhang, Phillip Isola, Alexei A. Efros, Eli Shecht-
+man, and Oliver Wang. The unreasonable effectiveness of
+deep features as a perceptual metric. In Proceedings of the
+IEEE Conference on Computer Vision and Pattern Recogni-
+tion (CVPR), pages 586–595, 2018. 6
+[25] Caixia Zhou, Yaping Huang, Mengyang Pu, Qingji Guan,
+Ruoxi Deng, and Haibin Ling. MuGE: Multiple granularity
+edge detection. In Proceedings of the IEEE/CVF Conference
+on Computer Vision and Pattern Recognition (CVPR), pages
+25952–25962, 2024. 6
+10

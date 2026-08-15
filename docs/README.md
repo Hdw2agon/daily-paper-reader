@@ -6,31 +6,29 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-08-14
-- 运行时间：2026-08-14 20:40:42 UTC
+- 最新运行日期：2026-08-15
+- 运行时间：2026-08-15 19:23:47 UTC
 - 运行状态：成功
-- 本次总论文数：3
-- 精读区：1
+- 本次总论文数：2
+- 精读区：0
 - 速读区：2
 
 ### 今日简报（AI）
-今日聚焦图像修复与编辑前沿，重点攻克了不完美草图引导下的高质量图像补全难题。
-满分论文 SketchSense 实现了对粗糙手绘的精准解读，同时 UniScale 与自回归编辑技术为工业缺陷检测和局部图像修改提供了新思路。
-建议优先研读 SketchSense，探索如何利用 AI 弥补人类绘画误差以实现专业级的图像修复效果。
-- 详情：[/202608/14/README](/202608/14/README)
+今日聚焦资源受限下的自监督预训练优化与像素级精准的草图引导图像编辑。
+重点关注如何在有限算力下提升音视频预训练效能，以及通过“草图+指令”双重引导实现更细腻的局部图像修改。
+建议开发者探索低成本预训练方案，或尝试利用草图交互提升视觉创作的操控感。
+- 详情：[/202608/15/README](/202608/15/README)
 
 ### 精读区论文标签
-1. [SketchSense: Learning to Interpret Imperfect Sketch Guidance for Image Inpainting](/202608/14/2608.13186v1-sketchsense-learning-to-interpret-imperfect-sketch-guidance-for-image-inpainting)  
-   标签：评分：10.0/10、query:q1
-   evidence：草图引导的图像补全与修复框架
+- 本次无精读推荐。
 
 ### 速读区论文标签
-1. [UniScale: Arbitrary-Scale Industrial Anomaly Generation](/202608/14/2608.07864v2-uniscale-arbitrary-scale-industrial-anomaly-generation)  
+1. [A Controlled Study of Self-Supervised Image and Video Pretraining under Limited Resources](/202608/15/2608.13183v1-a-controlled-study-of-self-supervised-image-and-video-pretraining-under-limited-resources)  
+   标签：评分：7.0/10、query:q7
+   evidence：用于图像重建的自监督学习目标
+2. [SI-Edit: Toward Sketch-Instruction Guided Local Image Editing with Pixel-Level Precision](/202608/15/2608.09097v1-si-edit-toward-sketch-instruction-guided-local-image-editing-with-pixel-level-precision)  
    标签：评分：6.0/10、query:q4
-   evidence：用于高保真异常生成和合成的生成模型
-2. [Model the Edit, Not the Image: Visual Autoregressive Editing from a Source-Centric Perspective](/202608/14/2608.09057v2-model-the-edit-not-the-image-visual-autoregressive-editing-from-a-source-centric-perspective)  
-   标签：评分：6.0/10、query:q1
-   evidence：无需训练的图像编辑与补全技术
+   evidence：用于局部图像编辑与生成的生成模型
 
 
 <div class="dpr-home-promo-card">

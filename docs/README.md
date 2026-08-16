@@ -6,29 +6,40 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-08-15
-- 运行时间：2026-08-15 19:23:47 UTC
+- 最新运行日期：2026-08-16
+- 运行时间：2026-08-16 19:50:19 UTC
 - 运行状态：成功
-- 本次总论文数：2
-- 精读区：0
-- 速读区：2
+- 本次总论文数：6
+- 精读区：1
+- 速读区：5
 
 ### 今日简报（AI）
-今日聚焦资源受限下的自监督预训练优化与像素级精准的草图引导图像编辑。
-重点关注如何在有限算力下提升音视频预训练效能，以及通过“草图+指令”双重引导实现更细腻的局部图像修改。
-建议开发者探索低成本预训练方案，或尝试利用草图交互提升视觉创作的操控感。
-- 详情：[/202608/15/README](/202608/15/README)
+1) 今日深度解析脑部 MRI 跨对比度超分技术，同步覆盖水下增强与黑盒去噪等 6 项视觉修复前沿进展。
+2) 核心突破在于实现了解剖学一致的各向异性 MRI 超分，并针对复杂水下环境提出了区域级退化处理新思路。
+3) 推荐医疗影像与底层视觉开发者重点研读跨对比度融合策略，以提升特定场景下的图像重建保真度。
+- 详情：[/202608/16/README](/202608/16/README)
 
 ### 精读区论文标签
-- 本次无精读推荐。
+1. [Anatomically Consistent Cross-Contrast Super-Resolution of Anisotropic Brain T2w MRI](/202608/16/2608.08401v1-anatomically-consistent-cross-contrast-super-resolution-of-anisotropic-brain-t2w-mri)  
+   标签：评分：8.0/10、query:q3
+   evidence：无需地面真值的无标签图像修复
 
 ### 速读区论文标签
-1. [A Controlled Study of Self-Supervised Image and Video Pretraining under Limited Resources](/202608/15/2608.13183v1-a-controlled-study-of-self-supervised-image-and-video-pretraining-under-limited-resources)  
+1. [CoRe-UIE: Rethinking Coexisting and Region-wise Degradation for Underwater Image Enhancement](/202608/16/2608.08965v1-core-uie-rethinking-coexisting-and-region-wise-degradation-for-underwater-image-enhancement)  
    标签：评分：7.0/10、query:q7
-   evidence：用于图像重建的自监督学习目标
-2. [SI-Edit: Toward Sketch-Instruction Guided Local Image Editing with Pixel-Level Precision](/202608/15/2608.09097v1-si-edit-toward-sketch-instruction-guided-local-image-editing-with-pixel-level-precision)  
+   evidence：针对多种退化的水下图像修复
+2. [Fidelity-Constrained Anchoring for Black-Box Denoisers](/202608/16/2608.13194v1-fidelity-constrained-anchoring-for-black-box-denoisers)  
+   标签：评分：7.0/10、query:q3
+   evidence：无需训练的图像去噪与修复框架
+3. [eBIRD: Event-based Intensity Image Reconstruction Using Controllable Diffusion Models](/202608/16/2608.08519v1-ebird-event-based-intensity-image-reconstruction-using-controllable-diffusion-models)  
+   标签：评分：6.0/10、query:q7
+   evidence：使用可控扩散模型进行图像重建与修复
+4. [Beyond Fixed Luminance: Towards Panchromatic and Orthochromatic Image Colorization](/202608/16/2608.10798v2-beyond-fixed-luminance-towards-panchromatic-and-orthochromatic-image-colorization)  
+   标签：评分：6.0/10、query:q3
+   evidence：将图像修复和上色视为图像编辑
+5. [XYZFlow:Scaling Multi dimensional Shortcut Flows for Efficient Generative Modeling](/202608/16/2608.12276v2-xyzflowscaling-multi-dimensional-shortcut-flows-for-efficient-generative-modeling)  
    标签：评分：6.0/10、query:q4
-   evidence：用于局部图像编辑与生成的生成模型
+   evidence：通过流匹配进行高保真图像生成的生成式建模
 
 
 <div class="dpr-home-promo-card">

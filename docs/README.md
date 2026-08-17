@@ -6,40 +6,34 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-08-16
-- 运行时间：2026-08-16 19:50:19 UTC
+- 最新运行日期：2026-08-17
+- 运行时间：2026-08-17 19:46:47 UTC
 - 运行状态：成功
-- 本次总论文数：6
+- 本次总论文数：4
 - 精读区：1
-- 速读区：5
+- 速读区：3
 
 ### 今日简报（AI）
-1) 今日深度解析脑部 MRI 跨对比度超分技术，同步覆盖水下增强与黑盒去噪等 6 项视觉修复前沿进展。
-2) 核心突破在于实现了解剖学一致的各向异性 MRI 超分，并针对复杂水下环境提出了区域级退化处理新思路。
-3) 推荐医疗影像与底层视觉开发者重点研读跨对比度融合策略，以提升特定场景下的图像重建保真度。
-- 详情：[/202608/16/README](/202608/16/README)
+今日深挖超高清图像修复与高效生成流，重点推介 MagnifiQ 文本引导的渐进式超分方案。
+MagnifiQ 凭借补丁感知技术在图像增强上取得 8.0 高分，同步关注非线性运动插帧与多维流模型的效率优化。
+推荐优先阅读 MagnifiQ 了解如何利用文本先验重塑细节，并探索生成式模型在视频插帧中的前沿应用。
+- 详情：[/202608/17/README](/202608/17/README)
 
 ### 精读区论文标签
-1. [Anatomically Consistent Cross-Contrast Super-Resolution of Anisotropic Brain T2w MRI](/202608/16/2608.08401v1-anatomically-consistent-cross-contrast-super-resolution-of-anisotropic-brain-t2w-mri)  
-   标签：评分：8.0/10、query:q3
-   evidence：无需地面真值的无标签图像修复
+1. [MagnifiQ: Patch-aware Text Guided Progressive Upscaling for High-Resolution Image Restoration](/202608/17/2608.14543v1-magnifiq-patch-aware-text-guided-progressive-upscaling-for-high-resolution-image-restoration)  
+   标签：评分：8.0/10、query:q4
+   evidence：基于扩散模型的高分辨率图像修复
 
 ### 速读区论文标签
-1. [CoRe-UIE: Rethinking Coexisting and Region-wise Degradation for Underwater Image Enhancement](/202608/16/2608.08965v1-core-uie-rethinking-coexisting-and-region-wise-degradation-for-underwater-image-enhancement)  
-   标签：评分：7.0/10、query:q7
-   evidence：针对多种退化的水下图像修复
-2. [Fidelity-Constrained Anchoring for Black-Box Denoisers](/202608/16/2608.13194v1-fidelity-constrained-anchoring-for-black-box-denoisers)  
-   标签：评分：7.0/10、query:q3
-   evidence：无需训练的图像去噪与修复框架
-3. [eBIRD: Event-based Intensity Image Reconstruction Using Controllable Diffusion Models](/202608/16/2608.08519v1-ebird-event-based-intensity-image-reconstruction-using-controllable-diffusion-models)  
-   标签：评分：6.0/10、query:q7
-   evidence：使用可控扩散模型进行图像重建与修复
-4. [Beyond Fixed Luminance: Towards Panchromatic and Orthochromatic Image Colorization](/202608/16/2608.10798v2-beyond-fixed-luminance-towards-panchromatic-and-orthochromatic-image-colorization)  
-   标签：评分：6.0/10、query:q3
-   evidence：将图像修复和上色视为图像编辑
-5. [XYZFlow:Scaling Multi dimensional Shortcut Flows for Efficient Generative Modeling](/202608/16/2608.12276v2-xyzflowscaling-multi-dimensional-shortcut-flows-for-efficient-generative-modeling)  
+1. [XYZFlow:Scaling Multi dimensional Shortcut Flows for Efficient Generative Modeling](/202608/17/2608.12276v1-xyzflowscaling-multi-dimensional-shortcut-flows-for-efficient-generative-modeling)  
    标签：评分：6.0/10、query:q4
-   evidence：通过流匹配进行高保真图像生成的生成式建模
+   evidence：通过流匹配进行高效图像合成的生成模型
+2. [SNM-VFI: Symmetric Nonlinear Motion-Guided Generative Video Frame Interpolation](/202608/17/2608.13460v1-snm-vfi-symmetric-nonlinear-motion-guided-generative-video-frame-interpolation)  
+   标签：评分：6.0/10、query:q4
+   evidence：无需训练的生成式视频插帧框架
+3. [Source-Agnostic Image Translation Based on Latent Aware Adaptive Masking](/202608/17/2608.14046v1-source-agnostic-image-translation-based-on-latent-aware-adaptive-masking)  
+   标签：评分：6.0/10、query:q4
+   evidence：用于图像转换和掩码生成的生成式扩散模型
 
 
 <div class="dpr-home-promo-card">

@@ -6,43 +6,38 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-08-21
-- 运行时间：2026-08-21 20:45:48 UTC
+- 最新运行日期：2026-08-22
+- 运行时间：2026-08-22 20:26:22 UTC
 - 运行状态：成功
-- 本次总论文数：7
-- 精读区：2
+- 本次总论文数：5
+- 精读区：0
 - 速读区：5
 
 ### 今日简报（AI）
-今日深度复盘 7 篇视觉修复前沿论文，重点攻克视频物体移除的物理一致性与眼镜精准去除难题。
-核心结论指出，结合物理建模与因果逻辑是实现高保真视频编辑的关键，尤其在处理复杂折射与遮挡时表现卓越。
-建议优先研读物理驱动的视频修复方案，并关注跨模态语义约束在超高清图像重建中的最新应用。
-- 详情：[/202608/21/README](/202608/21/README)
+聚焦扩散模型（DiT）的布局涌现与精细化控制，今日速读 5 篇图像生成与语义通信前沿论文。
+重点关注 Mise-en-Scène 揭示的 DiT 隐式布局能力，以及 PixelControl 在文本转图像中实现的高保真细节控制。
+建议关注 DiT 架构下的 AI 协作设计新范式，并探索语义通信在图像高保真重建中的应用潜力。
+- 详情：[/202608/22/README](/202608/22/README)
 
 ### 精读区论文标签
-1. [BeyondMasks: Evaluating Causal and Physical Consistency in Video Object Removal](/202608/21/2608.20107v1-beyondmasks-evaluating-causal-and-physical-consistency-in-video-object-removal)  
-   标签：评分：9.0/10、query:q1
-   evidence：将视频对象移除视为局部图像修复
-2. [Unwarping the Lens: A Physics-Grounded Approach to Video Glasses Removal](/202608/21/2608.20212v1-unwarping-the-lens-a-physics-grounded-approach-to-video-glasses-removal)  
-   标签：评分：9.0/10、query:q1
-   evidence：通过静态图像修复和生成先验实现高保真眼镜去除
+- 本次无精读推荐。
 
 ### 速读区论文标签
-1. [ProjFormer: Point Cloud Completion via Geometric-Projective Transformer and Cross-Modal Semantic Constraints](/202608/21/2608.15104v1-projformer-point-cloud-completion-via-geometric-projective-transformer-and-cross-modal-semantic-constraints)  
-   标签：评分：7.0/10、query:q1
-   evidence：通过跨模态语义约束进行点云补全
-2. [DPC-Net: Dual-Prior Collaborative Network for All-in-One Image Restoration](/202608/21/2608.20141v1-dpc-net-dual-prior-collaborative-network-for-all-in-one-image-restoration)  
-   标签：评分：7.0/10、query:q7
-   evidence：利用双重先验的通用图像修复
-3. [Ultra-High-Definition Restoration Transformers with Correlation Matching Transformation](/202608/21/2608.20263v1-ultra-high-definition-restoration-transformers-with-correlation-matching-transformation)  
-   标签：评分：7.0/10、query:q1
-   evidence：基于Transformer的通用图像修复任务框架
-4. [AutoLumNet: Monotone Optimal Transport for Single-Shot Exposure Correction](/202608/21/2608.19860v1-autolumnet-monotone-optimal-transport-for-single-shot-exposure-correction)  
-   标签：评分：6.0/10、query:q3
-   evidence：单次曝光图像恢复与校正
-5. [Swift-Image: Exploring the Performance Frontier of Compact Unified Image Generation Models](/202608/21/2608.20334v1-swift-image-exploring-the-performance-frontier-of-compact-unified-image-generation-models)  
+1. [Mise-en-Scène: Implicit Layout Emergence in Diffusion Transformers for Human-AI Design Co-Creation](/202608/22/2608.19000v1-mise-en-scne-implicit-layout-emergence-in-diffusion-transformers-for-human-ai-design-co-creation)  
+   标签：评分：7.0/10、query:q4
+   evidence：用于设计合成的图像编辑扩散Transformer
+2. [PixelControl: Fine-Grained Condition Fidelity in Text-to-Image Diffusion](/202608/22/2608.15705v1-pixelcontrol-fine-grained-condition-fidelity-in-text-to-image-diffusion)  
    标签：评分：6.0/10、query:q4
-   evidence：使用扩散Transformer的图像生成与编辑统一模型
+   evidence：扩散模型中的细粒度条件保真度
+3. [TISC: A Text-Driven Image Semantic Communication System for Faithful Reconstruction](/202608/22/2608.16100v1-tisc-a-text-driven-image-semantic-communication-system-for-faithful-reconstruction)  
+   标签：评分：6.0/10、query:q4
+   evidence：基于扩散生成模型的图像重建
+4. [Binarized High-Efficiency RAW Video Restoration and Beyond](/202608/22/2608.16756v1-binarized-high-efficiency-raw-video-restoration-and-beyond)  
+   标签：评分：6.0/10、query:q7
+   evidence：用于底层感知的 RAW 视频修复框架
+5. [From Corpora to Co-Evolving Capabilities: Capability-Centric Data Design for Generalist Image Generation](/202608/22/2608.18076v1-from-corpora-to-co-evolving-capabilities-capability-centric-data-design-for-generalist-image-generation)  
+   标签：评分：6.0/10、query:q4
+   evidence：图像间转换与通用图像生成
 
 
 <div class="dpr-home-promo-card">

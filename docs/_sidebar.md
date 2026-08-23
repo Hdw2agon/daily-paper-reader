@@ -1,6 +1,9 @@
 * <a class="dpr-sidebar-root-link" href="#/">首页</a>
 * <a class="dpr-sidebar-root-link dpr-sidebar-noactive-link" href="javascript:void(0)" data-dpr-hash="#/tutorial/README">使用教程</a>
 * Daily Papers
+  * 2026-08-23 <!--dpr-date:20260823-->
+    * 速读区
+      * <a class="dpr-sidebar-item-link dpr-sidebar-item-structured" href="#/202608/23/2608.19637v1-textrefine-improving-textual-fidelity-spatial-placement-and-glyph-rendering-for-text-editing-in-product-posters" data-sidebar-item="{&quot;title&quot;: &quot;TextRefine: Improving Textual Fidelity, Spatial Placement, and Glyph Rendering for Text Editing in Product Posters&quot;, &quot;link&quot;: &quot;https://arxiv.org/abs/2608.19637v1-textrefine-improving-textual-fidelity-spatial-placement-and-glyph-rendering-for-text-editing-in-product-posters&quot;, &quot;score&quot;: &quot;6.0&quot;, &quot;tags&quot;: [{&quot;kind&quot;: &quot;query&quot;, &quot;label&quot;: &quot;q1&quot;}], &quot;evidence&quot;: &quot;在保留背景的同时进行图像编辑和文本插入&quot;}">TextRefine: Improving Textual Fidelity, Spatial Placement, and Glyph Rendering for Text Editing in Product Posters</a>
   * 2026-08-22 <!--dpr-date:20260822-->
     * 速读区
       * <a class="dpr-sidebar-item-link dpr-sidebar-item-structured" href="#/202608/22/2608.19000v1-mise-en-scne-implicit-layout-emergence-in-diffusion-transformers-for-human-ai-design-co-creation" data-sidebar-item="{&quot;title&quot;: &quot;Mise-en-Scène: Implicit Layout Emergence in Diffusion Transformers for Human-AI Design Co-Creation&quot;, &quot;link&quot;: &quot;https://arxiv.org/abs/2608.19000v1-mise-en-scne-implicit-layout-emergence-in-diffusion-transformers-for-human-ai-design-co-creation&quot;, &quot;score&quot;: &quot;7.0&quot;, &quot;tags&quot;: [{&quot;kind&quot;: &quot;query&quot;, &quot;label&quot;: &quot;q4&quot;}], &quot;evidence&quot;: &quot;用于设计合成的图像编辑扩散Transformer&quot;}">Mise-en-Scène: Implicit Layout Emergence in Diffusion Transformers for Human-AI Design Co-Creation</a>

@@ -1,0 +1,632 @@
+Title: SplatGuide: Geometric Priors from 3D Gaussians for Pose-Free Novel View Synthesis
+
+URL Source: https://arxiv.org/pdf/2608.16863v1
+
+Published Time: Tue, 18 Aug 2026 02:31:05 GMT
+
+Number of Pages: 25
+
+Markdown Content:
+# SplatGuide: Geometric Priors from 3D Gaussians for Pose-Free Novel View Synthesis 
+
+Yejun Zhang 1⋆, Zihan Wang 1⋆, Xu Ji 1⋆, Yihao Wang 1, Yuxin Hou 2, Junyuan Fang 1, Juho-Matti Kilpeläinen 1, Arno Solin 1,3, Hamed Rezazadegan Tavakoli 4,Esa Rahtu 5, and Juho Kannala 1,6
+
+> 1
+
+Aalto University, Finland 2Deep Render, UK 3ELLIS Institute Finland 
+
+> 4
+
+Nokia Technologies, Finland 5Tampere University, Finland 6University of Oulu, Finland 
+
+{firstname.lastname, zihan.1.wang, xu.1.ji}@aalto.fi hamed.rezazadegan_tavakoli@nokia.com esa.rahtu@tuni.fi yuxin.hou@deeprender.ai       
+
+> Images Latent Image
+> Multi-view Diffusion
+> (a) Baseline
+> Images
+> FF Recon.
+> 3D-GS Guidance 1View selection
+> 2Rendering
+> 3Tokens
+> Multi-view Diffusion
+> (b) Ours : GS-guided diffusion
+
+Fig. 1: SplatGuide vs. diffusion baseline. (a) The baseline passes camera poses di-rectly to a multi-view diffusion model. (b) SplatGuide first uses a feed-forward recon-struction (FF Recon.) model to build a 3DGS scene from unposed images, then reuses it to supply rendered images, visibility-aware view selection, and feature tokens as ge-ometric guidance. 
+
+Abstract. Generating photorealistic novel views from unposed images requires both 3D geometric understanding and the ability to synthe-size unseen content. A natural strategy combines feed-forward 3DGS reconstruction with multi-view diffusion. Yet prior pipelines extract at most one signal from the reconstruction, either pixel rendering or learned features, while none exploits per-Gaussian visibility for occlusion-aware reference selection. This information disconnect leaves renderable ge-ometry, visibility cues, and learned features unused. SplatGuide closes this disconnect by reusing a single 3DGS scene across three complemen-tary roles. Rendered images provide pixel-aligned geometric condition-ing. Per-Gaussian source-view indices are rendered into a target-view voting map for occlusion-aware reference selection. Reconstruction to-kens supply feature-level guidance via cross-attention. All three signals  
+
+> ⋆
+
+Equal contribution. arXiv:2608.16863v1 [cs.CV] 17 Aug 2026 2 Y. Zhang et al. derive from the same reconstruction forward pass. Across RealEstate10K, DL3DV, Tanks-and-Temples, and Mip-NeRF 360, SplatGuide achieves state-of-the-art pose-free novel view synthesis. On RealEstate10K, with a moderate number of input views, it surpasses the ground-truth-pose baseline. 
+
+1 Introduction 
+
+Imagine synthesizing a photorealistic walkthrough of a room from a handful of casual phone snapshots, with no camera calibration, no controlled capture, and no pose annotations. This is the goal of pose-free novel view synthesis (NVS), and it demands two capabilities that today live in separate worlds. Feed-forward 3D reconstruction models [9, 26, 27, 34] recover camera poses and scene geometry in a single forward pass, yet they can only interpolate between observed viewpoints and cannot hallucinate content in unobserved regions. Multi-view diffusion mod-els [2, 6, 17, 20, 23, 28, 41, 42] generate photorealistic images at novel viewpoints, yet they depend on accurate, pre-computed poses, a requirement that is rarely met outside controlled benchmarks. Combining reconstruction with diffusion is therefore a natural strategy: reconstruction grounds the geometry, and diffusion synthesizes what the reconstruction cannot see. Existing combinations, however, pass the reconstruction output to the gen-erator through a single narrow channel. Pose-only methods [6, 41, 42] forward the estimated camera parameters and discard the reconstructed scene entirely, causing novel-view quality to fall well below the ground-truth-pose ceiling. Pixel-level methods [3,32,39,40,44] render the reconstructed geometry into images that condition a video diffusion backbone, anchoring the spatial layout but restrict-ing generation to trajectory interpolation and tying the pipeline to a specific architecture. Feature-level methods [20,31] inject dense latent features via cross-attention or alignment losses, improving spatial consistency but requiring dense features from models like VGGT [26] at prohibitive computational cost. More-over, all of these pipelines select reference views by pose distance or temporal recency, heuristics that ignore occlusion and break down under tight context budgets. The common blind spot is not the absence of a particular module, but a structural information disconnect : feed-forward reconstruction already produces a complete 3D Gaussian Splatting (3DGS) [10] scene that encodes renderable geometry, per-Gaussian source-view ownership, and learned feature representa-tions, yet existing pipelines extract at most one of these signals and discard the rest. The cost of this disconnect surfaces at both ends of the pipeline. On the con-ditioning side, restoring the discarded renderings and features to a predicted-pose baseline markedly improves both fidelity and perceptual quality (Tab. 4). On the selection side, reference-view selection hinges on exactly the per-Gaussian visi-bility that existing pipelines throw away, and the choice of selection policy alone separates the strongest strategies from the weakest by a wide margin (Tab. 3). Pose-free NVS is thus bottlenecked not by what reconstruction fails to provide, but by what existing pipelines fail to use. SplatGuide 3
+
+We present SplatGuide, which closes the information disconnect by reusing a single 3DGS scene across three complementary roles (Fig. 1). Rather than inventing new modules, SplatGuide recovers information that the reconstruc-tion already provides but that existing pipelines throw away: (1) Geometric signal : rendering the 3DGS scene at target and reference poses produces pixel-aligned images that provide direct geometric conditioning for the diffusion model. (2) Visibility signal : each Gaussian naturally records the index of its source view; rendering these indices into a target-view voting map yields an occlusion-aware reference selector that clearly outperforms pose-based and recency-based strate-gies under tight context budgets. (3) Feature signal : camera and register tokens extracted from the reconstruction backbone are injected via cross-attention, sup-plying scene-level context that pixel-aligned renderings cannot convey. All three signals derive from a single reconstruction forward pass, require no additional 3D primitives, and keep the backbone frozen. Our contributions are: 
+
+– We identify the information disconnect as the structural bottleneck of pose-free NVS and propose SplatGuide, which closes it by bridging rendered im-ages, per-Gaussian visibility, and reconstruction tokens from a single recon-structed 3DGS scene to the diffusion generator. 
+
+– We introduce a visibility-aware view selector that renders per-Gaussian source-view indices into a target-view voting map, delivering occlusion-aware refer-ence selection at negligible cost and large gains over pose-based and recency-based strategies under tight context budgets. 
+
+– We achieve state-of-the-art pose-free NVS on four benchmarks, surpass-ing the ground-truth-pose baseline on RealEstate10K given sufficient input views, and demonstrate modularity: the reconstruction backbone can be sub-stituted zero-shot without retraining, so the framework benefits directly from advances in feed-forward reconstruction. 
+
+2 Related Work 
+
+Pose-Free Novel View Synthesis. NeRF [18] and 3DGS [10] achieve photoreal-istic novel view synthesis but require accurate camera poses, typically obtained from Structure-from-Motion (SfM) [22] pipelines. Feed-forward reconstruction models remove this dependency: DUSt3R [27], MASt3R [12], and VGGT [26] jointly predict camera poses and 3D point clouds from input images, while In-stantSplat [5] accelerates convergence with sparse-view priors. NoPo-Splat [34] marks a turning point by reconstructing a 3DGS scene and synthesizing novel views in a single forward pass without any pose input, open-ing the direction of pose-free novel view synthesis. Subsequent works follow two routes. On the reconstruction side, AnySplat [9], WorldMirror [16], and RayZer [8] scale feed-forward 3DGS to larger and more diverse scenes, yet they can only interpolate between observed viewpoints and cannot hallucinate unob-served content. On the generation side, end-to-end multi-view diffusion models such as Matrix3D [17] and Fillerbuster [30] jointly predict poses and generate 4 Y. Zhang et al. 
+
+novel views, but lack explicit 3D geometric constraints, leading to inconsistencies in observed regions. Combining reconstruction with diffusion is therefore a natural strategy: ViewCrafter [40] conditions a video diffusion model on DUSt3R-predicted poses and rendered point maps, while CAT3D [6] and SEVA [42] accept predicted poses directly but degrade severely because they are trained on ground-truth poses. These pipelines extract at most one signal from the reconstruction output and discard the rest; SplatGuide instead reuses the full 3DGS scene across three complementary conditioning signals. 
+
+Conditioning Diffusion with 3D Reconstruction Priors. Existing methods that inject reconstruction priors into diffusion each bridge only one of the three in-formation signals. For the geometric signal, ViewCrafter [40] and its follow-ups [39, 41] render reconstructed point clouds at target poses and feed the re-sulting images into video diffusion models [2, 15, 35], providing a strong geomet-ric anchor but tying the pipeline to a video backbone and limiting generation to sparse trajectory interpolation; earlier reprojection-based methods [3, 32, 44] share this single signal under further constraints such as per-scene optimiza-tion or single-frame inpainting. For the feature signal, Gen3C [20] injects dense latent features via cross-attention, and Geometry Forcing [31] aligns diffusion representations with geometric foundation model features; both improve spatial consistency but require dense features from models like VGGT at prohibitive computational cost. Neither paradigm exploits the visibility signal already en-coded in the reconstructed scene; SplatGuide bridges all three signals from a single reconstruction pass. 
+
+View Selection for Multi-View Generation. Scaling multi-view diffusion to large view sets hinges on selecting informative reference views. Temporally local con-ditioning [21,25,28,36,38] suits contiguous video but not general multi-view set-tings. Spatial strategies rank candidates by pose distance [6, 42] or field-of-view overlap [33,37], lacking explicit occlusion reasoning, while VMem [13] models vis-ibility with surfel-indexed memory but requires aggressive downsampling of 3D primitives, yielding coarse geometric discrimination. Our selector instead reads per-Gaussian source-view indices already produced by the reconstruction back-bone, providing occlusion-aware selection at negligible cost without additional 3D primitives. 
+
+3 Method 
+
+Problem Formulation. Given a set of N unposed RGB reference images Iref =
+
+{Iref  
+
+> i
+
+}Ni=1 capturing the same static scene, our goal is to synthesize M target views 
+
+Itgt = {Itgt  
+
+> j
+
+}Mj=1 at the corresponding query camera poses Ptgt = {Ptgt  
+
+> j
+
+}Mj=1 . For each target view, we model the generation as 
+
+p(Itgt  
+
+> j
+
+| I ref , C, Ptgt  
+
+> j
+
+), (1) SplatGuide 5Reconstruction View Selection            
+
+> Index Map
+> Generation
+> Recon. feature Cross-Attention Image
+> Cross-Attention N Input Images
+> Cam & Reg Tokens Reg &Cam Tokens
+> Feed-Forward Reconstruction Model
+> Rendering
+> Index
+> 3D Gaussians with index
+> RGB
+> Generated Image(s)
+> Rendered
+> Target RGB Noise Target Plücker
+> Target View(s)
+> Rendering
+> Context RGBs Context Plückers
+> Selected Context Views
+
+Fig. 2: Overview of SplatGuide. Reconstruction: A feed-forward model takes N
+
+unposed images and produces 3D Gaussians with per-Gaussian source-view indices 
+
+(μ, σ, r, s, c, index ), along with camera and register tokens. View Selection: The per-Gaussian indices are rendered into a target-view index map; pixel-wise voting retrieves the top-K reference views, whose RGBs and Plücker coordinates form the selected context views. Generation: The rendered target RGB, noise, and target Plücker are concatenated with the context views and fed into the diffusion model, which is further conditioned on reconstruction tokens via cross-attention to produce the final photore-alistic image. 
+
+where C = frecon (Iref ) denotes target-independent reconstruction conditioning from the reference images, comprising estimated reference poses Pref , a recon-structed 3DGS scene G, and reconstruction features. 
+
+3.1 Model Architecture 
+
+Overview. As illustrated in Fig. 2, SplatGuide follows a three-stage pipeline of reconstruction, selection, and generation. A feed-forward backbone estimates the reference camera poses and reconstructs a 3DGS scene G from the unposed inputs. The resulting renderings, source-view indices, and reconstruction tokens respectively provide pixel-level conditioning, visibility-aware reference selection, and feature-level guidance. Together, these signals guide fdiff to synthesize the target views. 
+
+Reconstruction Model. The reconstruction model recovers camera poses and scene geometry from the unposed input. The feed-forward model frecon pro-cesses the reference set Iref and outputs both poses and an explicit 3DGS scene: 
+
+(Pref , G) = frecon (Iref ). (2) We adopt backbones that predict pixel-aligned Gaussians, i.e ., every pixel of every reference view regresses one Gaussian. Each gi ∈ G therefore carries a 6 Y. Zhang et al. 
+
+source-view index v(i) ∈ { 1, . . . , V } that is determined by construction at re-construction time: no Gaussian is fused or merged across views, so the index requires neither extra supervision nor any tie-breaking heuristic. This property is shared by all reconstruction backbones we evaluate, and it is the only re-quirement a backbone must satisfy to be used as a drop-in replacement. From the reconstructed scene G, we render coarse but geometrically consistent images at both target poses Ptgt to obtain ˆItgt and estimated reference poses Pref to obtain ˆIref , via standard 3DGS rendering [10]: 
+
+ˆIP = X 
+
+> k∈N (P)
+
+ckα′
+
+> kk−1
+
+Y
+
+> l=1
+
+(1 − α′
+
+> l
+
+), (3) where ck and α′ 
+
+> k
+
+are the learned color and projected opacity of the k-th Gaussian, and N (P) denotes the depth-sorted set of Gaussians visible from pose P. Setting 
+
+P = Ptgt  
+
+> j
+
+or P = Pref  
+
+> i
+
+yields the rendered target images ˆItgt and reference images 
+
+ˆIref , respectively. These rendered images constitute the primary geometric anchor of our pipeline: unlike pure 2D conditioning, they encode both geometry and appearance from the reconstructed scene and inherently maintain multi-view consistency. Our ablation (Tab. 4) confirms that the rendered image is the largest single contributor to generation quality. 
+
+Diffusion Model. The diffusion-based generator fdiff , built on SEVA [42], refines the coarse rendered images ˆItgt into photorealistic novel views Itgt , receiving geometric guidance at two complementary levels: pixel-level conditioning via rendered images and feature-level conditioning via injected reconstruction to-kens. 
+
+Rendering as Geometric Conditioning. The primary geometric signal comes from the rendered images produced by frecon . We choose channel-wise con-catenation for injection because it preserves the pixel-aligned spatial correspon-dence between the rendered geometry and the generated content. Following the SEVA conditioning framework, each reference image Iref is encoded into a latent 
+
+z = E(Iref ) via the VAE encoder E(·) and concatenated with its Plücker ray embedding and a binary mask distinguishing reference from target views. For target views, we replace the latent with the noisy state zt. We extend this by en-coding the rendered images ˆIref and ˆItgt into the latent space and concatenating them as an additional channel group zrender ∈ RH×W ×C :
+
+zcond = [ zt, zrender , eplk , m] ∈ RH×W ×(2 C+Cplk +1) , (4) where eplk ∈ RH×W ×Cplk encodes the 6D Plücker coordinates for each pixel ray and m ∈ { 0, 1}H×W ×1 indicates valid regions. To accommodate the additional C
+
+channels, we expand the first convolutional layer of the U-Net from C + Cplk + 1 
+
+to 2C + Cplk + 1 input channels, initializing the new weights to zeros so that the pre-trained model behavior is preserved at the start of training. SplatGuide 7
+
+Tokens as Feature Conditioning. Rendered images provide pixel-aligned geo-metric conditioning but cannot convey scene-level context beyond the visible surfaces, such as global structure and texture statistics. We therefore inject re-construction tokens from frecon into the diffusion model. For each reference view 
+
+i we extract from the last layer of the reconstruction backbone one camera token 
+
+tcam  
+
+> i
+
+∈ Rdr used for pose prediction, and four register tokens {treg  
+
+> i,l
+
+}4 
+
+> l=1
+
+∈ R4×dr
+
+(dr =1024 ), which aggregate non-local information across patches [4]. A learned linear projection maps each token to the cross-attention dimension of the diffu-sion U-Net, and the tokens are injected through dedicated cross-attention layers, analogous to how SEVA [42] injects CLIP [19] features. Our ablation (Tab. 4) confirms that these feature cues are complementary to rendered images, further improving both fidelity and perceptual quality. The final conditioning C thus comprises reference latents, rendered latents, Plücker ray embeddings, the binary view-type mask, and the camera and register tokens. 
+
+Training Objective. We train only the diffusion model while keeping the recon-struction backbone frozen. Following standard latent diffusion practice [24], we minimize the noise-prediction objective: 
+
+L = Ez0,ϵ,t 
+
+h
+
+∥ϵ − ϵθ (zt, t, C)∥22
+
+i
+
+, (5) where z0 = E(Itgt ) is the VAE-encoded target, ϵ ∼ N (0, I), t ∼ U (1 , T ), and zt
+
+is the noised latent at timestep t.
+
+3.2 Gaussians as Context Views Selector 
+
+Scaling pose-free NVS to practical settings requires handling candidate pools that far exceed the context budget of the diffusion model; our experiments show that the selection policy alone accounts for a 7 dB range in output quality (Tab. 3), making view selection a first-order design decision. We design a hybrid strategy that combines scene-based visibility reasoning with a lightweight pose-based augmentation. As illustrated in Fig. 3, the selector (1) reconstructs a 3D Gaussian proxy with source-view indices, (2) renders an occlusion-aware view-index map in the target view, and (3) selects reference views via visibility-based scoring, directly reusing the 3DGS scene G already produced by the reconstruc-tion backbone. Importantly, spatial proximity between cameras does not necessarily imply shared visible content due to occlusions. Given a target camera Ptgt and recon-structed Gaussians G = {gi}Gi=1 with their source-view indices v(i) from Sec. 3.1, we estimate how much of the surface visible from Ptgt is explained by each can-didate view. Since selection only requires coarse visibility, we downsample the Gaussian set to reduce computational overhead. Reusing the projection and ras-terization operations of 3D Gaussian Splatting [10], we render a view-index map 
+
+under a hard first-hit depth test: at each pixel p, only the nearest Gaussian is kept and writes a distinct palette color cv(i) encoding its source view, while pixels 8 Y. Zhang et al. Render To   
+
+> Target View
+> Selected Context Views
+> Feed- Forward
+> Reconstruction
+> Rendered
+> Index Map Score
+> Candidates
+> ✔ ❌ ❌
+> First-hit Depth Filter
+
+Fig. 3: Overview of the proposed view selection pipeline. We reuse the reconstructed 3D Gaussians with per-Gaussian source-view indices, render an occlusion-aware target-view index map via first-hit visibility, and aggregate pixel votes into per-view visibility scores S(k) to determine Top-K Indices. The final selection is refined by DeDup, which filters spatially redundant candidates, and PoseAug, which augments the context set with pose-proximal views for isolated targets, ensuring a complete and diverse set of 
+
+K reference images. 
+
+with no valid Gaussian are ignored. Whereas v(i) is unambiguous per Gaussian, a target ray typically intersects Gaussians originating from several different views; the first-hit test resolves this competition by awarding the pixel to the nearest surface only, and palette colors are never alpha-blended, which keeps index re-covery exact. Each target pixel thus votes for the source view that best explains its visible surface, and the view index ˆv(p) is recovered by nearest-color lookup. We then define a visibility score 
+
+S(k) = X
+
+> p
+
+Iˆv(p) = k, (6) which counts the target pixels dominated by geometry from view k. We rank candidates by S(k) in descending order and greedily select the highest-scoring views until the context budget is exhausted. 
+
+Beyond Geometric Coverage. Ranking by S(k) alone, as in prior visibility-based retrieval [13], optimizes purely for geometric coverage. Coverage, however, does not guarantee informative conditioning: a faraway candidate can observe much of the target surface yet deliver appearance evidence that is too coarse, and sev-eral top-ranked candidates frequently explain the same surfaces. We therefore refine the ranking with two lightweight components. DeDup discards candidates whose visible Gaussians largely coincide with those of already selected views, preventing the limited budget from being spent on near-duplicate viewpoints. 
+
+PoseAug fills the remaining slots with a max-min proximity rule that guards against the complementary failure mode: a target left distant from every cho-sen context. With S the current context set and tk, ttgt  
+
+> j
+
+the camera centers of SplatGuide 9
+
+candidate k and target j, PoseAug locates the most isolated target, 
+
+j⋆ = arg max   
+
+> j∈{ 1,...,M }
+
+min  
+
+> k∈S
+
+tk − ttgt  
+
+> j2
+
+, (7) and admits the unselected candidate nearest to it, k⋆ = arg min k / ∈S tk − ttgt  
+
+> j⋆2
+
+;the rule repeats until the budget is saturated, so every target retains at least one nearby context. The supplementary material ablates both components, con-firming that they are complementary to the visibility ranking. 
+
+4 Experiments 
+
+We evaluate SplatGuide on four benchmarks spanning in-domain and out-of-domain scenes. Comparison experiments show that our full pipeline matches or surpasses ground-truth-pose methods, controlled selection experiments iso-late the effect of visibility-aware view selection, and ablations verify that each conditioning signal provides complementary gains. 
+
+Implementation Details. Our diffusion backbone builds on SEVA [42], and we adopt WorldMirror [16] as the reconstruction model. Both the reconstruction backbone frecon and the VAE remain frozen throughout training; frecon produces the rendered images and tokens that constitute the conditioning C but receives no gradient updates. Only the diffusion model is trained, using the Adam optimizer with a learning rate of 1 × 10 −5 on 8 H200 GPUs with a batch size of 32. Classifier-free guidance is not used during training. At inference time, we use the DDIM sampler [24] with classifier-free guidance [7]. 
+
+Training and Test Data. We train the diffusion model on DL3DV [14] with 10,510 scenes and RealEstate10K [43] with 67,477 training videos, both contain-ing mixed indoor and outdoor scenes. We evaluate on two in-domain datasets, RealEstate10K and DL3DV, and two out-of-domain datasets, Mip-NeRF 360 [1] and Tanks and Temples [11], to test generalization. Further details are provided in the supplementary material. 
+
+4.1 Novel View Synthesis Results 
+
+Following standard practice [6, 42], we report PSNR, SSIM, and LPIPS. We compare against regression-based methods, including AnySplat, WorldMirror, and RayZer, as well as diffusion-based methods, including SEVA, Fillerbuster, and ViewCrafter. We note that methods such as Gen3C [20] and Geometry Forcing [31] require ground-truth camera poses and are therefore not directly comparable to our pose-free setting. ViewCrafter uses a separate evaluation setup detailed in the supplementary. 10 Y. Zhang et al. 
+
+GT Render Ours SEVA ViewCrafter Fig. 4: Visual comparison of novel view synthesis. Columns from left to right: ground truth, the coarse 3DGS render serving as our geometric prior, our SplatGuide result, SEVA, and ViewCrafter. SplatGuide produces sharper structures and fewer artifacts than both baselines, benefiting from the explicit geometric guidance provided by the rendered image and injected tokens. 
+
+Table 1: Quantitative comparison on the in-domain RealEstate10K (top) and DL3DV (bottom) datasets. Best results among unposed methods are in bold , and second-best are underlined.                                                                                                                                                                    
+
+> GT 3-view 6-view 9-view
+> Method pose PSNR ↑SSIM ↑LPIPS ↓PSNR ↑SSIM ↑LPIPS ↓PSNR ↑SSIM ↑LPIPS ↓
+> RealEstate10K
+> SEVA ✓27.57 0.89 0.07 29.24 0.90 0.06 29.63 0.91 0.05 AnySplat ×19.81 0.71 0.24 23.23 0.79 0.16 24.13 0.82 0.15 WorldMirror ×21.13 0.77 0.16 22.89 0.81 0.12 23.35 0.83 0.11 Fillerbuster ×19.13 0.63 0.27 19.81 0.65 0.24 20.59 0.67 0.22 ViewCrafter ×20.18 0.74 0.23 22.97 0.81 0.19 23.22 0.82 0.17 SEVA ×23.47 0.77 0.13 26.20 0.82 0.07 27.14 0.83 0.06 Ours ×26.52 0.84 0.07 29.29 0.87 0.04 30.00 0.88 0.04 DL3DV
+> SEVA ✓15.13 0.43 0.41 16.62 0.48 0.33 17.68 0.52 0.27 AnySplat ×10.04 0.29 0.61 12.15 0.33 0.56 13.78 0.37 0.51 WorldMirror ×13.11 0.31 0.54 13.98 0.34 0.47 15.01 0.41 0.42 RayZer ×14.65 0.35 0.64 16.28 0.40 0.54 17.75 0.46 0.46 Matrix3D ×12.73 0.31 0.53 13.35 0.32 0.50 ---ViewCrafter ×11.16 0.28 0.61 ------SEVA ×12.50 0.35 0.55 13.49 0.37 0.48 14.26 0.38 0.43 Ours ×14.96 0.42 0.39 16.21 0.46 0.31 16.99 0.48 0.27
+
+Geometric conditioning bridges the pose gap. SEVA (unposed) denotes the offi-cial SEVA model [42] run with DUSt3R-predicted poses provided by the SEVA codebase. As shown in Tab. 1, on RealEstate10K, SplatGuide improves over this strongest pose-only diffusion baseline by +3.05 dB at 3 views, and with 9 views it surpasses even the ground-truth-pose SEVA, showing that the complete frame-SplatGuide 11 
+
+Table 2: Quantitative comparison on out-of-domain datasets. All methods operate without ground-truth poses. Best results are in bold , and second-best are underlined.                                                                                                               
+
+> Tanks and Temples Mip-NeRF 360 Method 3-view 6-view 3-view 6-view 9-view PSNR ↑SSIM ↑LPIPS ↓PSNR ↑SSIM ↑LPIPS ↓PSNR ↑SSIM ↑LPIPS ↓PSNR ↑SSIM ↑LPIPS ↓PSNR ↑SSIM ↑LPIPS ↓
+> Regression-based methods:
+> AnySplat 16.04 0.46 0.35 18.00 0.52 0.30 8.26 0.20 0.66 10.30 0.23 0.60 11.42 0.26 0.56 WorldMirror 17.45 0.55 0.27 19.06 0.56 0.25 11.90 0.24 0.61 12.52 0.26 0.55 13.07 0.26 0.52
+> Diffusion-based methods:
+> Fillerbuster 17.18 0.46 0.30 18.60 0.52 0.27 12.55 0.20 0.62 13.15 0.20 0.59 13.82 0.21 0.57 ViewCrafter 18.31 0.51 0.26 20.89 0.61 0.14 11.54 0.19 0.63 11.84 0.20 0.61 12.25 0.21 0.59 SEVA 19.45 0.58 0.15 21.59 0.64 0.10 13.89 0.25 0.49 14.80 0.26 0.43 15.07 0.27 0.41 Ours 20.01 0.60 0.12 21.95 0.67 0.09 14.64 0.27 0.46 15.43 0.28 0.40 16.01 0.30 0.35
+
+work compensates for the accuracy loss of predicted poses when sufficient views are available. The same trend holds on DL3DV, where SplatGuide achieves the best LPIPS across all view counts; RayZer reports higher PSNR at 6 and 9 views but with substantially weaker perceptual quality, e.g ., LPIPS of 0.54 vs. our 0.31 at 6 views. As Tab. 2 shows, on the out-of-domain Mip-NeRF 360 and Tanks and Temples benchmarks, SplatGuide remains the best among all unposed methods across view counts, confirming that geometric conditioning transfers to diverse scenes without domain-specific tuning. Fig. 4 corroborates these gains visually: SplatGuide produces sharper structures and fewer artifacts than both diffusion baselines. 
+
+Generation complements reconstruction. SplatGuide surpasses pure reconstruc-tion baselines by large margins, e.g ., +5.39 dB over WorldMirror and +6.71 dB over AnySplat on the RealEstate10K 3-view split. This gap confirms that recon-struction models alone can only interpolate observed regions and cannot hallu-cinate plausible content in unobserved areas, whereas our diffusion-based gener-ation fills these regions with high fidelity guided by the reconstructed geometric prior. Moreover, the advantage persists on out-of-domain scenes, showing that the diffusion model’s learned generative prior remains valuable when reconstruc-tion quality degrades on unseen distributions. 
+
+Extrapolation beyond observed viewpoints. Generative NVS matters most when targets depart substantially from all reference views, precisely the regime where render-and-refine pipelines are expected to struggle. Fig. 5 examines this setting: as the target leaves the observed trajectory, the 3DGS render turns sparse and incomplete, yet it still pins down the layout of the visible geometry, and the diffusion model completes the remaining content into a coherent novel view. 
+
+4.2 Inference-Time View Selection 
+
+To isolate the effect of selection policy from the generator, we fix the diffu-sion model and vary only the selection strategy. We compare against four reim-plemented baselines: temporal recency Temporal [25], camera-distance ranking 12 Y. Zhang et al.   
+
+> (a) Contexts (b) Rendered (c) Generated
+
+Fig. 5: View extrapolation under large viewpoint changes. For each scene we show (a) the selected context views, (b) coarse 3DGS renders at target poses far from all context cameras, and (c) the corresponding generated novel views. The degraded renders still anchor the visible layout, which the diffusion model completes into coherent images. 
+
+Table 3: Comparison of view selection policies with a fixed generator. All methods use the same reconstruction and diffusion backbones; only the selection policy differs.                                                            
+
+> B=6 (sparse) B=9 (mid) B=16 (ample) Method PSNR ↑SSIM ↑LPIPS ↓PSNR ↑SSIM ↑LPIPS ↓PSNR ↑SSIM ↑LPIPS ↓
+> Temporal(DFoT) 20.88 0.71 0.22 21.50 0.75 0.18 26.53 0.86 0.10 CamDist(SEVA) 24.34 0.80 0.11 25.44 0.81 0.10 27.71 0.88 0.07 FoV(WorldMem) 26.52 0.83 0.09 27.61 0.84 0.07 29.25 0.90 0.06 Surfel(Vmem) 26.93 0.84 0.09 27.86 0.85 0.08 29.12 0.90 0.07 Ours 28.25 0.85 0.06 28.91 0.86 0.06 29.94 0.91 0.05
+
+CamDist [42], surfel-based visibility coverage Surfel [13], and field-of-view over-lap FoV [33]. All methods draw from the same pool of 32 candidate references under three context budgets: B=6 for the sparse regime, B=9 for the mid regime, and B=16 for the ample regime. 
+
+Quantitative Results. The results reveal a striking 7 dB range across selection policies on RealEstate10K at B=6 . Our hybrid method achieves the best results across all budgets, with the largest gains in the sparse regime: +1.3 dB over the best existing strategy Surfel and +3.9 dB over CamDist at B=6 . The advantage narrows at B=16 , where the strongest spatial strategies converge within 1 dB: visibility-aware selection matters most precisely when the context budget is tight, the regime most relevant to practical deployment. 
+
+Qualitative Observations. Fig. 6 illustrates two representative failure modes. In the top two rows, pose-based baselines select clusters of nearly identical views, wasting the budget on redundant content and causing texture bleeding near depth discontinuities, while the surfel-based VMem selector over-concentrates on already well-covered surfaces; our method selects complementary views, produc-ing sharper edges and fewer missing regions. In the bottom two rows, strong fore-ground occluders dominate the frames chosen by pose-only methods, whereas our SplatGuide 13                     
+
+> Table 4: Ablation study on geometric conditioning on DL3DV with 9 views. We progressively add rendering images, camera tokens and register tokens to the baseline to measure each component’s contribution. Method PSNR ↑SSIM ↑LPIPS ↓
+> Baseline + predicted pose 15.64 0.33 0.38 + rendering image 16.30 0.35 0.33 + rendering image + cam & reg 16.63 0.36 0.32
+> Ground Truth Ours SEVA VMem WorldMem
+
+# Ground Truth Ours SEVA VMem 
+
+# Ground Truth Ours SEVA VMem 
+
+# Ground Truth Ours SEVA VMem Wo 
+
+# Ground Truth Ours SEVA VMem Wo 
+
+# Ground Truth Ours SEVA VMem WorldMe 
+
+# Ground Truth Ours SEVA VMem WorldMe 
+
+# Ground Truth Ours SEVA VMem WorldMem 
+
+# Ground Truth Ours SEVA VMem WorldMem 
+
+# round Truth Ours SEVA VMem WorldMem 
+
+# Ground Truth Ours SEVA VMem WorldMem 
+
+# Ground Truth Ours SEVA VMem 
+
+# Ground Truth Ours SEVA VMem 
+
+# Ground Truth Ours SEVA VMem Wo 
+
+# Ground Truth Ours SEVA VMem Wor 
+
+# Ground Truth Ours SEVA VMem WorldMe 
+
+# Ground Truth Ours SEVA VMem WorldMem 
+
+# Ground Truth Ours SEVA VMem WorldMem 
+
+# Ground Truth Ours SEVA VMem WorldMem 
+
+# Ground Truth Ours SEVA VMem WorldMem 
+
+# round Truth Ours SEVA VMem WorldMem 
+
+# Ground Truth Ours SEVA VMem WGround Truth Ours SEVA VMem Ground Truth Ours SEVA VMem WorldM Ground Truth Ours SEVA VMem Wor Ground Truth Ours SEVA VMem WorldMem Ground Truth Ours SEVA VMem WorldMem Ground Truth Ours SEVA VMem WorldMem Ground Truth Ours SEVA VMem WorldMem nd Truth Ours SEVA VMem WorldMem round Truth Ours SEVA VMem WorldMem 
+
+# Ground Truth Ours SEVA VMem 
+
+# Ground Truth Ours SEVA VMem 
+
+# Ground Truth Ours SEVA VMem Wor 
+
+# Ground Truth Ours SEVA VMem Wor 
+
+# Ground Truth Ours SEVA VMem WorldMem 
+
+# Ground Truth Ours SEVA VMem WorldMem 
+
+# Ground Truth Ours SEVA VMem WorldMem 
+
+# Ground Truth Ours SEVA VMem WorldMem 
+
+# round Truth Ours SEVA VMem WorldMem 
+
+# round Truth Ours SEVA VMem WorldMem Fig. 6: Qualitative comparison of view-selection policies. Top two rows: our method recovers fine details by selecting complementary views. Bottom two rows: our visibility-aware selection suppresses occluder-dominated candidates and reveals hidden geometry. 
+
+first-hit voting suppresses such candidates and retrieves views that see around the obstruction. These patterns are consistent across scenes and align with the quantitative gaps in Tab. 3. 
+
+4.3 Ablation of Geometric Conditioning 
+
+Tab. 4 presents a staged ablation that progressively adds geometric conditioning components. To reduce computational cost, all variants are trained and evaluated on a representative subset of DL3DV with 9 reference views. Starting from the predicted-pose baseline, adding the rendering image alone yields a +0.66 dB gain, confirming that rendering serves as the primary geo-metric anchor. Further adding camera and register tokens yields the best overall quality at 16.63 PSNR and 0.32 LPIPS, a 16% relative LPIPS reduction from the baseline. Token-level guidance thus complements pixel-level rendering rather than replacing it: renderings anchor the spatial layout, while tokens supply global scene context that resolves texture and style ambiguities. 14 Y. Zhang et al. 
+
+Table 5: Scaling the candidate pool on long-trajectory Tanks-and-Temples scenes (Long-LRM split) with a fixed context budget B=9 . Larger pools consistently improve quality without degrading palette-encoded index recovery. Pool size V 32 64 96 128 PSNR ↑ 16.06 16.40 16.87 17.21 
+
+SSIM ↑ 0.41 0.42 0.43 0.47 
+
+LPIPS ↓ 0.28 0.25 0.25 0.23        
+
+> Nerfbusters T&T Self-collected images
+> Inputs Generated Inputs Generated Inputs Generated
+
+Fig. 7: Novel view synthesis on large-scale scenes with 100+ input images. Each group shows four example inputs (left 2×2 grid) and two generated novel views (right), on Nerfbusters [29], Tanks-and-Temples, and self-collected casual captures. 
+
+Table 6: Zero-shot generalization across reconstruction backbones on RealEstate10K. Our diffusion model, trained exclusively with WorldMirror priors, successfully transfers to AnySplat without retraining.                              
+
+> 3-view 6-view 9-view
+> Method PSNR ↑SSIM ↑LPIPS ↓PSNR ↑SSIM ↑LPIPS ↓PSNR ↑SSIM ↑LPIPS ↓
+> Ours (AnySplat) 26.56 0.83 0.08 29.97 0.87 0.05 31.29 0.88 0.04
+> Ours (WorldMirror) 26.52 0.84 0.07 29.29 0.87 0.04 30.00 0.88 0.04
+
+Scaling to Larger Candidate Pools. Casual captures routinely yield pools far larger than the 32 candidates used above, stressing both the selector and the palette encoding, whose colors for a growing view count V lie ever closer in RGB space. On long-trajectory Tanks-and-Temples scenes from the Long-LRM split [45], we fix the budget to B=9 and enlarge the pool from 32 to 128 candi-dates. As Tab. 5 shows, quality rises monotonically with pool size, by +1.15 dB PSNR overall, with no palette-decoding failures even at V =128 : with more can-didates available, each target finds contexts nearby, so the generator bridges a shorter extrapolation gap. Fig. 7 illustrates this regime on casually captured scenes and public benchmarks with over 100 input images. 
+
+4.4 Generalizability to Different Reconstruction Models 
+
+To test whether the framework depends on a specific reconstruction backbone, we replace WorldMirror [16] with AnySplat [9] zero-shot, without any fine-tuning of the diffusion model, and evaluate on the identical RealEstate10K [43] test split with all other components held constant. As shown in Tab. 6, the AnySplat variant achieves competitive or superior performance across all view counts, with gains of up to +1.29 dB at 9 views. Any SplatGuide 15 
+
+feed-forward model producing camera poses and a pixel-aligned 3DGS scene can thus serve as a drop-in replacement, and a stronger backbone translates directly into better generation quality: the modular separation between reconstruction and generation lets the framework absorb future advances in feed-forward recon-struction without retraining. 
+
+Portability of the Conditioning Interface. The conditioning interface is largely backbone-agnostic: rendered images enter through channel-wise concatenation in the latent space, which any latent diffusion model supports by expanding its input convolution with zero-initialized weights, and reconstruction tokens enter through cross-attention layers present in most U-Net and DiT architectures. The visibility-aware selector runs entirely upstream of the generator, so it transfers to any backbone with a bounded context budget. Only the Plücker-and-mask input layout and the context-window length follow SEVA’s design; we adopt SEVA for its strong pose-conditioned prior, and validating other multi-view diffusion backbones is left to future work. 
+
+5 Conclusion 
+
+We present SplatGuide, a framework for pose-free novel view synthesis that repurposes a single 3DGS reconstruction as a unified interface for pixel-level rendering, feature-level token guidance, and visibility-aware view selection. By systematically bridging the information disconnect between reconstruction and generation, SplatGuide closes the gap between predicted and ground-truth poses, even surpassing the ground-truth-pose baseline on RealEstate10K with sufficient input views, and demonstrates that visibility-aware selection is a first-order de-sign decision for scalable generation. A key strength of our design is its mod-ularity: reconstruction and generation are fully decoupled, so each component can be upgraded independently, as validated by our zero-shot backbone substi-tution experiment, and future advances in feed-forward reconstruction translate directly into higher-quality synthesis. 
+
+Limitations. Our failure modes are correlated: renderings, tokens, and source-view indices all come from the same reconstruction G, so wherever the feed-forward backbone degrades, such as on textureless surfaces, wide baselines, repetitive structures, or dynamic content, all three signals degrade at once and the generator has no independent geometric cue left. Dynamic scenes are the sharpest case, as motion both corrupts the reconstruction and breaks the first-hit correspondence behind the view-index map. 
+
+Acknowledgements. We acknowledge funding by Nokia Technologies, the Re-search Council of Finland (projects 339730, 352788, 353138, 353139, 362407, 362408, 362409, 372999, 373778, 373780, 373997, 373999), and the Finnish Doc-toral Program Network in Artificial Intelligence, AI-DOC (decision number VN/3137/2024-OKM-6). We acknowledge CSC – IT Center for Science, Fin-land, and the Aalto Science-IT project for the computational resources. 16 Y. Zhang et al. 
+
+References 
+
+1. Barron, J.T., Mildenhall, B., Verbin, D., Srinivasan, P.P., Hedman, P.: Mip-nerf 360: Unbounded anti-aliased neural radiance fields. In: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition. pp. 5470– 5479 (2022) 2. Cao, C., Yu, C., Liu, S., Wang, F., Xue, X., Fu, Y.: Mvgenmaster: Scaling multi-view generation from any image via 3d priors enhanced diffusion model. In: Pro-ceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recogni-tion (CVPR). pp. 6045–6056 (June 2025) 3. Chan, E.R., Nagano, K., Chan, M.A., Bergman, A.W., Park, J.J., Levy, A., Aittala, M., Mello, S.D., Karras, T., Wetzstein, G.: GeNVS: Generative novel view synthesis with 3D-aware diffusion models. In: ICCV (2023) 4. Darcet, T., Oquab, M., Mairal, J., Bojanowski, P.: Vision transformers need reg-isters. In: International Conference on Learning Representations (2024) 5. Fan, Z., Cong, W., Wen, K., Wang, K., Zhang, J., Ding, X., Xu, D., Ivanovic, B., Pavone, M., Pavlakos, G., et al.: Instantsplat: Unbounded sparse-view pose-free gaussian splatting in 40 seconds. arXiv preprint arXiv:2403.20309 2(3), 4 (2024) 6. Gao, R., Holynski, A., Henzler, P., Brussee, A., Martin-Brualla, R., Srinivasan, P., Barron, J.T., Poole, B.: Cat3d: Create anything in 3d with multi-view diffusion models. In: Advances in Neural Information Processing Systems (2024) 7. Ho, J., Salimans, T.: Classifier-free diffusion guidance. arXiv preprint arXiv:2207.12598 (2022) 8. Jiang, H., Tan, H., Wang, P., Jin, H., Zhao, Y., Bi, S., Zhang, K., Luan, F., Sunkavalli, K., Huang, Q., et al.: Rayzer: A self-supervised large view synthesis model. In: Proceedings of the IEEE/CVF International Conference on Computer Vision (2025) 9. Jiang, L., Mao, Y., Xu, L., Lu, T., Ren, K., Jin, Y., Xu, X., Yu, M., Pang, J., Zhao, F., et al.: Anysplat: Feed-forward 3d gaussian splatting from unconstrained views. In: SIGGRAPH Asia 2025 Conference Papers (2025) 10. Kerbl, B., Kopanas, G., Leimkühler, T., Drettakis, G.: 3d gaussian splatting for real-time radiance field rendering. ACM Trans. Graph. 42 (4), 139:1–139:14 (2023) 11. Knapitsch, A., Park, J., Zhou, Q.Y., Koltun, V.: Tanks and temples: Benchmarking large-scale scene reconstruction. ACM Transactions on Graphics 36 (4) (2017) 12. Leroy, V., Cabon, Y., Revaud, J.: Grounding image matching in 3d with mast3r. In: European Conference on Computer Vision. pp. 71–91. Springer (2024) 13. Li, R., Torr, P., Vedaldi, A., Jakab, T.: Vmem: Consistent interactive video scene generation with surfel-indexed view memory. In: Proceedings of the IEEE/CVF International Conference on Computer Vision (2025) 14. Ling, L., Sheng, Y., Tu, Z., Zhao, W., Xin, C., Wan, K., Yu, L., Guo, Q., Yu, Z., Lu, Y., et al.: Dl3dv-10k: A large-scale scene dataset for deep learning-based 3d vision. In: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition. pp. 22160–22169 (2024) 15. Liu, F., Sun, W., Wang, H., Wang, Y., Sun, H., Ye, J., Zhang, J., Duan, Y.: Reconx: Reconstruct any scene from sparse views with video diffusion model. In: International Conference on Learning Representations (2025) 16. Liu, Y., Min, Z., Wang, Z., Wu, J., Wang, T., Yuan, Y., Luo, Y., Guo, C.: Worldmir-ror: Universal 3d world reconstruction with any-prior prompting. In: International Conference on Machine Learning (2026) SplatGuide 17 17. Lu, Y., Zhang, J., Fang, T., Nahmias, J.D., Tsin, Y., Quan, L., Cao, X., Yao, Y., Li, S.: Matrix3d: Large photogrammetry model all-in-one. In: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (2025) 18. Mildenhall, B., Srinivasan, P.P., Tancik, M., Barron, J.T., Ramamoorthi, R., Ng, R.: Nerf: Representing scenes as neural radiance fields for view synthesis. Commu-nications of the ACM 65 (1), 99–106 (2022) 19. Radford, A., Kim, J.W., Hallacy, C., Ramesh, A., Goh, G., Agarwal, S., Sastry, G., Askell, A., Mishkin, P., Clark, J., et al.: Learning transferable visual models from natural language supervision. In: International conference on machine learning. pp. 8748–8763. PmLR (2021) 20. Ren, X., Shen, T., Huang, J., Ling, H., Lu, Y., Nimier-David, M., Müller, T., Keller, A., Fidler, S., Gao, J.: Gen3c: 3d-informed world-consistent video generation with precise camera control. In: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (2025) 21. Rombach, R., Esser, P., Ommer, B.: Geometry-free view synthesis: Transformers and no 3d priors. In: Proceedings of the IEEE/CVF International Conference on Computer Vision. pp. 14356–14366 (2021) 22. Schonberger, J.L., Frahm, J.M.: Structure-from-motion revisited. In: Proceedings of the IEEE conference on computer vision and pattern recognition. pp. 4104–4113 (2016) 23. Shi, Y., Wang, P., Ye, J., Mai, L., Li, K., Yang, X.: Mvdream: Multi-view diffusion for 3d generation. In: International Conference on Learning Representations (2024) 24. Song, J., Meng, C., Ermon, S.: Denoising diffusion implicit models. In: International Conference on Learning Representations (2021) 25. Song, K., Chen, B., Simchowitz, M., Du, Y., Tedrake, R., Sitzmann, V.: History-guided video diffusion. In: International Conference on Machine Learning (2025) 26. Wang, J., Chen, M., Karaev, N., Vedaldi, A., Rupprecht, C., Novotny, D.: Vggt: Visual geometry grounded transformer. In: Proceedings of the IEEE/CVF Confer-ence on Computer Vision and Pattern Recognition (2025) 27. Wang, S., Leroy, V., Cabon, Y., Chidlovskii, B., Revaud, J.: Dust3r: Geometric 3d vision made easy. In: CVPR (2024) 28. Wang, Z., Yuan, Z., Wang, X., Li, Y., Chen, T., Xia, M., Luo, P., Shan, Y.: Mo-tionctrl: A unified and flexible motion controller for video generation. In: ACM SIGGRAPH 2024 Conference Papers. pp. 1–11 (2024) 29. Warburg, F., Weber, E., Tancik, M., Holynski, A., Kanazawa, A.: Nerfbusters: Removing ghostly artifacts from casually captured nerfs. In: Proceedings of the IEEE/CVF International Conference on Computer Vision (2023) 30. Weber, E., Müller, N., Kant, Y., Agrawal, V., Zollhöfer, M., Kanazawa, A., Richardt, C.: Fillerbuster: Unified generative scene completion model for casual captures. In: International Conference on 3D Vision (2026) 31. Wu, H., Wu, D., He, T., Guo, J., Ye, Y., Duan, Y., Bian, J.: Geometry forcing: Marrying video diffusion and 3d representation for consistent world modeling. In: International Conference on Learning Representations (2026) 32. Wu, J.Z., Zhang, Y., Turki, H., Ren, X., Gao, J., Shou, M.Z., Fidler, S., Gojcic, Z., Ling, H.: Difix3d+: Improving 3D reconstructions with single-step diffusion models. In: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (2025) 33. Xiao, Z., Lan, Y., Zhou, Y., Ouyang, W., Yang, S., Zeng, Y., Pan, X.: World-mem: Long-term consistent world simulation with memory. In: Advances in Neural Information Processing Systems (2025) 18 Y. Zhang et al. 34. Ye, B., Liu, S., Xu, H., Li, X., Pollefeys, M., Yang, M.H., Peng, S.: No pose, no problem: Surprisingly simple 3d gaussian splats from sparse unposed images. In: International Conference on Learning Representations (2025) 35. Yin, X., Zhang, Q., Chang, J., Feng, Y., Fan, Q., Yang, X., Pun, C.M., Zhang, H., Cun, X.: Gsfixer: Improving 3d gaussian splatting with reference-guided video diffusion priors. In: International Conference on Machine Learning (2026) 36. Yu, J.J., Forghani, F., Derpanis, K.G., Brubaker, M.A.: Long-term photomet-ric consistent novel view synthesis with diffusion models. In: Proceedings of the IEEE/CVF International Conference on Computer Vision. pp. 7094–7104 (2023) 37. Yu, J., Bai, J., Qin, Y., Liu, Q., Wang, X., Wan, P., Zhang, D., Liu, X.: Context as memory: Scene-consistent interactive long video generation with memory retrieval. In: SIGGRAPH Asia 2025 Conference Papers (2025) 38. Yu, J., Qin, Y., Wang, X., Wan, P., Zhang, D., Liu, X.: Gamefactory: Creating new games with generative interactive videos. In: Proceedings of the IEEE/CVF International Conference on Computer Vision (2025) 39. YU, M., Hu, W., Xing, J., Shan, Y.: Trajectorycrafter: Redirecting camera trajec-tory for monocular videos via diffusion models. In: ICCV (2025) 40. Yu, W., Xing, J., Yuan, L., Hu, W., Li, X., Huang, Z., Gao, X., Wong, T.T., Shan, Y., Tian, Y.: Viewcrafter: Taming video diffusion models for high-fidelity novel view synthesis. IEEE Transactions on Pattern Analysis and Machine Intelligence (2025) 41. Zhang, S., Xu, H., Guo, S., Xie, Z., Bao, H., Xu, W., Zou, C.: Spatialcrafter: Unleashing the imagination of video diffusion models for scene reconstruction from limited observations. In: Proceedings of the IEEE/CVF International Conference on Computer Vision. pp. 27794–27805 (2025) 42. Zhou, J., Gao, H., Voleti, V., Vasishta, A., Yao, C.H., Boss, M., Torr, P., Rupprecht, C., Jampani, V.: Stable virtual camera: Generative view synthesis with diffusion models. In: Proceedings of the IEEE/CVF International Conference on Computer Vision (2025) 43. Zhou, T., Tucker, R., Flynn, J., Fyffe, G., Snavely, N.: Stereo magnification: Learn-ing view synthesis using multiplane images. ACM Transactions on Graphics 37 (4), 1–12 (2018) 44. Zhou, Z., Tulsiani, S.: SparseFusion: Distilling view-conditioned diffusion for 3D reconstruction. In: CVPR (2023) 45. Ziwen, C., Tan, H., Zhang, K., Bi, S., Luan, F., Hong, Y., Fuxin, L., Xu, Z.: Long-lrm: Long-sequence large reconstruction model for wide-coverage gaussian splats. In: Proceedings of the IEEE/CVF International Conference on Computer Vision (2025) SplatGuide: Supplementary Material 
+
+A Additional Implementation Details 
+
+We adopt a dual-resolution strategy: inputs are resized to 448 ×448 for the recon-struction backbone to balance computational cost, while the diffusion model and 3DGS rendering operate at 576 × 576 to match the SEVA baseline. For bench-mark evaluation, we first align the target camera poses with the reconstructed scene. We use WorldMirror to place the reference and target cameras in the same coordinate system. We reconstruct the 3DGS using the reference RGBs and the aligned reference poses. We then render the 3DGS at the aligned target poses. Target RGBs are used only for camera alignment and metric computation. They are not used to build the 3DGS or provide features to the generation model. We initialize the diffusion model from the pre-trained SEVA weights, with all newly added layers zero-initialized and the VAE frozen throughout training. We train for 25,000 steps on 8 H200 GPUs. At inference time, we use the DDIM sampler with 50 steps and a classifier-free guidance scale of 2.0, following the default SEVA configuration. We set the context window length to T =21 follow-ing SEVA, where T is the total number of reference and target views, unless otherwise specified. 
+
+B Additional Evaluation Details 
+
+RayZer and Matrix3D We evaluate RayZer [2] using provided checkpoints trained on DL3DV with 16 context views at 256 × 256 resolution. Since its image-index embeddings make it sensitive to view counts, we pad our inputs to match the required 16 views. While RayZer achieves high PSNR, these metrics are inflated by the low evaluation resolution and do not reflect superior quality. Visual anal-ysis uncovers significant mosaic-like artifacts, indicating that input padding fails to resolve the model’s structural sensitivity to mismatches between training and testing view counts. We also evaluate Matrix3D [3], which processes input im-ages at 896 × 896 resolution and generates outputs at 512 × 512 . Due to its maximum context limit of 8 views, we restrict our evaluation to the 3-view and 6-view splits. Unlike our fully unposed framework, Matrix3D requires ground-truth camera intrinsics as input; we therefore provide these intrinsics during testing. 
+
+Camera Pose Error Tab. A1 reports camera pose accuracy using Rotation Er-ror Rerr and Translation Error Terr . We first align the predicted poses Ppred 
+
+with the ground truth Pgt by setting the first frame to identity and rescaling predicted translations to match the ground-truth scale. The scale factor is the 2          
+
+> Table A1: Camera pose error comparison between DUSt3R and WorldMirror as re-construction backbones. Method Rerr (◦)↓Terr ↓
+> DUSt3R 0.69 0.06 WorldMirror 0.27 0.02
+
+median ratio of ground-truth to predicted translation norms, computed over ref-erence frames only. After alignment, Rerr measures the mean geodesic distance between rotation matrices and Terr measures the mean Euclidean distance be-tween translation vectors over all N frames: 
+
+Rerr = 1
+
+N
+
+> N
+
+X
+
+> i=1
+
+180 
+
+π arccos tr (R(i)T 
+
+> gt
+
+R(i)
+
+> pred
+
+) − 12
+
+!
+
+(1) 
+
+Terr = 1
+
+N
+
+> N
+
+X
+
+> i=1
+
+|| t(i) 
+
+> pred
+
+− t(i) 
+
+> gt
+
+|| 2 (2) 
+
+C Additional Qualitative Results 
+
+We provide more qualitative visualizations of novel view synthesis results across diverse datasets. Fig. A1 shows generation quality on MipNeRF 360, Tanks and Temples, and DL3DV datasets, with red and blue zoom boxes highlighting detailed regions to assess texture fidelity and geometric accuracy. 
+
+D Inference Time View Selection 
+
+In this section, we provide additional analysis of the inference-time view selection policies introduced in the main paper. Unless otherwise specified, we use 32 candidate reference views and a 6-view context budget ( B=6 ) at each generation, matching the sparse regime in the main paper. 
+
+View-Index Rendering Implementation. As described in the main paper, we render a view-index map by downsampling the reconstructed 3D Gaussians and encoding each source view with a distinct palette color. We apply a hard depth filter before color decoding. At each pixel, we keep the closest valid Gaussian and ignore all other Gaussians. Pixels with no valid Gaussian are excluded from voting. Thus, colors from different source views are not blended in the index map. We downsample to approximately 10% of the original Gaussian count to reduce computational overhead while preserving coarse geometric visibility. The palette colors {ck}Vk=1 are generated by uniform sampling in HSV color space and converting to RGB, ensuring sufficient perceptual distance between view indices for robust nearest-color lookup during index recovery. SplatGuide: Supplementary Material 3
+
+Ground Truth Render Ours SEVA 
+
+# Ground Truth Render Ours 
+
+# Ground Truth Render Ours 
+
+# Ground Truth Render Ours SEV 
+
+# Ground Truth Render Ours SEVA 
+
+# Ground Truth Render Ours SEVA 
+
+# Ground Truth Render Ours SEVA 
+
+# und Truth Render Ours SEVA 
+
+# Truth Render Ours SEVA 
+
+# Ground Truth Render Ours Ground Truth Render Ours Ground Truth Render Ours Ground Truth Render Ours Ground Truth Render Ours SEVA Ground Truth Render Ours SEVA round Truth Render Ours SEVA Ground Truth Render Ours SEVA 
+
+# Ground Truth Render Ours Ground Truth Render Ours Ground Truth Render Ours SGround Truth Render Ours SEVA Ground Truth Render Ours SEVA Ground Truth Render Ours SEVA round Truth Render Ours SEVA nd Truth Render Ours SEVA 
+
+Fig. A1: Qualitative Results on the MipNeRF360, Tanks and Temples, and DL3DV Datasets. Red and blue boxes highlight detailed regions with corresponding magnified views showing texture fidelity and geometric accuracy. 
+
+Curated challenging dataset for view selection analysis. Standard benchmarks mostly feature simple scene geometry and smooth camera motion, so different selection rules often choose very similar views. To stress-test selection policies, we collect a small dataset of short handheld video sequences in everyday indoor and outdoor environments. From each video we uniformly subsample a fixed number of frames as candidate reference views and select a few target views for evaluation. The captured scenes exhibit three recurring geometric patterns. 
+
+– Occlusion : small objects are partially or fully blocked by foreground struc-tures, so that nearby views see only the occluder while slightly different viewpoints reveal the object. 
+
+– Corridor : long walkways with repeated structures and strong perspective, where many neighboring views become redundant if selected simultaneously. 
+
+– Staircase : multi-level geometry with railings and noticeable height changes, where small camera shifts significantly alter which surfaces are visible. 
+
+Quantitative comparison on captured scenes. Tab. A2 reports a quantitative comparison of selection policies on these captured sequences. On scenes with strong occlusions and depth variation, purely pose-based methods such as CamDist 4                                
+
+> Table A2: Quantitative comparison of view-selection policies on our captured real-world scenes with a 6-view context budget. Metrics are averaged over all target views. Method PSNR ↑SSIM ↑LPIPS ↓
+> CamDist 18.37 0.58 0.31 Surfel 18.52 0.59 0.30 FoV 18.27 0.58 0.30 Ours 19.30 0.61 0.26 Table A3: Ablation of selection variants on RealEstate10K with 32 candidates and a 6-view context budget. Method PSNR ↑SSIM ↑LPIPS ↓
+> Ours 28.25 0.85 0.06
+> w/o PoseAug 26.50 0.83 0.08 w/o DeDup 27.94 0.84 0.06
+> w/o PoseAug + DeDup 25.13 0.81 0.11
+
+and FoV perform the weakest. The Surfel-based method brings a slight improve-ment, and our Gaussian-visibility selection achieves the best overall image qual-ity. 
+
+Ablation on selection variants on RealEstate10K. Our hybrid selector combines Gaussian-visibility scores S(k) with two additional components: PoseAug , which fills remaining context budget slots with views ranked by camera distance to the target pose, and DeDup , a lightweight spatial-diversity heuristic that discourages selecting nearly-identical views by encouraging coverage across different image regions. To isolate the contribution of each component, we conduct an ablation on RealEstate10K with 32 candidates and a 6-view context budget, using the same fixed generator as in the main paper. Tab. A3 shows that both PoseAug and DeDup provide consistent gains. Removing PoseAug alone causes a 1.75 dB drop, while removing both components degrades PSNR by 3.12 dB, confirming that the pose-based fallback and diversity filtering are complementary to visibility-based ranking. 
+
+DeDup spatial filtering mechanism. The DeDup component partitions the target image into a 2×2 grid of tiles and computes tile-restricted visibility scores 
+
+S(b)vis (k) for each tile b. During greedy selection, we choose views that maximize the marginal gain: 
+
+∆(k) = λglobal Svis (k) + λtile 4X
+
+> b=1
+
+max {0, S (b)vis (k) − Cb} (3) SplatGuide: Supplementary Material 5              
+
+> Table A4: Inference cost on a single RTX 4090 with batch size 1 and a candidate pool of 32 views. Sampling times for SEVA and for our model are measured under the same DDIM configuration. Rendering and selection together account for less than 0.01% of our end-to-end latency. The reconstruction cost is not exclusive to our method: the unposed SEVA baseline also requires a reconstruction pass to obtain poses, so the two pipelines differ mainly in sampling time. Stage Component Time (s) Reconstruction WorldMirror forward pass 3.73 Selection 3DGS rendering (RGB + index map) 0.005 full selection incl. DeDup and PoseAug 0.006 Generation SEVA sampling (baseline) 62.9 SplatGuide sampling (ours) 71.8 End-to-end (ours) 75.5
+
+where Cb = max u∈S S(b)vis (u) tracks the best current coverage of tile b among already-selected views S. This prevents selecting redundant views that observe the same regions while encouraging spatial diversity across the image. 
+
+E Inference Cost Analysis 
+
+Tab. A4 reports a stage-wise breakdown of inference cost. Two observations follow. First, the visibility-aware selector is essentially free. Rendering the view-index map and aggregating votes over a pool of 32 candidates takes 0.006 s in total, four orders of magnitude below the sampling cost, because it reuses the 3DGS scene and the rasterizer already required for pixel-level conditioning and adds no separate 3D data structure. This substantiates the claim that occlusion-aware selection is obtained at negligible cost: the accuracy gains over pose-based and surfel-based policies reported in the main paper are not purchased with compute. Second, the geometric conditioning itself is not free, and we report its cost explicitly. Sampling rises from 62.9 s to 71.8 s, an increase of 8.9 s or roughly 14% ,arising from the extra rendered-latent channel group and the additional cross-attention layers that consume reconstruction tokens. The 3.73 s reconstruction pass is the other component of our end-to-end cost, but it is not an overhead unique to our method, since the unposed SEVA baseline likewise depends on a reconstruction pass for pose estimation. We consider the sampling increase a favorable trade: the same reconstruction pass simultaneously supplies pixel-level conditioning, feature-level tokens, and the selection signal, so one forward pass is amortized across all three uses rather than paid for separately. We report wall-clock time rather than FLOPs because the dominant cost is iterative DDIM sampling, whose latency is governed by the number of sequential denoising steps and is therefore not captured by a single-pass FLOP count. All 6                   
+
+> Table A5: Comparison of ViewCrafter results under different evaluation protocols on RealEstate10K benchmark. Here we use 3 input-views as an example. Method PSNR ↑SSIM ↑LPIPS ↓
+> ViewCrafter (SEVA) 22.81 0.83 0.16 ViewCrafter (All-view) 22.80 0.81 0.16 ViewCrafter (Test-align) 20.18 0.74 0.23 Ours 26.52 0.84 0.07
+
+measurements above fit on a single consumer card, and the selector adds no persistent state beyond the downsampled Gaussian set, which is roughly 10% of the full reconstruction. 
+
+F ViewCrafter Evaluation Details 
+
+The official ViewCrafter codebase does not provide an evaluation pipeline for multi-view input scenarios. To enable a fair comparison, we explored two repro-duction approaches. 
+
+Approach 1, All-view reconstruction: We input all reference and target images into DUSt3R [4] to obtain a complete point cloud and camera poses for all views. Subsequently, we remove the point cloud corresponding to target views while retaining only the reference view point cloud for subsequent point rendering. As shown in Tab. A5, this approach yields results closely aligned with those reported for ViewCrafter in the SEVA paper, suggesting that SEVA may have adopted a similar evaluation strategy. However, this approach has a potential issue: although target point clouds are removed after reconstruction, using all views during the reconstruction phase yields more accurate poses and geometry for reference views, particularly in sparse-view scenarios. This introduces information leakage from target views, creating an unfair advantage that does not reflect the true capability of synthe-sizing novel views from reference views alone. 
+
+Approach 2, Test-time alignment: To ensure a fair comparison, we adopt the test-time camera pose alignment strategy, where reconstruction is performed using only reference views. Similar stricter protocol is applied identically to our method and all baselines, and all results reported in the main paper are based on this consistent setup. Our method outperforms ViewCrafter across all datasets under both evalu-ation protocols, confirming that the improvements are not artifacts of the eval-uation setup. 
+
+G Evaluation Dataset Split 
+
+We adhere to established evaluation protocols across all benchmarks to ensure fair comparison. For RealEstate10K and Mip-NeRF 360, we use the test splits SplatGuide: Supplementary Material 7
+
+defined in ReconFusion [5] and the official release [1], respectively. For Tanks and Temples, we follow ViewCrafter’s test scene selection but extend the evaluation from single-input to 3-view and 6-view settings. For DL3DV, we adopt the 20-scene subset introduced in Long-LRM [6], with strict separation from the training data. The specific DL3DV scenes selected for evaluation are: 
+
+– 0bfdd020cf475b9c68e4b469d1d1a2d0cad303eefe8b78fb2307855afdaac8be 
+
+– 6d81c5ab0d480fd43d78b75ff372a8113ad38e2c03f1d69627c009883054d4c2 
+
+– 8cb2e97d26a639f05a571476240a8fa86988e6853f0f13cc05830d1578002aad 
+
+– 093ef327b4e4f9d4ee52c02a354a53558a8652157fb0d58f3b4a708734afb334 
+
+– 119fd56d3797e2d349ca64ddcc5851463cd13b5974b5b2e4566ed5cf7e02e6c1 
+
+– 165f5af8bfe32f70595a1c9393a6e442acf7af019998275144f605b89a306557 
+
+– 183dd248f6a86e07c5adf9de8ee2d0abe45b1216331c03678e89634c2e9b1c7f 
+
+– 0569e83fdc248a51fc0ab082ce5e2baff15755c53c207f545e6d02d91f01d166 
+
+– 918c8dad730c3b804306c5da8486124be4aa0612e85fb825338fd350c912e1b0 
+
+– 8324b3ca22085040c2a0ecb7284e0cdf776b1f846b73a7c0df893587cb4a45f8 
+
+– 35317e621976e87f0c143e66fc61fb8cddb4ff134304da7a00e32ac1983105b4 
+
+– 35872363e17af5d173b6a0b09fcf5de94627ad5dc5f8a9ad4c579f3e70b4797a 
+
+– 41036716da7efda334c1d434c4141d15642e0e02f881a01b6c8c36f8bea64c45 
+
+– 493816813d2d6d248eb3c2b0b77b63e54235266e9a06e270fd0d282f13960493 
+
+– 0853979305f7ecb80bd8fc2c8df916410d471ef04ed5f1a64e9651baa41d7695 
+
+– 1264931635e127fb905c8953cbc2deadd0c763e633af7fbd9405a61ca849710c 
+
+– a17a984ca90a9b5840fdf85b15104b0d18e25975981c1aa90fcdfd6eeeb285f3 
+
+– a62c330f5403e2e41a82a74c4e865b705c5706843b992fae2fe2e538b122d984 
+
+– adf35184a12d4cfa3f4248b87aa5adb4f39f179df460d6d76136e13d37299a2a 
+
+– e5684b3292bfd77db297839fc37ee4cce7fd59775af1a6a4827e3b4f59c036d3 
+
+References 
+
+1. Barron, J.T., Mildenhall, B., Verbin, D., Srinivasan, P.P., Hedman, P.: Mip-nerf 360: Unbounded anti-aliased neural radiance fields. In: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition. pp. 5470–5479 (2022) 2. Jiang, H., Tan, H., Wang, P., Jin, H., Zhao, Y., Bi, S., Zhang, K., Luan, F., Sunkavalli, K., Huang, Q., et al.: Rayzer: A self-supervised large view synthesis model. In: Proceedings of the IEEE/CVF International Conference on Computer Vision (2025) 3. Lu, Y., Zhang, J., Fang, T., Nahmias, J.D., Tsin, Y., Quan, L., Cao, X., Yao, Y., Li, S.: Matrix3d: Large photogrammetry model all-in-one. In: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (2025) 4. Wang, S., Leroy, V., Cabon, Y., Chidlovskii, B., Revaud, J.: Dust3r: Geometric 3d vision made easy. In: CVPR (2024) 5. Wu, R., Mildenhall, B., Henzler, P., Park, K., Gao, R., Watson, D., Srinivasan, P.P., Verbin, D., Barron, J.T., Poole, B., Holynski, A.: Reconfusion: 3d reconstruction with diffusion priors. In: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (2024) 6. Ziwen, C., Tan, H., Zhang, K., Bi, S., Luan, F., Hong, Y., Fuxin, L., Xu, Z.: Long-lrm: Long-sequence large reconstruction model for wide-coverage gaussian splats. In: Proceedings of the IEEE/CVF International Conference on Computer Vision (2025)

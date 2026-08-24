@@ -6,26 +6,41 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-08-23
-- 运行时间：2026-08-23 20:07:16 UTC
+- 最新运行日期：2026-08-24
+- 运行时间：2026-08-24 20:37:45 UTC
 - 运行状态：成功
-- 本次总论文数：1
-- 精读区：0
-- 速读区：1
+- 本次总论文数：7
+- 精读区：2
+- 速读区：5
 
 ### 今日简报（AI）
-今日聚焦海报文本编辑，探索 TextRefine 如何提升文字渲染精度。
-该研究通过优化空间布局与字形渲染，显著提升了电商海报中文字编辑的忠实度。
-建议关注 AI 辅助设计工具的开发者参考其在复杂背景下的文字精准控制方案。
-- 详情：[/202608/23/README](/202608/23/README)
+今日精选 7 篇前沿成果，深度解析医疗 AI 隐私修复与 CLIP 先验在逆问题中的
+- 详情：[/202608/24/README](/202608/24/README)
 
 ### 精读区论文标签
-- 本次无精读推荐。
+1. [Masking Is Not Enough: Generative Restoration for Multimodal De-Identification in Medical AI](/202608/24/2608.21133v1-masking-is-not-enough-generative-restoration-for-multimodal-de-identification-in-medical-ai)  
+   标签：评分：9.0/10、query:q1
+   evidence：针对掩码医疗图像的生成式修复
+2. [Frozen CLIP Priors for Robust Self-Supervised Poisson Inverse Problems](/202608/24/2608.20524v1-frozen-clip-priors-for-robust-self-supervised-poisson-inverse-problems)  
+   标签：评分：8.0/10、query:q7
+   evidence：用于图像逆问题和修复的自监督学习
 
 ### 速读区论文标签
-1. [TextRefine: Improving Textual Fidelity, Spatial Placement, and Glyph Rendering for Text Editing in Product Posters](/202608/23/2608.19637v1-textrefine-improving-textual-fidelity-spatial-placement-and-glyph-rendering-for-text-editing-in-product-posters)  
+1. [DiGS-Avatar: Single-Image Animatable 3D Human Reconstruction via UV-Space Diffusion](/202608/24/2608.20759v1-digs-avatar-single-image-animatable-3d-human-reconstruction-via-uv-space-diffusion)  
+   标签：评分：7.0/10、query:q1
+   evidence：基于扩散的UV潜空间补全任务
+2. [SplatGuide: Geometric Priors from 3D Gaussians for Pose-Free Novel View Synthesis](/202608/24/2608.16863v1-splatguide-geometric-priors-from-3d-gaussians-for-pose-free-novel-view-synthesis)  
+   标签：评分：6.0/10、query:q4
+   evidence：合成未见内容与新视角合成
+3. [Frozen DINO Localizes Image Edits Without a Localizer](/202608/24/2608.18968v1-frozen-dino-localizes-image-edits-without-a-localizer)  
+   标签：评分：6.0/10、query:q3
+   evidence：无需训练的图像编辑定位
+4. [Exploring the Performance Frontier of Compact Unified Image Generation Models](/202608/24/2608.20334v2-exploring-the-performance-frontier-of-compact-unified-image-generation-models)  
+   标签：评分：6.0/10、query:q4
+   evidence：统一的图像生成与编辑模型
+5. [GAP-SAM: A Global Artifact Prior for Generalizable AI-Generated Image Manipulation Localization](/202608/24/2608.20929v1-gap-sam-a-global-artifact-prior-for-generalizable-ai-generated-image-manipulation-localization)  
    标签：评分：6.0/10、query:q1
-   evidence：在保留背景的同时进行图像编辑和文本插入
+   evidence：局部扩散修复伪影
 
 
 <div class="dpr-home-promo-card">

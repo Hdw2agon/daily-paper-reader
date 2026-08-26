@@ -6,52 +6,37 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-08-25
-- 运行时间：2026-08-25 20:34:30 UTC
+- 最新运行日期：2026-08-26
+- 运行时间：2026-08-26 20:33:22 UTC
 - 运行状态：成功
-- 本次总论文数：10
-- 精读区：3
-- 速读区：7
+- 本次总论文数：5
+- 精读区：1
+- 速读区：4
 
 ### 今日简报（AI）
-今日聚焦 10 篇前沿成果，重点攻克文生图安全治理与法医影像精准修复两大难题。
-推荐关注 GuardPaint 的投机性安全解码技术，以及利用薛定谔桥模型还原尸体自解影像的法医新突破。
-建议读者留意扩散模型如何从“艺术创作”转向“安全合规”与“专业取证”的深度应用。
-- 详情：[/202608/25/README](/202608/25/README)
+今日深度复盘 AI 组织学染色的可靠性边界，并同步追踪扩散模型在图像修复与风格化领域的最新进展。
+核心结论指出，通过规模化与不确定性量化可显著提升医学生成模型的临床可信度，同时持续学习技术正攻克图像修复中的“遗忘”难题。
+建议优先研读关于组织学染色的系统性研究，掌握构建安全、可解释医疗 AI 系统的关键方法。
+- 详情：[/202608/26/README](/202608/26/README)
 
 ### 精读区论文标签
-1. [GuardPaint:SpeculativeSafetyDecodingforText-to-ImageGeneration](/202608/25/2608.21869v1-guardpaintspeculativesafetydecodingfortext-to-imagegeneration)  
-   标签：评分：9.0/10、query:q1
-   evidence：用于安全视觉修复的手术级图像补全
-2. [Through the Schrödinger Bridge: Benchmarking Antemortem Image Restoration from Postmortem Autolysis to Enhance Forensic Diagnostics](/202608/25/2608.21813v1-through-the-schrdinger-bridge-benchmarking-antemortem-image-restoration-from-postmortem-autolysis-to-enhance-forensic-diagnostics)  
-   标签：评分：8.0/10、query:q3
-   evidence：在没有像素级成对数据的情况下恢复图像
-3. [GAN-Diff : Coupling Pretrained WGAN-GP Features with Conditional Diffusion U-Nets](/202608/25/2608.22272v1-gan-diff--coupling-pretrained-wgan-gp-features-with-conditional-diffusion-u-nets)  
-   标签：评分：8.0/10、query:q4
-   evidence：用于图像修复的生成式GAN引导扩散混合框架
+1. [Towards Reliable AI-Based Histological Staining: A Systematic Study of Scaling and Uncertainty in Unpaired Generative Models](/202608/26/2608.24626v1-towards-reliable-ai-based-histological-staining-a-systematic-study-of-scaling-and-uncertainty-in-unpaired-generative-models)  
+   标签：评分：8.0/10、query:profile-1
+   evidence：无监督生成模型图像合成基准测试
 
 ### 速读区论文标签
-1. [HP-UniIF: Hierarchical Prompt Learning for Unified Image Fusion](/202608/25/2608.21786v1-hp-uniif-hierarchical-prompt-learning-for-unified-image-fusion)  
-   标签：评分：7.0/10、query:q7
-   evidence：利用扩散先验进行视觉修复
-2. [Neighbor-Aware View Synthesis for Restoring Missing Views in Light-Field Camera Arrays](/202608/25/2608.23175v1-neighbor-aware-view-synthesis-for-restoring-missing-views-in-light-field-camera-arrays)  
-   标签：评分：7.0/10、query:q1
-   evidence：使用生成框架修复光场相机阵列中缺失的视图
-3. [Controllable blind deblurring with diffusion models](/202608/25/2608.23343v1-controllable-blind-deblurring-with-diffusion-models)  
-   标签：评分：7.0/10、query:q7
-   evidence：基于扩散模型的盲修复
-4. [FixAnything: 3D-Consistent Rendering Refinement via Video Generative Priors](/202608/25/2608.23549v1-fixanything-3d-consistent-rendering-refinement-via-video-generative-priors)  
+1. [Controllable blind deblurring with diffusion models](/202608/26/2608.23343v2-controllable-blind-deblurring-with-diffusion-models)  
    标签：评分：7.0/10、query:q4
-   evidence：用于修复渲染伪影和补全的生成式先验
-5. [Pixel-Space Diffusion via Observation Operators](/202608/25/2608.21885v1-pixel-space-diffusion-via-observation-operators)  
+   evidence：基于扩散模型的盲去模糊图像修复
+2. [Restoring Without Forgetting: Continual Learning Across Image Degradations](/202608/26/2608.23799v1-restoring-without-forgetting-continual-learning-across-image-degradations)  
+   标签：评分：7.0/10、query:q1
+   evidence：跨多种退化类型的图像修复持续学习
+3. [Scale-Separated Conditioning for Style-Encoder-Free Diffusion Stylization](/202608/26/2608.19719v1-scale-separated-conditioning-for-style-encoder-free-diffusion-stylization)  
    标签：评分：6.0/10、query:q4
-   evidence：用于图像结构恢复的生成式扩散模型
-6. [TRACE: Artifact-Robust Statistical Shape Modeling from Imperfect Surface Scans - A Case Study in Craniosynostosis 3D Photography](/202608/25/2608.22131v1-trace-artifact-robust-statistical-shape-modeling-from-imperfect-surface-scans---a-case-study-in-craniosynostosis-3d-photography)  
-   标签：评分：6.0/10、query:q2
-   evidence：针对伪影污染扫描和不完整边界的无监督方法
-7. [SymmAdapt: Symmetrical Flow Matching for Source-Free Domain Adaptation in Medical Image Segmentation](/202608/25/2608.22532v1-symmadapt-symmetrical-flow-matching-for-source-free-domain-adaptation-in-medical-image-segmentation)  
-   标签：评分：6.0/10、query:profile-1
-   evidence：使用生成式流匹配进行无监督领域自适应图像合成
+   evidence：扩散风格化与图像合成生成模型
+4. [SceneReGen: Generative Reconstruction of 3D Scenes from a Single Image](/202608/26/2608.23930v1-sceneregen-generative-reconstruction-of-3d-scenes-from-a-single-image)  
+   标签：评分：6.0/10、query:q1
+   evidence：补全部分观察到的物体
 
 
 <div class="dpr-home-promo-card">

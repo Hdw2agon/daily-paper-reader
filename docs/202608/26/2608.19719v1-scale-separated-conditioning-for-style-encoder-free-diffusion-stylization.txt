@@ -1,0 +1,399 @@
+Title: Scale-Separated Conditioning for Style-Encoder-Free Diffusion Stylization
+
+URL Source: https://arxiv.org/pdf/2608.19719v1
+
+Published Time: Fri, 21 Aug 2026 00:37:27 GMT
+
+Number of Pages: 15
+
+Markdown Content:
+# Scale-Separated Conditioning for Style-Encoder-Free Diffusion Stylization 
+
+Jingtao Zhang 1⋆, Haorui Gao 2⋆⋆ , Youqing Liang 2, and Zeming Liu 3 
+
+> 1
+
+College of Computing, Georgia Institute of Technology, Atlanta, GA, USA 
+
+jzhang957@gatech.edu  
+
+> 2
+
+Courant Institute of Mathematical Sciences, New York University, New York, NY, USA  
+
+> 3
+
+Department of Computer Science, Brown University, Providence, RI, USA 
+
+Abstract. Reference-based diffusion stylization requires separating tar-get geometry from transferable appearance. Existing tuning-based meth-ods often rely on aligned content-style-target triplets or auxiliary visual encoders, which increases data cost and can transfer unintended scene structure from the style reference. We propose SEFS (Style-Encoder-Free Stylization), a style-encoder-free conditioning framework for diffusion transformers. SEFS forms style tokens from stochastic low-resolution crops of single training images. This crop bottleneck preserves local ap-pearance statistics such as palette, stroke, texture, and material, while reducing access to global layout cues. Target content is encoded by edge and segmentation cues and fused with the noisy latent through parameter-efficient trainable projections. We add style-to-denoising re-normalization for token-statistic alignment and cross-block skip fusion for spatial detail. SEFS trains on unpaired single images; the frozen diffusion VAE is used only to place image conditions in the latent space. On artistic stylization benchmarks, SEFS improves content consistency and leakage diagnostics while retaining reference-style affinity, and ablations support the crop-resolution, re-normalization, and skip-fusion choices. The code of SEFS will be made publicly available. 
+
+Keywords: Reference-based stylization · Diffusion models · Style transfer 
+
+## 1 Introduction 
+
+Diffusion-based text-to-image models have become a common backbone for visual generation, with rapid progress in latent diffusion and diffusion trans-formers [21,19,8,5,4]. Their pretrained priors support many conditioning tasks, including text prompts, spatial controls, identity references, inpainting or out-painting, and image edits [30,29,22,1,31,2,14,23]. Reference-based stylization is one such conditioning problem. Given a target content image and a style ref-erence, the model must preserve the target geometry while transferring visual  
+
+> ⋆
+
+Equal contribution. Corresponding author.  
+
+> ⋆⋆
+
+Equal contribution. arXiv:2608.19719v1 [cs.CV] 20 Aug 2026 2 J. Zhang et al. 
+
+appearance such as palette, material, atmosphere, stroke pattern, illumination, and local texture. These attributes are not explicitly labeled in the reference: style is entangled with the reference image’s own objects, layout, and scene semantics. This makes stylized data collection, style representation, and evaluation difficult. This entanglement leads to a common failure mode. If the reference repre-sentation is too rich, the model may copy non-transferable structure from the style image, causing content leakage. If it is too weak, the generated image preserves geometry but misses the reference appearance. Existing approaches occupy different points on this trade-off. Training-free methods manipulate inver-sion trajectories or attention features from the reference [26,6,10,20,13], which avoids additional training but can be slow when inversion is required, sensitive to inversion quality, and dependent on layer-wise intervention. Adapter-based methods introduce pretrained image encoders or prompt adapters [29,9], but the extracted embeddings are not guaranteed to isolate style from semantics and introduce additional parameters. Tuning-based methods can improve stylization, yet often depend on curated content-style-target triplets or large-scale paired construction [28], making the data pipeline expensive and limiting scalability. SEFS uses a conditioning bottleneck rather than a stronger style encoder. A style reference contains transferable appearance at local scales, whereas its global spatial arrangement is usually non-transferable. We therefore construct style tokens from stochastic low-resolution crops of individual images. Cropping exposes local appearance statistics; resizing suppresses precise contours and global layout; and training across many single images discourages an image-identity shortcut. At inference time, the same style-token pathway is driven by an external style reference, while content is supplied by structural controls from the target image. This creates a same-image-to-cross-image generalization setting: training learns the scale-separated roles from unpaired single images, whereas evaluation tests fixed target-content and external-style-reference pairs. We propose SEFS (Style-Encoder-Free Stylization), a style-encoder-free con-ditioning framework for diffusion transformers. SEFS separates the conditioning pathway by scale and role: edge maps and segmentation maps provide target-content cues, while low-resolution style crops provide appearance tokens. These conditions are fused into the diffusion transformer with parameter-efficient train-able projections and LoRA adaptation. Style-to-denoising re-normalization aligns the statistics of style tokens with the denoising token stream, and cross-block skip fusion reuses shallow structural features in later transformer blocks. The frame-work uses unpaired single images for training, avoids auxiliary style encoders, and remains parameter-efficient. Our contributions are summarized as follows: 
+
+i) We introduce SEFS, a style-encoder-free diffusion stylization framework that learns from unpaired single images rather than aligned content-style-target triplets. The method uses a scale-separated crop bottleneck to preserve local appearance statistics while suppressing global reference structure. 
+
+ii) We design a parameter-efficient trainable conditioning architecture that combines target edges, segmentation maps, and low-resolution style tokens inside Scale-Separated Conditioning for Diffusion Stylization 3CSGO StyleShot  
+
+> SEFS
+> Fig. 1. Representative comparisons with CSGO [28], StyleShot [9], and SEFS. Existing methods can drift from the target content or transfer reference-specific structure; scale-separated conditioning helps SEFS preserve target layout while matching reference appearance.
+
+a diffusion transformer. Cross-block skip fusion improves content preservation by carrying shallow structural information to later denoising stages. 
+
+iii) We introduce style-to-denoising re-normalization to stabilize heterogeneous token fusion. This module improves the crop-token pathway in our ablations and supports training using about 40k unpaired WikiArt images, without requiring curated triplets or a separate style-encoder training set. 
+
+iv) We evaluate SEFS against recent diffusion stylization methods and conduct focused ablations on content conditions, crop resolution, style-encoder usage, re-normalization, and skip fusion. The results improve content scores and leakage diagnostics while retaining reference-style affinity. 
+
+## 2 Related Work 
+
+2.1 Diffusion Models and Conditional Generation 
+
+Latent diffusion models [21,19] and diffusion transformers [18,8,5,4,32,24] provide strong priors for controllable image synthesis. Typical conditioning methods keep the generator largely fixed and add spatial adapters [30], image-prompt adapters [29], or low-rank tuning [11]. This makes adaptation efficient but creates a representation trade-off: conditions must guide generation without overriding target content or leaking unwanted semantics. In stylization, spatial maps preserve geometry but not appearance, whereas image embeddings can entangle style with reference identity, objects, and layout. SEFS keeps the parameter-efficient paradigm but replaces the auxiliary style encoder with a scale-separated image pathway. 4 J. Zhang et al. 
+
+2.2 Reference-Based Stylization 
+
+Arbitrary reference-based stylization remains difficult because style may include color, material, atmosphere, stroke statistics, and sometimes global structure. Classical neural style transfer separates content and style through feature statis-tics, as in AdaIN-style normalization [12], while transformer feed-forward methods improve perceptual quality and content preservation [7]. Diffusion methods ex-ploit stronger generative priors, but still need a style pathway that transfers appearance without copying reference layout. Recent diffusion stylization methods are commonly training-free, adapter-based, or tuning-based. Training-free approaches manipulate inversion trajectories, attention features, reference modulation, or sampling startpoints [26,6,10,20,13]. They avoid task-specific training but can be sensitive to inversion quality, layer choices, and attention reuse. Adapter-based methods use image-conditioned pathways or pretrained visual encoders [29,9], which capture rich appearance but may retain object category, layout, or reference identity. Tuning-based methods such as CSGO [28] improve stylization end-to-end, often with curated triplets or large construction pipelines. SEFS is complementary to these directions. Instead of extracting a full-resolution style embedding with a pretrained encoder, it forms style tokens from stochastic low-resolution crops. This bottleneck preserves local transferable appearance while suppressing global reference geometry; combined with target structural cues and token re-normalization, it yields a diffusion-transformer stylization framework trained without triplet supervision or an auxiliary visual style encoder. 
+
+## 3 The proposed SEFS 
+
+3.1 Preliminaries Flow Matching. Let p0 and p1 denote the source and data distributions on 
+
+Rn. An ODE-based generative model transports a sample x0 ∼ p0 to x1 ∼ p1 by integrating a time-dependent vector field: 
+
+dxt
+
+dt = fθ (xt, t ), t ∈ [0 , 1] . (1) The learned vector field fθ : Rn × [0 , 1] → Rn defines the trajectory followed during generation. 
+
+Rectified Flow. Rectified Flow [16] trains the vector field on straight paths between a data sample and Gaussian noise. We use an equivalent reverse-time parameterization of the SD3 latent-space path [8], where t = 0 corresponds to noise and t = 1 corresponds to the data latent: 
+
+zt = (1 − t)ϵ + tz0, ϵ ∼ N (0 , I ), (2) and minimize 
+
+LRF = Et,ϵ 
+
+h
+
+λt ∥fθ (zt, t ) − (z0 − ϵ)∥22
+
+i
+
+, (3) where λt is the timestep-dependent loss weight. Scale-Separated Conditioning for Diffusion Stylization 5Resize Random crop SAM Content Part Style Part          
+
+> VAE Encoder
+> Latent + Noise
+> Canny
+> Canny Latent SAM Latent
+> VAE Encoder Style Latent
+> Block 0
+> Token-wise Cat
+> Fused Latent Noisy Latent Style Latent Fused Latent Divide Divide
+> 𝜎 !,𝜇 !
+> …
+> Remain Blocks Noisy Distribution Style Distribution
+> 𝜎 ",𝜇 "
+> Channel-wise Cat
+> LoRA
+> : Freeze : Tuned Fused Latent 𝑧 :𝑧 ∈ 𝑅 !"! #∗$
+
+Fig. 2. Framework of the proposed SEFS. The target image provides structural content conditions through Canny edges and SAM [15] segmentation, while the style pathway receives stochastic low-resolution crops that expose local appearance statistics and suppress global layout. Style tokens are concatenated with the denoising tokens and re-normalized using the denoising-token statistics (μd, v d) and style-token statistics 
+
+(μs, v s). The right part illustrates LoRA fine-tuning and cross-block skip fusion. Raw Image Canny SAM Style Raw Image Canny SAM Style 
+
+Fig. 3. Training inputs of SEFS. Canny edges preserve fine structural boundaries, SAM masks preserve coarse region layout, and low-resolution style crops retain local appearance while reducing access to global reference geometry. 
+
+3.2 The proposed SEFS 
+
+We first describe how SEFS constructs content and style conditions from single images, then present the token projection, re-normalization, cross-block skip fusion, and training objective. 
+
+Condition Generation. Given a training image x, SEFS constructs a pseudo content-style training instance without requiring an external stylized target. For content, we use two complementary structural views. Edge maps such as Canny [3] and HED [27] are commonly used to provide high-frequency boundaries and local contours; we instantiate this view with Canny edges. SAM segmentation masks [15] provide region-level organization that is not captured by 6 J. Zhang et al. 
+
+sparse edges alone, such as consistent regions over buildings, sky, or mountains. For style, we apply stochastic cropping to x and resize the crop to a low resolu-tion. This operation preserves local appearance statistics such as color palette, texture, material, and stroke pattern, but removes much of the precise contour and global layout information that would otherwise encourage content leakage. During inference, the cropped training view is replaced by the user-provided style reference, processed through the same low-resolution style pathway. Implementation details. During training, RandomCropResize samples a crop with ratio (0 .1 ∼ 0.5) from the training image and resizes it to 64 × 64 to form the style view. During inference, we use a deterministic single-view protocol: the full style reference is resized to the same 64 × 64 style-token resolution rather than sampled repeatedly. Canny maps and SAM outputs are rendered as three-channel images before VAE encoding, matching the input interface of the copied SD3 patch-embedding branch. Text-conditioning settings are kept fixed across training and evaluation so that differences primarily reflect the image-conditioning pathways. Although training constructs pseudo instances from a single image, the content and style signals are deliberately separated by role and scale: structural maps provide geometry, while the low-resolution style view provides appearance statistics with limited access to global layout. The cross-image evaluations in Fig. 4 and Table 2 therefore test whether this bottleneck transfers to arbitrary content-style pairs rather than only reconstructing the training image. 
+
+Condition projection. Let m ∈ RH×W ×3 and c ∈ RH×W ×3 denote the SAM segmentation map and Canny edge map, respectively. Let s ∈ RH1×W1×3
+
+denote the low-resolution style view, where H1 < H and W1 < W . We use pretrained SD3 [8] as the base model and form the noisy latent by 
+
+zt = (1 − t) · ϵ + t · z0 (4) where z0 = Encode (x) and Encode (·) is the pretrained VAE encoder. We encode the content and style conditions in the same latent space: mz = Encode (m),
+
+cz = Encode (c), and sz = Encode (s). Thus, “style-encoder-free” means that SEFS does not introduce an auxiliary CLIP/IP-Adapter-style visual encoder for style extraction; all image conditions are encoded only through the frozen diffusion VAE before entering the parameter-efficient trainable conditioning branch. After patchification with patch size p and projection by the copied SD3 patch-embedding layer, the denoising latent, segmentation latent, and edge latent are represented as sequences of length L and hidden dimension D, while the style latent has length L1. We concatenate content-related tokens along the channel dimension: 
+
+zcat = Concat (zt, mz, cz) (5) where zcat ∈ RL×3D. A trainable projection Wcat ∈ R3D×D maps the concate-nated sequence back to the original hidden dimension. We initialize this projection Scale-Separated Conditioning for Diffusion Stylization 7
+
+to preserve the pretrained denoising stream at the beginning of fine-tuning: 
+
+Wcat =
+
+
+
+1 0 · · · 00 1 · · · 0
+
+· · · · · · · · · · · · 
+
+0 0 · · · 10 0 0 0
+
+· · · · · · · · · · · · 
+
+0 0 0 0
+
+
+
+, z = zcat Wcat (6) where Wcat is initialized by concatenating one D × D identity matrix and two 
+
+D × D zero matrices. The style tokens are then concatenated with the projected denoising sequence along the token dimension, yielding z ∈ R(L+L1)×D .
+
+Re-normalization. The denoising tokens and style tokens originate from different visual views and therefore have different activation statistics. Direct token concatenation can make the style stream either dominate generation or be ignored during early fine-tuning. To stabilize the fusion, after the first transformer block we divide the sequence into the denoising part dz = z[0 : L] and the style part sz = z[L : L + L1]. We then align the style-token statistics to the denoising-token statistics: 
+
+˜sz =
+
+√vd + η
+
+√vs + η (sz − μs) + μd (7) where μs and vs are the channel-wise mean and variance of the style tokens, 
+
+μd and vd are the corresponding statistics of the denoising tokens, and η is a small constant for numerical stability. The square roots convert variances into standard-deviation scales for feature-statistic matching. Similar to adaptive modulation in diffusion transformers [18], we predict a residual scale and shift from the re-normalized style tokens: 
+
+γs = ˜ szWscale , βs = ˜ szWshif t , sz = ˜ sz ⊙ (1 + γs) + βs (8) where Wscale ∈ RD×D and Wshif t ∈ RD×D are trainable parameters. 
+
+Skip-Connection across blocks. Transformer blocks at shallow depths preserve fine structural details, while deeper blocks tend to carry more semantic and global information. To improve content preservation, we introduce cross-block skip fusion in the latter half of the transformer. Let z(i) denote the output sequence of block i in a model with N blocks. For later blocks, we concatenate the current sequence with its paired shallow feature along the channel dimension and project it back to D dimensions: 
+
+W(i) 
+
+> skip
+
+=
+
+
+
+1 0 · · · 00 1 · · · 0
+
+· · · · · · · · · · · · 
+
+0 0 · · · 10 0 0 0
+
+· · · · · · · · · · · · 
+
+0 0 0 0
+
+
+
+, z(i) = z(i)W(i) 
+
+> skip
+
+(9) 8 J. Zhang et al. 
+
+The skip projection is initialized to pass through the current block output and gradually learn how much shallow structural information to reuse. The resulting sequence z(i) ∈ R(L+L1)×D is fed into the next block. 
+
+Objective function. The training objective follows the SD3 rectified-flow loss with additional conditions: 
+
+LSEF S = λt · ∥ f (zt, mz, cz, sz, t ; θ) − (z0 − ϵ)∥22 (10) where λt balances different timesteps. 
+
+Algorithm summary. We summarize the training pipeline in Algorithm 1 and the block-wise forward pass in Algorithm 2. Algorithm 1 shows how each un-paired image is converted into structural content conditions and a low-resolution style view, encoded into latent tokens, and optimized with the rectified-flow objective. Algorithm 2 details the corresponding forward computation, including content-token projection, style-token re-normalization, and cross-block skip fu-sion. Here, ConCat Dim and ConCat Seq denote concatenation over the channel dimension and token dimension, respectively; at inference, the random crop is replaced by the user-provided style reference while the rest of the conditioning pipeline is unchanged. 
+
+Algorithm 1 Training pipeline of the proposed SEFS. RandomCropResize 
+
+denotes stochastic cropping followed by low-resolution resizing.  
+
+> 1:
+
+Input: Pretrained SD3 model fθ. Raw image x, text embeddings T. Pre-trained SAM encoder SAM (·) and VAE encoder Encode (·). Canny detector 
+
+Canny (·), and Optimizer OP T (·). 
+
+> 2:
+
+Init: Θtrain including LoRA, projection, re-normalization, and skip-fusion parameters  
+
+> 3:
+
+Data: s ← RandomCropResize (x) 
+
+> 4:
+
+Data: m ← SAM (x), c ← Canny (x) 
+
+> 5:
+
+Encode: mz, cz, sz, z0 ← Encode (m, c, s, x) 
+
+> 6:
+
+Diffusion: zt = (1 − t) · ϵ + t · z0, ϵ ∼ N (0 , I) 
+
+> 7:
+
+Forward: LSEF S = ∥fθ (zt, mz, cz, sz) − (z0 − ϵ)∥22 
+
+> 8:
+
+Backward: Θtrain = OP T (∂LSEF S /∂Θ train ) 
+
+> 9:
+
+Return: SD3 model with trained LoRA and trainable conditioning modules Scale-Separated Conditioning for Diffusion Stylization 9
+
+Algorithm 2 Block-wise forward of the proposed SEFS. 
+
+1: Input: i-th block with LoRA weights Block (i)(·), 0 ≤ i ≤ N − 1, and N is the number of blocks. Noisy image latent zt, style image latent sz, Canny image latent cz, and SAM image latent mz. Extra learnable parameters Wcat 
+
+and W(i)
+
+> skip
+
+, N 
+
+> 2
+
+≤ i ≤ N − 1. Shift and scale Wshif t , Wscale .
+
+2: Init: j ← 0, skipList = [] 
+
+3: Patchify: zt, sz, cz , mz = P atchif y (zt, sz, cz , mz)
+
+4: Content Fusion: z = ConCat Dim (zt, cz , mz)Wcat 
+
+5: Style Fusion: z(0) = ConCat Seq (z, sz)
+
+6: for j ≤ N − 1 do 
+
+7: if j == 0 then 
+
+8: Store: skipList.append (z(j))
+
+9: Forward: z(j+1) = Block (j)(z(j))
+
+10: Divide: dz, sz ← Divide Seq (z(j+1) )
+
+11: Statistics: μd, v d ← Stats (dz)
+
+12: Statistics: μs, v s ← Stats (sz)
+
+13: Standardization: sz ← sz−μs√vs+η , η = 10 −5
+
+14: Re-Normalization: ˜sz ← sz ⊙ √vd + η + μd
+
+15: Scale/Shift: as ← 1 + ˜ szWscale 
+
+16: Scale/Shift: bs ← ˜szWshif t 
+
+17: Re-Scale: sz ← ˜sz ⊙ as + bs
+
+18: Style-Fusion: z(j+1) ← Cat Seq (dz, sz)
+
+19: else if j ≤ (N − 1) /2 then 
+
+20: Store: skipList.append (z(j))
+
+21: Forward: z(j+1) = Block (j)(z(j))
+
+22: else 
+
+23: Skip: z(j) = Cat Dim (z(j), skipList [N − 1 − j]) 
+
+24: Fusion: z(j) ← z(j)W(j)
+
+> skip
+
+25: Forward: z(j+1) = Block (j)(z(j))
+
+26: end if 
+
+27: j = j + 1 
+
+28: end for 
+
+29: return z(N )
+
+Inference pipeline. Given a target content image r and a style reference image s, we compute the Canny edge map c and SAM segmentation map m from 
+
+r. The style reference is passed through the same low-resolution style pathway used during training. We then encode m, c, and s into latent conditions zm, zc,and zs, and denoise a randomly initialized latent conditioned on all three signals. 
+
+## 4 Experimental Results 
+
+Experimental setup. We use SD3-Medium as the base generator and train only LoRA layers, content/style projections, re-normalization scale/shift, and 10 J. Zhang et al. 
+
+cross-block skip projections. A copied SD3 patch-embedding layer encodes sz , cz ,and mz ; the original branch remains frozen. Training uses WikiArt [25], AdamW [17], 30k steps, learning rate 2 × 10 −5,weight decay 0.03 , batch size 32, and 8 A100 GPUs. Evaluation protocol. 
+
+The main comparison uses 1,000 fixed cross-image content-style pairs against StyleShot [9] and CSGO [28]. Canny/SAM are computed only from the target content image; style references enter through each method’s style-conditioning input. All methods use official checkpoints or recommended preprocessing, gen-erate 512 × 512 images with 30 steps, and share prompts, seeds, and sampler settings. We use LoRA rank 16, SAM ViT-H masks, and Canny thresholds 100/200. Content DINO and CLIP-I measure target consistency; Style Ref. Sim. is CLIP image-image similarity to the reference; Leakage is a DINO diagnostic between edge-rendered outputs and style references, where lower is better; FID is computed against held-out WikiArt style-domain images. Human preference is the primary aggregate signal, and automatic metrics are diagnostics. Pseudo-triplet ablations in Tables 1 and 4 are used only for mechanism analysis.     
+
+> Table 1. Content-condition and skip-fusion ablation on WikiArt. All variants use 30k steps, batch size 32, and learning rate 2×10 −5.
+
+# Skip-connection SAM Canny IS FID CLIP-I 
+
+# ! ! ! 9.1788 48.7677 0.9063 
+
+# % ! ! 9.1304 53.1521 0.8813 
+
+# ! % ! 9.1543 49.3103 0.8983 
+
+# ! ! % 9.0941 59.1620 0.8294 
+
+4.1 Main Comparisons 
+
+Fig. 4 compares SEFS with CSGO [28] and StyleShot [9]. Across diverse pairs, SEFS preserves target structure while transferring palette, texture, and stroke statistics. The references contain non-transferable foreground figures, village layouts, and line-art contours; baselines more often inherit these structures or distort target geometry. Table 2 reports the main comparison. Standard baselines use their released pipelines. To isolate the content-control confound, StyleShot + Struct. Ctrl. keeps the StyleShot style encoder and injection pathway, adds the same target-derived Canny/SAM branch as SEFS, and trains only the added structural projection and LoRA layers with the same data, rank, and step budget. It does not use the SEFS low-resolution style-token pathway or re-normalization. Scale-Separated Conditioning for Diffusion Stylization 11 CSGO Style SEFS Content Style Shot CSGO SEFS Content StyleShot 
+
+Fig. 4. Qualitative comparisons. SEFS better preserves target layout while transferring reference appearance; baselines either weaken style transfer or introduce reference-induced content drift. 
+
+Table 2. Main comparison. StyleShot + Struct. Ctrl. gives StyleShot the same target-derived Canny/SAM controls as SEFS. Time is per image on A100. Lower Leakage/FID and higher content/style scores are better. Method Content DINO Content CLIP-I Style Ref. Sim. Leakage FID Time StyleShot 0.8017 0.8684 0.7462 0.4871 56.8421 4.8s StyleShot + Struct. Ctrl. 0.8918 0.8971 0.7785 0.4472 51.9248 7.2s CSGO 0.8098 0.8566 0.7397 0.4944 60.6377 6.3s SEFS 0.9040 0.9026 0.7835 0.3931 49.5724 6.1s 
+
+The matched-control baseline narrows the content gap, confirming the value of structural conditions, but still has higher Leakage and worse FID despite similar content and Style Ref. Sim. scores. Thus, SEFS’s gain is not explained by Canny/SAM alone; under matched structure control, the low-resolution style bottleneck better suppresses non-transferable reference layout. 
+
+Leakage validation. We annotate 100 hard pairs with non-transferable objects or layouts. The DINO edge-rendering score correlates with human leakage ratings with Spearman ρ = 0 .62 , while Style Ref. Sim. is weaker ( ρ = 0 .27 ), supporting Leakage as an auxiliary diagnostic. Efficiency. SEFS uses no auxiliary learned visual style encoder; image conditions pass through the frozen VAE, and online structural preprocessing is counted in end-to-end latency. It adds 42.7M trainable parameters, takes 3.9s model-only time on A100, and takes 6.1s end-to-end with online Canny/SAM. Human preference. In blind forced-choice comparisons, 42 participants judged six content-style pairs per comparison, yielding 252 judgments for each method pair. Each question showed the same content image, style reference, and two anonymized outputs in random order. 12 J. Zhang et al. 
+
+Under the joint criterion of content preservation and style fidelity, participants preferred SEFS over StyleShot in 64.3% of comparisons (95% Wilson CI: 58.2– 69.9%), over CSGO in 72.2% (95% Wilson CI: 66.4–77.4%), and over StyleShot + Struct. Ctrl. in 62.7% (95% Wilson CI: 56.6–68.4%). Table 3 gives cross-image mechanism controls. Removing or shuffling style tokens preserves content but reduces style-reference similarity, showing that the style pathway carries transferable appearance. SEFS w/ Style Encoder keeps the same SD3 backbone, content branch, LoRA rank, data, and budget, but replaces low-resolution VAE style tokens with a frozen CLIP visual style encoder and trainable projection.  
+
+> Table 3. Cross-image mechanism controls on the same 1,000 content-style pairs.
+
+Variant Content DINO Style Ref. Sim. Leakage FID Full SEFS 0.9040 0.7835 0.3931 49.5724 SEFS w/ Style Encoder 0.8924 0.7946 0.4478 52.3861 w/o style tokens 0.9132 0.7048 0.3619 55.2846 shuffled style 0.9015 0.7162 0.3698 53.9173 w/o re-normalization 0.8618 0.7447 0.4326 58.6035 high-res style tokens 0.8654 0.7779 0.4612 55.9184 
+
+The architecture-matched control reaches slightly higher Style Ref. Sim. than SEFS, but also increases Leakage and FID, supporting the trade-off between reference affinity and reference-layout leakage. 
+
+4.2 Ablation Studies Content Consistency. We sample 1,000 WikiArt test images and construct pseudo triplets with SAM, Canny [3], and a 64 × 64 random style crop, isolating content conditioning because Canny and SAM encode structure rather than appearance. For Canny-only or SAM-only variants, Wcat ∈ R2D×D matches the input dimension. Table 1 shows that the full model performs best. Removing Canny causes the largest FID and CLIP-I degradation, highlighting edge-level geometry; removing SAM has a smaller but consistent effect on coarse layout. Skip fusion further improves FID and CLIP-I. 
+
+Style Consistency. We analyze re-normalization and crop resolution with 10k-step variants. For the resolution ablation, the style-view resolution is varied during training. At evaluation time, all style views are first downsampled to 64 ×64 
+
+and then resized to the corresponding training resolution, so the comparison tests the learned resolution-specific pathway rather than giving higher-resolution variants extra reference information. The encoder variant replaces crop tokens with a pretrained CLIP visual encoder and trainable projection. Scale-Separated Conditioning for Diffusion Stylization 13  
+
+> Table 4. Style-token ablation on WikiArt. “Style Res” is the style-view resolution; “Style Enc” replaces crop tokens with a pretrained CLIP visual encoder.
+
+## Re-Normalization Style Res Style Enc IS FID CLIP-I 
+
+## ! 64 × 64 % 9.4697 54.1585 0.8821 
+
+## % 64 × 64 % 9.0913 66.9413 0.8191 
+
+## ! 128 × 128 % 9.2169 56.9813 0.8535 
+
+## ! 256 × 256 % 9.3046 58.9413 0.8199 
+
+## ! 256 × 256 ! 9.4039 57.0631 0.8517 
+
+Table 4 shows that removing re-normalization substantially degrades IS, FID, and CLIP-I. The 64 × 64 setting performs best, suggesting that learning with a stronger low-resolution bottleneck is beneficial; higher training resolutions weaken this bottleneck and make the style pathway more prone to reference-structure reliance. The CLIP-encoder variant does not outperform crop tokens, suggesting that a stronger generic visual representation is not necessarily a better style representation here. 
+
+## 5 Discussion 
+
+5.1 Methodology Comparisons Relation to CSGO [28]. Both CSGO and SEFS are end-to-end tuning methods for diffusion stylization. The main difference is the supervision and conditioning design. CSGO relies on pre-collected content-style-target triplets, whereas SEFS constructs pseudo training instances from unpaired single images. Architecturally, CSGO uses an image encoder for style extraction and a ControlNet-style branch for content control. SEFS instead uses low-resolution crop tokens for style, structural maps for content, and parameter-efficient LoRA/projection layers [11], reducing dependence on auxiliary encoders and triplet construction. 
+
+Relation to StyleShot [9]. StyleShot also aims to disentangle content and style, but does so through dedicated pretrained encoders and a two-stage training strategy. This design is practical for arbitrary style transfer, but the style representation still relies on learned encoder capacity and can retain reference identity, object semantics, or layout cues. SEFS pursues the same separation ob-jective through data construction and token design rather than encoder capacity: content is represented by explicit structural conditions, while style is represented by low-resolution appearance tokens. This design avoids learning a separate style encoder and addresses content leakage through the scale of the style signal. 
+
+Limitations. Because SEFS deliberately compresses the style reference into low-resolution tokens, it is designed primarily for transferable local appearance statistics rather than exact global composition. It may therefore under-transfer 14 J. Zhang et al. 
+
+styles whose identity depends on symbolic motifs, legible text, object-level shapes, or precise layout. This is the main trade-off of the proposed bottleneck: reducing reference-structure leakage can also suppress non-local style cues. The method also inherits errors from structural preprocessing, where inaccurate Canny edges or SAM masks can weaken content preservation. These limitations suggest future work on adaptive multi-scale style tokens and more robust structural conditioning. 
+
+## 6 Conclusion 
+
+We presented SEFS (Style-Encoder-Free Stylization), a style-encoder-free diffusion stylization framework based on scale-separated conditioning. Instead of extracting style with an auxiliary visual encoder or relying on aligned triplets, SEFS learns style tokens from stochastic low-resolution crops of unpaired single images. With target-derived structural cues, re-normalization, and skip fusion, SEFS preserves target structure while transferring reference appearance. Cross-image comparisons, matched controls, and ablations indicate that the crop-token bottleneck reduces reference-layout leakage while retaining transferable style cues; the automatic metrics are used as diagnostics rather than complete definitions of stylization quality. 
+
+## References 
+
+1. Bertalmio, M., Sapiro, G., Caselles, V., Ballester, C.: Image inpainting. In: SIG-GRAPH (2000) 2. Brooks, T., Holynski, A., Efros, A.A.: Instructpix2pix: Learning to follow image editing instructions. In: CVPR (2023) 3. Canny, J.: A computational approach to edge detection. TPAMI (1986) 4. Chen, J., Ge, C., Xie, E., Wu, Y., Yao, L., Ren, X., Wang, Z., Luo, P., Lu, H., Li, Z.: Pixart-sigma: Weak-to-strong training of diffusion transformer for 4k text-to-image generation. In: ECCV. pp. 74–91 (2024) 5. Chen, J., Yu, J., Ge, C., Yao, L., Xie, E., Wu, Y., Wang, Z., Kwok, J., Luo, P., Lu, H., et al.: Pixart-alpha: Fast training of diffusion transformer for photorealistic text-to-image synthesis. ICLR (2024) 6. Chung, J., Hyun, S., Heo, J.P.: Style injection in diffusion: A training-free approach for adapting large-scale diffusion models for style transfer. In: CVPR (2024) 7. Deng, Y., Tang, F., Dong, W., Ma, C., Pan, X., Wang, L., Xu, C.: Stytr2: Image style transfer with transformers. In: CVPR (2022) 8. Esser, P., Kulal, S., Blattmann, A., Entezari, R., Müller, J., Saini, H., Levi, Y., Lorenz, D., Sauer, A., Boesel, F., et al.: Scaling rectified flow transformers for high-resolution image synthesis. In: ICML (2024) 9. Gao, J., Sun, Y., Liu, Y., Tang, Y., Zeng, Y., Qi, D., Chen, K., Zhao, C.: Styleshot: A snapshot on any style. IEEE Transactions on Pattern Analysis and Machine Intelligence 48 (2), 1215–1228 (2026) 10. Hertz, A., Voynov, A., Fruchter, S., Cohen-Or, D.: Style aligned image generation via shared attention. In: CVPR (2024) 11. Hu, E.J., Wallis, P., Allen-Zhu, Z., Li, Y., Wang, S., Wang, L., Chen, W., et al.: Lora: Low-rank adaptation of large language models. In: ICLR (2022) Scale-Separated Conditioning for Diffusion Stylization 15 12. Huang, X., Belongie, S.: Arbitrary style transfer in real-time with adaptive instance normalization. In: ICCV (2017) 13. Jeong, J., Kim, J., Choi, Y., Lee, G., Uh, Y.: Visual style prompting with swapping self-attention. arXiv preprint arXiv:2402.12974 (2024) 14. Kawar, B., Zada, S., Lang, O., Tov, O., Chang, H., Dekel, T., Mosseri, I., Irani, M.: Imagic: Text-based real image editing with diffusion models. In: CVPR (2023) 15. Kirillov, A., Mintun, E., Ravi, N., Mao, H., Rolland, C., Gustafson, L., Xiao, T., Whitehead, S., Berg, A.C., Lo, W.Y., et al.: Segment anything. In: ICCV (2023) 16. Liu, X., Gong, C., et al.: Flow straight and fast: Learning to generate and transfer data with rectified flow. In: ICLR (2023) 17. Loshchilov, I., Hutter, F.: Decoupled weight decay regularization. In: ICLR (2019) 18. Peebles, W., Xie, S.: Scalable diffusion models with transformers. In: ICCV (2023) 19. Podell, D., English, Z., Lacey, K., Blattmann, A., Dockhorn, T., Müller, J., Penna, J., Rombach, R.: Sdxl: Improving latent diffusion models for high-resolution image synthesis. In: ICLR (2024) 20. Qi, T., Fang, S., Wu, Y., Xie, H., Liu, J., Chen, L., He, Q., Zhang, Y.: Deadiff: An efficient stylization diffusion model with disentangled representations. In: CVPR (2024) 21. Rombach, R., Blattmann, A., Lorenz, D., Esser, P., Ommer, B.: High-resolution image synthesis with latent diffusion models. In: CVPR (2022) 22. Ruiz, N., Li, Y., Jampani, V., Pritch, Y., Rubinstein, M., Aberman, K.: Dreambooth: Fine tuning text-to-image diffusion models for subject-driven generation. In: CVPR (2023) 23. Shi, Y., Xue, C., Liew, J.H., Pan, J., Yan, H., Zhang, W., Tan, V.Y., Bai, S.: Dragdiffusion: Harnessing diffusion models for interactive point-based image editing. In: CVPR (2024) 24. Tan, S., Li, H., Zhang, J., Jia, X., Yang, X., Zhang, S., Zhang, Y.: SWIFT: Prompt-adaptive memory for efficient interactive long video generation. arXiv preprint arXiv:2605.09442 (2026) 25. Tan, W.R., Chan, C.S., Aguirre, H.E., Tanaka, K.: Ceci n’est pas une pipe: A deep convolutional network for fine-art paintings classification. In: ICIP (2016) 26. Wallace, B., Gokul, A., Naik, N.: Edict: Exact diffusion inversion via coupled transformations. In: CVPR (2023) 27. Xie, S., Tu, Z.: Holistically-nested edge detection. In: ICCV (2015) 28. Xing, P., Wang, H., Sun, Y., Wang, Q., Bai, X., Ai, H., Huang, J.Y., Li, Z.: Csgo: Content-style composition in text-to-image generation. In: NeurIPS. pp. 111464–111504 (2025) 29. Ye, H., Zhang, J., Liu, S., Han, X., Yang, W.: Ip-adapter: Text compatible image prompt adapter for text-to-image diffusion models. arXiv preprint arXiv:2308.06721 (2023) 30. Zhang, L., Rao, A., Agrawala, M.: Adding conditional control to text-to-image diffusion models. In: ICCV (2023) 31. Zhang, S., Huang, J., Zhou, Q., Wang, F., Luo, J., Yan, J., et al.: Continuous-multiple image outpainting in one-step via positional query and a diffusion-based approach. In: ICLR (2024) 32. Zheng, G., Chen, H., Li, H., Zhang, J., Yang, Z., Jia, X., Yang, X., Zhang, S., Zhang, Y.: Enhancing video physical consistency via role-aware joint training and modality-decoupled denoising. arXiv preprint arXiv:2607.04653 (2026)

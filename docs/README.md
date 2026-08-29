@@ -7,37 +7,34 @@
 
 ## 每次日报
 - 最新运行日期：2026-08-29
-- 运行时间：2026-08-29 01:53:23 UTC
+- 运行时间：2026-08-29 22:12:47 UTC
 - 运行状态：成功
-- 本次总论文数：5
+- 本次总论文数：4
 - 精读区：0
-- 速读区：5
+- 速读区：4
 
 ### 今日简报（AI）
-今日速览 5 篇前沿论文，聚焦 4D 医学影像插值、高效扩散模型推理及无奖励在线强化学习图像编辑。
-重点关注利用低秩速度场作为结构先验提升 4D 影像插值精度，以及通过参考缓存技术大幅优化 In-Context Diffusion Transformer 的生成效率。
-建议关注医学影像处理与生成式模型效率优化的交叉领域，探索低秩先验在动态场景建模中的应用潜力。
+今日聚焦扩散模型底层优化，深入探讨了像素空间算子、迭代过滤及视觉分词器的语义一致性。
+重点推荐 AffineTok 提出的仿射一致性分词方案，以及利用观测算子改进像素级生成的新思路。
+建议关注视觉分词器（Tokenizer）与生成模型的协同演进，这是提升图像生成质量与效率的关键。
 - 详情：[/202608/29/README](/202608/29/README)
 
 ### 精读区论文标签
 - 本次无精读推荐。
 
 ### 速读区论文标签
-1. [Low-Rank Velocity Fields as a Structural Prior for Unsupervised 4D Medical Image Interpolation](/202608/29/2608.24025v1-low-rank-velocity-fields-as-a-structural-prior-for-unsupervised-4d-medical-image-interpolation)  
-   标签：评分：7.0/10、query:q2
-   evidence：利用结构先验进行无监督图像插值与合成
-2. [Anchoring Instruction Outside Mask: Exact Reference Caching for Efficient In-Context Diffusion Transformers](/202608/29/2608.21229v1-anchoring-instruction-outside-mask-exact-reference-caching-for-efficient-in-context-diffusion-transformers)  
-   标签：评分：6.0/10、query:q1
-   evidence：用于图像编辑和掩码处理的上下文扩散
-3. [Can We Perform Online RL for Image Editing without Editing Rewards?](/202608/29/2608.22780v1-can-we-perform-online-rl-for-image-editing-without-editing-rewards)  
+1. [Pixel-Space Diffusion via Observation Operators](/202608/29/2608.21885v2-pixel-space-diffusion-via-observation-operators)  
    标签：评分：6.0/10、query:q4
-   evidence：无需编辑奖励的强化学习图像编辑
-4. [Bridge Damage Detection from Low-Light UAV Imagery via Degradation-Aware Mixture-of-Experts Enhancement](/202608/29/2608.23136v1-bridge-damage-detection-from-low-light-uav-imagery-via-degradation-aware-mixture-of-experts-enhancement)  
-   标签：评分：6.0/10、query:q7
-   evidence：针对低光增强的退化感知图像修复
-5. [SpatialCrafter: Single Image World Modeling with Generative 3D Proxies](/202608/29/2608.27073v1-spatialcrafter-single-image-world-modeling-with-generative-3d-proxies)  
+   evidence：用于图像结构恢复的生成式扩散模型
+2. [Targeted Iterative Filtering](/202608/29/2608.22299v1-targeted-iterative-filtering)  
+   标签：评分：6.0/10、query:q3
+   evidence：用于图像修复和去噪的非线性扩散方案
+3. [AffineTok: Semantic Affine Consistency for Diffusion-Friendly Visual Tokenizer](/202608/29/2608.23864v1-affinetok-semantic-affine-consistency-for-diffusion-friendly-visual-tokenizer)  
    标签：评分：6.0/10、query:q4
-   evidence：用于图像到场景生成的生成式3D代理
+   evidence：基于扩散生成模型的语义恢复与去噪
+4. [Learning spatially varying regularisation parameters of low regularity for image reconstruction](/202608/29/2608.25127v1-learning-spatially-varying-regularisation-parameters-of-low-regularity-for-image-reconstruction)  
+   标签：评分：6.0/10、query:q3
+   evidence：具有自适应正则化的变分图像重建与修复
 
 
 <div class="dpr-home-promo-card">

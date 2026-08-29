@@ -1,0 +1,502 @@
+Title: Anchoring Instruction Outside Mask: Exact Reference Caching for Efficient In-Context Diffusion Transformers
+
+URL Source: https://arxiv.org/pdf/2608.21229v1
+
+Published Time: Mon, 24 Aug 2026 01:10:00 GMT
+
+Number of Pages: 21
+
+Markdown Content:
+# ANCHORING INSTRUCTION OUTSIDE MASK : EXACT 
+
+# REFERENCE CACHING FOR EFFICIENT IN-C ONTEXT 
+
+# DIFFUSION TRANSFORMERS 
+
+Yangshuai Liu 1,* ‡, Zheming Li 2,* , Jiaao Li 2, Kang He 2, Ziliang Lai 2,Zhitai Liu 1, †, Chengru Song 2, †
+
+> 1
+
+Harbin Institute of Technology 2KlingAI Research 
+
+yangshuai.liu@stu.hit.edu.cn, lizheming@klingai.com ztliu@hit.edu.cn, songchengru@klingai.com 
+
+ABSTRACT 
+
+Omnimodal generation is central to a wide range of content creation and editing applications. In-context conditioning is essential to this paradigm. It allows dif-fusion transformers to process text instructions and visual references in a shared attention sequence. However, each reference image introduces thousands of to-kens. Computation therefore grows rapidly with the number of references. Exist-ing methods reduce computation through structured sparse attention, which limits interactions between reference and target tokens. This structure also makes the reference K and V independent of the denoising target, allowing them to be com-puted once and reused across steps. However, it blocks visual references from attending to the text instruction. This substantially degrades instruction follow-ing and reference fidelity in multi-reference editing. To resolve this conflict, we jointly redesign the token sequence and attention mask. Our beyond-mask design uses static text anchors to connect the instruction to the reference branch. It pre-serves exact K and V reuse without adding parameters. However, this direct archi-tectural conversion degrades generation quality. We recover the lost performance through teacher-forced velocity distillation, followed by a short on-policy stage in which the teacher supervises student-visited states. To our knowledge, this is the first use of on-policy distillation for architectural recovery in diffusion mod-els. Across three image-editing benchmarks, our method matches full-attention generation quality. With five reference images, it accelerates the complete 40-step denoising process by 3.92 ×, while static text anchors introduce negligible runtime overhead; the speedup reaches 5.47 × at ten references in our scaling study. 
+
+1 INTRODUCTION 
+
+Modern omnimodal systems aim to handle text, images, audio, and video within a unified generative model. In-context conditioning provides a flexible way to combine these heterogeneous inputs. Instead of assigning each modality a separate interface, the model processes them jointly as context. Diffusion transformers commonly implement this idea by concatenating text, target-image, and reference-image tokens(Peebles & Xie, 2023; Esser et al., 2024; Zhuang et al., 2025). Bidirec-tional attention then allows information to flow among the instruction, evolving target, and visual references. This flexibility is computationally expensive. At 1024 2 resolution, one reference image contributes roughly 4k tokens. When reference states depend on the evolving target, the model must recompute them at every denoising step. The cost quickly increases as more references are added. Structured sparse attention offers a direct way to avoid this repeated computation. It isolates the reference-image tokens from the denoising target, making their layerwise K and V independent of 
+
+> *
+
+Equal contribution. 
+
+> †
+
+Corresponding authors. 
+
+> ‡
+
+Work done during an internship at KlingAI Research. 
+
+1arXiv:2608.21229v1 [cs.CV] 21 Aug 2026 the current step. These K and V can then be precomputed and reused exactly throughout denoising (Tan et al., 2025b; Zhang et al., 2025c). However, this isolation removes an important information path. Under bidirectional attention, the instruction tokens receive information from the evolving target. If the reference-image tokens attend to these updated instruction states, target information also flows into the reference-image states. Their K and V then become step-dependent and can no longer be reused exactly. Blocking this con-nection preserves exact caching, but prevents the reference-image representations from identifying which visual content is relevant to the instruction. This limitation substantially harms instruction following and reference fidelity when multiple references are provided. This conflict cannot be resolved by changing the mask over the original token sequence alone. Un-der existing structured sparse designs, any path from the updated instruction states to the reference-image tokens also carries information from the evolving target. Keeping this path makes the refer-ence K and V step-dependent, while removing it blocks instruction access. To resolve this conflict, we propose a beyond-mask design that extends the token sequence while preserving a regular attention structure. More complex masks can break regularity, require custom kernels, and lose compatibility with optimized implementations such as FlashAttention (Dao et al., 2022). By contrast, our design preserves a regular attention layout and can directly use these high-performance kernels. Exact caching therefore delivers practical speedups without specialized kernel development. Specifically, we instantiate a static instruction pathway at t = 0 using static text anchors. During ref-erence precomputation, these anchors transfer instruction information to the reference-image tokens without creating a dependency on the evolving target. The anchors are removed once the reference K and V have been constructed and do not participate in denoising. This pathway reuses the existing text branch and introduces no new parameters. Changing the attention structure creates a mismatch between the inherited model weights and the new information flow, leading to an initial drop in generation quality. To recover this loss, we apply teacher-forced velocity distillation at data-derived states. This stage restores most of the lost performance, but eventually plateaus because inference follows the student’s own trajectory. We address this remaining state-distribution gap with a short on-policy stage. We roll out the student and ask the full-attention teacher to provide velocity targets at the visited states. Training on these states directly corrects errors along the student’s inference trajectory. To our knowledge, this is the first use of on-policy distillation for architectural recovery in diffusion models. Because our method operates on the reference-side dependency structure, it is orthogonal to com-plementary diffusion acceleration techniques such as temporal caching, and sparse attention, and can in principle be combined with them. Our contributions are the following: • We introduce a beyond-mask design with parameter-free static text anchors. They make the reference K and V instruction-aware while preserving exact reuse across denoising steps. • We develop a two-stage recovery procedure that combines teacher-forced velocity distilla-tion with a short on-policy stage at student-visited states. To our knowledge, this is the first use of on-policy distillation for architectural recovery in diffusion models. • Our method matches the full-attention baseline across three image-editing benchmarks and multiple evaluation settings. With five reference images, it accelerates the complete 40-step denoising process by 3.92 × with negligible overhead from static text anchors; the speedup reaches 5.47 × at ten references in the scaling study. 
+
+2 RELATED WORK 
+
+Efficient diffusion transformers. Existing approaches accelerate diffusion transformers mainly by reducing attention computation or reusing intermediate states. Sparse-attention methods reduce computation by selecting only a subset of token interactions (Zhang et al., 2025b; Xi et al., 2025; Li et al., 2025b; Wu et al., 2025c; Zhang et al., 2026). Their sparse patterns are often dynamic 2and irregular, which complicates kernel and system design. Consequently, high sparsity may not translate into proportional runtime speedups. Temporal caching reuses activations across nearby denoising steps (Selvaraju et al., 2024; Liu et al., 2024a; Ma et al., 2024; Cui et al., 2026). This reuse is approximate and may reduce generation fidelity. Structural methods instead isolate fixed condition tokens from the denoising target. This enables exact K and V reuse (Zhang et al., 2025c; Tan et al., 2025b), but requires additional condi-tioning modules. 
+
+Recovery after architectural changes. Modifying a pretrained diffusion architecture often causes an initial quality drop. Lightweight attention changes can often be recovered through short fine-tuning or distillation (Zhang et al., 2026). More substantial changes replace softmax attention with linear or convolutional operators and typically require longer retraining (Liu et al., 2024b; Dong et al., 2025; Becker et al., 2025; Wang et al., 2025). These methods generally learn from teacher-forced examples drawn from a fixed training distribution. 
+
+On-policy distillation. On-policy distillation trains students on states induced by their own tra-jectories and has been widely studied in language models (Agarwal et al., 2024; Gu et al., 2024; Ko et al., 2025; Yang et al., 2025; Lu & Lab, 2025). Related ideas have also been explored in genera-tive vision for few-step diffusion and autoregressive video generation (Song et al., 2023; Yin et al., 2025; Huang et al., 2025; Cui et al., 2025). These works primarily target sampling acceleration or generative training, rather than recovery from an attention-structure modification. 
+
+3 METHODOLOGY 
+
+3.1 PRELIMINARIES 
+
+In-context diffusion transformers. At each denoising step, an in-context diffusion transformer jointly processes a text instruction, an evolving target, and one or more visual references (Peebles & Xie, 2023; Esser et al., 2024; Tan et al., 2025a; Wu et al., 2025a). Let LT ∈ RNLT ×d denote the live-text tokens from the DiT text branch, Xt ∈ RNX ×d the denoising-target tokens, and R(k) ∈ RN (k)R ×d
+
+the tokens of the k-th reference image. Here, d is the hidden dimension. For K reference images, their tokens are concatenated into R, followed by the complete model input: 
+
+R = [R (1) ; . . . ; R (K)], St = [LT; Xt; R] . (1) The instruction and reference inputs remain fixed during denoising, whereas Xt evolves at every step. Their hidden states, however, may still change through attention to Xt.
+
+Exact reference caching. Let R(ℓ)(t) denote the reference states at transformer layer ℓ and de-noising step t. Their K and V are 
+
+K(ℓ)R (t) = R (ℓ)(t)W (ℓ) 
+
+> K
+
+, V (ℓ)R (t) = R (ℓ)(t)W (ℓ) 
+
+> V
+
+. (2) We call R exactly cacheable when these K and V remain unchanged across all denoising steps. This property holds by construction if the reference input and timestep are fixed and no information from 
+
+Xt or other step-dependent states reaches R. The reference K and V can then be computed once and reused throughout denoising. 
+
+On-policy distillation in language models. Consider an autoregressive teacher pT and student pθ .Given a prompt c and a response y = ( y1, . . . , y L) from a fixed dataset, teacher-forced distillation matches the teacher and student distributions along dataset prefixes: 
+
+LTF = E(c,y )∼D 
+
+ 1
+
+L
+
+> L
+
+X
+
+> j=1
+
+D(pT(· | c, y <j ), p θ (· | c, y <j )) 
+
+ , (3) 3Qwen Image Edit-2511 Isolated Condition Text Anchor (ours) Reference Image 
+
+> He is eating noodles in the enviroment from image 2. She is lying in the peaceful bedroom from the second image. I want the man to lace up the hiking boots, preparing for an adventurous winter hike in the snowy forest. The confident young businessman from the first image sits at the cozy workspace in the second image, with the passionflower from the third image elegantly displayed on the dark-colored desk beside the laptop. Place the Keurig coffee maker on the counter and position the fuzzy caterpillar on the wooden top beside it.
+
+Figure 1: Qualitative comparison on OmniContext. Each row shows the reference images and outputs from the full-attention base model, isolated cache, and our text-anchor model. The isolated cache often follows the instruction but fails to preserve the referenced subjects. Static text anchors restore reference fidelity while maintaining instruction following. Red boxes highlight identity in-consistencies. where D denotes a divergence between the teacher and student distributions. At inference time, however, the student conditions on its own previous predictions, so the prefixes it encounters may differ from those in the training data. On-policy distillation addresses this mismatch by first rolling out the student, ˆy ∼ pθ (· | c), and then matching the teacher and student on the resulting student-generated prefixes: 
+
+LOPD = Ec∼D c Eˆy∼pθ (·| c)
+
+ 1
+
+|ˆy|
+
+|ˆy|
+
+X
+
+j=1 
+
+D(pT(· | c, ˆy<j ), p θ (· | c, ˆy<j )) 
+
+ , (4) where Dc is the marginal distribution over prompts. The key difference is therefore where distillation is performed: teacher-forced distillation operates on prefixes from the data distribution, whereas on-policy distillation operates on prefixes induced by the student itself. Training on student rollouts exposes the model to the states it is likely to encounter at inference time, thereby reducing the 4Inference  
+
+> Step 1 · Extract Instruction-aware R-KV cache
+> Step 2 · Reuse
+
+…
+
+Attention masks (First Step)   
+
+> LT ST Reference Target
+> instruction-aware R-KV
+
+(a) Full attention (b) Isolated condition (c) Text anchors (ours)     
+
+> Query  （Q） tokens
+> instruction-blind R-KV
+> LT Target ST Reference LT Reference  Target LT Reference  Target LT Reference Target LT Reference Target
+> Query  （Q） tokens Query  （Q） tokens Key/Value Key/Value Key/Value
+> ...
+> Reference Target noise Xt Instruction LT ST Reference Target
+> LT Target ST Reference
+> Key/Value Query  （Q） tokens
+> LT Reference kvcache Xt-1
+> LT Xt-1
+> Step 3 · Reuse
+> LT Reference kvcache Xt-2
+> LT Xt-2
+> Step N · Reuse
+> LT Reference kvcache Xt-n
+> LT Xt-n
+> Output LT: live text from the DiT text branch ST: static text with the timestep fixed at t=0
+> No Cache
+
+Figure 2: Overview of instruction-aware exact caching. Top: Static text anchors condition the reference branch once during cache construction. Only the resulting reference K and V are retained and reused across denoising steps. Bottom: Comparison of attention structures, where rows denote queries and columns denote keys and values. train–inference mismatch. The same principle extends to iterative diffusion models, where the states visited by the student during generation can deviate from those produced by the teacher. 3.2 MISSING INSTRUCTION PATH 
+
+Under full attention, the reference-image block ( R) receives information from both live text ( LT )and the target ( Xt). Structured sparse attention removes the target dependency to make R cacheable, but also blocks the instruction path needed to identify instruction-relevant visual content. 
+
+Dependency-graph analysis. Consider structured attention over the original sequence 
+
+[LT , X t, R] , with the same connectivity used across transformer layers. Let LT (ℓ), X(ℓ)
+
+t , and R(ℓ)
+
+denote the hidden states after layer ℓ. We write u → v for a direct attention dependency from u to v.Bidirectional text–target attention creates X(ℓ−1) 
+
+t → LT (ℓ). If the reference tokens attend to these live-text states, the graph also contains LT (ℓ) → R(ℓ+1) . These dependencies compose across layers: 
+
+X(ℓ−1) 
+
+t → LT (ℓ) → R(ℓ+1) . (5) Therefore, although the instruction input is fixed, the reference states depend on the evolving target. Their K and V consequently change across denoising steps and cannot be reused exactly. Exact caching requires removing every path from Xt to R. Since the text–target interaction is preserved across layers, this also prevents R from accessing the live-text states. Thus, under the structured connectivity considered here, mask design over the original sequence cannot provide both live instruction access and exact reference caching. As shown in Figure 1, blocking this instruction path degrades reference fidelity and can also hurt instruction following. 5student rollout states 
+
+Two-Stage Recovery    
+
+> Stage 1 · Offline Field Alignment
+> offline teacher states
+> Full-Attention Teacher Field
+> Sparse-Attention Student
+> Teacher-forced v-MSE
+> Stage 2 · On-Policy Refinement
+> OPD · v-MSE
+> Teacher-Field Student trajectory Teacher velocity Student velocity
+
+Figure 3: Two-stage architectural recovery. Stage 1 queries the teacher at data-derived inter-polants. Stage 2 queries the same teacher at states visited by the student and corrects residual errors along the student’s inference trajectory. 3.3 STATIC TEXT ANCHORS 
+
+Instead of limiting the design to masks over the original token sequence, we extend the attention graph with a new static instruction path. This path is formed by static text anchors, denoted by ST ,whose timestep is fixed to tST = 0 . The resulting token sequence is [LT , X t, ST , R] .We connect R and ST bidirectionally, while blocking both from receiving information from LT or 
+
+Xt. The original branch preserves the pretrained interaction between LT and Xt and continues to attend to R, but not to ST . The resulting graph adds the instruction path ST → R without opening a target path Xt → R.The static subgraph [ST , R] depends only on the instruction and reference image, so it is evaluated once before denoising. We cache only the resulting reference K and V and discard the temporary ST 
+
+states. The cached K and V are therefore instruction-aware, target-independent, and exactly reusable across all denoising steps. This construction adds no parameters, as ST reuses the existing instruction embeddings, attention projections, and transformer weights. We set tST = 0 to align ST with the clean reference branch. Static text anchors add only a one-time precomputation cost. Let NR and NST denote the numbers of reference and static-text tokens. Since ST contains only instruction tokens, NST ≪ NR. Relative to an isolated reference cache, the additional attention interactions are 
+
+∆AST = 2 NRNST + N 2ST . (6) This cost is paid only during cache construction. Since ST is discarded before denoising, its run-time overhead is negligible. Equation 6 counts attention interactions rather than end-to-end FLOPs; measured latency is reported in Section 4.2. 3.4 TWO -S TAGE ARCHITECTURAL RECOVERY 
+
+Although the beyond-mask design enables instruction-aware exact caching, directly converting the full-attention architecture degrades generation quality. We recover the lost performance through two-stage distillation. The first stage applies teacher-forced velocity distillation at data-derived states. The second stage applies on-policy distillation at student-visited states to correct errors along the student’s own inference trajectory. Figure 3 summarizes this procedure. 6Let vfull denote the frozen full-attention teacher and vθ the student with the cacheable architecture. The student is initialized from the teacher weights; only its token sequence and attention graph are changed. 
+
+Stage 1: teacher-forced velocity distillation. We first align the student with the teacher at data-derived states. Given a clean sample x0 and Gaussian noise x1 ∼ N (0 , I ), we construct the flow-matching interpolant xt = (1 − t)x0 + tx 1 (Lipman et al., 2023) and minimize 
+
+LTF = Ex0,x 1,c,t 
+
+h
+
+∥vθ (xt, c, t ) − vfull (xt, c, t )∥22
+
+i
+
+, (7) where c contains the instruction and reference images. The data-derived interpolants define the query states, while the teacher provides the velocity targets. This stage recovers most of the performance lost during architectural conversion. However, it does not train the student on states reached by its own sampler. Once teacher-forced training plateaus, residual errors can therefore remain along the student trajectory. 
+
+Stage 2: on-policy refinement. We roll out the current student from z1 ∼ N (0 , I ) and collect the visited states zθt . Let ¯zt = sg( zθt ) denote the same states with stop-gradient. We query the teacher at these states and optimize 
+
+LOPD = Ez1,c,t 
+
+h
+
+∥vθ (¯ zt, c, t ) − vfull (¯ zt, c, t )∥22
+
+i
+
+. (8) The regression target is unchanged from Stage 1. Only the query-state distribution changes from data-derived interpolants to student-visited states. Stop-gradient avoids backpropagation through the sampler. This short on-policy stage corrects the remaining errors along the student’s own inference trajectory. 
+
+4 EXPERIMENTS 
+
+4.1 EXPERIMENTAL SETUP 
+
+Models. We evaluate our method on Qwen-Image-Edit-2511 (Wu et al., 2025a). The full-attention teacher uses the officially released weights. The isolated cache adopts the cacheable attention topol-ogy used in prior work (Zhang et al., 2025c; Tan et al., 2025b), while our model augments the same topology with static text anchors. Both students are initialized from the teacher weights. 
+
+Benchmarks and metrics. We evaluate generation quality on OmniContext (Wu et al., 2025b), GEdit-Bench (Liu et al., 2025b), and ImgEdit-Bench (Ye et al., 2025). OmniContext evaluates prompt following (PF) and subject consistency (SC) on a 0–10 scale, with Overall obtained by aver-aging the per-example geometric mean of PF and SC. GEdit-Bench evaluates semantic consistency (SC) and perceptual quality (PQ), and similarly forms its Overall score from their per-example ge-ometric mean before aggregation across editing categories. ImgEdit-Bench evaluates instruction adherence, image-editing quality, and detail preservation on a 1–5 scale, using their per-example arithmetic mean as the editing score before category-level aggregation. We follow the official eval-uation and aggregation protocol of each benchmark. 
+
+Implementation Details. Both recovery stages use OmniEdit (Wei et al., 2025) and OrionEdit (Jiang et al., 2026), with a global batch size of 8 and a learning rate of 5 × 10 −6. Stage 1 per-forms teacher-forced velocity distillation for 30 k steps. Stage 2 starts from the 30 k checkpoint and performs 500 on-policy updates. Each rollout contains 40 denoising steps, from which we sample 
+
+K = 4 query states across the full trajectory. Additional implementation details are provided in Appendix D. 7Table 1: Generation quality on OmniContext and end-to-end efficiency. All 400 evaluates the complete benchmark. End-to-end latency is measured over the complete 40-step generation process with five reference images, and speedup is relative to the full-attention base model.                                                                                      
+
+> MULTIPLE SCENE All 400 Efficiency Method PF ↑SC ↑PF ↑SC ↑PF ↑SC ↑Overall ↑Latency (s) ↓Speedup ↑
+> Base (Qwen-Image-Edit) 8.660 8.020 8.180 7.693 8.550 7.867 8.119 370.0 1.00 ×
+> SVDQuant (FP4, r=32 ) (Li et al., 2025a) 7.913 7.807 7.247 6.967 7.888 7.520 7.582 303.3 1.22 ×
+> TeaCache (Liu et al., 2025a) 8.513 7.873 7.813 7.427 8.330 7.675 7.896 93.8 3.94 ×
+> SageAttention2 (Zhang et al., 2025a) 8.720 8.280 7.993 7.580 8.495 7.923 8.105 283.5 1.31 ×
+> ToPi (Lin et al., 2026) 8.580 8.107 7.940 7.447 8.400 7.692 7.891 196.6 1.88 ×
+> Isolated cache 8.053 7.967 7.720 7.287 8.155 7.490 7.680 94.1 3.93 ×
+> Text anchors (ours) 8.573 8.453 7.913 7.947 8.418 8.167 8.185 94.4 3.92 ×
+
+Table 2: Cross-benchmark image-editing results. Results are reported for the full-attention base model and both cacheable architectures after Stage 1 and Stage 2 recovery. 
+
+OmniContext ImgEdit-Bench GEdit-Bench Method PF ↑ SC ↑ Overall ↑ Overall ↑ SC ↑ PQ ↑ Overall ↑
+
+Base 8.550 7.867 8.119 4.324 8.097 7.303 7.574 
+
+Isolated, Stage 1 8.180 7.203 7.529 4.184 7.929 7.181 7.440 Isolated, + Stage 2 8.155 7.490 7.680 4.219 7.911 7.290 7.475 Text anchors, Stage 1 8.285 7.970 8.019 4.293 7.940 7.252 7.460 Text anchors, + Stage 2 8.418 8.167 8.185 4.351 8.059 7.269 7.540 
+
+4.2 MAIN RESULTS 
+
+Tables 1 and 2 compare our method with the full-attention base model and the isolated cache, which serve as our controlled architectural baselines. We additionally report representative diffusion infer-ence acceleration techniques spanning quantization, temporal caching, efficient attention, and token pruning as practical reference points. Table 1 reports detailed OmniContext results together with end-to-end efficiency, while Table 2 extends the quality comparison to GEdit-Bench and ImgEdit-Bench. 
+
+End-to-end efficiency. With eight reference images, text anchors reduce the complete 40-step generation latency from 370 .0 to 94 .4 seconds, corresponding to a 3.92 × speedup. The isolated cache requires 94 .1 seconds under the same setting, so adding static text anchors costs only 0.3
+
+seconds while preserving the efficiency of the cacheable topology. Because our method removes repeated reference-side computation, it is complementary to acceleration techniques that reduce the cost of the remaining computation. 
+
+Quality preservation. Text anchors retain full-attention-level generation quality despite the large speedup, achieving an Overall score of 8.185 compared with 8.119 for the full-attention base model. More importantly, at nearly identical latency, they improve the isolated cache from 7.680 to 8.185 ,including a 0.677 gain in subject consistency. Among the practical acceleration references, Tea-Cache reaches a similar 3.94 × speedup with an Overall score of 7.896 , whereas SageAttention2 preserves an Overall score of 8.105 at a 1.31 × speedup. These methods operate on complementary aspects of diffusion inference and are not direct architectural counterparts to ours. 
+
+Results across benchmarks. Text anchors improve over the isolated cache on both ImgEdit-Bench and GEdit-Bench under both recovery stages. The final model closely matches the full-attention base model across all three benchmarks: Overall scores are 8.185 versus 8.119 on Omni-Context, 4.351 versus 4.324 on ImgEdit-Bench, and 7.540 versus 7.574 on GEdit-Bench. The same conclusion therefore holds across different instruction distributions, metrics, and evaluation proto-cols. Together, these results show that exact reference reuse can provide substantial acceleration 8without sacrificing generation quality, offering a practical route to efficient multi-reference diffusion inference. 4.3 ABLATION STUDY 
+
+On-Policy Recovery We examine whether further teacher-forced distillation can recover the re-maining quality gap, or whether supervision on student-visited states is necessary. Starting from the same 30 k Stage 1 checkpoint, we compare continued teacher-forced distillation with Stage 2 on-policy recovery. Continued teacher-forced distillation remains nearly saturated: across the 30k–33k checkpoints, the Overall score stays within [7 .998 , 8.034] , with a mean of 8.016 ± 0.015 .
+
+Figure 4: Teacher-forced saturation and on-policy recovery. Starting from the same 30k Stage 1 checkpoint, we compare continued teacher-forced training with Stage 2 on-policy recovery. Shaded regions denote mean ± standard deviation, and the green dashed line indicates the full-attention teacher. In contrast, every evaluated Stage 2 checkpoint starting from the same 30k model exceeds the best continued teacher-forced checkpoint. The improvement is already visible after 250 on-policy up-dates, where Overall reaches 8.057 , and increases to 8.185 after 500 updates. Similar trends are observed for both PF and SC. These results suggest that the remaining error is not primarily re-solved by additional teacher-forced optimization. Instead, exposing the model to states visited by its own denoising trajectory provides a stronger recovery signal. 
+
+OPD Query Design We further vary the query interval and the number of queries K sampled from each student rollout. All configurations start from the same Stage 1 checkpoint, whose Overall score is 8.019 . The reported ∆ is measured relative to this starting point. The effect of K depends on the query interval: increasing the number of queries does not uniformly improve recovery. Full-trajectory sampling performs best for both K = 1 and K = 4 , with the full-trajectory, K = 4 configuration achieving the highest Overall score. We therefore use full-trajectory sampling with K = 4 as the default OPD configuration. These experiments select the recovery procedure without assigning a separate semantic role to each noise interval. 4.4 SCALING WITH THE NUMBER OF REFERENCE IMAGES 
+
+We further study how inference cost scales with the number of reference images. As shown in Figure 5, full-attention latency increases rapidly as more references are introduced, whereas our method grows substantially more slowly by reusing cached reference representations. Accordingly, the end-to-end speedup increases steadily from 1.82 × with one reference image to 5.47 × with ten references. This trend reflects the benefit of exact reference reuse: as the reference context grows, full attention repeatedly incurs the cost of processing the additional reference tokens, while our method reuses the cached reference representations throughout generation. The advantage of exact caching therefore becomes increasingly pronounced in multi-reference settings. 9Table 3: OPD query design. All configura-tions are initialized from the same 30k Stage 1 checkpoint and evaluated after 500 on-policy updates. Overall scores are reported for dif-ferent query intervals and numbers of sampled states K, with ∆ measured from the Stage 1 starting point ( 8.019 ). 
+
+K = 1 K = 4 
+
+Query interval Overall ∆ Overall ∆
+
+Full trajectory 8.084 +0 .065 8.185 +0 .166 
+
+High-noise 8.060 +0 .041 8.131 +0 .112 
+
+Mid-noise 8.073 +0 .054 8.051 +0 .032 
+
+Low-noise 7.936 −0.083 7.888 −0.131 1 2 3 4 5 6 7 8 9 10 Number of reference images 0200 400 600 800 1000 Latency (s) 
+
+> Scaling with the Number of Reference Images
+> Full attention latency Ours latency Speedup 2.0 2.5 3.0 3.5 4.0 4.5 5.0 5.5 Speedup (×)
+> 1.82× 2.45× 3.00× 3.53× 3.86× 4.23× 4.59× 4.91× 5.16× 5.47×
+
+Figure 5: Scaling with the number of refer-ence images. End-to-end latency is measured over 40 denoising steps on a single GPU at 
+
+1024 × 1024 resolution with CFG scale 4.0.
+
+5 CONCLUSION 
+
+In this work, we studied efficient in-context conditioning for diffusion transformers with multiple vi-sual references. Existing structured sparse attention enables exact reference caching, but can prevent reference tokens from accessing the text instruction. To address this limitation, we introduced static text anchors, a parameter-free beyond-mask design that provides a temporary instruction path dur-ing cache construction. We also developed a two-stage recovery procedure that combines teacher-forced velocity distillation with on-policy supervision at student-visited states. Experiments on three image-editing benchmarks show that our method matches the generation quality of the full-attention baseline. With five reference images, it achieves a 3.92 × end-to-end speedup with negligible over-head from static text anchors, and the speedup reaches 5.47 × at ten references in the scaling study. More broadly, our results show that structured sparse caching can scale to large generative mod-els without compromising quality, opening a promising direction for efficient exact reuse in future systems. 10 REFERENCES 
+
+Rishabh Agarwal, Nino Vieillard, Yongchao Zhou, Piotr Stanczyk, Sabela Ramos, Matthieu Geist, and Olivier Bachem. On-policy distillation of language models: Learning from self-generated mistakes. In International Conference on Learning Representations , 2024. Philipp Becker, Abhinav Mehrotra, Ruchika Chavhan, Malcolm Chadwick, Luca Morreale, Mehdi Noroozi, Alberto Gil Ramos, and Sourav Bhattacharya. EDiT: Efficient diffusion transformers with linear compressed attention, 2025. Black Forest Labs. FLUX.2: Frontier visual intelligence. Black Forest Labs technical blog, 2025. https://bfl.ai/blog/flux-2. Guoxuan Chen, Chufeng Xiao, Haoran Yang, Siyue Xie, Binxiao Huang, Ming Zhang, Cheuk Him Chau, Xinyu Fu, Yingzhao Lian, Tom S. Y. Li, et al. Boogu-Image-0.1: Boosting open-source unified multimodal understanding and generation, 2026. Hanshuai Cui, Zhiqing Tang, Zhifei Xu, Zhi Yao, Wenyi Zeng, and Weijia Jia. BWCache: Acceler-ating video diffusion transformers through block-wise caching, 2026. Justin Cui, Jie Wu, Ming Li, Tao Yang, Xiaojie Li, Rui Wang, Andrew Bai, Yuanhao Ban, and Cho-Jui Hsieh. Self-Forcing++: Towards minute-scale high-quality video generation, 2025. Tri Dao, Daniel Y. Fu, Stefano Ermon, Atri Rudra, and Christopher R´ e. FlashAttention: Fast and memory-efficient exact attention with IO-awareness. In Advances in Neural Information Process-ing Systems , 2022. ZiYi Dong, Chengxing Zhou, Weijian Deng, Pengxu Wei, Xiangyang Ji, and Liang Lin. Can we achieve efficient diffusion without self-attention? distilling self-attention into convolutions, 2025. Patrick Esser, Sumith Kulal, Andreas Blattmann, Rahim Entezari, Jonas M¨ uller, Harry Saini, Yam Levi, Dominik Lorenz, Axel Sauer, Frederic Boesel, Dustin Podell, Tim Dockhorn, Zion English, Kyle Lacey, Alex Goodwin, Yannik Marek, and Robin Rombach. Scaling rectified flow trans-formers for high-resolution image synthesis. In International Conference on Machine Learning ,2024. Yuxian Gu, Li Dong, Furu Wei, and Minlie Huang. MiniLLM: On-policy distillation of large lan-guage models. In International Conference on Learning Representations , 2024. Xun Huang, Zhengqi Li, Guande He, Mingyuan Zhou, and Eli Shechtman. Self forcing: Bridging the train-test gap in autoregressive video diffusion. In Advances in Neural Information Processing Systems , 2025. Zeyu Jiang, Lai Man Po, Xuyuan Xu, Yexin Wang, Guoping Gong, Haoxuan Wu, Chenbo Yan, Kun Li, and Yuyang Liu. OrionEdit: Bridging reference and source images for generalized cross-image editing. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pp. 9127–9138, 2026. Jongwoo Ko, Tianyi Chen, Sungnyun Kim, Tianyu Ding, Luming Liang, Ilya Zharkov, and Se-Young Yun. DistiLLM-2: A contrastive approach boosts the distillation of LLMs. In International Conference on Machine Learning , 2025. Bingnan Li, Haozhe Wang, Haozhong Xiong, Fangtai Wu, Jinpeng Yu, Yang Shi, Jiaming Liu, and Ruihua Huang. Rethinking classifier-free guidance in on-policy diffusion distillation, 2026. Muyang Li, Yujun Lin, Zhekai Zhang, Tianle Cai, Xiuyu Li, Junxian Guo, Enze Xie, Chenlin Meng, Jun-Yan Zhu, and Song Han. SVDQuant: Absorbing outliers by low-rank components for 4-bit diffusion models. In International Conference on Learning Representations , 2025a. Xingyang Li, Muyang Li, Tianle Cai, Haocheng Xi, Shuo Yang, Yujun Lin, Lvmin Zhang, Songlin Yang, Jinbo Hu, Kelly Peng, Maneesh Agrawala, Ion Stoica, Kurt Keutzer, and Song Han. Radial attention: O(n log n) sparse attention with energy decay for long video generation. In Advances in Neural Information Processing Systems , 2025b. 11 Junqing Lin, Xingyu Zheng, Pei Cheng, Bin Fu, Jingwei Sun, and Guangzhong Sun. Token pruning for in-context generation in diffusion transformers, 2026. Yaron Lipman, Ricky T. Q. Chen, Heli Ben-Hamu, Maximilian Nickel, and Matt Le. Flow matching for generative modeling. In International Conference on Learning Representations , 2023. Feng Liu, Shiwei Zhang, Xiaofeng Wang, Yujie Wei, Haonan Qiu, Yuzhong Zhao, Yingya Zhang, Qixiang Ye, and Fang Wan. Timestep embedding tells: It’s time to cache for video diffusion model. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition ,pp. 7353–7363, 2025a. Joseph Liu, Joshua Geddes, Ziyu Guo, Haomiao Jiang, and Mahesh Kumar Nandwana. Smooth-Cache: A universal inference acceleration technique for diffusion transformers, 2024a. Shiyu Liu, Yucheng Han, Peng Xing, Fukun Yin, Rui Wang, Wei Cheng, Jiaqi Liao, Yingming Wang, Honghao Fu, Chunrui Han, Guopeng Li, Yuang Peng, Quan Sun, Jingwei Wu, Yan Cai, Zheng Ge, Ranchen Ming, Lei Xia, Xianfang Zeng, Yibo Zhu, Binxing Jiao, Xiangyu Zhang, Gang Yu, and Daxin Jiang. Step1X-Edit: A practical framework for general image editing, 2025b. Songhua Liu, Zhenxiong Tan, and Xinchao Wang. CLEAR: Conv-like linearization revs pre-trained diffusion transformers up, 2024b. Kevin Lu and Thinking Machines Lab. On-policy distillation. Thinking Machines Lab: Connection-ism , 2025. doi: 10.64434/tml.20251026. https://thinkingmachines.ai/blog/on-policy-distillation/. Xinyin Ma, Gongfan Fang, Michael Bi Mi, and Xinchao Wang. Learning-to-cache: Accelerating diffusion transformer via layer caching. In Advances in Neural Information Processing Systems ,2024. Meituan LongCat Team, Hanghang Ma, Haoxian Tan, Jiale Huang, Junqiang Wu, Jun-Yan He, Lishuai Gao, Songlin Xiao, Xiaoming Wei, Xiaoqi Ma, Xunliang Cai, Yayong Guan, and Jie Hu. LongCat-Image technical report, 2025. William Peebles and Saining Xie. Scalable diffusion models with transformers. In Proceedings of the IEEE/CVF International Conference on Computer Vision , 2023. Pratheba Selvaraju, Tianyu Ding, Tianyi Chen, Ilya Zharkov, and Luming Liang. FORA: Fast-forward caching in diffusion transformer acceleration, 2024. Lin Song, Wenbo Li, Guoqing Ma, Wei Tang, Bo Wang, Yuan Zhang, Yijun Yang, Yicheng Xiao, Jianhui Liu, Yanbing Zhang, et al. Awaking spatial intelligence in unified multimodal understand-ing and generation, 2026. Yang Song, Prafulla Dhariwal, Mark Chen, and Ilya Sutskever. Consistency models. In International Conference on Machine Learning , 2023. Super Intelligence Team, Changhao Qiao, Chao Hui, Chen Li, Cunzheng Wang, Dejia Song, Jiale Zhang, Jing Li, Qiang Xiang, Runqi Wang, Shuang Sun, Wei Zhu, Xu Tang, Yao Hu, Yibo Chen, Yuhao Huang, Yuxuan Duan, Zhiyi Chen, and Ziyuan Guo. FireRed-Image-Edit-1.0 technical report, 2026. Zhenxiong Tan, Songhua Liu, Xingyi Yang, Qiaochu Xue, and Xinchao Wang. OminiControl: Minimal and universal control for diffusion transformer. In Proceedings of the IEEE/CVF Inter-national Conference on Computer Vision , 2025a. Zhenxiong Tan, Qiaochu Xue, Xingyi Yang, Songhua Liu, and Xinchao Wang. OminiControl2: Efficient conditioning for diffusion transformers, 2025b. Jiahao Wang, Ning Kang, Lewei Yao, Mengzhao Chen, Chengyue Wu, Songyang Zhang, Shuchen Xue, Yong Liu, Taiqiang Wu, Xihui Liu, Kaipeng Zhang, Shifeng Zhang, Wenqi Shao, Zhenguo Li, and Ping Luo. LiT: Delving into a simple linear diffusion transformer for image generation, 2025. 12 Cong Wei, Zheyang Xiong, Weiming Ren, Xinrun Du, Ge Zhang, and Wenhu Chen. OmniEdit: Building image editing generalist models through specialist supervision. In International Confer-ence on Learning Representations , 2025. Chenfei Wu, Jiahao Li, Jingren Zhou, Junyang Lin, Kaiyuan Gao, Kun Yan, Sheng-ming Yin, Shuai Bai, Xiao Xu, Yilei Chen, Yuxiang Chen, Zecheng Tang, Zekai Zhang, Zhengyi Wang, An Yang, Bowen Yu, Chen Cheng, Dayiheng Liu, Deqing Li, Hang Zhang, Hao Meng, Hu Wei, Jingyuan Ni, Kai Chen, Kuan Cao, Liang Peng, Lin Qu, Minggang Wu, Peng Wang, Shuting Yu, Tingkun Wen, Wensen Feng, Xiaoxiao Xu, Yi Wang, Yichang Zhang, Yongqiang Zhu, Yujia Wu, Yuxuan Cai, and Zenan Liu. Qwen-Image technical report, 2025a. Chenyuan Wu, Pengfei Zheng, Ruiran Yan, Shitao Xiao, Xin Luo, Yueze Wang, Wanli Li, Xiyan Jiang, Yexin Liu, Junjie Zhou, Ze Liu, Ziyi Xia, Chaofan Li, Haoge Deng, Jiahao Wang, Kun Luo, Bo Zhang, Defu Lian, Xinlong Wang, Zhongyuan Wang, Tiejun Huang, and Zheng Liu. Omnigen2: Exploration to advanced multimodal generation. arXiv preprint arXiv:2506.18871 ,2025b. Chenyuan Wu, Pengfei Zheng, Ruiran Yan, Shitao Xiao, Xin Luo, Yueze Wang, Wanli Li, Xiyan Jiang, Yexin Liu, Junjie Zhou, Ze Liu, Ziyi Xia, Chaofan Li, Haoge Deng, Jiahao Wang, Kun Luo, Bo Zhang, Defu Lian, Xinlong Wang, Zhongyuan Wang, Tiejun Huang, and Zheng Liu. OmniGen2: Towards instruction-aligned multimodal generation, 2026. Jianzong Wu, Liang Hou, Haotian Yang, Xin Tao, Ye Tian, Pengfei Wan, Di Zhang, and Yunhai Tong. VMoBA: Mixture-of-block attention for video diffusion models, 2025c. Haocheng Xi, Shuo Yang, Yilong Zhao, Chenfeng Xu, Muyang Li, Xiuyu Li, Yujun Lin, Han Cai, Jintao Zhang, Dacheng Li, Jianfei Chen, Ion Stoica, Kurt Keutzer, and Song Han. Sparse videogen: Accelerating video diffusion transformers with spatial-temporal sparsity, 2025. An Yang et al. Qwen3 technical report, 2025. Yang Ye, Xianyi He, Zongjian Li, Bin Lin, Shenghai Yuan, Zhiyuan Yan, Bohan Hou, and Li Yuan. ImgEdit: A unified image editing dataset and benchmark, 2025. Tianwei Yin, Qiang Zhang, Richard Zhang, William T. Freeman, Fredo Durand, Eli Shechtman, and Xun Huang. From slow bidirectional to fast autoregressive video diffusion models. In Proceed-ings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , 2025. Jintao Zhang, Haofeng Huang, Pengle Zhang, Jia Wei, Jun Zhu, and Jianfei Chen. SageAttention2: Efficient attention with thorough outlier smoothing and per-thread INT4 quantization. In Interna-tional Conference on Machine Learning , pp. 75097–75119, 2025a. Jintao Zhang, Chendong Xiang, Haofeng Huang, Jia Wei, Haocheng Xi, Jun Zhu, and Jianfei Chen. SpargeAttention: Accurate and training-free sparse attention accelerating any model inference. In 
+
+International Conference on Machine Learning , 2025b. Jintao Zhang, Kai Jiang, Chendong Xiang, Weiqi Feng, Yuezhou Hu, Haocheng Xi, Jianfei Chen, and Jun Zhu. SpargeAttention2: Trainable sparse attention via hybrid top-k+top-p masking and distillation fine-tuning, 2026. Yuxuan Zhang, Yirui Yuan, Yiren Song, Haofan Wang, and Jiaming Liu. EasyControl: Adding efficient and flexible control for diffusion transformer, 2025c. Junhao Zhuang, Lingen Li, Xuan Ju, Zhaoyang Zhang, Chun Yuan, and Ying Shan. Cobra: Efficient line art COlorization with BRoAder references, 2025. 13 A A G RAPH STATEMENT OF THE IMPOSSIBILITY 
+
+We formalize the constraint in §3.2 using a layered dependency graph. Let 
+
+V = {LT , X, R},
+
+and let M ∈ { 0, 1}V ×V be a layer-shared attention mask, where M [b′, b ] = 1 means that b attends to b′. The block representations satisfy 
+
+hℓb = Fℓ
+
+ hℓ−1 
+
+> b
+
+; {hℓ−1 
+
+> b′
+
+: M [b′, b ] = 1 } , ℓ = 1 , . . . , L. (9) We unroll M across depth. The resulting graph contains a node (b, ℓ ) for each block b and layer ℓ,residual edges (b, ℓ − 1) → (b, ℓ ), and attention edges (b′, ℓ − 1) → (b, ℓ ) whenever M [b′, b ] = 1 .Write (b, ℓ ) ⇝ (b′, m ) when a directed path exists. Since X changes across denoising steps, structural exact reuse of the reference requires 
+
+StructCacheable(R) ⇐⇒ (X, 0) ̸ ⇝ (R , ℓ ), ∀ ℓ = 1 , . . . , L. (10) This is a structural guarantee: if such a path exists, the mask alone no longer guarantees step-independent reference states. We say that the reference can access contextualized live text when 
+
+LiveTextReachable(R) ⇐⇒ (LT , ℓ ) ⇝ (R , m ) for some 1 ≤ ℓ < m ≤ L. (11) The condition ℓ ≥ 1 excludes the uncontextualized input text embedding. 
+
+Theorem 1. Assume L ≥ 2, the mask is shared across layers, and the pretrained text–target in-teraction is preserved, i.e., M [X, LT] = 1 . Then no mask on the original token set {LT , X, R}
+
+satisfies both StructCacheable(R) and LiveTextReachable(R) .Proof. Since M [X, LT] = 1 ,
+
+(X, 0) → (LT , 1) .
+
+If LiveTextReachable(R) holds, then for some 1 ≤ ℓ < m ≤ L,
+
+(LT , ℓ ) ⇝ (R , m ).
+
+Residual connections give (LT , 1) ⇝ (LT , ℓ ), hence 
+
+(X, 0) → (LT , 1) ⇝ (LT , ℓ ) ⇝ (R , m ),
+
+which contradicts StructCacheable(R) .Our construction changes the theorem’s domain by adding a static instruction carrier ST . The ref-erence and ST are mutually visible, while neither receives information from the live target stream. Thus the instruction can reach the reference through ST without creating a path from X to R, pre-serving structural exact cacheability. The theorem concerns a structural guarantee under a layer-shared mask and preserved text–target coupling; it does not claim that every permitted dependency is numerically active, nor that text reachability alone guarantees better editing quality. 
+
+B WHY THE RECOVERY IS STAGED 
+
+This appendix explains the optimization role of the two query distributions used in §3.4. The formal point is not that Stage 1 is mathematically necessary before Stage 2, but that once the student cannot be assumed to reproduce the teacher exactly, the location at which the teacher is queried can change the best approximation. This is the reason for switching distributions after teacher-forced recovery saturates in our experiments. 14 A fixed-query objective. Let μ be a fixed distribution over query triples (z, c, t ) and write 
+
+L(θ; μ) = 
+
+Z
+
+vθ (z, c, t ) − vfull (z, c, t ) 22 dμ(z, c, t ). (12) Stage 1 uses the distribution μdata of data-derived interpolants, whereas Stage 2 uses states drawn from the current student’s rollout distribution. For a fixed μ, define eθ = vθ −vfull and let Jθ = ∂θ vθ .Then 
+
+∇θ L(θ; μ) = 2 
+
+Z
+
+Jθ (z, c, t )⊤eθ (z, c, t ) d μ(z, c, t ). (13) Thus the query distribution appears explicitly in the optimization problem. If there exists a student parameter θ⋆ that matches the teacher pointwise on all relevant states, then eθ⋆ = 0 and the same zero-loss solution is optimal for every μ. After an architectural change, however, such exact real-izability is not guaranteed. In that case the residual generally cannot be removed everywhere, and changing μ changes how the remaining error is weighted. This observation does not require us to assume that exact compensation by the student is impossible; it only explains why off-policy and on-policy regression need not have the same optimum when the residual is nonzero. 
+
+Why the student distribution is the relevant second-stage target. At inference, the current stu-dent visits states distributed according to an occupancy measure ρθ induced by its own sampler. Errors on these states are directly encountered during generation. At Stage 2 iteration i, we first generate a rollout with the current parameters θi, detach the visited states, and then take stochastic-gradient updates using samples from the frozen query distribution ρθi . Equivalently, each update targets 
+
+L(θ; ρθi ) = 
+
+Z
+
+vθ (z, c, t ) − vfull (z, c, t ) 22 dρθi (z, c, t ), (14) without differentiating through the rollout that produced ρθi . The teacher is queried at exactly the same states as the student, so no approximation of the teacher target is introduced by moving the query distribution. What changes is only where the velocity mismatch is penalized. Because ρθ itself changes with the student, Stage 2 is not ordinary minimization of a single fixed objective. It is better viewed as a moving-query stochastic procedure: generate states from ρθi ,detach them, update θ, and repeat. We make no convergence claim for this process. 
+
+Why we use the stages in this order. Stage 1 provides a simple teacher-forced initialization using data-derived states and requires no student rollout for each update. In our experiment it recovers most of the quality lost after the architectural conversion. More importantly for the argument here, continued Stage 1 training then saturates under the reported schedule, whereas switching the query distribution to student-visited states improves every evaluated Stage 2 checkpoint (Figure 4). Equa-tion equation 13 gives a direct explanation for why such a switch can matter: once a nonzero residual remains, two query distributions need not place that residual in the same regions of state space. Accordingly, the claim supported by this analysis and our experiments is the following: after teacher-forced recovery has plateaued, changing the supervision locations to the student’s own trajectory provides an effective additional recovery signal. We do not need the stronger claim that teacher predictions become unreliable away from data interpolants, nor do we claim that a teacher-forced phase is a mathematical prerequisite for every possible on-policy recovery procedure. 
+
+C COST ACCOUNTING 
+
+This appendix gives an attention-interaction model of the reference-caching speedup. The model is exact under its stated token-interaction counting convention; it is not a complete transformer FLOP model or a wall-clock predictor, because it omits hardware effects and position-wise linear work such as projections and feed-forward layers. 
+
+Derivation. Let NR, NX , NLT , and NST denote the token counts of the reference, target, live-text, and static-text blocks, and define S = NX + NLT . With the sequence and connectivity of Figure 2, computation splits into a one-time static precomputation and a per-step live computation. The static 15 block [ST , R] is evaluated once; at each denoising step, [LT , X t] supplies the queries and attends to 
+
+[LT , X t, R] . Counting one unit per query–key interaction gives 
+
+Cpre = ( NR + NST )2, (15) 
+
+Cstep = S(NR + S), (16) 
+
+Cours = Cpre + T Cstep , (17) whereas full attention over the original sequence costs Cfull = T (NR + S)2 under the same conven-tion. Therefore 
+
+R(NR) = Cfull 
+
+Cours 
+
+= T (NR + S)2
+
+(NR + NST )2 + T S (NR + S) . (18) Section 4.4 reports measured end-to-end latency; the purpose of equation 18 is to characterize the scaling induced by the attention structure. 
+
+Monotonicity. Put u = NR + S and a = NST − S, so that NR + NST = u + a and 
+
+R(u) = T u 2
+
+D(u) , D(u) = ( u + a)2 + T Su, u > S. (19) Differentiating gives 
+
+R′(u) = T u [2 a(u + a) + T Su ]
+
+D(u)2 . (20) Assume the static-text block is no longer than the live block, 0 ≤ NST ≤ S, which is the regime used here. Then −S ≤ a ≤ 0. Because a ≤ 0 and u + a ≤ u,
+
+2a(u + a) + T Su ≥ 2au + T Su = u(T S + 2 a) ≥ uS (T − 2) . (21) Hence R′(u) > 0 for every T > 2: under this interaction-counting model, the analytical speedup is strictly increasing with the number of reference tokens. 
+
+Ceiling. The same assumptions also give a simple T -fold ceiling. From equation 19, 
+
+D(u) − u2 = 2 au + a2 + T Su (22) 
+
+= u(T − 2) S + 2 NST 
+
+ + ( NST − S)2. (23) For T > 2 and S > 0, the right-hand side is strictly positive. Therefore D(u) > u 2 and 
+
+R(NR) < T for every finite NR. (24) Moreover, the leading quadratic terms of numerator and denominator in equation 18 give R(NR) →
+
+T only as NR → ∞ . Thus no finite reference count reaches a T -fold speedup in this model. 
+
+What the interaction model omits. Equation equation 18 counts attention interactions only. In an actual transformer, caching also avoids later reference-side projections and feed-forward compu-tation, whose cost is approximately linear in the number of cached reference tokens. Kernel launch overhead, memory traffic, and hardware utilization are omitted as well. Consequently, equation 18 should be used to reason about structural scaling rather than as an exact prediction of measured seconds. 
+
+Where the limiting term changes. The two denominator terms in equation 18 are the one-time static precomputation (NR + NST )2 and the repeated live computation T S (NR + S). Their exact equality is 
+
+(NR + NST )2 = T S (NR + S), (25) so the precise crossover depends on NST . Comparing only the leading NR-dependent terms gives the useful scale NR ≈ T S . Thus the common rule NR < T S versus NR > T S should be read as an asymptotic crossover estimate, not as the exact boundary. 16 Why the large-context approximation fails at one reference. If NR ≫ S and NR ≫ NST , then equation 18 reduces to 
+
+R(NR) ≈ T N R
+
+NR + T S . (26) At one reference in our configuration, however, NR = 4096 and S = 4608 , so NR ≫ S is already false. The asymptotic expression therefore predicts only 0.87 ×, even though the measured end-to-end speedup is 1.82 × (Figure 5). The exact interaction model in equation 18 retains NST and should be evaluated with the actual static-text token count rather than with the large-context approximation. 
+
+D FULL EXPERIMENTAL DETAILS 
+
+Table 4 collects the settings of both recovery stages. Two are worth singling out. The gradient-norm clip is unusually tight at 0.05 ; the student begins close to the teacher and the updates that matter are small, so a conventional clip admits occasional steps large enough to undo the alignment being built. And stage 2 resumes from a stage-1 checkpoint rather than from the pretrained weights, which is what makes the two stages a sequence rather than two independent treatments. Table 4: Recovery hyper-parameters. Both stages train the full parameter set in bf16 with DeepSpeed ZeRO-2 and gradient checkpointing on a single node.                                   
+
+> Stage 1 (teacher-forced) Stage 2 (on-policy) Data OmniEdit, OrionEdit (same proportions) Trainable all parameters Precision bf16, ZeRO-2, gradient checkpointing Global batch 8
+> Optimizer AdamW, β= (0 .9,0.999) ,ε= 10 −10
+> Weight decay 3×10 −210 −2
+> Schedule cosine, 200 warmup steps Gradient clip 0.05
+> Learning rate 5e −65e −6
+> Steps 30 k500 (checkpoints every 250 )Initialization pretrained stage-1 checkpoint Rollout —40 steps, conditional branch only, no CFG Query states —K= 4 , full range Seed 42
+
+Sampling. All OmniContext images are generated with the same settings for every model in this paper: 40 denoising steps, 1024 × 1024 reference and output, true classifier-free guidance at γ = 4 
+
+with a blank negative prompt, and a single fixed seed ( 42 ) across all 400 examples. GEdit-Bench follows its own released protocol ( 50 steps, γ = 4 , per-example seeds) and its numbers are therefore not comparable to the OmniContext tables. 
+
+Scoring. We use the released evaluation code of each benchmark without modification, including its prompts, its judge and its parsing. For OmniContext this is the VIEScore-style protocol of Wu et al. (2026) with GPT-4.1 as the judge. Two properties of that code bear on how its scores should be read. The judge is queried at the API default temperature rather than greedily, so re-scoring an unchanged set of images does not return the same numbers — which is the mechanism behind the 
+
+0.054 spread measured in §4.1. And when a response cannot be parsed as JSON the released code substitutes a uniformly random integer in [0 , 10] ; such an event is rare, but it is heavy-tailed, and a single occurrence shifts a 50 -example sub-task mean by up to 0.2. We leave both behaviours in place, since changing them would break comparability with published numbers, but they are the reason this paper declines to read differences of a few hundredths as an ordering. 
+
+E WHAT DOES NOT WORK 
+
+Before settling on pointwise regression we tried a range of more elaborate recovery objectives, none of which improved on it. We report the guidance-aware family here because it is the one a reader is 17 most likely to propose: the deployed sampler uses classifier-free guidance, so aligning the recovery stage with it looks like free performance. 
+
+Guided rollouts and branch-aware losses. At inference the model is sampled with true classifier-free guidance, v = v− + γ (v+ − v−) with γ = 4 , whereas the recovery stage of §3.4 uses no guidance at all: the student rolls out under its conditional branch alone, the teacher is evaluated at those states under its conditional branch alone, and only that branch is regressed. Three guidance settings are therefore distinct and are stated separately throughout — the teacher’s forward pass, the student’s rollout, and evaluation — and in the reported configuration the first two are unguided while the third uses γ = 4 . This raises the question of whether aligning training with deployment — rolling out along the guided trajectory and supervising the branch structure that guidance consumes — would recover more. Two knobs are available: whether the rollout follows the guided combination, and whether the loss constrains anything beyond v+. Both settings of the second knob were run under the guided rollout, following the two branch-aware objectives of Li et al. (2026). Independent branch matching (IBM) regresses each branch to the teacher separately, ∥v+ 
+
+> θ
+
+− v+full ∥2 + ∥v− 
+
+> θ
+
+−
+
+v−
+
+> full
+
+∥2. Positive–direction matching (PDM) regresses the positive branch together with the guidance direction d = v+ − v−, at λ = 1 ; both remove the freedom of a guided-only objective, under which positive- and negative-branch errors may cancel inside the composed prediction and leave the branches under-identified. Variant Rollout Supervision PF SC Overall ∆
+
+As reported unguided v+ only 8.418 8.167 8.185 —IBM guided, γ=4 v+ and v− 8.283 7.987 8.025 −0.160 
+
+PDM guided, γ=4 v+ and d 8.223 8.040 8.021 −0.164 
+
+Both cost about 0.16 in Overall, three times the reproducibility scale of §4.1, and they are indistin-guishable from each other : the 0.004 between them is far beneath that scale. Neither deployment-aligned package beats plain on-policy regression. We do not read this as isolating the trajectory from the branch term: a guided-trajectory, positive-only control was not run, so the two knobs are not separated here and the negative result applies to the packages as tested rather than to either component alone. This is the outcome that Li et al. (2026) would predict here, and it is worth stating in their terms, since it delimits rather than contradicts their result. The failure mode they identify — antagonistic branch-error dynamics, in which matching the composed prediction lowers the positive-branch error while raising the negative one — arises under privileged negative conditioning, where the teacher’s negative branch sees information the student’s does not. In our setting the negative branch is shared: teacher and student differ in their mask, not in what they condition on, and the negative branch of each retains the same reference images with only the text emptied. Both branch errors therefore fall together, which is the benign regime their analysis describes, and a branch-aware objective has no cross-branch compensation left to remove. What remains of the guided setting is its cost: the rollout visits states under an amplified field, and with a residual as small as the one here (§3.4) there is little for the branch-aware term to recover in exchange. We therefore keep the recovery stage guidance-free and apply true CFG only at inference, where it is unchanged at γ = 4 ; the finding is about where guidance is used during training, not about whether the deployed sampler should use it. The choice should not be carried over to a recovery problem in which the teacher’s negative branch is privileged. 
+
+F ADDITIONAL RESULTS 
+
+F.1 WHERE THE BASE MODEL STANDS , UNDER ONE PROTOCOL 
+
+Table 5 places our base model among recent instruction-based editing systems. The purpose is not comparison with these systems — they differ in scale, training data and inference configuration, so none of them is a controlled counterpart to anything in §4 — but to establish that the full-attention upper bound this paper chases is a strong one rather than a weak model chosen to make recovery easy. 18 Table 5: Recent instruction-based editing systems, all generated and scored by us under a single protocol (see text). Our base model is bold . Absolute values differ from each system’s published figures — including our own base model’s — because no per-model tuning was applied; only the relative ordering is intended. Not comparable to Table 1 and Figure 4, which use a different protocol. 
+
+> ∗
+
+Evaluated at version 1.1; the cited report covers version 1.0. Model PF ↑ SC ↑ Overall ↑
+
+FireRed-Image-Edit-1.1 ∗ (Super Intelligence Team et al., 2026) 8.252 7.503 7.762 Qwen-Image-Edit-2511 (our base) (Wu et al., 2025a) 8.068 7.345 7.580 LongCat-Image-Edit (Meituan LongCat Team et al., 2025) 8.041 7.358 7.554 Boogu-Image-0.1-Edit (Chen et al., 2026) 7.784 7.021 7.215 JoyAI-Image-Edit (Song et al., 2026) 7.569 7.271 7.134 FLUX.2 [dev] (Black Forest Labs, 2025) 7.384 7.297 7.073 Two points about the protocol, since the numbers here are not the ones these systems report. Every row was generated and scored by us under one configuration : the same judge and version, the same prompt template, the same sampler and step count, the same resolution, and no per-model tuning of guidance or negative prompts. Consequently our own base model also scores below its published figure , and by a margin comparable to the other rows’ shifts. This is the expected con-sequence of a uniform protocol. Published scores are obtained under each system’s own preferred settings, which is appropriate for reporting a system but not for ranking several; a protocol that reproduced every published number would be one that had been tuned per model, and the result-ing ordering would carry that tuning rather than the models. The absolute values in this table are therefore lower across the board and are only meaningful relative to one another .For the same reason the scores here are not comparable to Table 1 and Figure 4, which use the OmniContext protocol of §4.1; the teacher appears in both at different values, and no row of this table should be read against a row of those. Nothing in §4 depends on this table: our claims are made against the full-attention teacher on the same base model with the mask as the only variable, and that comparison is unaffected by where the base model sits relative to other systems. F.2 A BATCH OF GE DIT -B ENCH EXAMPLES 
+
+Figures 7 and 6 show ten GEdit-Bench examples under the same three-column comparison, with the instruction printed above each row. Unlike the figures above, these are shown as a contiguous batch rather than as selected cases, so they also include instructions on which the three models are hard to tell apart; that is the point of showing a batch. 19 Input Official Isolated Condition Text Anchor 
+
+Prompt: Change the background to the ocean. 
+
+Input Official Isolated Condition Text Anchor 
+
+Prompt: Change the car body color to blue. 
+
+Official Isolated Condition Text Anchor Input Official Isolated Condition Text Anchor 
+
+Prompt: Change the plane's material to feathers. Prompt: Change the bird's action to flapping its wings and flying high. 
+
+Input Official Isolated Condition Text Anchor 
+
+Prompt: Make the action of the man to cheering. 
+
+Input Official Isolated Condition Text Anchor Figure 6: GEdit-Bench examples, part 2 of 2 (last five of ten; continued from Figure 7), in the same column layout. 20 Prompt: remove the umbrella. 
+
+Input Official Isolated Condition Text Anchor 
+
+Prompt: Replace the dog with a rabbit. 
+
+Input Official Isolated Condition Text Anchor 
+
+Prompt: Please generate an ID photo of me based on this picture. 
+
+Input Official Isolated Condition Text Anchor 
+
+Prompt: Change the background to a forest. 
+
+Input Official Isolated Condition Text Anchor Input Official Isolated Condition Text Anchor 
+
+Prompt: Change the background to a lingerie store, in a panoramic view, keeping the person in the original image unchanged. Prompt: Change the background to the ocean. 
+
+Input Official Isolated Condition Text Anchor 
+
+Prompt: Change the car body color to blue. Figure 7: GEdit-Bench examples, part 1 of 2 (first five of ten; continued in Figure 6). Columns: input, the full-attention teacher ( Official ), the isolated condition, and ours ( Text Anchor ). The in-struction is printed above each row. 21

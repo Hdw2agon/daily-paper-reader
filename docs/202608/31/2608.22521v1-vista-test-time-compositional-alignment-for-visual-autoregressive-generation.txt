@@ -1,0 +1,540 @@
+Title: VISTA: Test-Time Compositional Alignment for Visual Autoregressive Generation
+
+URL Source: https://arxiv.org/pdf/2608.22521v1
+
+Published Time: Tue, 25 Aug 2026 01:17:53 GMT
+
+Number of Pages: 20
+
+Markdown Content:
+Preprint 
+
+# VISTA: T EST -T IME COMPOSITIONAL ALIGNMENT FOR VISUAL AUTOREGRESSIVE GENERATION 
+
+Hossein Shahabadi Niki Sepasian Mahdieh Soleymani Baghshah 
+
+Department of Computer Engineering Sharif University of Technology 
+
+hosseinshahabadi.me@gmail.com 
+
+# ABSTRACT 
+
+Visual autoregressive (VAR) models have emerged as a fast, high-quality alterna-tive to diffusion for text-to-image generation, but like diffusion models they ex-hibit persistent compositional failures, producing images that violate the attribute bindings and spatial relations specified in the prompt. While a rich line of test-time alignment methods has developed for diffusion, no comparable approach exists for next-scale VAR generation, whose stateful, discrete, multi-resolution sampling process makes existing techniques inapplicable. We close this gap with 
+
+VISTA (Vi sual Autoregressive Semantic Test-time Alignment), the first gradient-based test-time alignment framework for next-scale autoregressive image genera-tion. Built on Infinity, VISTA intervenes directly in the generation process, opti-mizing intermediate representations through the frozen transformer to steer visual predictions toward compositional constraints, without modifying model parame-ters or requiring additional training. VISTA introduces the mechanisms needed to make such optimization stable across scales, together with an extensible objective space that any differentiable constraint on cross-attention can plug into. Across two benchmarks and two model scales, VISTA improves every targeted composi-tional category, raising the mean targeted score by nearly 20% on a 2B backbone and almost 6% on an 8B backbone, with the largest gains on spatial relations. Image quality is preserved: an independent preference model VISTA never opti-mizes scores its outputs nearly 20% higher. Notably, the 2B model with VISTA surpasses a backbone four times its size, indicating that a substantial part of the compositional gap between model scales is recoverable at test time. 
+
+# 1 INTRODUCTION 
+
+Text-to-image generation is dominated by two model families. Latent diffusion models Rombach et al. (2022) and their transformer-based successors remain the default choice for open-domain syn-thesis. More recently, visual autoregressive (VAR) models have emerged as a competitive alterna-tive: VAR Tian et al. (2024) reformulates autoregressive image generation as coarse-to-fine next-scale prediction rather than raster-scan token-by-token prediction Esser et al. (2021), producing an image as a sequence of token maps of increasing resolution, each conditioned on all coarser ones. This let transformer-based Vaswani et al. (2017) autoregressive models surpass diffusion transform-ers in quality, speed, and scalability for the first time, and Infinity Han et al. (2025a) extends it with a bitwise, infinite-vocabulary tokenizer and self-correction, reaching quality competitive with top diffusion models. Neither family, however, reliably composes. In a systematic comparison of six text-to-image sys-tems, prior work has found that next-scale VAR models such as Infinity exhibit systematic failures in attribute binding, spatial reasoning, and relational tasks, and that these failures do not disappear with scale Shahabadi et al. (2025): visual fidelity and parameter count do not guarantee composi-tional understanding. Since retraining a backbone to fix compositionality is expensive and does not transfer across models, a growing body of work instead intervenes at inference time. In diffusion models this line is well developed. Building on the finding that cross-attention en-codes spatial correspondence between image regions and text Hertz et al. (2022), Attend-and-1arXiv:2608.22521v1 [cs.CV] 23 Aug 2026 Preprint Excite Chefer et al. (2023) and SynGen Rassin et al. (2023) optimize the diffusion latent during sampling to reshape attention toward prompt constraints, and subsequent work has refined the ob-jective for attribute binding Meral et al. (2024); Li et al. (2023), concept separation Agarwal et al. (2023), and spatial relations Rezaei et al. (2025); Han et al. (2025b). These methods share a com-mon premise: a frozen model’s own cross-attention exposes a differentiable handle on compositional structure, and steering it at inference time is cheaper and more portable than retraining. Test-time intervention has begun to reach VAR models as well, but along a different axis. TTS-VAR Chen et al. (2025b) treats generation as a path-search problem, using clustering-based diver-sity search at coarse scales and resampling-based selection at fine scales, and ScalingAR Chen et al. (2025a) adapts test-time scaling to next-token-prediction autoregressive generation. Both improve generation quality by searching over candidate trajectories under a reward model or confidence sig-nal, so both are bounded by what the backbone already samples: when a constraint is violated in nearly every candidate, selection has nothing to select. Gradient-based steering carries no such bound, but it has no VAR counterpart, and porting it is not straightforward. Infinity generates dis-crete tokens across scales of increasing resolution over a persistent state that later scales depend on, rather than repeatedly updating one continuous latent at fixed resolution. Two consequences defeat a direct port: a gradient normalized as a single global vector is diluted across the far larger token maps of VAR scales until its per-element magnitude no longer changes the sampled token, and each optimization step corrupts the attention cache that every subsequent scale reads. We close this gap with VISTA (Vi sual Autoregressive Semantic Test-time Alignment), the first gradient-based test-time framework for compositional alignment in next-scale VAR generation. Built on Infinity, VISTA optimizes intermediate token representations through the frozen trans-former via mechanisms for differentiable cross-attention capture, cache-safe optimization, per-token gradient normalization, and adaptive step budgets, independent of which objective is optimized. A pluggable registry then lets any differentiable constraint on cross-attention plug into this same infras-tructure; we instantiate it with objectives for attribute binding, planar relations, and depth ordering. On T2I-CompBench, VISTA improves every targeted category, with an 84% relative gain on 2D spatial relations and 12 –20% gains on color, texture, and shape binding; on GenEval it nearly triples object positioning accuracy, where search-based test-time scaling on the same backbone gains under 
+
+8% Chen et al. (2025b). Applied to Infinity-2B, it surpasses the 4× larger Infinity-8B on the majority of these categories and on their average, and applied to Infinity-8B it improves that model further. A preference model VISTA never optimizes scores its outputs nearly 20% higher, so the compositional gains are not bought by degrading the image. As with any test-time method, they are traded against inference cost; VISTA exposes this trade-off through two knobs and requires no additional training, trainable parameters, or task-specific data. Appendix A discusses related work in full. Our contributions are as follows. (i) We introduce the first gradient-based test-time framework for compositional alignment in next-scale VAR generation, requiring no additional training, parameters, reward model, or candidate search. (ii) We identify the failure modes that make test-time latent optimization unstable inside stateful, multi-scale generation, and give mechanisms that resolve them independently of the objective optimized (Secs. 3.2–3.3). (iii) We cast compositional alignment as an extensible differentiable objective space over cross-attention. Existing binding and planar-relation objectives port into it directly; for depth we introduce a boundary-containment constraint that reads occlusion geometry out of attention alone, where prior work resorts to an external depth estimator and search over completed images. 
+
+# 2 PRELIMINARIES 
+
+Next-scale VAR generation. VAR Tian et al. (2024) generates an image as a sequence of dis-crete token maps r1, . . . , r S at increasing spatial resolutions hs × ws, each rs an index map into a codebook V learned by a VQ tokenizer, with generation factorized autoregressively over scales: 
+
+p(r1, . . . , r S | c) = 
+
+> S
+
+Y
+
+> s=1
+
+p(rs | r1, . . . , r s−1, c ). (1) Infinity Han et al. (2025a) takes c to be a text-conditioning sequence from a frozen text encoder, ex-tending the formulation from VAR’s class-conditional setting to free-form text-to-image generation 2Preprint – the setting VISTA operates in – and replaces the finite codebook with a bitwise, infinite-vocabulary tokenizer whose labels are predicted per bit. At inference, scale s’s input is formed by upsampling the already-sampled, quantized codes r<s to resolution hs × ws, giving a continuous embedding 
+
+zs ∈ RLs×C (Ls = hsws). In Infinity’s default schedule, S = 13 , with token grids ranging from 
+
+1×1 and 2×2 at the coarsest scales through 4×4, 6×6, and 8×8, on to 64 ×64 at the finest. A trans-former processes zs through alternating self-attention (over spatial positions) and cross-attention (to 
+
+c) layers to produce logits; rs is then obtained by discrete sampling (top-k/top-p) and quantized, and the process repeats for s + 1 . Keys and values computed at each scale are cached and read by every later scale, so the transformer carries state across the whole schedule rather than restarting at each step. This is the generation loop VISTA intervenes in: zs is a per-scale, freshly-derived continuous representation, not a single tensor refined throughout generation as in diffusion, the point of inter-vention precedes an irreversible discrete sampling step, and any forward pass taken there writes to a cache that all later scales depend on (Secs. 3.2–3.3). Cross-attention layers, which let image tokens query c, expose an interpretable handle on which text tokens influence which spatial regions Hertz et al. (2022); Sec. 3.2 adapts this interface to Infinity. 
+
+Compositional generation. We take a prompt to assert constraints over the entities it describes: an entity’s cardinality , the attributes bound to it, and relations between entity pairs. A generation ex-hibits a compositional failure when the image violates one or more such constraints, independent of overall visual quality. Sec. 3.4 operationalizes these as differentiable objectives over cross-attention maps. 
+
+# 3 METHOD 
+
+3.1 OVERVIEW 
+
+VISTA is a test-time optimization framework for next-scale VAR generation. It intervenes in Infin-ity’s frozen generation process (Sec. 2), optimizing the continuous embedding zs at selected scales so that the model’s own cross-attention satisfies compositional constraints derived from the prompt. No parameters are updated and no training data is required: at a scale selected for intervention (Sec. 3.3), VISTA replaces zs with an optimized ˜zs before it reaches the transformer, so every later scale conditions on the steered representation. We separate the framework into optimization mechanisms (Secs. 3.2–3.3) and compositional objectives registered into them through a common interface (Sec. 3.4), so objectives can be added or removed without touching the mechanisms. Fig. 1 summarizes the method. 3.2 DIFFERENTIABLE CROSS -A TTENTION CAPTURE 
+
+To steer generation via cross-attention, we need a gradient path from a loss on attention back to zs –but Infinity’s cross-attention layers are only ever evaluated as part of frozen, cached sampling, with no such path available by default. We recover one by recomputing attention on the fly, taking the query from the representation under optimization and holding the key fixed, since our objectives need only the resulting attention distribution over text tokens: 
+
+q = Wq zs, k = sg( Wk c), A = softmax 
+
+ qk ⊤
+
+√d
+
+
+
+, (2) where sg( ·) denotes a stop-gradient. Averaged across attention heads and layers, this yields a single map A(s) ∈ RLs×Lk per scale, differentiable with respect to zs, which every objective in Sec. 3.4 is defined over. 3.3 STABLE OPTIMIZATION IN A STATEFUL GENERATION PROCESS 
+
+A gradient path alone is not enough to optimize inside Infinity’s loop. Four properties of stateful, multi-scale generation each break a step that is routine in diffusion, and each fix exposes the next problem. 
+
+Taking a step at all. Optimizing zs requires extra forward passes at scale s, but the loop is not built for them: its self-attention cache is carried across scales, so an optimization pass overwrites 3Preprint 
+
+Figure 1: VISTA on “a white crow and a black flower”. Generation proceeds coarse to fine, each scale conditioned on all coarser ones; VISTA steers only the outlined coarse scales, scoring the model’s own cross-attention with a differentiable compositional loss and taking normalized gradient steps on that scale’s input zs until the objectives converge or the step budget is spent. Right: flower 
+
+and crow attention at Res 3 and Res 4 (the 6×6 and 8×8 grids), with and without steering. Without it the maps stay collapsed onto one another and a second bird appears in place of the flower; with it they separate and remain separated through the unsteered fine scales. Lentity is shown but not instantiated (Sec. 3.4). entries that every later scale will read, and the sampling path retains no gradients. We reconstruct scale s’s computation in differentiable form and restore the cache to its pre-optimization state before real sampling resumes, so that however many steps we take, generation continues from exactly the state it would have reached unmodified. 
+
+Making the step move anything. With gradients available, the natural update is too weak to mat-ter. zs is far larger and more variable in magnitude than a diffusion latent, so a gradient normalized as one global vector is spread across all LsC entries and the per-element change falls below what alters a sampled token. We therefore normalize per token rather than globally, 
+
+ˆgi = gi
+
+∥gi∥2 + ϵ , gi = ∇zs,i L, (3) so a token’s update does not shrink because the tensor around it is large, and scale the step to each scale’s own feature magnitude, 
+
+lr eff = lr base · RMS( zs) · √C, (4) so a single lr base serves every scale and prompt of a given backbone. One step is then normalized-gradient descent, ˜zs,i ← zs,i − lr eff · ˆgi.
+
+Sharing the step between objectives. A step that works for one objective still has to serve several at once, and their losses (Sec. 3.4) are not comparable in scale, so summing loss values would let one dominate arbitrarily. We combine gradient directions instead: for active losses {L k} with 
+
+g(k) 
+
+> i
+
+= ∇zs,i Lk,
+
+gi = X     
+
+> k:∥g(k)
+> i∥2≥τk
+
+g(k)
+
+> i
+
+∥g(k) 
+
+> i
+
+∥2 + ϵ . (5) An objective below its threshold τk contributes nothing that step but is re-evaluated fresh at the next, so it re-engages automatically if a later step perturbs it back above threshold. All active ob-jectives share one forward and backward pass, which Appendix E shows makes joint optimization substantially cheaper than the sum of standalone costs. 4Preprint 
+
+Deciding how many steps, and where. What remains is how often to apply the update. A fixed count wastes computation on scales that are already close and starves those that are far, so VISTA reads the budget off the initial gradient magnitude: for each active objective with g(k)0 > τ k, severity is 
+
+ςk = clip log  g(k)0 /τ k
+
+
+
+log( Nmax + 1) , 0, 1
+
+!
+
+, (6) giving Neff = max(1 , ⌈Nmax · max k ςk⌉). Eq. 6 is built from the ratio g(k)0 /τ k rather than an absolute magnitude, so it is unchanged when an objective is rescaled and objectives of different natural magnitudes share one severity scale; the logarithm compresses a ratio that spans orders of magnitude across prompts, under which a linear map would award nearly every violated scale the full Nmax ; and dividing by log( Nmax +1) saturates severity exactly at g(k)0 = ( Nmax +1) τk, tying the only free constant to Nmax rather than adding a hyperparameter (Appendix I). Optimization also stops the moment every active gradient falls below threshold, so Neff is a ceiling rather than a cost. Because gradient magnitudes differ substantially between backbones, τk is calibrated per backbone and does not transfer; Sec. 4 reports the values used. The same reasoning selects which scales to steer. Intervention matters most while layout is still being established and less once generation moves into fine detail (Sec. 1), a reading supported indepen-dently by perturbation analyses of VAR sampling, which find that reseeding a coarse scale changes the final image’s structure while reseeding a fine one alters only local detail Tang et al. (2025). We therefore steer only the coarsest non-degenerate scales, beginning at the 4×4 grid; the 1×1 and 2×2
+
+scales are excluded, as their one and four spatial positions admit no meaningful attention distribution over the image plane. Sec. 4 shows gains saturate once roughly three scales are steered. 3.4 COMPOSITIONAL OBJECTIVES 
+
+From prompt to attention. A prompt is compositionally satisfied only when every constraint it asserts holds at once: each entity present in the number stated ( Lentity ), each attribute on the entity it modifies ( Lbind ), each relation holding between the right pair ( Lrel ). All three are recoverable from the text alone, so a parse yields layout constraints we can enforce before any pixel exists. Cross-attention is where that layout lives inside the model: column t of A(s) scores which spatial positions attend to text token t, so a claim about where an entity belongs is a claim about where its attention mass belongs. Each constraint therefore becomes a differentiable function of A(s), and steering the map steers the layout. 
+
+General form. The parser returns one set per constraint kind: the entities carrying an explicit count, E; the attribute–noun pairs, P; and the ordered relation triples r = ( X, ρ, Y ), R. The relation phrase ρ assigns each r to exactly one disjoint subset: R2D , resolved in the image plane ( left of ,
+
+above ); Rdep , resolved along the viewing axis ( behind ); or Rns , non-spatial ( holding , wearing ). Then 
+
+Lcompos = Lentity (E) + Lbind (P) + Lrel (R), Lrel = L2D + Ldepth 
+
+| {z }
+
+> Lspatial
+
++Lns , (7) where an empty set contributes nothing. Lentity , L2D , and Ldepth decompose as means over the instances in their set; Lbind does not, since the contrastive form below couples every pair in P
+
+through one normalization. We group L2D and Ldepth under Lspatial because both constrain the placement of an ordered pair and differ only in the axis on which it is resolved; they correspond to the 2D and 3D Spatial categories of Sec. 4. Eq. 7 is agnostic to how each term is operationalized: any differentiable function of A(s) can substitute for the definitions below without altering Secs. 3.2–3.3, which Appendix J verifies by swapping each term for alternatives from the diffusion literature. For a group T of text-token indices – the tokens of one word or phrase – its attention map at scale s is 
+
+m(s) 
+
+> T
+
+= 1 
+
+> |T|
+
+P 
+
+> t∈T
+
+A(s):,t ∈ RLs , the mean of the columns T indexes, scoring the Ls spatial positions of scale s. Since an objective is evaluated at one scale at a time we drop the superscript, writing 
+
+mT , and mX when T is a named entity’s token group. Our reported configuration instantiates 
+
+Lbind , L2D , and Ldepth , all defined below. 5Preprint 
+
+Borrowed objectives. Some terms are taken from training-free methods for diffusion and used as published, which is itself part of the claim: they enter Eq. 7 unmodified, so nothing in Secs. 3.2–3.3 is specialized to them. Lbind is the multi-positive contrastive objective of CONFORM Meral et al. (2024), which treats an attribute and its own noun as positives against every other pair, pulling each attribute’s attention toward its noun’s and away from competing objects’ without requiring the maps to coincide. L2D is the probability-of-superiority objective of PSG Rezaei et al. (2025): it reads two maps as distributions over grid positions and drives the probability that one exceeds the other along the relation’s axis toward the asserted arrangement. We claim neither. Appendix G states them in full, and Appendix J places both among the strongest of the alternatives we tried. 
+
+Depth ordering. “B behind A” asserts an ordering along the viewing axis, but cross-attention is a distribution over the image plane with no depth channel, so the constraint has no direct expression in the signal we optimize. Existing objectives leave this gap open: binding and planar terms constrain image-plane position only, PSG reports that cross-attention does not expose the viewing axis and so handles 3D relations by search over completed images scored by an external depth model, and LaRender Zhan & Liu (2025) controls occlusion by latent volumetric rendering but requires user-supplied regions and an occlusion order. Depth ordering does, however, leave one signature in the image plane: occlusion. If B lies behind A
+
+and the two overlap, A’s silhouette interrupts B, so the arc of B’s boundary facing A wraps around 
+
+A instead of closing on empty space. Our objective therefore does not measure depth at all. It tests for that geometric footprint, realizing the asserted ordering by inducing the occluding configuration – the one arrangement in which a planar map can witness a relation along the viewing axis. The viewing axis is not directly exposed in cross-attention, as PSG reports; the geometry occlusion leaves behind is, and that is what we steer. Two terms implement it, both ours, on the sharpened distributions pX = softmax( γ mX ) of Appendix G over normalized coordinates ci ∈ [0 , 1] 2.
+
+Separation. Occlusion is only meaningful between two distinct objects, and A-STAR Agarwal et al. (2023) observes that concepts whose attention overlaps collapse into one malformed subject. We take that principle but not its soft-IoU form, whose gradient at coarse scales merely redistributes activations across as few as 16 tokens. Summarizing each object by an attention-weighted centroid 
+
+μXa and spread ϱXa per axis a, we penalize the intersection of their extents: 
+
+Lsep = Y
+
+> a∈{ x,y }
+
+h
+
+min 
+
+> X
+
+ μXa +ϱXa
+
+ − max 
+
+> X
+
+ μXa −ϱXa
+
+i
+
+> +
+
+. (8) Its gradient therefore translates and rescales an object as a whole. 
+
+Boundary Containment (BC). Separation cannot tell “behind” from “beside”; BC supplies the or-dering. We extract a soft perimeter of B, select the arc facing A, and draw V differentiable virtual points ˜xv from it (Appendix B). By the wrapping property above, under genuine occlusion those points fall inside A; under mere adjacency they fall in empty space. Evaluating A’s attention density 
+
+dA at each with a Gaussian kernel and thresholding at δ, set relative to A’s peak, 
+
+Lbc = 1
+
+V
+
+> V
+
+X
+
+> v=1
+
+δ − dA(˜ xv )
+
+> +
+
+. (9) Together, Ldepth = λsep Lsep + λbc Lbc needs no depth estimator, no search, and no layout input, and Appendix J finds it the strongest of five depth objectives on the category that isolates it. 
+
+# 4 EXPERIMENTS 
+
+4.1 SETUP 
+
+Models and benchmarks. We evaluate VISTA on Infinity-2B and Infinity-8B Han et al. (2025a), using each model’s default 13-scale schedule, and report results on T2I-CompBench Huang et al. (2023) and GenEval Ghosh et al. (2023). All numbers are averaged over four seeds: prior-system rows are taken from prior benchmarking work Shahabadi et al. (2025), and our own runs are re-ported per seed in Appendix C together with their standard deviations. Every Infinity row we report, baseline and VISTA alike, runs with ScaleKV Li et al. (2026) cache compression enabled; we write 
+
+Infinity-2B and Infinity-8B for those configurations throughout and note explicitly where a number refers to the backbone without compression. 6Preprint Table 1: T2I-CompBench, four seeds. Prior-system rows are from Shahabadi et al. (2025) and use no cache compression; every Infinity row does (Sec. 4.1). VISTA applies Lbind + L2D + Ldepth 
+
+over three scales; TTS-VAR is the authors’ implementation at N =1 under our setup. Numeracy and Non-Spatial (shaded) are untargeted and unchanged by construction; Avg. 6 covers the six targeted categories, Avg. 8 all eight. Bold : best per group; underline: best overall.                                                                                                      
+
+> Model Color Texture Shape 2D 3D Cmplx Num. Non-S. Avg. 6Avg. 8
+> SDXL 0.593 0.519 0.466 0.215 0.341 0.319 0.504 0.311 0.409 0.409 PixArt-α0.407 0.444 0.367 0.202 0.350 0.324 0.506 0.308 0.349 0.363 Flux-Dev 0.746 0.644 0.482 0.273 0.393 0.363 0.613 0.309 0.483 0.478 Flux-Schnell 0.725 0.683 0.559 0.271 0.373 0.364 0.604 0.312 0.496 0.486 Infinity-2B 0.749 0.632 0.475 0.234 0.405 0.384 0.572 0.310 0.480 0.470 + TTS-VAR ( N=1 )0.773 0.690 0.543 0.269 0.424 0.391 0.596 0.311 0.515 0.500 + VISTA 0.832 0.750 0.574 0.442 0.452 0.398 0.572 0.310 0.575 0.541
+> Infinity-8B 0.827 0.753 0.604 0.365 0.414 0.397 0.612 0.316 0.560 0.536 + VISTA 0.858 0.798 0.658 0.415 0.424 0.403 0.612 0.316 0.593 0.560
+
+Baselines and configuration. Since VISTA is applied on top of ScaleKV, the compressed back-bone is the reference that isolates its contribution; Appendix C reports the uncompressed backbone, where no category moves by more than 0.008 and the targeted average is unchanged ( 0.481 against 
+
+0.480 ) – an order of magnitude below VISTA’s gains, so compression is not a confound. Unless noted otherwise, VISTA activates Lbind +L2D +Ldepth and steers the three coarsest non-degenerate scales ( 4×4, 6×6, 8×8) with Nmax = 5 steps, a choice Sec. 4.4 motivates. Two hyperparameters are set per backbone, the base step size lr base and the gradient threshold τk, both by brief manual exploration on a small prompt subset rather than by grid search; Appendix E gives the values. No numeracy or non-spatial objective is active: Lentity is expressible in the framework of Sec. 3.4 but set to zero throughout, and we give no instantiation of Lns (Sec. 5). VISTA therefore leaves those two categories at their baseline values by construction; we report them unchanged and exclude them when averaging. 4.2 MAIN RESULTS 
+
+Table 1 reports T2I-CompBench scores for both backbones, alongside four diffusion and diffusion-transformer systems taken from prior benchmarking work Shahabadi et al. (2025) to situate the results within the current landscape. 
+
+VISTA improves every targeted category on both backbones. On Infinity-2B, the largest gain is on 2D Spatial ( +84 .2% ), consistent with L2D optimizing directly for the quantity the benchmark’s spatial metric approximates. Color, Texture, and Shape improve by 12 –20% , 3D Spatial by 11 .3% ,and Complex by 4.2% ; the smaller Complex gain is expected, since Complex prompts combine several phenomena at once and no single objective targets them jointly. Averaged over the six targeted categories, VISTA raises the mean score by 19 .5% on 2B and 5.9% on 8B. The smaller relative gain on 8B follows from its stronger starting point and correspondingly less headroom. The standard deviation of the targeted average is 0.002 on both backbones, one to two orders of magnitude below these gains (Appendix C). 
+
+Per-category results isolate individual objectives. Each T2I-CompBench category exercises one constraint type, and VISTA activates an objective only when the parser extracts a matching con-straint, so the per-category columns of Table 1 act as a per-objective ablation: Color, Texture, and Shape isolate Lbind , 2D Spatial isolates L2D , and 3D Spatial isolates Ldepth . GenEval gives the complementary view, since its prompts more often combine binding and positional constraints in one scene. 
+
+A 2B model competitive with a 4 × larger one. VISTA on Infinity-2B surpasses Infinity-8B on four of the six targeted categories – Color ( 0.832 vs. 0.827 ), 2D Spatial ( 0.442 vs. 0.365 , by a wide margin), 3D Spatial, and Complex – and on the targeted-category average ( 0.575 vs. 0.560 ). It falls short only on Texture and Shape. This indicates that a substantial part of the compositional gap 7Preprint Table 2: GenEval, four seeds. All rows run with ScaleKV and VISTA rows use the configuration of Table 1. Shaded categories are untargeted and unchanged by construction; Overall averages all six. 
+
+Bold : best per group; underline: best overall.                                    
+
+> Model Color Attr. Pos. Single Two Count Overall Infinity-2B 0.827 0.560 0.250 0.994 0.808 0.591 0.672 + VISTA 0.809 0.645 0.745 0.994 0.808 0.591 0.765
+> Infinity-8B 0.886 0.765 0.578 1.000 0.937 0.778 0.824 + VISTA 0.907 0.788 0.825 1.000 0.937 0.778 0.873
+
+attributed to model scale is recoverable at test time, without further training or the larger model’s inference cost. 4.3 GEN EVAL 
+
+To confirm the improvements are not specific to one benchmark, we evaluate the same configurations on GenEval (Table 2). The pattern matches T2I-CompBench. Position improves most dramatically – +198% on 2B (0.250 → 0.745 ) and +42 .7% on 8B – raising the overall score by 12 .5% and 5.9% respectively. As on T2I-CompBench, VISTA on 2B surpasses 8B on position ( 0.745 vs. 0.578 ). Attribute binding improves on both backbones. Color decreases slightly on 2B ( 0.827 → 0.809 ), an effect absent on 8B and on T2I-CompBench, where 2B color improves by 12% ; we attribute it to GenEval’s color metric scoring single-object attribution rather than multi-object binding. 
+
+Comparison to search-based test-time scaling. We run TTS-VAR Chen et al. (2025b), the closest existing test-time method for next-scale VAR, from the authors’ implementation at N =1 under our setup; Appendix F gives the cost comparison. It selects among sampled trajectories, so it helps in proportion to how often the backbone already produces a satisfying one, whereas VISTA moves the trajectory itself. TTS-VAR raises the targeted average by 7.3% and VISTA by 19 .8% , with VISTA ahead in every targeted category, and the margin tracks how systematically the backbone fails: on 2D Spatial the baseline is 0.234 and selection reaches only 0.269 against steering’s 0.442 , while on Color, already at 0.749 , the margin narrows ( 0.773 against 0.832 ). Selection cannot return what the model rarely samples. It does win where failures are stochastic, improving the Numeracy we leave untargeted from 0.572 to 0.596 . The costs differ in kind. TTS-VAR begins with 8N trajectories at the coarsest scales and narrows to N at the finest, decodes the surviving batch out of latent space at every clustering and resampling step, four in their default schedule, and keeps two pretrained networks resident alongside the backbone – DINOv2 for the clustering features and ImageReward for the selection scores – so runtime, peak memory, and model footprint all grow with N . VISTA loads no model beyond the backbone and its text encoder, never leaves latent space, and steers a single trajectory. The two are orthogonal rather than competing – VISTA could steer the coarse scales inside a search framework, where a pixel-space verifier cannot score – which we leave to future work. 4.4 QUALITY , F IDELITY , AND COST 
+
+The number of steered scales and the step budget Nmax are exposed to the user as a quality–cost trade-off. Table 3 varies the former along three axes at once: compositional score, image fidelity, and generation time. Compositional quality saturates on both backbones, 8B peaking at three scales, while cost jumps at the fourth. Fidelity moves in two directions at once: ImageReward Xu et al. (2023) rises sharply and holds flat to three scales before declining, while the LAION aesthetic score Schuhmann et al. (2022) falls monotonically, by 1.3–2.2% at the default depending on predictor version; CLIPScore Hessel et al. (2021) gains 1.1% , and all three are significant at p < 10 −3 over the 600 paired prompts (Ap-pendix H). They diverge because steering displaces the representation further from the backbone’s own distribution: a judge scoring an image against its prompt is compensated up to three scales, one scoring it alone is not. Three scales is where all three axes agree and is our default; Nmax =1 retains 8Preprint Table 3: The steered-scale knob, measured three ways: targeted-category average on T2I-CompBench, fidelity on 600 paired prompts by two judges VISTA never optimizes (one conditioned on the prompt, one not), and per-image time on Infinity-2B. Scales are added coarse-to-fine from 
+
+4×4; the shaded row is our default.                                    
+
+> Steered scales Targ. 2B ↑Targ. 8B ↑ImageReward ↑Aesthetic ↑Time (2B) ↓
+> None 0.480 0.560 1.025 5.734 3.09 s 10.546 0.579 1.234 5.683 4.58 s 20.567 0.587 1.234 5.615 5.28 s 30.575 0.593 1.230 5.609 5.96 s 40.579 0.586 1.204 5.608 13.13 s
+
+much of the gain at 3.77 s. The balance is favourable – a 20% gain on a model trained to predict human preference, the same reward model TTS-VAR selects against, for a 2% cost on a judge that never sees the prompt. Appendix E reports the full cost grid. 4.5 QUALITATIVE RESULTS 
+
+Fig. 1 (bottom right) shows how the correction propagates: the flower and crow maps are nearly coincident under base generation, separate at the steered scales, and stay distinct through the un-steered fine scales that follow. This is the mechanism behind our scale-selection design (Sec. 3.3): correcting the coarse layout suffices, because later scales inherit and refine it rather than revisiting it. Appendix D shows further prompts spanning binding, spatial relations, and their combination. 
+
+# 5 LIMITATIONS 
+
+Cost and scope. VISTA buys compositional accuracy with inference time, and Sec. 4.4 shows the trade-off is adjustable rather than fixed. Our experiments cover two backbones from one model family. The mechanisms of Secs. 3.2–3.3 are built around properties next-scale VAR models share in general – a freshly derived continuous input at each scale, a cache carried forward, and a discrete sampling step closing each scale – but we have verified them only on Infinity. 
+
+Objective coverage and parsing. We cover attribute binding, planar relations, and depth ordering. Numeracy fits the same framework but is disabled here, and we offer no objective for non-spatial relations, so both stay at their baseline values. Complex prompts gain least for a related reason: they assert several constraints at once, while every objective we define treats one in isolation. Pairs and relations come from a dependency parse, which recovers every instance in both benchmarks’ templated prompts and in the longer free-form prompts we tried, though we did not evaluate it systematically beyond them. 
+
+# 6 CONCLUSION 
+
+We presented VISTA, a test-time optimization framework for compositional alignment in next-scale visual autoregressive generation. VISTA separates general-purpose optimization mechanisms from a pluggable registry of compositional objectives that use them without modification. Instantiated for attribute binding, planar relations, and depth ordering, it improves every targeted category on two benchmarks and two backbones, and lets a 2B-parameter model surpass a model four times its size on most targeted categories and on their average. The broader claim is that the test-time alignment paradigm developed for diffusion is not architecture-bound. Its specific mechanisms do not transfer, but its premise – that a frozen model’s own cross-attention is a differentiable, training-free handle on compositional structure – does, once the instabilities particular to stateful, multi-scale, discrete-token generation are addressed. Existing test-time methods for VAR select among sampled trajectories, which helps in proportion to how often the backbone already produces a satisfying one; steering the trajectory itself carries no such bound. Natural next steps are other VAR backbones and objectives that reason jointly across com-positional phenomena, where our gains are currently weakest. 9Preprint 
+
+# REFERENCES 
+
+Aishwarya Agarwal, Srikrishna Karanam, KJ Joseph, Apoorv Saxena, Koustava Goswami, and Bal-aji Vasan Srinivasan. A-star: Test-time attention segregation and retention for text-to-image syn-thesis. In 2023 IEEE/CVF International Conference on Computer Vision (ICCV) , pp. 2283–2293. IEEE, 2023. Hila Chefer, Yuval Alaluf, Yael Vinker, Lior Wolf, and Daniel Cohen-Or. Attend-and-excite: Attention-based semantic guidance for text-to-image diffusion models. ACM transactions on Graphics (TOG) , 42(4):1–10, 2023. Harold Haodong Chen, Xianfeng Wu, Wen-Jie Shu, Rongjin Guo, Disen Lan, Harry Yang, and Ying-Cong Chen. Go with your gut: Scaling confidence for autoregressive image generation. 
+
+arXiv preprint arXiv:2509.26376 , 2025a. Zhekai Chen, Ruihang Chu, Yukang Chen, Shiwei Zhang, Yujie Wei, Yingya Zhang, and Xihui Liu. Tts-var: A test-time scaling framework for visual auto-regressive generation. arXiv preprint arXiv:2507.18537 , 2025b. Patrick Esser, Robin Rombach, and Bjorn Ommer. Taming transformers for high-resolution image synthesis. In Proceedings of the IEEE/CVF conference on computer vision and pattern recogni-tion , pp. 12873–12883, 2021. Dhruba Ghosh, Hannaneh Hajishirzi, and Ludwig Schmidt. Geneval: An object-focused framework for evaluating text-to-image alignment. Advances in Neural Information Processing Systems , 36: 52132–52152, 2023. Jian Han, Jinlai Liu, Yi Jiang, Bin Yan, Yuqi Zhang, Zehuan Yuan, Bingyue Peng, and Xiaobing Liu. Infinity ∞: Scaling bitwise autoregressive modeling for high-resolution image synthesis. In 2025 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pp. 15733–15744. IEEE, 2025a. Woojung Han, Yeonkyung Lee, Chanyoung Kim, Kwanghyun Park, and Seong Jae Hwang. Spatial transport optimization by repositioning attention map for training-free text-to-image synthesis. In 
+
+2025 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pp. 18401– 18410. IEEE, 2025b. Amir Hertz, Ron Mokady, Jay Tenenbaum, Kfir Aberman, Yael Pritch, and Daniel Cohen-Or. Prompt-to-prompt image editing with cross attention control. arXiv preprint arXiv:2208.01626 ,2022. Jack Hessel, Ari Holtzman, Maxwell Forbes, Ronan Le Bras, and Yejin Choi. Clipscore: Areference-free evaluation metric for image captioning. In Proceedings of the 2021 conference on empirical methods in natural language processing , pp. 7514–7528, 2021. Kaiyi Huang, Kaiyue Sun, Enze Xie, Zhenguo Li, and Xihui Liu. T2i-compbench: A compre-hensive benchmark for open-world compositional text-to-image generation. Advances in Neural Information Processing Systems , 36:78723–78747, 2023. Kunjun Li, Zigeng Chen, Cheng-Yen Yang, and Jenq-Neng Hwang. Memory-efficient visual au-toregressive modeling with scale-aware kv cache compression. Advances in Neural Information Processing Systems , 38:13736–13761, 2026. Yumeng Li, Margret Keuper, Dan Zhang, and Anna Khoreva. Divide & bind your attention for improved generative semantic nursing. arXiv preprint arXiv:2307.10864 , 2023. Tuna Han Salih Meral, Enis Simsar, Federico Tombari, and Pinar Yanardag. Conform: Contrast is all you need for high-fidelity text-to-image diffusion models. In 2024 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pp. 9005–9014. IEEE, 2024. Royi Rassin, Eran Hirsch, Daniel Glickman, Shauli Ravfogel, Yoav Goldberg, and Gal Chechik. Linguistic binding in diffusion models: Enhancing attribute correspondence through attention map alignment. Advances in Neural Information Processing Systems , 36:3536–3559, 2023. 10 Preprint Parham Rezaei, Arash Marioriyad, Mahdieh Soleymani Baghshah, and Mohammad Hossein Ro-hban. Why settle for mid: A probabilistic viewpoint to spatial relationship alignment in text-to-image models. arXiv preprint arXiv:2506.23418 , 2025. Robin Rombach, Andreas Blattmann, Dominik Lorenz, Patrick Esser, and Bj¨ orn Ommer. High-resolution image synthesis with latent diffusion models. In 2022 IEEE/CVF conference on com-puter vision and pattern recognition (CVPR) , pp. 10674–10685. ieee, 2022. Christoph Schuhmann, Romain Beaumont, Richard Vencu, Cade Gordon, Ross Wightman, Mehdi Cherti, Theo Coombes, Aarush Katta, Clayton Mullis, Mitchell Wortsman, et al. Laion-5b: An open large-scale dataset for training next generation image-text models. Advances in neural in-formation processing systems , 35:25278–25294, 2022. Hossein Shahabadi, Niki Sepasian, Arash Marioriyad, Ali Sharifi-Zarchi, and Mahdieh Soleymani Baghshah. Infinity and beyond: Compositional alignment in var and diffusion t2i models. arXiv preprint arXiv:2512.11542 , 2025. Weidong Tang, Xinyan Wan, Siyu Li, and Xiumei Wang. Inference-time scaling for visual au-toregressive modeling by searching representative samples. In Chinese Conference on Pattern Recognition and Computer Vision (PRCV) , pp. 406–419. Springer, 2025. Keyu Tian, Yi Jiang, Zehuan Yuan, Bingyue Peng, and Liwei Wang. Visual autoregressive modeling: Scalable image generation via next-scale prediction. Advances in neural information processing systems , 37:84839–84865, 2024. Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez, Łukasz Kaiser, and Illia Polosukhin. Attention is all you need. Advances in neural informa-tion processing systems , 30, 2017. Jiazheng Xu, Xiao Liu, Yuchen Wu, Yuxuan Tong, Qinkai Li, Ming Ding, Jie Tang, and Yuxiao Dong. Imagereward: Learning and evaluating human preferences for text-to-image generation. 
+
+Advances in Neural Information Processing Systems , 36:15903–15935, 2023. Xiaohang Zhan and Dingming Liu. Larender: Training-free occlusion control in image generation via latent rendering. In 2025 IEEE/CVF International Conference on Computer Vision (ICCV) ,pp. 19679–19688. IEEE, 2025. 
+
+# A RELATED WORK 
+
+Sec. 1 sketches the two lines of work VISTA sits between: gradient-based test-time alignment for diffusion, and search-based test-time scaling for autoregressive generation. This appendix gives the fuller picture, including the specific methods our objectives build on. 
+
+Test-time semantic alignment in diffusion models. A substantial line of work improves com-positional faithfulness in diffusion models at inference time, without fine-tuning, by treating cross-attention as an interpretable, controllable interface. Attend-and-Excite Chefer et al. (2023) optimizes the diffusion latent during sampling to strengthen attention on neglected subject tokens, establishing the generative-semantic-nursing formulation that most subsequent work follows. SynGen Rassin et al. (2023) adds a syntactic parse of the prompt, encouraging an attribute’s attention to overlap with its bound noun and diverge from unrelated nouns. CONFORM Meral et al. (2024) reformu-lates binding as a multi-positive contrastive objective over attention-map embeddings, treating an attribute and its noun as positives and all other pairs as negatives; we adopt this formulation for our binding objective (Sec. 3.4). Divide&Bind Li et al. (2023) adds an attendance term for multi-instance prompts, and A-STAR Agarwal et al. (2023) reduces the intersection-over-union between concept attention maps so that each concept occupies a distinct region, a segregation principle we build on in the separation term of our depth objective. For spatial relations specifically, PSG Rezaei et al. (2025) proposes a Probability-of-Superiority reward over attention-derived spatial distribu-tions, whose gradient-based formulation we adapt as our spatial objective, and Han et al. Han et al. (2025b) instead reposition attention mass by optimal transport. 11 Preprint These methods share VISTA’s premise that a frozen model’s cross-attention exposes a differentiable, training-free handle on compositional structure. They differ from VISTA in the object being opti-mized: all are formulated for the continuous, fixed-resolution latent that diffusion updates repeatedly across denoising steps, whereas next-scale VAR generation produces discrete tokens across scales of increasing resolution, with each scale’s representation freshly derived and consumed once (Sec. 2). The mechanisms of Secs. 3.2–3.3 exist to close that gap. 
+
+Test-time methods for autoregressive generation. Test-time intervention has reached VAR mod-els along a different axis. TTS-VAR Chen et al. (2025b) casts generation as a path-search problem over sampled trajectories, combining an adaptive descending batch-size schedule with clustering-based diversity search at coarse scales and resampling-based potential selection at fine scales, scored by reward functions over the multi-scale generation history. ScalingAR Chen et al. (2025a) targets next-token-prediction autoregressive image generation instead, using token-entropy signals rather than early decoding or auxiliary reward models. Both improve overall generation quality on Infinity-class backbones without training, and both are in principle complementary to VISTA: they select among trajectories the model would produce anyway, whereas VISTA modifies the trajectory itself through gradients on the intermediate representation, and requires no external scorer. Neither targets compositional constraints explicitly. Sec. 4.3 compares against TTS-VAR directly on GenEval. 
+
+Occlusion and depth ordering. A smaller body of work targets occlusion specifically. LaRen-der Zhan & Liu (2025) applies volume-rendering principles in latent space, estimating per-object transmittance from bounding boxes and cross-attention to control which object appears in front. Like VISTA it is training-free and operates through attention, but it is formulated for diffusion and depends on externally supplied layout: an occlusion graph and per-object boxes. Our depth objec-tive (Sec. 3.4) instead derives its geometry from the prompt’s parsed relations and the model’s own attention, requiring neither. 
+
+Visual autoregressive generation. VAR and Infinity, the backbone VISTA builds on, are intro-duced in Sec. 1. Prior benchmarking work Shahabadi et al. (2025) characterized Infinity’s com-positional failures against diffusion and diffusion-transformer systems, and provides the baseline numbers we report in Table 1. ScaleKV Li et al. (2026) separately addresses Infinity’s KV-cache memory cost by allocating differentiated cache budgets across layers and scales; we apply VISTA on top of it throughout, and use it in Sec. 4 to confirm that cache compression and test-time optimization compose without interference. 
+
+Compositional benchmarks. T2I-CompBench Huang et al. (2023) and GenEval Ghosh et al. (2023), both of which we evaluate on in Sec. 4, provide standardized prompts and automated met-rics for attribute binding, spatial and non-spatial relations, counting, and multi-object composition. The two differ in construction in a way we exploit in Sec. 4.2: T2I-CompBench separates con-straint types across categories, so each category exercises one objective in isolation, while GenEval’s prompts more often combine binding and positional constraints within a single scene. Both consis-tently surface the same failure modes – attribute leakage, missed objects, incorrect arrangement, miscounting – across diffusion, diffusion-transformer, and VAR architectures alike. 
+
+# B BOUNDARY CONTAINMENT : C ONSTRUCTION DETAILS 
+
+This section details the construction of the virtual points used by the boundary-containment term of Sec. 3.4. Throughout, A is the occluder, B the occluded object, pX = softmax( γ mX ) their sharpened attention distributions, and ci ∈ [0 , 1] 2 the normalized grid coordinates. 
+
+Soft perimeter. We obtain a soft perimeter map eB of the occluded object by taking the positive part of the difference between pB and a dilated copy of itself, so that interior mass cancels and boundary mass survives. The result is normalized to sum to one over the grid. 
+
+Facing selection. Occlusion constrains only the portion of B’s boundary that faces A. We there-fore weight each perimeter location by its proximity to A’s attention-weighted centroid μA,
+
+si = eB (i) exp   − ∥ ci − μA∥/κ , (10) 12 Preprint 
+
+> “a bicycle to the right of a fire hydrant” “a cat above a dog on a staircase” “a red banana and a green strawberry” “...man wearing a striped scarf sitting to the left of a young woman in a green dress...”
+> Base VISTA (Ours)
+
+Figure 2: Base and VISTA generations across spatial relations, attribute binding, and their combi-nation. Purple marks spatial relation phrases; teal marks attribute–noun binding pairs. with temperature κ. We treat μA as constant when computing si: the selection of which boundary points to test is a geometric decision, and letting gradients flow through it would allow the loss to be reduced by moving A toward B rather than by satisfying the containment constraint. 
+
+Virtual points. Let the K highest-scoring locations have coordinates ck and normalized weights 
+
+wk ∝ sk. We draw V points by sampling Dirichlet coefficients α(v) ∼ Dir( 1), reweighting by w,and renormalizing: 
+
+˜xv =
+
+> K
+
+X
+
+> k=1
+
+α(v) 
+
+> k
+
+wk
+
+P 
+
+> k′
+
+α(v) 
+
+> k′
+
+wk′
+
+ck. (11) Each ˜xv lies in the convex hull of the selected boundary, biased toward the points that face A most strongly. Sampling rather than using a fixed interpolation avoids fitting the constraint to a particular parameterization of the boundary, and the coefficients are differentiable in w, so gradients reach pB
+
+through the perimeter weights. 
+
+Containment test. We evaluate A’s attention density at each sampled point with a Gaussian kernel of bandwidth h,
+
+dA(˜ xv ) = X
+
+> i
+
+pA(i) exp   − ∥ ci − ˜xv ∥2/2h2, (12) which is smooth in both ˜xv and pA and so admits gradients to both objects. The threshold δ in Eq. 9 is set as a fixed fraction of max i pA(i) rather than as an absolute value, so the test adapts to how peaked A’s attention happens to be at a given scale. 
+
+# C PER -S EED RESULTS AND VARIANCE 
+
+Table 4 gives per-seed T2I-CompBench scores for our default configuration on both backbones. All rows in Table 1 are averaged over four seeds, prior-system rows as reported in prior work and our own rows over the four seeds listed here. 
+
+Effect of cache compression. Every Infinity row in Table 1 runs with ScaleKV enabled, since VISTA is applied on top of it. For reference, the uncompressed Infinity-2B backbone scores 0.741 /
+
+0.636 / 0.480 / 0.240 / 0.406 / 0.382 on Color, Texture, Shape, 2D Spatial, 3D Spatial, and Complex, for a targeted average of 0.481 , against 0.480 with compression. No category moves by more than 13 Preprint Table 4: Per-seed T2I-CompBench scores for the default configuration (three steered scales, 
+
+Nmax =5 ), over four seeds. Avg. is the mean over the six targeted categories.                
+
+> Model Seed Col. Tex. Shp. 2D 3D Cpx. Avg. 2B 00.826 0.750 0.568 0.454 0.455 0.395 0.575 10.823 0.755 0.579 0.432 0.447 0.400 0.573 20.848 0.746 0.576 0.439 0.453 0.399 0.577 std 0.014 0.005 0.006 0.011 0.004 0.003 0.002 8B 00.853 0.802 0.652 0.425 0.426 0.405 0.594 10.863 0.792 0.664 0.417 0.424 0.402 0.594 20.858 0.801 0.657 0.404 0.422 0.402 0.591 std 0.005 0.006 0.006 0.011 0.002 0.002 0.002
+
+0.008 in either direction, which is the same order as the seed-to-seed variation in Table 4. Compres-sion is therefore not a confound for any conclusion we draw, and the compressed backbone is the reference we use throughout. Seed variance is small relative to the effects we report. The largest per-category standard deviation in the table is 0.014 , and the standard deviation of the targeted average is 0.002 on both backbones. Across all four scale-count settings and both backbones, per-category standard deviations remain below 0.015 throughout. By comparison, VISTA’s improvements over the corresponding baseline range from 0.006 on Complex to 0.208 on 2D Spatial, and the targeted-average gain is 0.095 on 2B and 0.033 on 8B: between one and two orders of magnitude larger than the seed noise. The exception is Complex, where the 2B gain ( 0.014 ) is only a few standard deviations above the noise floor, consistent with our observation that no single objective targets multi-constraint prompts directly. 
+
+# D ADDITIONAL QUALITATIVE RESULTS 
+
+On the combined binding-and-spatial prompt, Base fails on both axes at once: the man is placed to the right of the woman rather than the left, and the striped scarf and green garment leak onto both subjects rather than binding to their intended referents. VISTA corrects both together, consistent with the gradient-combination mechanism of Sec. 3.3: binding and spatial objectives are optimized within the same per-token update, so a prompt violating both is corrected on both rather than trading one off against the other. This prompt is also longer and more naturalistic than T2I-CompBench’s templated phrasing, indicating that VISTA’s gains are not confined to short, template-style prompts. On “a cat above a dog on a staircase,” Base additionally exhibits partial merging between the two subjects, with blurred and overlapping boundaries, which is visibly reduced under VISTA. This is the failure mode our separation term (Sec. 3.4) is designed to prevent, although here it arises from the spatial objective alone, since the prompt asserts no depth relation. We note it as a qualitative observation, since we do not measure image fidelity systematically. 
+
+# E INFERENCE OVERHEAD : F ULL BREAKDOWN 
+
+Table 5 reports per-image generation time on Infinity-2B over every combination of step budget, steered-scale count, and active objective subset. All runs use the same 20 prompts. The unmodi-fied baseline is 3.09 s (median over seven repetitions of the same prompt set; individual repetitions ranged from 3.03 to 5.60 s). Peak memory is 10 .95 GB for the baseline and for all configurations up to three steered scales, rising to 15 .1–15 .3 GB at four scales. 
+
+Objectives compose sub-additively. At our default setting of three scales and Nmax =5 , each objective costs a similar amount in isolation: +1 .88 s for binding, +1 .78 s for spatial, and +1 .85 sfor depth. If these costs stacked, running all three would add +5 .51 s; the measured cost is +2 .87 s, roughly half. This follows from Sec. 3.3: all active objectives are evaluated from a single shared forward and backward pass per optimization step rather than sequentially, so the marginal cost of an 14 Preprint Table 5: Per-image generation time (seconds) on Infinity-2B. B, S, and D denote the binding, spatial, and depth objectives. Baseline is 3.09 s.                                                                  
+
+> Scales BSDB+S B+D S+D B+S+D
+> Nmax = 1
+> 13.60 3.36 3.38 3.47 3.47 3.45 3.50 23.47 3.48 3.48 3.61 3.60 3.56 3.63 33.57 3.56 3.56 3.74 3.74 3.68 3.77 44.95 4.94 4.95 5.82 5.81 5.51 5.93
+> Nmax = 5
+> 14.10 4.09 4.10 4.53 4.52 4.37 4.58 24.54 4.52 4.54 5.20 5.17 4.95 5.28 34.97 4.87 4.94 5.87 5.84 5.38 5.96 410.90 6.33 6.38 14.66 14.36 7.26 13.13
+
+additional objective is far below its standalone cost. The same pattern holds at every scale count and step budget in the table. 
+
+Cost at four scales. The jump at four steered scales, where the 12 ×12 grid enters the optimization, is disproportionate and dominated by the binding objective ( 10 .90 s alone at Nmax =5 , versus 6.33 sfor spatial and 6.38 s for depth). Timings in this row are also less stable than elsewhere: B+S exceeds B+S+D, which should not occur if costs were strictly additive in the number of active objectives, and we attribute the discrepancy to measurement variance under memory pressure at this configuration. Since our reported results use three scales, this row informs the quality–cost trade-off of Sec. 4.4 but does not affect any reported score. 
+
+Memory on the larger backbone. The same pattern holds on Infinity-8B, where peak memory is 
+
+22 .7 GB for up to three steered scales and rises to 36 .1 GB at four. The relative jump is larger than on 2B, reinforcing three scales as the sensible default on both backbones. 
+
+Hyperparameter values. Two values are set per backbone. The base step size is lr base = 0 .005 
+
+on Infinity-2B and 0.045 on Infinity-8B; the gradient threshold is τk = 10 −3 on 2B and 10 −12 on 8B, the latter low enough that gating and the budget reduction of Eq. 6 are effectively inactive and every steered scale runs the full Nmax . The nine-order-of-magnitude gap is not a tuning artefact: gradient magnitudes at a given scale differ by roughly that much between the two backbones, so a threshold calibrated on one silently disables optimization on the other. Both values were found by brief manual exploration on a small prompt subset; we did not grid-search either, and we expect a tuned τk on 8B would recover part of the cost reported in Table 5. 
+
+# F DETAILED COMPARISON WITH TTS-VAR 
+
+TTS-VAR Chen et al. (2025b) and VISTA are the only two test-time methods we are aware of for next-scale VAR text-to-image generation, and they take opposite approaches: TTS-VAR searches over sampled trajectories and selects among them, while VISTA modifies a single trajectory. This appendix expands the comparison of Sec. 4.3. 
+
+TTS-VAR in brief. TTS-VAR treats generation as a path-search problem. It samples a batch of trajectories under a descending batch-size schedule – their published setting keeps 8N candidates at the coarsest scales and narrows to 1N at the finest – and prunes the batch twice. At scales 2
+
+and 5 it decodes the partial generations to pixels, embeds them with DINOv2, and applies k-means clustering to retain structurally dissimilar candidates, preserving diversity rather than selecting for quality. At scales 6 and 9 it decodes again, scores each candidate with ImageReward, and resamples from a multinomial over the resulting potential scores at temperature λ = 10 . The pruning is the whole mechanism: every image TTS-VAR can return is one the unmodified backbone would have produced on its own. 15 Preprint 
+
+Our run. We evaluate TTS-VAR from the authors’ public implementation at N =1 , on our own T2I-CompBench prompts, with the same Infinity-2B backbone, scorers, and seeds as every other row of Table 1. Reporting it this way removes the comparability problems that arise from quoting their published table: their paper scores Non-Spatial and Complex with a chain-of-thought captioner where the baselines we build on Shahabadi et al. (2025) use the CLIP-based and 3-in-1 variants, and its Infinity-2B baseline differs from ours in several categories. Under a common setup none of that applies, and the rows in Table 1 can be read directly against one another. N =1 is the smallest configuration the method defines, keeping the widest batch to 8 trajectories at the 1×1 scale and 1
+
+at the finest; larger N improves their scores further at proportionally greater cost. 
+
+Systematic versus stochastic failure. The split in Table 1 is consistent across categories. VISTA leads by the widest margin on 2D Spatial, where the backbone scores near the bottom of its range: selection reaches 0.269 against steering’s 0.442 , a gain of 15% against 89% over the same baseline. TTS-VAR’s own limitations note that positional relations remain its weakest item, and their pub-lished GenEval figures show the same shape, Position moving only 0.202 → 0.217 even at N =8 .We read this as a property of selection rather than of their particular implementation. Drawing N
+
+trajectories and keeping the best one helps in proportion to how often a satisfying trajectory appears in the batch; when the backbone places two objects in the asserted arrangement only occasionally, increasing N raises the chance of finding one, but when it almost never does, the batch contains nothing worth selecting. Steering does not depend on this, since it moves probability mass toward configurations sampling would rarely produce. The converse is visible in the untargeted columns: on Numeracy, where the backbone succeeds a reasonable fraction of the time and fails for reasons that vary across seeds, TTS-VAR gains 0.572 → 0.596 while VISTA, having no cardinality objective active, leaves it unchanged. 
+
+Where each method can intervene. The two methods are also constrained to different parts of the schedule, which we think is the more fundamental difference. TTS-VAR’s verifier is a reward model applied to a decoded intermediate image, and their analysis of score–outcome consistency finds that scores before roughly scale 6 do not predict final quality; their selection is therefore applied at scales 6 and 9, and at coarse scales they can only preserve diversity by clustering, which they report yields moderate gains on its own. Our scale ablation (Sec. 4.4) places the commitment of compositional structure earlier, at 4×4 to 8×8, and steering later scales yields little. VISTA can act there because cross-attention is a prompt-referenced signal that exists inside the transformer and needs no decodable image, so it is informative precisely where a pixel-space reward model is not. The two mechanisms are therefore orthogonal rather than competing, and compose in the obvious way: VISTA can be applied to each trajectory inside a search framework, steering the coarse scales that a pixel-space verifier cannot score while selection continues to operate at the fine scales where it does work. Since steering raises the quality of every candidate the search sees, rather than changing how candidates are ranked, we would expect the combination to improve on either method alone, but we have not evaluated it and make no claim beyond the compatibility of the two mechanisms. 
+
+Cost. The two methods scale differently in cost, and the difference is structural rather than a matter of tuning. TTS-VAR pays on three axes at once. Its runtime is multiplicative in the sample count, since every retained candidate is a full forward pass through the backbone at every scale. Its peak memory grows with the coarse-scale batch, which is where the schedule is widest. And it requires two pretrained networks resident alongside the backbone – DINOv2 and ImageReward – plus four full decoder passes per image to produce the pixels those networks consume, none of which the backbone needs for generation. VISTA has none of these. It generates one trajectory, so memory is set by the backbone rather than by a batch; it never decodes to pixels during optimization, reading cross-attention from inside the transformer instead; and it loads no model beyond the backbone and its text encoder. Its overhead is additive in the number of optimization steps, and at our default setting amounts to +93% wall-clock time with peak memory unchanged from the unmodified baseline (10 .95 GB on 2B; Appendix E). A direct wall-clock comparison is not available, since TTS-VAR reports relative TFLOPs curves rather than absolute timings and we did not re-run their code. We ran TTS-VAR on Infinity-2B only, matching the backbone their implementation targets, whereas Table 1 reports VISTA on both 2B and 8B. 16 Preprint Table 6: Provenance of each objective term. “Principle only” means we adopt the motivating obser-vation but not the loss function, which we state explicitly in the relevant paragraph of Sec. 3.4.                        
+
+> Term Eq. Taken from prior work Ours
+> Lbind 13 Multi-positive contrastive form of CON-FORM Meral et al. (2024) Application to VAR scales
+> L2D 14 PoS objective of PSG Rezaei et al. (2025), un-changed Sharpening; inversion de-tail
+> Lsep 8Segregation principle of A-STAR Agarwal et al. (2023) only Extent-based functional form
+> Lbc 9—Entire term
+> Lentity ——Not instantiated
+> Lns ——Not instantiated
+
+# G BORROWED OBJECTIVES AND PROVENANCE 
+
+This appendix gives the two objectives that VISTA takes from prior work in full, and then states for each term of Eq. 7 what is borrowed and what is ours. Both definitions below use the attention map 
+
+mT of a text-token group T as defined in Sec. 3.4. 
+
+Attribute binding. Following prior work on attention-based binding Rassin et al. (2023); Meral et al. (2024), we write an attribute–noun pair as p = ( a, n ) ∈ P , with a the token group of the modifier and n that of the noun it modifies: “a red banana” gives p = ( red , banana ). Each group contributes one embedding: for T ∈ { a, n } we reshape mT to the hs × ws grid, convolve with a fixed 3×3 Gaussian kernel G (σ = 0 .5) to suppress isolated single-token responses, flatten, and 
+
+ℓ2-normalize, giving uT ∝ vec( G ∗ mT ) with ∥uT ∥2 = 1 . The M = 2 |P| resulting embeddings form one multi-positive contrastive problem adapted from CONFORM Meral et al. (2024): for embedding i from pair p, the positive set P (i) holds the other embedding of p, and all embeddings of other pairs are negatives. With cosine similarity sim ij = u⊤ 
+
+> i
+
+uj /η at temperature η = 0 .07 ,
+
+Lbind (P) = − 1
+
+M
+
+> M
+
+X
+
+> i=1
+
+1
+
+|P (i)|
+
+X 
+
+> j∈P(i)
+
+log exp(sim ij )
+
+P  
+
+> j′̸=i
+
+exp(sim ij ′ ) . (13) This is one term over all of P, not a sum of per-pair losses: the denominator normalizes over every competing pair, which is what pulls each attribute’s support toward its own noun’s and away from other objects’ without requiring the maps to overlap exactly. 
+
+Planar relations. For a relation r = ( X, ρ, Y ) ∈ R 2D resolved along image-plane axis a (e.g. left of , above ), we adopt the probability-of-superiority objective of PSG Rezaei et al. (2025) unchanged. Let Z range over the two nouns of the relation, X and Y . Since PoS compares two distributions, each object’s attention map must first be read as one: pZ = softmax( γ mZ ) turns the non-negative but unnormalized mZ into a distribution over the Ls grid positions, and the temperature γ sharpens it. Sharpening is necessary rather than cosmetic here: at coarse scales attention is spread almost evenly across few tokens, and two near-uniform distributions give PoS ≈ 1/2 whatever the arrange-ment, leaving no usable gradient. With these distributions, the probability that X is superior to Y
+
+along a is 
+
+PoS( X, Y ) = X
+
+> i,j
+
+pX (i) pY (j) ⊮[coord a(i) ≥ coord a(j)] , (14) and L2D (r) = −PoS( X, Y )2, averaged over R2D ; the square follows Rezaei et al. (2025). Two choices are specific to our setting: the temperature γ, for the reason above, and the fact that we invert left /top -type relations as PoS ← 1 − PoS rather than by exchanging X and Y , which differs only in how tokens sharing a coordinate are counted. 
+
+Provenance. Table 6 summarizes what we take from prior work and what is ours across all terms. We separate borrowing a principle from borrowing a functional form , since the two are distinct and the distinction matters for what we claim. 17 Preprint Table 7: Image fidelity under three judges VISTA does not optimize, as a function of the number of steered scales. All columns are paired with the same base generations. p values are for the default configuration.                                             
+
+> VISTA, steered scales Metric Base 123 (default) 4∆at default p
+> ImageReward 1.025 1.234 1.234 1.230 1.204 +20 .1% 3.6×10 −7
+> CLIPScore 0.321 0.325 0.326 0.325 0.324 +1 .1% 6.1×10 −4
+> Aesthetic (v1) 6.056 6.022 6.023 5.976 5.957 −1.3% 1.6×10 −3
+> Aesthetic (v2) 5.734 5.683 5.615 5.609 5.608 −2.2% 2.0×10 −10
+
+Two points deserve emphasis. First, L2D is PSG’s objective applied without modification, including the square, which PSG adopts for empirical reasons; we claim no contribution to the planar case beyond porting it to a next-scale backbone. Second, A-STAR’s segregation loss is a soft IoU be-tween pointwise attention maps, whereas Lsep compares axis-aligned extents derived from attention-weighted moments. These are different functions, and we credit A-STAR for the observation that motivates the term rather than for the term itself. The depth pair (Lsep , Lbc ) is where our objective-level contribution lies. PSG reports that cross-attention maps do not directly expose the viewing axis and therefore handles 3D relations by best-of-
+
+N search over completed images, scored by a segmentation model and a monocular depth estimator. 
+
+Ldepth takes the opposite route: rather than measuring depth, it tests the geometric signature that occlusion leaves in the attention maps, namely that the boundary arc of the occluded object facing the occluder wraps the occluder’s silhouette, so points interpolated along that arc fall inside it. This is a weaker cue than an estimated depth map, and it only distinguishes occlusion from adjacency rather than recovering a metric ordering, but it is differentiable, available at coarse scales, and requires no model beyond the backbone. 
+
+# H IMAGE FIDELITY 
+
+Table 7 reports the study summarized in Sec. 4.4. We generate the 600 T2I-CompBench prompts (100 per category) with Infinity-2B and with VISTA at one through four steered scales, holding the seed fixed so that every VISTA image is paired with the base image from the same seed and prompt. Scores come from three models VISTA does not optimize against: ImageReward Xu et al. (2023), a preference model trained on human comparisons; CLIPScore Hessel et al. (2021); and the LAION aesthetic predictor Schuhmann et al. (2022), for which we report both released versions. Significance is a two-sided Wilcoxon signed-rank test over the 600 paired prompts. 
+
+Reading the table. The two families of judge move in opposite directions, and both monotonically in the amount of intervention. Prompt-conditioned quality is essentially unchanged from one to three scales and declines at four; unconditional aesthetic quality declines throughout. We read this as the expected signature of the mechanism rather than as noise: gradient steps displace zs from the region the backbone’s own sampling would have reached, so more steered scales means a larger displacement, and the cost of that displacement is visible to a judge that scores an image on its own but is offset, up to three scales, for a judge that scores it against the prompt. The ImageReward gain is the more informative of the two, since VISTA has no access to it at any point in generation and it is the same reward model that TTS-VAR uses as its selection criterion (Appendix F). 
+
+Per-category ImageReward. At the default configuration the gain is present in every category: Texture +0 .351 , 3D Spatial +0 .311 , 2D Spatial +0 .219 , Shape +0 .168 , Color +0 .149 , Complex 
+
++0 .034 . Complex is the outlier, with a per-prompt win rate of 49% against 54 –65% elsewhere, which is consistent with the account in Sec. 4.2: its prompts assert several constraints simultaneously and VISTA optimizes each in isolation, so the intervention is as likely to disturb the image as to improve it. 
+
+Caveats. This study uses a single seed, unlike the four-seed results in Table 1; with 600 paired prompts and the p values above, the direction of each effect is not in doubt, but the magnitudes carry 18 Preprint Table 8: Binding objectives on the three categories where only Lbind is active. All rows share the same optimization machinery and the same planar and depth terms, which are inactive here. ∆ is on the mean.                                         
+
+> Lbind Color Texture Shape Mean ∆
+> CONFORM (ours) 0.830 0.764 0.570 0.721 +17 .1%
+> SynGen divergence 0.823 0.745 0.565 0.711 +15 .5%
+> KL 0.830 0.740 0.556 0.709 +15 .1%
+> Focal 0.769 0.735 0.579 0.694 +12 .8%
+> Divide-and-Bind 0.778 0.633 0.459 0.623 +1 .2%
+> JSD 0.730 0.642 0.475 0.616 +0 .0%
+> No steering 0.730 0.642 0.475 0.616 —
+
+the variance of one draw. The two aesthetic predictor versions also disagree on magnitude ( −1.3% 
+
+against −2.2% at the default), which is why we report both rather than selecting one. 
+
+# I REMAINING CHOICES IN THE STEP BUDGET 
+
+Sec. 3.3 motivates the ratio, the logarithm, and the normalizing constant in Eq. 6. Three further choices complete it. Taking max k over active objectives gives a scale as many steps as its most violated constraint requires, so adding a nearly-satisfied objective never shortens the budget available to a violated one; the alternatives, a sum or a mean, both let a satisfied objective dilute the budget of an unsatisfied one. The outer max(1 , ·) guarantees that a scale selected for intervention always takes at least one step, which keeps scale selection and budget allocation independent: a scale chosen by Sec. 3.3 is never silently skipped because its severity rounded to zero. Finally, Neff is a ceiling rather than a step count, since optimization exits as soon as every active gradient falls below its threshold. The functional form therefore bounds worst-case cost more than it determines the number of steps actually taken, which is why we treat it as a scheduling heuristic rather than a tuned component; we did not ablate alternative monotone forms. 
+
+# J ALTERNATIVE OBJECTIVE INSTANTIATIONS 
+
+Sec. 3.4 argues that Eq. 7 is agnostic to how each term is operationalized, and that what this work contributes is the machinery that makes such objectives usable at coarse scales rather than the ob-jectives themselves. This appendix tests that claim. Holding Secs. 3.2–3.3 fixed, we swap the three instantiated terms for alternatives drawn from the diffusion literature and from natural variations on them, and run each combination on 100 prompts per category with a single seed. The purpose is to establish that the pipeline is objective-independent, not to identify an optimal objective set; the sample is too small and the seed count too low for the differences between the stronger rows to be meaningful. The unsteered baselines below are measured on the same 100 -prompt samples, not on the full benchmark, so they differ from Table 1; most notably 2D Spatial is 0.171 here against 0.234 
+
+over all prompts. Because T2I-CompBench categories each assert one constraint type, and VISTA activates an ob-jective only when the parser extracts a matching constraint, the categories separate the three terms cleanly: on Color, Texture, and Shape prompts no relation is present and only Lbind is active; on 2D Spatial prompts only L2D ; on 3D Spatial prompts only Ldepth . We therefore report each term against the categories that isolate it. Complex prompts activate several terms at once and are omitted for that reason. The pipeline is objective-independent in the sense that matters: sixteen of the eighteen configurations improve their isolated category over the unsteered backbone, using identical capture, normalization, combination, and budget machinery. Nothing in Secs. 3.2–3.3 is specialized to the objectives we report. The spread within each table is more informative than the ordering, and it falls along one line. Among planar objectives, those that summarize a map before comparing it – by centroid, by superi-ority probability, by mass on one side of an axis – gain between 112% and 176% , while the two that 19 Preprint Table 9: Planar objectives on 2D Spatial, where only L2D is active.                 
+
+> L2D 2D Spatial ∆
+> Relative centroid 0.473 +175 .9%
+> PoS (ours) 0.454 +164 .8%
+> Gaussian-at-target 0.417 +143 .3%
+> Half-field mass 0.363 +111 .8%
+> Separation 0.225 +31 .3%
+> Attention IoU 0.198 +15 .5%
+> No steering 0.171 —
+
+Table 10: Depth objectives on 3D Spatial, where only Ldepth is active.               
+
+> Ldepth 3D Spatial ∆
+> BC (ours) 0.495 +12 .8%
+> Peak dominance 0.487 +11 .0%
+> Overlap dominance 0.478 +8 .9%
+> Containment–adjacency 0.458 +4 .3%
+> Depth proxy 0.419 −4.5%
+> No steering 0.439 —
+
+compare maps elementwise gain 31% (separation) and 16% (attention IoU). The same split appears in binding, where Divide-and-Bind and JSD, whose gradients likewise act pointwise, are the two weakest, with JSD leaving all three categories exactly at baseline. This is the behaviour predicted in Sec. 3.4: at 4×4 to 8×8 a pointwise criterion is computed over as few as 16 tokens, and its gradient redistributes individual token activations rather than moving an object. Objectives that summarize before comparing transfer to coarse scales; objectives that compare elementwise carry far less us-able signal. That is a property of the setting rather than of any particular loss, and we take it to be the more useful finding here. The single configuration that actively hurts is the depth proxy, which scores 0.419 against a baseline of 0.439 .Our own choices are not uniformly the best available. The relative-centroid objective outperforms PoS on 2D Spatial ( 0.473 against 0.454 ), which we report as measured; the objective space set out in Eq. 7 is open, and we do not claim to have searched it. These runs also use a single seed and a 100 -prompt sample per category, so our objectives average 0.585 over the six targeted categories here against 0.575 in Table 1, over a baseline that is likewise 0.474 here against 0.480 there. The comparison within these tables is internally consistent and should not be read against Table 1 row by row. 20

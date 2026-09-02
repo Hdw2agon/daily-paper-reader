@@ -6,70 +6,53 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-09-01
-- 运行时间：2026-09-01 21:43:33 UTC
+- 最新运行日期：2026-09-02
+- 运行时间：2026-09-02 22:45:57 UTC
 - 运行状态：成功
-- 本次总论文数：16
+- 本次总论文数：11
 - 精读区：5
-- 速读区：11
+- 速读区：6
 
 ### 今日简报（AI）
-今日深度解析 16 篇视觉修复前沿，重点突破夜间能见度增强与超声图像去噪两大技术瓶颈。
-推荐关注 Schrödinger Bridge Transformer 在无监督增强中的应用，以及自适应不确定性引导的扩散模型在医疗影像修复中的高分表现。
-建议从两篇 9 分论文入手，探索扩散模型如何精准解决极端光照与专业医疗场景下的画质退化问题。
-- 详情：[/202609/01/README](/202609/01/README)
+今日深挖 11 篇前沿论文，重点攻克扩散模型在“无需训练”下的跨域修复与物体
+- 详情：[/202609/02/README](/202609/02/README)
 
 ### 精读区论文标签
-1. [Di$^2$CycleSB: Towards High-Quality Unsupervised Nighttime Visibility Enhancement via Schrödinger Bridge Transformer](/202609/01/2608.29043v1-di2cyclesb-towards-high-quality-unsupervised-nighttime-visibility-enhancement-via-schrdinger-bridge-transformer)  
-   标签：评分：9.0/10、query:profile-1
-   evidence：无监督夜间可见性增强与修复
-2. [Null-Space Diffusion Restoration with Adaptive Uncertainty-Guided Fusion for Ultrasound Speckle Reduction](/202609/01/2608.29820v1-null-space-diffusion-restoration-with-adaptive-uncertainty-guided-fusion-for-ultrasound-speckle-reduction)  
+1. [Training-Free Inpainting Across Domains with a Frozen Text-to-Image Diffusion Model](/202609/02/2609.00862v1-training-free-inpainting-across-domains-with-a-frozen-text-to-image-diffusion-model)  
+   标签：评分：10.0/10、query:q3
+   evidence：基于冻结扩散模型的免训练图像补全
+2. [PredErase: Training-Free Object-and-Effect Removal with Predictive Latent Guidance](/202609/02/2609.00956v1-prederase-training-free-object-and-effect-removal-with-predictive-latent-guidance)  
    标签：评分：9.0/10、query:q3
-   evidence：无地面真值的无监督扩散修复
-3. [Mover360: Controllable Object Manipulation in 360° Panoramic Images](/202609/01/2608.23238v1-mover360-controllable-object-manipulation-in-360-panoramic-images)  
+   evidence：免训练物体移除与预测潜变量引导
+3. [Using Channel Representations in Regularization Terms: A Case Study on Image Diffusion](/202609/02/2608.29227v1-using-channel-representations-in-regularization-terms-a-case-study-on-image-diffusion)  
+   标签：评分：8.0/10、query:q3
+   evidence：利用扩散模型处理缺失数据的图像重建
+4. [Seeing Through Extreme Visual Sparsity: Surface Understanding from a Single Random Visual Patch](/202609/02/2608.29475v1-seeing-through-extreme-visual-sparsity-surface-understanding-from-a-single-random-visual-patch)  
    标签：评分：8.0/10、query:q1
-   evidence：360度图像中的物体平移与移除
-4. [ReconSplat: Generalizable 3D Scene Reconstruction Beyond Observed Views](/202609/01/2608.28895v1-reconsplat-generalizable-3d-scene-reconstruction-beyond-observed-views)  
+   evidence：使用掩码自编码器从10%可见区域进行表面重建
+5. [ReBridge-Flow: Re-Coupling Posterior Bridges in Flow Matching for Image Restoration](/202609/02/2609.00811v1-rebridge-flow-re-coupling-posterior-bridges-in-flow-matching-for-image-restoration)  
    标签：评分：8.0/10、query:q4
-   evidence：扩散模型作为3D场景的修复器
-5. [ObjectSplat: Improving Mesh Fidelity and Interactivity for 3D Scenes via Object-Level Mesh Splatting](/202609/01/2608.30423v1-objectsplat-improving-mesh-fidelity-and-interactivity-for-3d-scenes-via-object-level-mesh-splatting)  
-   标签：评分：8.0/10、query:q1
-   evidence：为3D场景重建进行背景修复
+   evidence：使用流匹配进行图像修复的生成先验
 
 ### 速读区论文标签
-1. [Efficient JPEG Restoration in the Wavelet Domain via Mean Flows](/202609/01/2608.28730v1-efficient-jpeg-restoration-in-the-wavelet-domain-via-mean-flows)  
+1. [Discrete Diffusion Bridges for Spatiotemporally Aligned Image Translation and Generation](/202609/02/2608.29997v1-discrete-diffusion-bridges-for-spatiotemporally-aligned-image-translation-and-generation)  
    标签：评分：7.0/10、query:q4
-   evidence：用于图像修复的生成式修复模型
-2. [DocIntent: Answerability-Guided Agentic Restoration for Real-World Document Visual Question Answering](/202609/01/2608.29037v1-docintent-answerability-guided-agentic-restoration-for-real-world-document-visual-question-answering)  
-   标签：评分：7.0/10、query:q3
-   evidence：文档图像的智能体修复
-3. [DARD: Zero-Shot Degradation-Aware Retinex-Guided Diffusion for Low-Light Image Enhancement](/202609/01/2608.29243v1-dard-zero-shot-degradation-aware-retinex-guided-diffusion-for-low-light-image-enhancement)  
-   标签：评分：7.0/10、query:q3
-   evidence：用于图像增强的零样本退化感知扩散模型
-4. [Learning to Restore More: Continual Capability Expansion for Pretrained Image Restoration Models](/202609/01/2608.30305v1-learning-to-restore-more-continual-capability-expansion-for-pretrained-image-restoration-models)  
+   evidence：用于图像转换与生成的离散扩散模型
+2. [Revisiting Cross-View Completion: Self-Supervised Pre-Training via Reconstruction Error Comparison](/202609/02/2609.01530v1-revisiting-cross-view-completion-self-supervised-pre-training-via-reconstruction-error-comparison)  
    标签：评分：7.0/10、query:q7
-   evidence：图像修复模型的持续能力扩展
-5. [APT: Anchor-aligned Perturbations for Tamper Localization in Fully Regenerated Images](/202609/01/2608.30656v1-apt-anchor-aligned-perturbations-for-tamper-localization-in-fully-regenerated-images)  
-   标签：评分：7.0/10、query:q1
-   evidence：基于扩散模型修复的篡改定位
-6. [PixelIR: Fidelity-Perception Decoupling via Pixel-Space Image-Residual Flow Matching for Efficient One-Step Real-World Super-Resolution](/202609/01/2608.30782v1-pixelir-fidelity-perception-decoupling-via-pixel-space-image-residual-flow-matching-for-efficient-one-step-real-world-super-resolution)  
-   标签：评分：7.0/10、query:q7
-   evidence：真实世界图像超分辨率与修复
-7. [Efficient Training with Foresight: Multi-Token Auxiliary Supervision for Autoregressive Image Generation](/202609/01/2608.25386v1-efficient-training-with-foresight-multi-token-auxiliary-supervision-for-autoregressive-image-generation)  
+   evidence：通过跨视图补全进行自监督预训练
+3. [Manifold-Constrained PET Reconstruction with Learned Flow-Matching Priors](/202609/02/2608.29158v1-manifold-constrained-pet-reconstruction-with-learned-flow-matching-priors)  
+   标签：评分：6.0/10、query:q2
+   evidence：基于生成流形先验的无监督重建
+4. [RAGDiffusion++: From Macro-Retrieval to Micro-Fidelity Alignment for Garment Generation](/202609/02/2608.29280v1-ragdiffusion-from-macro-retrieval-to-micro-fidelity-alignment-for-garment-generation)  
    标签：评分：6.0/10、query:q4
-   evidence：用于图像合成的生成模型
-8. [Mapping-Based Image Diffusion](/202609/01/2608.29164v1-mapping-based-image-diffusion)  
-   标签：评分：6.0/10、query:q3
-   evidence：用于图像增强和去噪的基于张量的泛函
-9. [Generalization over Memorization: Generalization-Aware Diffusion Adaptation for Single-Image Multi-View Synthesis](/202609/01/2608.29233v1-generalization-over-memorization-generalization-aware-diffusion-adaptation-for-single-image-multi-view-synthesis)  
-   标签：评分：6.0/10、query:q4
-   evidence：生成式多视图图像合成
-10. [GenFirst: Generation Before Reconstruction for Stable End-to-End Latent Generative Modeling](/202609/01/2608.29335v1-genfirst-generation-before-reconstruction-for-stable-end-to-end-latent-generative-modeling)  
-   标签：评分：6.0/10、query:q4
-   evidence：潜空间生成建模与重建
-11. [GSPotential: Camera Potential Field for Sparse-View 3D Gaussian Splatting](/202609/01/2608.29346v1-gspotential-camera-potential-field-for-sparse-view-3d-gaussian-splatting)  
-   标签：评分：6.0/10、query:q4
-   evidence：引入扩散先验进行稀疏视图重建
+   evidence：使用基于扩散的生成模型修复服装图像
+5. [IT-TextFusion: Iterative Text-Image Interaction with Text-Guided Residual Refinement for Degradation-Aware Image Fusion](/202609/02/2609.01092v1-it-textfusion-iterative-text-image-interaction-with-text-guided-residual-refinement-for-degradation-aware-image-fusion)  
+   标签：评分：6.0/10、query:q7
+   evidence：退化感知的图像融合与修复
+6. [P-PatchDiff: Progressive Patch Diffusion Models for Low-light Image Enhancement](/202609/02/2609.01123v1-p-patchdiff-progressive-patch-diffusion-models-for-low-light-image-enhancement)  
+   标签：评分：6.0/10、query:q7
+   evidence：用于图像修复的扩散模型
 
 
 <div class="dpr-home-promo-card">

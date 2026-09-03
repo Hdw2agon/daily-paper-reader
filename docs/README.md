@@ -6,53 +6,41 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-09-02
-- 运行时间：2026-09-02 22:45:57 UTC
+- 最新运行日期：2026-09-03
+- 运行时间：2026-09-03 22:37:02 UTC
 - 运行状态：成功
-- 本次总论文数：11
-- 精读区：5
+- 本次总论文数：7
+- 精读区：1
 - 速读区：6
 
 ### 今日简报（AI）
-今日深挖 11 篇前沿论文，重点攻克扩散模型在“无需训练”下的跨域修复与物体
-- 详情：[/202609/02/README](/202609/02/README)
+今日精粹 7 篇图像处理与 3D 重建前沿论文，重点攻克无监督去阴影
+- 详情：[/202609/03/README](/202609/03/README)
 
 ### 精读区论文标签
-1. [Training-Free Inpainting Across Domains with a Frozen Text-to-Image Diffusion Model](/202609/02/2609.00862v1-training-free-inpainting-across-domains-with-a-frozen-text-to-image-diffusion-model)  
-   标签：评分：10.0/10、query:q3
-   evidence：基于冻结扩散模型的免训练图像补全
-2. [PredErase: Training-Free Object-and-Effect Removal with Predictive Latent Guidance](/202609/02/2609.00956v1-prederase-training-free-object-and-effect-removal-with-predictive-latent-guidance)  
-   标签：评分：9.0/10、query:q3
-   evidence：免训练物体移除与预测潜变量引导
-3. [Using Channel Representations in Regularization Terms: A Case Study on Image Diffusion](/202609/02/2608.29227v1-using-channel-representations-in-regularization-terms-a-case-study-on-image-diffusion)  
+1. [Consistency as Regularization for Unsupervised Shadow Removal](/202609/03/2609.01806v1-consistency-as-regularization-for-unsupervised-shadow-removal)  
    标签：评分：8.0/10、query:q3
-   evidence：利用扩散模型处理缺失数据的图像重建
-4. [Seeing Through Extreme Visual Sparsity: Surface Understanding from a Single Random Visual Patch](/202609/02/2608.29475v1-seeing-through-extreme-visual-sparsity-surface-understanding-from-a-single-random-visual-patch)  
-   标签：评分：8.0/10、query:q1
-   evidence：使用掩码自编码器从10%可见区域进行表面重建
-5. [ReBridge-Flow: Re-Coupling Posterior Bridges in Flow Matching for Image Restoration](/202609/02/2609.00811v1-rebridge-flow-re-coupling-posterior-bridges-in-flow-matching-for-image-restoration)  
-   标签：评分：8.0/10、query:q4
-   evidence：使用流匹配进行图像修复的生成先验
+   evidence：无监督阴影去除与图像修复框架
 
 ### 速读区论文标签
-1. [Discrete Diffusion Bridges for Spatiotemporally Aligned Image Translation and Generation](/202609/02/2608.29997v1-discrete-diffusion-bridges-for-spatiotemporally-aligned-image-translation-and-generation)  
-   标签：评分：7.0/10、query:q4
-   evidence：用于图像转换与生成的离散扩散模型
-2. [Revisiting Cross-View Completion: Self-Supervised Pre-Training via Reconstruction Error Comparison](/202609/02/2609.01530v1-revisiting-cross-view-completion-self-supervised-pre-training-via-reconstruction-error-comparison)  
+1. [Uncertainty-Guided Adverse Weather Restoration via Gated Transformer Network](/202609/03/2609.02434v1-uncertainty-guided-adverse-weather-restoration-via-gated-transformer-network)  
    标签：评分：7.0/10、query:q7
-   evidence：通过跨视图补全进行自监督预训练
-3. [Manifold-Constrained PET Reconstruction with Learned Flow-Matching Priors](/202609/02/2608.29158v1-manifold-constrained-pet-reconstruction-with-learned-flow-matching-priors)  
-   标签：评分：6.0/10、query:q2
-   evidence：基于生成流形先验的无监督重建
-4. [RAGDiffusion++: From Macro-Retrieval to Micro-Fidelity Alignment for Garment Generation](/202609/02/2608.29280v1-ragdiffusion-from-macro-retrieval-to-micro-fidelity-alignment-for-garment-generation)  
-   标签：评分：6.0/10、query:q4
-   evidence：使用基于扩散的生成模型修复服装图像
-5. [IT-TextFusion: Iterative Text-Image Interaction with Text-Guided Residual Refinement for Degradation-Aware Image Fusion](/202609/02/2609.01092v1-it-textfusion-iterative-text-image-interaction-with-text-guided-residual-refinement-for-degradation-aware-image-fusion)  
+   evidence：恶劣天气环境下的图像修复
+2. [SR-Edit: Region-Aware Image Editing via Self-Refinement](/202609/03/2609.02504v1-sr-edit-region-aware-image-editing-via-self-refinement)  
+   标签：评分：7.0/10、query:q1
+   evidence：区域感知图像编辑与非编辑区域保留
+3. [InceptionGS: Generative Bootstrapping for Large-Scale Gaussian Splatting under Unstructured View Sampling](/202609/03/2609.02747v1-inceptiongs-generative-bootstrapping-for-large-scale-gaussian-splatting-under-unstructured-view-sampling)  
+   标签：评分：7.0/10、query:q1
+   evidence：视角稀疏下的场景补全生成式引导
+4. [Per-View Gaussian Predictions Enable Training-Free Distractor Filtering in Feed-Forward 3DGS](/202609/03/2608.26951v1-per-view-gaussian-predictions-enable-training-free-distractor-filtering-in-feed-forward-3dgs)  
+   标签：评分：6.0/10、query:q3
+   evidence：无需训练的干扰物过滤与伪影去除
+5. [A Cone-Constrained Bilinear Decomposition for Total Scaled-Gradient Variation Models](/202609/03/2609.00036v1-a-cone-constrained-bilinear-decomposition-for-total-scaled-gradient-variation-models)  
+   标签：评分：6.0/10、query:q3
+   evidence：图像修复中用于保持边缘和角落的正则化器
+6. [Efficient All-in-One Weather Restoration using Spectral Harmonization](/202609/03/2609.02839v1-efficient-all-in-one-weather-restoration-using-spectral-harmonization)  
    标签：评分：6.0/10、query:q7
-   evidence：退化感知的图像融合与修复
-6. [P-PatchDiff: Progressive Patch Diffusion Models for Low-light Image Enhancement](/202609/02/2609.01123v1-p-patchdiff-progressive-patch-diffusion-models-for-low-light-image-enhancement)  
-   标签：评分：6.0/10、query:q7
-   evidence：用于图像修复的扩散模型
+   evidence：利用光谱协调进行全能天气图像修复
 
 
 <div class="dpr-home-promo-card">

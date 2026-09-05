@@ -1,0 +1,1463 @@
+Linear Fusion MultiDiffusion for Fast
+Training-Free Spherical Panorama Generation
+Akio Hayakawa1 , Yusuke Mukuta1,2 , and Tatsuya Harada1,2
+1 The University of Tokyo
+2 RIKEN Center for Advanced Intelligence Project
+{hayakawa,mukuta,harada}@mi.t.u-tokyo.ac.jp
+Under Water
+Firefly
+Grand Canyon
+Ocean
+Forest
+Firework
+Desert
+Storm
+Snow Mountains
+Fig. 1: LF-MultiDiffusion enables high-quality panorama generation using a pre-trained
+text-to-image generator in a training-free manner, achieving SOTA with faster runtime.
+Abstract. We propose LF-MultiDiffusion, a training-free panorama gen-
+eration method that extends MultiDiffusion to support linear projections
+between target and reference image spaces. Our key idea is to reformulate
+latent aggregation as a regularized least-squares problem and solve it
+efficiently with a Krylov-based iterative solver inside the denoising loop.
+This formulation enables denser and more natural mappings than prior
+training-free methods, yielding more stable generation with far fewer
+perspective views. As a result, LF-MultiDiffusion reduces the number of
+image generator evaluations during denoising and significantly improves
+inference efficiency. Experiments show that LF-MultiDiffusion achieves
+better visual quality, text alignment, and panoramic consistency than
+the strongest training-free baseline, while providing a 15.36× speedup.
+Our project page is available at: https://ahykw.github.io/lfmd.
+Keywords: Training-free panorama generation · MultiDiffusion · Latent
+optimization · Efficient inference
+arXiv:2609.01997v1  [cs.CV]  2 Sep 2026
+
+
+2
+A. Hayakawa et al.
+1
+Introduction
+Panoramic imagery has become a fundamental component of immersive digital
+experiences, including content for head-mounted displays (HMDs), real estate
+virtual tours, and street-level mapping. It represents a 360° scene in a single
+compact image, enabling users to look around seamlessly. As commercial HMDs
+have become widely available, the demand for panoramic content is growing not
+only for capturing and sharing real-world scenes but also for creating them.
+Recent advances in generative modeling enable high-quality image synthesis
+[3, 6, 33], but most models are designed for a limited field of view. Several
+works [18, 28, 35, 42, 45] have extended image generation to panoramic image
+synthesis using text-ERP paired datasets, but their applicability remains limited
+to specific domains due to the scarcity of such datasets. Moreover, there is a
+substantial gap in domain coverage between general image generation models
+and panorama-specific models. For example, image generation models can be
+trained on diverse visual domains such as artistic or cartoon-style images, whereas
+such content is rarely available in panoramic datasets. These limitations make
+training-free approaches, which fully leverage the capability of pre-trained image
+generation models, particularly attractive for panoramic content creation.
+A few prior works have explored this direction. DynamicScaler [26] proposes
+Panoramic Projecting Denoise, which generates panoramic images by optimiz-
+ing panorama-domain noisy latents so that perspective patches obtained via
+equirectangular projection (ERP) follow the reverse diffusion trajectories of a
+pre-trained image generator. SphereDiff [30] instead parameterizes latents directly
+on the sphere surface to reduce distortion near the pole. While these methods
+achieve seamless and high-quality panorama generation, their optimization relies
+on MultiDiffusion [2], which restricts the projection between the panorama and
+perspective spaces to direct pixel sampling (or bijective mapping) for each cam-
+era view. As a result, they require a large number of overlapping views (44 in
+DynamicScaler and 89 in SphereDiff) to cover all pixels in the panorama and
+maintain seamlessness. Because a pre-trained image generator must be evaluated
+for every view at every denoising step, this incurs a high computational cost;
+generating a single panorama takes about 7 minutes with DynamicScaler and 32
+minutes with SphereDiff using FLUX [3].
+To address this limitation, we propose Linear Fusion MultiDiffusion (LF-
+MultiDiffusion), an extension of MultiDiffusion that supports arbitrary linear
+projections between the target and reference image spaces (Fig. 2). Our for-
+mulation casts latent aggregation as a regularized least-squares problem. Its
+solution is no longer a simple weighted average of reprojected denoised latents,
+and explicit inversion is computationally impractical. We therefore incorporate a
+Krylov-based iterative solver into the denoising loop. We empirically show that
+this iterative update is efficient, adding only 20% of the cost of the denoising step.
+By supporting arbitrary linear projections, our method enables denser and more
+natural mappings between panoramic and perspective views, which stabilizes
+generation even with far fewer perspective views. Experimental results show that
+LF-MultiDiffusion achieves better visual quality, text alignment, and geometric
+
+
+LF-MultiDiffusion
+3
+Prior work
+Ours
+Dense views with 
+sparse pixel mapping
+Sparse views with
+dense pixel mapping
+T2I model
+…
+Many NFEs
+Less NFEs
+T2I model
+T2I model
+T2I model
+T2I model
+T2I model
+…
+T2I model
+T2I model
+Weighted average
+(MultiDiffusion)
+Solving linear system
+(LF-MultiDiffusion)
+Substantially faster 
+than T2I steps
+update
+Timestep = t
+Timestep = t - 1
+Reference image sampling
+Independent denoising
+Aggregation
+32m 15s
+2m 6s
+Fig. 2: LF-MultiDiffusion for fast training-free panorama generation. Prior methods are
+constrained to perform direct pixel sampling within the MultiDiffusion framework [2],
+leading to many neural function evaluations (NFEs) and slow inference. Our method
+supports denser linear mappings, improving both generation quality and efficiency.
+Camera frustums and inference times for prior work are taken from SphereDiff [30].
+consistency than existing training-free methods while achieving a 15.36× speedup
+over the best-performing baseline.
+2
+Related work
+2.1
+Diffusion and flow-matching models for image generation
+Diffusion models [17] and flow-matching models [25,27] have become the dominant
+backbone for text-to-image generation [3, 7, 29, 33, 34]. However, these models
+are typically trained for a fixed aspect ratio or a narrow range of resolutions,
+and generation outside that regime often degrades layout and composition unless
+additional design choices are introduced.
+To support flexible output sizes and aspect ratios, prior work has either
+adapted pre-trained text-to-image diffusion models at inference time [16] or
+modified the architecture and training framework to natively support variable
+resolutions and aspect ratios [39]. MultiDiffusion [2] and its variants [10,23,37,46]
+extend pre-trained text-to-image diffusion models to larger canvases through
+region-wise denoising and fusion, enabling arbitrary aspect ratios and higher
+resolutions in a model-agnostic, zero-shot manner. However, these methods
+are primarily designed for planar imagery or wide-canvas images rather than
+geometrically consistent 360° panoramas and do not explicitly enforce loop
+consistency over 360° scenes.
+2.2
+Training-based text-conditional 360° panorama generation
+Text2Light [4] pioneered text-driven panorama generation using a discrete VQ-
+VAE latent space and an autoregressive prior. Following the success of diffusion
+
+
+4
+A. Hayakawa et al.
+models in text-to-image (T2I) generation, diffusion-based methods have also
+become the dominant paradigm for panorama generation [18,28,35,42,45]. These
+methods rely on text-panorama paired datasets, which are challenging to collect
+at scale and, therefore, tend to have limited domain coverage and reduced robust-
+ness to diverse text prompts. For example, a model trained primarily on indoor
+panorama datasets typically generalizes poorly to outdoor scenes. CurvedDiffu-
+sion [36] finetunes a pre-trained T2I latent diffusion model using synthetically
+distorted images and demonstrates that panorama generation can emerge from
+such adaptation. However, the output aspect ratio is inherited from the base
+model, and it supports only a fixed resolution.
+In contrast, our method directly uses pre-trained T2I models with their
+parameters fixed, thereby inheriting the base models’ prompt coverage. More-
+over, it supports arbitrary aspect ratios and resolutions by adopting region-wise
+generation as in MultiDiffusion-style methods.
+2.3
+Training-free text-conditional 360° panorama generation
+A few prior works have explored training-free panorama generation. Dynamic-
+Scaler [26] optimizes panorama-domain noisy latents over diffusion timesteps by
+applying MultiDiffusion with equirectangular projection (ERP). SphereDiff [30]
+similarly adopts a training-free formulation, but represents latents directly on
+the sphere to reduce the distortion near the poles. Because the original Mul-
+tiDiffusion formulation assumes one-to-one pixel correspondence between the
+large canvas and each local patch, these methods must use direct pixel sampling
+between panoramas to perspective views, such as nearest-neighbor sampling in
+DynamicScaler and the dynamic latent sampling specialized for the spherical
+latent in SphereDiff. To cover the full panorama and maintain seamlessness, they
+require many overlapping camera views. As a result, they suffer from inefficient
+inference due to many neural function evaluations.
+An orthogonal line of work studies training-free text-to-3D scene generation.
+WonderJouney [44], LucidDreamer [5], and WonderWorld [43] iteratively expand
+3D scenes by optimizing 3D point clouds, 3D Gaussian splatting (3DGS) [20],
+and 3D Gaussian surfels, respectively, from inpainted views generated by a pre-
+trained text-to-image generator. Because these methods progressively construct
+the scene through sequential view expansion and optimization, they often suffer
+from loop inconsistency and error accumulation. To mitigate these issues, Dream-
+Scene360 [48] first generates several 360° panoramas followed by VLM-based
+initial scene selection, and then lifts them into 3D representations. Our work
+focuses on 360° panorama generation and is complementary to these training-free
+text-to-3D scene generation methods, as exemplified in DreamScene360.
+3
+Method
+In this section, we first briefly review MultiDiffusion and discuss the chal-
+lenges of applying it to 360° panoramic view synthesis. We then introduce
+
+
+LF-MultiDiffusion
+5
+LF-MultiDiffusion, an extension of MultiDiffusion that supports arbitrary linear
+projections between the target and reference image spaces. Since most diffusion
+models are latent diffusion models [33], we use “image” and “pixel” to also refer
+to a latent tensor and its spatial components, respectively.
+3.1
+Preliminaries
+Overview of MultiDiffusion. MultiDiffusion [2] enables the generation of
+images with arbitrary shapes using a pre-trained diffusion model without addi-
+tional training or finetuning. Let Φ : I × Y →I denote a pre-trained diffusion
+model, where I ⊆RM is the reference image space, and Y is the corresponding
+condition space. Starting from IT ∼N(0, I) with condition y ∈Y, the reverse
+diffusion process is written as
+  I _T , I _ { T - 1}
+, \d
+ots , I_0 \quad \text {s.t.} \quad I_{t-1} = \Phi (I_t \mid y), 
+(1)
+which gradually transforms a noisy image IT into a clean image I0. MultiDiffusion
+defines a reverse diffusion process in a potentially different target image space
+J ⊆RM ′ with condition space Z. Starting from JT ∼N(0, I) with condition
+z ∈Z, the reverse MultiDiffusion process is written as
+  J _T , J _ { T - 1}
+,\do
+ts , J_0 \ quad \text {s.t.} \quad J_{t-1} = \Psi (J_t \mid z), 
+(2)
+where Ψ : J × Z →J denotes a denoising operator at diffusion step t, referred
+to as the MultiDiffuser. In panoramic generation, the target image typically has
+a larger spatial extent than the reference image, i.e., M ′ ≥M.
+The key idea of MultiDiffusion is to construct Ψ so that it is as consistent
+as possible with the pre-trained diffusion model Φ. Let Ft,i : J →I denote a
+mapping from the target image space to the reference image space, where Ft,i(J)
+extracts a reference image from J by direct pixel sampling, such as cropping or
+nearest neighbor reprojection. Let yt,i = λt,i(z) be the corresponding condition
+for the i-th reference image, where λt,i : Z →Y maps the target condition to
+the reference condition (e.g., LLM-based conversion from global scene condition
+to that of each local patch). Then, the MultiDiffuser is defined as
+  \l a be l {e q:m
+ulti_d
+i
+f
+fus
+er} \ P si (J_t \mi d z) = \arg m in _{J_{ t-1} \in \pano } \sum _{i=1}^{N} \left \| W_{t,i} \odot \left [ F_{t,i}(J_{t-1}) - \Phi (F_{t,i}(J_t) \mid y_{t, i}) \right ] \right \|^2, 
+(3)
+where Wt,i ∈RM
+≥0 is a per-pixel weight and ⊙is the Hadamard product. When
+Ft,i is a direct pixel-sampling operator, Eq. (3) admits the closed-form solution
+  \l a be l
+ 
+{
+eq:
+m ul
+ti_ diffus
+er
+_cl o se
+d} \Psi (
+J _ t 
+\mi d z) = \sum _{i=1} ^N \frac {F_{t,i}^{-1}(W_{t,i})}{\sum _{j=1}^N F_{t,j}^{-1}(W_{t,j})} \odot F_{t,i}^{-1}\!\left (\Phi (F_{t,i}(J_t) \mid y_{t, i}) \right ). 
+(4)
+In practice, Wt,i is often set to 1M ∈RM so that all reference images contribute
+equally. We follow this setting and omit the weight term in the following sections
+for brevity.
+
+
+6
+A. Hayakawa et al.
+(a) ERP + direct pixel sampling from perspective
+views to panorama.
+(b) Covered pixels by nine camera positions near
+the center used in SphereDiff [30].
+Fig. 3: Perspective-to-panorama mapping with direct pixel sampling. Panorama size:
+256×512; perspective view: 128×128 with FOV = 90◦. (a) Pixels covered by a single view
+projected onto the ERP panorama at different camera latitudes ϕ = [77.5◦, 0◦, −45◦]
+(top to bottom). ERP-based direct sampling leaves many pixels uncovered (white pixels
+within the view frustum). (b) Existing methods mitigate this issue by densely sampling
+overlapping cameras, but they must run the diffusion model for every view, increasing
+computational cost.
+Challenges of applying MultiDiffusion to 360° panoramas. Applying
+Eq. (4) to non-perspective 360° panoramas is challenging because the direct-
+sampling assumption makes it difficult to cover all panorama pixels. To use Eq. (4),
+every target pixel must be assigned to at least one pixel in some perspective view.
+However, when perspective views are projected onto an ERP panorama and then
+reprojected by direct pixel sampling through F −1
+t,i , many panorama pixels remain
+uncovered, as illustrated in Fig. 3a. Existing approaches [26,30] address this issue
+by densely sampling camera views with substantial overlap (Fig. 3b). Since the
+pre-trained diffusion model Φ must be evaluated for every perspective view at
+every diffusion step, this dense sampling leads to high computational cost (e.g.,
+SphereDiff requires more than 30 minutes per panorama, as shown in Tab. 1).
+A natural way to reduce the number of uncovered pixels is to use denser
+mappings, such as bilinear interpolation or pixel splatting from panoramas to
+perspective views. As shown in Figure 4a, bilinear mapping between a perspective
+image and the center of a panorama produces no uncovered pixels. One may
+therefore consider extending Eq. (4) by still averaging reprojected predictions
+pixel-wise under such dense mappings. However, this naive extension violates
+consistency with the pre-trained model and severely degrades the intermediate
+denoising latents. To demonstrate this, we generate only the center region of a
+panorama using MultiDiffusion with bilinear mapping between the perspective
+image and the panorama. As shown in Fig. 4b, the naive extension produces
+noticeably degraded results.
+3.2
+MultiDiffuser with arbitrary linear projections
+To overcome this limitation, we propose Linear Fusion MultiDiffusion (LF-
+MultiDiffusion), an extension of MultiDiffusion to the case where the target-
+to-reference mapping is an arbitrary linear operator. Let S ⊂RM×M ′ denote
+
+
+LF-MultiDiffusion
+7
+(a) Bilinear mapping
+(b) Naive extension of Eq. (4)
+(c) Ours
+Fig. 4: Panorama generation with bilinear mapping between the panorama and a
+perspective view, where the panoramic latent is optimized at each denoising step. We
+use FLUX [3] as the pre-trained diffusion model with the text prompt "A room". (a)
+A perspective image is bilinearly mapped to the center of the panorama, leaving no
+pixels uncovered. (b) Naively extending Eq. (4) by pixel-wise averaging produces a
+blurry result. (c) Our method generates a high-quality image under the same bilinear
+mapping.
+a family of linear mappings from a target panorama vector J ∈J ⊆RM ′ to a
+reference image vector in RM. We replace the direct-sampling operators {Ft,i}N
+i=1
+with linear projection matrices {St,i ∈S}N
+i=1. Then, the resulting linear-fusion
+MultiDiffuser ΨLF is defined as
+  \lab e l { eq: psi
+_lf_de
+f
+}
+ \P
+si _{\rm L F}(J_t \ m id z) = \argmin _{J_{t-1}\in \pano } \sum _{i=1}^{N} \left \| S_{t,i}J_{t-1} - \Phi \!\left (S_{t,i}J_t \mid y_{t, i}\right ) \right \|^2. 
+(5)
+Here, St,iJ ∈RM denotes the i-th reference image obtained from J by the
+corresponding linear projection.
+Regularized formulation. Solving Eq. (5) in closed form would require ex-
+plicitly forming and inverting the associated normal-equation matrix, which is
+computationally prohibitive for high-resolution panoramas. Instead, we introduce
+a quadratic regularizer and estimate Jt−1 by solving the following regularized
+least-squares problem:
+  \l a bel {e
+q:r
+e
+g
+_ls
+q} J_{ t -1} = \a r gmin _{ J \in \pano } \sum _{i=1}^{N} \left \| S_{t,i}J - \Phi \!\left (S_{t,i}J_t \mid y_{t, i}\right ) \right \|^2 + \lambda \|LJ\|^2, 
+(6)
+where λ ≥0 is a regularization coefficient, and L = W 1/2D ∈RP ×M ′ is a
+weighted first-order regularizer with a discrete difference operator D ∈RP ×M ′ and
+a diagonal weight matrix W = diag(w) ∈RP ×P for w ∈RP
+≥0. This formulation
+includes, for example, ridge- or Laplacian-type regularization depending on the
+choice of D and W.
+
+
+8
+A. Hayakawa et al.
+0.0
+0.5
+1.0
+1.5
+Elapsed time [s]
+1.0
+1.5
+Normalized residual
+×10−1
+t = 7
+Pre-trained
+diffusion model
+0.0
+0.5
+1.0
+1.5
+Elapsed time [s]
+4
+6
+8
+×10−2
+t = 14
+Pre-trained
+diffusion model
+0.0
+0.5
+1.0
+1.5
+Elapsed time [s]
+2
+4
+6
+×10−2
+t = 21
+Pre-trained
+diffusion model
+LSMR convergence over time at different denoising steps
+Fig. 5: Runtime comparison between the LSMR [9] update and the total denoising cost
+of a full MultiDiffusion step. We plot the normalized residual in Eq. (5) every 10 solver
+updates at denoising timestep t ∈{7, 14, 21}. The total denoising cost for N = 14 using
+Flux [3] is shown as a gray dashed line. The Krylov solver update converges far more
+quickly than the denoising cost of the corresponding MultiDiffusion step.
+Augmented system. We rewrite Eq. (6) in an equivalent augmented form.
+Define the stacked operator and target vector as
+  \l
+a
+bel 
+{eq:
+aug
+ment
+e
+d _
+s
+yste m } \til de S 
+:= \
+b
+egin
+ {bmatri x } S_{
+t,1
+}\\ \vdo t s \\ 
+S
+_
+{t,N } \\ \s qrt {\lambda }\,L \end {bmatrix} \in \R ^{(NM+P)\times M'}, \qquad \tilde d := \begin {bmatrix} \Phi (S_{t, 1}J_t \mid y_{t, 1})\\ \vdots \\ \Phi (S_{t,N}J_t \mid y_{t, N})\\ \mathbf {0} \end {bmatrix} \in \R ^{NM+P}. 
+(7)
+Then, Eq. (6) is equivalently written as
+  \l a bel {e
+q:a
+u gme n ted_lsq} J_{t-1} = \argmin _{J \in \pano }\\|\tilde S J - \tilde d\|^2. 
+(8)
+We solve Eq. (8) using a matrix-free Krylov subspace method, either by applying
+preconditioned conjugate gradients (PCG) [13] to the corresponding normal
+equations or by directly applying LSMR [9]. In all cases, the solver requires
+only the operations J 7→St,iJ, I 7→S⊤
+t,iI, and J 7→L⊤(LJ), together with their
+stacked counterparts for ˜S. Therefore, the projection matrices need not be formed
+explicitly in memory during the iterative update.
+Figure 5 compares the runtime of the LSMR update with the total denoising
+cost of one MultiDiffusion step at different denoising steps. For this experiment,
+we used N = 14, which is also the default setting in our main experiments. We plot
+the normalized residual P
+i ∥St,iJ −Φ(St,iJt | yt,i)∥2 P
+i ∥Φ(St,iJt | yt,i)∥2 every
+10 solver iterations. The residual decreases rapidly within a few tens of iterations,
+and the solver update requires less than 20% of the computational cost of a full
+MultiDiffusion step. This overhead is substantially smaller than the additional
+cost incurred by increasing the number of views N, which scales linearly with
+the number of diffusion model evaluations. For reference, DynamicScaler and
+SphereDiff use N = 44 and N = 89, respectively, corresponding to roughly 3-7×
+longer denoising runtime. These results show that the proposed iterative update
+adapts the MultiDiffusion to panoramic view synthesis in a computationally
+efficient manner.
+
+
+LF-MultiDiffusion
+9
+3.3
+Implementation of the target space and projection
+Definition of the reference image space. We define the reference image space
+I as a rectangle of size H ×W. The mapping operations J 7→St,iJ and I 7→S⊤
+t,iI
+are implemented using pixel correspondences in 3D space. To establish these
+correspondences, we assume that each pixel in the reference image corresponds to
+a point on the unit sphere. Specifically, for a pixel u ∈[0, W) × [0, H) in It,i ∈I,
+we define the corresponding 3D point x ∈S2 by back-projecting its viewing ray
+onto the unit sphere, where u and x satisfy
+  \label { eq:c
+amer a _proje c tion} \mathbf {u} \sim M_{t,i} [\mathbf {x}^\top , 1]^\top , \quad M_{t,i} = K [R_{t,i} \mid \mathbf {c}], 
+(9)
+where Mt,i denotes the camera projection matrix, K ∈R3×3 is the intrinsic
+matrix, Rt,i ∈R3×3 is the rotation matrix, and c ∈R3 is the translation vector.
+The intrinsic matrix K and the translation vector c are shared across all
+views and timesteps. Unless otherwise noted, we set FOVx = FOVy = 90◦
+when computing K, and use c = [0, 0, 0]⊤since all camera centers coincide with
+the origin. In contrast, the rotation matrix Rt,i depends on both the timestep
+and the view index. Following the Panoramic Projecting Denoising proposed in
+DynamicScaler [26], we sweep the viewing direction horizontally as the reverse
+diffusion process proceeds, allowing the model to efficiently extract different
+subregions of the target image space over time. Specifically, let {(θi, ϕi)}N
+i=1
+denote the initial longitude-latitude pairs with θi ∈(−π, π] and ϕi ∈(−π/2, π/2].
+At timestep t, we define the view angle as (θt,i, ϕt,i) = (θi + st, ϕi), where
+s ∈(−π, π) is a constant angular shift per timestep. We then construct the
+rotation matrix Rt,i(θt,i, ϕt,i) such that its forward axis is aligned with the
+viewing direction d(θt,i, ϕt,i) defined by d(θ, ϕ) = (cos ϕ sin θ, sin ϕ, cos ϕ cos θ).
+ERP latent space with bilinear projection. Inspired by DynamicScaler [26],
+we represent the target space J as an ERP latent. Specifically, we define J as a
+rectangle of size Hp × Wp, where each pixel (i, j) ∈[0, Wp) × [0, Hp) corresponds
+to a point on the sphere with longitude θ and latitude ϕ as
+  \l a
+b
+el
+ {e
+q : e r p
+_p
+i x
+e l_to_lonlat} \theta = 2\pi \cdot \frac {i}{W_p} - \pi , \quad \phi = \pi \cdot \frac {j}{H_p} - \frac {\pi }{2}. 
+(10)
+We define the mapping J 7→St,iJ from the panorama to a perspective view
+by bilinear interpolation. Specifically, to compute the pixel value I[u, v] at pixel
+position u = (u, v), we first back-project its viewing ray to a 3D point (xu, yu, zu)
+using Eq. (9), and then compute the corresponding longitude and latitude
+(θu, ϕu) ∈R2 as θu = atan2(xu, zu) and ϕu = arcsin(yu). The corresponding
+continuous panorama coordinate (iu, ju) is then obtained by inverting Eq. (10).
+Using the 1D linear interpolation kernel κ(r) = max(0, 1 −|r|), we compute
+I[u, v] as
+  \l ab e
+l
+ {eq:bi linear_
+gat h er} I[ u , v] = \sum _{(i, j) \in \mathcal {N}(i_{\mathbf {u}}, j_{\mathbf {u}})} \kappa (i - i_{\mathbf {u}}) \kappa (j - j_{\mathbf {u}}) J[i, j], 
+(11)
+
+
+10
+A. Hayakawa et al.
+Algorithm 1 Panorama generation with LF-MultiDiffusion
+Require: Pre-trained diffusion model Φ, view conditions {yt,i}N
+i=1, linear mappings
+{St,i}N
+i=1, number of views N, total number of diffusion steps T, and LF-
+MultiDiffusion stopping timestep TM
+1: JT ∼N(0, I)
+Phase 1: Panorama latent optimization (LF-MultiDiffusion)
+2: for t = T, T −1, . . . , TM + 1 do
+3:
+It,i ←St,iJt
+∀i ∈[N]
+\triangleright Render
+4:
+˜It−1,i ←Φ(It,i, t, yt,i)
+∀i ∈[N]
+\triangleright Denoise
+5:
+Jt−1 ←KrylovSolve
+
+{St,i}N
+i=1, {˜It−1,i}N
+i=1
+
+\triangleright Solve Eq. (8)
+6: end for
+Phase 2: View-wise post refinement
+7: ITM ,i ←STM ,iJTM
+∀i ∈[N]
+\triangleright Render
+8: for t = TM, TM −1, . . . , 1 do
+9:
+It−1,i ←Φ(It,i, t, yt,i)
+∀i ∈[N]
+\triangleright Denoise
+10: end for
+11: J0 ←DistortionAwareWeightedAveraging
+ {STM ,i}N
+i=1, {I0,i}N
+i=1
+
+\triangleright Aggregate
+12: return J0
+where N(iu, ju) = {(⌊iu⌋+ δi, ⌊ju⌋+ δj) | δi, δj ∈{0, 1}} denotes the four
+neighboring panorama pixels of (iu, ju). The horizontal index is treated as
+periodic, whereas the vertical index is clipped to the valid range. For the reverse
+mapping I 7→S⊤
+t,iI, we use the same correspondences and interpolation weights
+as in Eq. (11), and scatter each pixel value I[u, v] onto the target ERP latent J.
+3.4
+View-wise post refinement
+Although LF-MultiDiffusion produces globally consistent panorama latents, the
+final decoded ERP images can still appear slightly blurry compared with images
+generated directly by the base model in its native perspective domain. We conjec-
+ture that this gap arises because the panorama is optimized in the VAE [21] latent
+space and decoded into the ERP format, where both latent-space compression
+and the geometric distortion inherent to ERP representations can weaken local
+details.
+In practice, we stop the panorama optimization at an intermediate timestep
+TM > 0 and use the resulting latent JTM for a view-wise post-refinement stage.
+Specifically, we first render a set of perspective-view latents {Ii}Nref
+i=1 by applying
+the corresponding projections S′
+TM,i to JTM . We then continue denoising each
+rendered view independently using the same pre-trained image generator Φ
+until the final step. Intuitively, this step brings each local view back to the
+native generation domain, allowing high-frequency details to be recovered while
+preserving the global structure established by LF-MultiDiffusion.
+After denoising, each refined latent is decoded independently into an RGB
+image. We then project the refined perspective images back to the ERP image and
+aggregate them using Distortion-Aware Weighted Averaging from SphereDiff [30],
+
+
+LF-MultiDiffusion
+11
+which accounts for the non-uniform distortion of ERP coordinates. Algorithm 1
+summarizes an overview of the proposed generation process.
+4
+Experiments
+4.1
+Experimental setup
+Implementation and inference details. We used FLUX [3] as the pre-trained
+image generator with the classifier-free guidance [14] scale set to 3.5. For text
+prompts, we followed SphereDiff [30] and used their 20 prompt sets. For each
+prompt set, we generated 10 panorama images with different random seeds.
+The total number of denoising steps T is set to 28, and the stopping step for
+LF-MultiDiffusion TM is set to 23.
+To construct mappings between the panorama and perspective views, we used
+N = 14 initial view directions: two polar views (θ, ϕ) = (0, ± π
+2 ), eight tilted views
+(θ, ϕ) = ( π
+2 i, ± π
+3 ) for i ∈{0, 1, 2, 3}, and four equatorial views (θ, ϕ) = ( π
+2 i, 0)
+for i ∈{0, 1, 2, 3}. We set the per-step angular shift s =
+π
+18. We generated
+2048 × 4096 ERP panoramas with 512 × 512 perspective views. All experiments
+were conducted on a single NVIDIA A100 GPU (40GB).
+Baselines. We compared against DynamicScaler [26] and SphereDiff [30] as
+training-free baselines. We set N = 44 for DynamicScaler and N = 89 for SphereD-
+iff, which are the default values. For a fair comparison, we used FLUX [3] as the
+base text-to-image generator. We additionally reported results for representative
+training-based models, Text2Light [4] and PanFusion [45].
+Evaluation process and metrics. We followed the evaluation protocol of
+SphereDiff [30]. Specifically, we rendered 14 perspective views from each generated
+panorama using FOV = 90◦for evaluation. Inspired by VBench [15], we used
+MUSIQ [19] to assess imaging quality (e.g., exposure, noise, and blur), the LAION
+aesthetic predictor [22] to measure aesthetic preference, and CLIP [32] feature
+similarity between each view and the corresponding text prompt to evaluate
+text alignment. We also reported Q-Align [40], an LLM-based visual evaluator,
+as an additional measure of perceptual quality. Furthermore, we conducted the
+VLM-based evaluation [47] similar to SphereDiff [30] to assess the panoramic
+distortion and continuity using Qwen-VL [1]. We use the text prompt proposed
+in SphereDiff [30] with slight modifications tailored for Qwen-VL (see Section C
+in the supplementary material for the full evaluation prompt). For runtime, we
+measured the end-to-end generation time excluding I/O overhead.
+Additional analyses in the supplementary material. Beyond the main
+experimental results presented in this section, we provide additional analyses
+in the supplementary material. They include experiments with SANA [41], an
+extension to text-to-panoramic video generation with LTX-Video [11], latent
+and projection variants, a sensitivity study on the post-refinement timestep, and
+additional generated samples.
+
+
+12
+A. Hayakawa et al.
+Table 1: Comparison with baselines. 2048 × 4096 panoramas are generated except for
+PanFusion (which only supports 512 × 1024). For the training-free methods, Flux [3] is
+used as a base T2I model. Runtime denotes the mean wall-clock time measured on a
+single Nvidia A100 40GB GPU (lower is better). Higher is better for all other metrics.
+LF-MultiDiffusion supports a dense mapping between panoramic and perspective views,
+thereby achieving higher generation quality with faster inference. *: The runtime for
+PanFusion is shown for reference due to its small resolution.
+Method
+Runtime Aesthetic Imaging QAlign CLIP Distortion Continuity
+Training-based panorama generation
+Text2Light
+56s
+0.424
+0.434
+2.22
+19.60
+3.26
+3.56
+PanFusion
+27s∗
+0.473
+0.527
+2.62
+25.44
+1.93
+2.31
+Training-free panorama generation
+DynamicScaler
+7m 31s
+0.463
+0.516
+3.11
+26.32
+3.15
+3.83
+SphereDiff
+32m 15s
+0.597
+0.533
+3.23
+27.65
+4.64
+4.82
+Ours
+2m 6s
+0.616
+0.568
+3.34
+29.19
+4.64
+4.86
+4.2
+Comparison with baselines
+Quantitative comparison. Table 1 compares our method with baselines.
+Training-based methods often struggle with out-of-domain prompts due to the
+limited coverage of the training data. For instance, for the prompt "Aurora", we
+observed that Text2Light tended to produce a collapsed black image, while PanFu-
+sion often generated an unrelated indoor scene. Among training-free approaches,
+LF-MultiDiffusion outperforms DynamicScaler and SphereDiff across all metrics.
+DynamicScaler applies an additional offset-shifting denoising stage that treats
+the panorama as a wide-canvas perspective image, rather than enforcing a strictly
+spherical (ERP-consistent) representation throughout. This can introduce geo-
+metric inconsistencies and degrade quality when evaluated via perspective-view
+rendering. In contrast, LF-MultiDiffusion and SphereDiff explicitly model curved
+panoramic geometry and mitigate these distortions, resulting in consistently
+higher scores across evaluation metrics. We attribute the improvement of LF-
+MultiDiffusion over SphereDiff to the use of denser linear projections, which
+stabilize optimization on curved representations and enable coherent panorama
+generation with substantially fewer views. Figure 6 subjectively compares the
+generated panorama and perspective views among training-free approaches.
+Notably, LF-MultiDiffusion achieves 3.58× and 15.36× speedup over Dy-
+namicScaler and SphereDiff, respectively. The dominant cost in training-free
+panorama generation is the number of evaluations of the pre-trained image
+generator, which scales linearly with the number of perspective views. By re-
+moving the direct-sampling constraint and supporting dense projections between
+panoramas and perspective views, LF-MultiDiffusion achieves better quality with
+significantly lower computational cost.
+
+
+LF-MultiDiffusion
+13
+DynamicScaler
+SphereDiff
+Ours
+View Angle
+(latitude)
+Panorama
+90°
+45°
+0°
+-45°
+-90°
+Fig. 6: Subjective comparison. DynamicScaler often exhibits pole distortions (±90◦).
+SphereDiff and LF-MultiDiffusion generate natural views across directions, and LF-
+MultiDiffusion achieves higher overall fidelity.
+Table 2: User study results on subjective panorama quality. Participants rated each
+method on a 5-point Likert scale. Higher scores indicate better image quality, fewer
+perceived distortions, and better continuity. We report the mean rating with 95%
+confidence intervals.
+Method
+Image Quality ↑
+Distortion ↑
+Continuity ↑
+DynamicScaler
+2.39±0.17
+2.36±0.16
+2.25±0.20
+SphereDiff
+3.64±0.14
+3.73±0.12
+3.96±0.12
+LF-MultiDiffusion (Ours)
+4.07±0.10
+3.75±0.16
+4.07±0.11
+User study. We further conducted a user study to evaluate the subjective
+quality of the generated panoramas. Participants rated samples from Dynamic-
+Scaler, SphereDiff, and LF-MultiDiffusion in terms of image quality, geometric
+naturalness, and continuity on a 5-point Likert scale. As shown in Table 2, LF-
+MultiDiffusion achieved the highest scores across all three aspects, indicating
+that our formulation improves perceived visual quality while preserving geometric
+naturalness and seamlessness. See the supplementary material for the setup
+details.
+4.3
+Ablation studies
+Solver types and number of updates. Table 3 reports the effect of the solver
+choice and the number of solver iterations. We evaluated PCG [13] and LSMR [9]
+with iteration in {10, 30, 100}. For PCG, we used a diagonal preconditioner derived
+
+
+14
+A. Hayakawa et al.
+Table 3: Results when using different
+solvers and the number of solver iterations.
+Solver Iters QAlign↑CLIP↑
+PCG
+10
+3.00
+28.94
+30
+3.04
+28.85
+100
+2.97
+28.95
+LSMR
+10
+3.27
+29.07
+30
+3.34
+29.19
+100
+3.30
+28.93
+Table 4: Results when using different reg-
+ularizers and coefficients.
+Regularizer
+λ
+QAlign↑CLIP↑
+-
+0
+3.282
+29.02
+Ridge
+10−3
+3.330
+29.10
+10−4
+3.340
+29.03
+10−5
+3.336
+28.99
+Laplacian
+10−3
+3.297
+28.89
+10−4
+3.341
+29.19
+10−5
+3.321
+29.00
+Table 5: Results when using a different number of perspective views N.
+N Runtime↓Aesthetic↑Imaging↑QAlign↑CLIP↑Distortion↑Continuity↑
+6
+1m 15s
+0.518
+0.634
+3.549
+27.55
+3.98
+4.53
+14
+2m 6s
+0.616
+0.568
+3.341
+29.19
+4.64
+4.86
+20
+2m 42s
+0.621
+0.552
+3.223
+29.21
+4.45
+4.77
+26
+3m 18s
+0.603
+0.538
+3.165
+29.12
+4.33
+4.69
+from the squared interpolation weights computed from S⊤
+i,tSi,t. Overall, LSMR
+achieves better scores across all metrics. Increasing the number of iterations
+from 10 to 30 improved performance, whereas further increasing it to 100 yielded
+diminishing returns.
+Regularizer and its coefficient. Table 4 reports an ablation on regularizer
+types and the coefficient λ. Using LSMR, we compared two regularizers: ridge
+and discrete Laplacian. For each regularizer, we tested λ ∈{10−3, 10−4, 10−5}.
+Across these settings, both regularizers performed comparably. We therefore used
+the discrete Laplacian with λ = 10−4 as the default, as it provided consistently
+higher QAlign and CLIP scores.
+Number of reference perspective views. Table 5 reports the effect of
+the number of reference perspective views, N ∈{6, 14, 20, 26}. For N = 6, we
+used two polar views (θ, ϕ) = (0, ± π
+2 ) and four equatorial views (θ, ϕ) = ( π
+2 i, 0)
+for i ∈{0, 1, 2, 3}. For larger N, we used two polar views, 2L tilted views
+(θ, ϕ) = ( 2π
+L i, ± π
+3 ), and L equatorial views (θ, ϕ) = ( 2π
+L i, 0) with L ∈{4, 6, 8}
+(corresponding to N = 14, 20, 26).
+Using N = 6 yields the highest scores for Imaging and QAlign, but sub-
+stantially degrades geometric metrics such as Distortion and Continuity. In
+this setting, reference views have little to no overlap at each diffusion step, so
+the optimization can produce high-fidelity local views while failing to enforce
+global seamlessness over the full panorama. Increasing the number of views to
+
+
+LF-MultiDiffusion
+15
+N = 14 improves Distortion and Continuity while maintaining strong perceptual
+and text alignment scores, providing the best overall trade-off between quality,
+consistency, and runtime in our experiments. Further increasing N beyond 14
+slightly improves some metrics but tends to degrade others, while incurring
+higher runtime. We conjecture that with heavier overlap, the least-squares fusion
+becomes more redundant and can make the iterative solve less well-conditioned,
+leading to diminishing returns under a fixed iteration budget.
+5
+Conclusion
+We presented LF-MultiDiffusion, a fast training-free framework for panoramic
+image synthesis that extends MultiDiffusion to arbitrary linear projections be-
+tween perspective views and ERP panoramas. By casting the update under linear
+mappings as a regularized least-squares problem and solving it with a matrix-free
+Krylov method, our approach removes the direct-sampling constraint of prior
+training-free baselines, enabling denser and more natural mappings between
+panorama and perspective views. This reduces the number of view evaluations
+during denoising. As a result, LF-MultiDiffusion improves generation quality,
+text alignment, and geometric consistency while achieving about 15.36× faster
+inference than the best-performing training-free baseline.
+Beyond panoramas, this formulation suggests a general recipe for optimization-
+based synthesis on non-planar domains; future work includes extending it to
+other surface topologies (e.g., torus-like representations for walk-through content)
+and to texture optimization directly on mesh surfaces.
+Acknowledgment
+This work was partially supported by JST Moonshot R&D Grant Number
+JPMJPS2011.
+References
+1. Bai, S., Chen, K., Liu, X., Wang, J., Ge, W., Song, S., Dang, K., Wang, P., Wang,
+S., Tang, J., Zhong, H., Zhu, Y., Yang, M., Li, Z., Wan, J., Wang, P., Ding, W.,
+Fu, Z., Xu, Y., Ye, J., Zhang, X., Xie, T., Cheng, Z., Zhang, H., Yang, Z., Xu, H.,
+Lin, J.: Qwen2.5-vl technical report (2025)
+2. Bar-Tal, O., Yariv, L., Lipman, Y., Dekel, T.: Multidiffusion: fusing diffusion paths
+for controlled image generation. In: ICML (2023)
+3. Black Forest Labs: Flux. https://github.com/black-forest-labs/flux (2024)
+4. Chen, Z., Wang, G., Liu, Z.: Text2light: Zero-shot text-driven hdr panorama
+generation. ACM Trans. Graph. (2022)
+5. Chung, J., Lee, S., Nam, H., Lee, J., Lee, K.M.: Luciddreamer: Domain-free gener-
+ation of 3d gaussian splatting scenes. IEEE TVCG (2025)
+
+
+16
+A. Hayakawa et al.
+6. Esser, P., Kulal, S., Blattmann, A., Entezari, R., Müller, J., Saini, H., Levi, Y.,
+Lorenz, D., Sauer, A., Boesel, F., Podell, D., Dockhorn, T., English, Z., Rombach,
+R.: Scaling rectified flow transformers for high-resolution image synthesis. In: ICML
+(2024)
+7. Esser, P., Kulal, S., Blattmann, A., Entezari, R., Müller, J., Saini, H., Levi, Y.,
+Lorenz, D., Sauer, A., Boesel, F., Podell, D., Dockhorn, T., English, Z., Rombach,
+R.: Scaling rectified flow transformers for high-resolution image synthesis. In: ICML
+(2024)
+8. Fang, Z., Zhu, K., Liu, Z., Liu, Y., Zhai, W., Cao, Y., Zha, Z.J.: Viewpoint:
+Panoramic video generation with pretrained diffusion models. In: NeurIPS (2025)
+9. Fong, D.C.L., Saunders, M.: Lsmr: An iterative algorithm for sparse least-squares
+problems. SIAM J. Sci. Comput. (2011)
+10. Frolov, S., Moser, B.B., Dengel, A.: Spotdiffusion: A fast approach for seamless
+panorama generation over time. In: WACV (2025)
+11. HaCohen, Y., Chiprut, N., Brazowski, B., Shalem, D., Moshe, D., Richardson, E.,
+Levin, E., Shiran, G., Zabari, N., Gordon, O., Panet, P., Weissbuch, S., Kulikov, V.,
+Bitterman, Y., Melumian, Z., Bibi, O.: Ltx-video: Realtime video latent diffusion
+12. Hardin, D.P., Michaels, T.J., Saff, E.B.: A comparison of popular point configura-
+tions on S2. Dolomites Research Notes on Approximation (2016)
+13. Hestenes, M.R., Stiefel, E.: Methods of conjugate gradients for solving linear systems.
+J. Res. Natl. Bur. Stand. (1952)
+14. Ho, J., Salimans, T.: Classifier-free diffusion guidance. In: NeurIPSW on Deep
+Generative Models and Downstream Applications (2021)
+15. Huang, Z., He, Y., Yu, J., Zhang, F., Si, C., Jiang, Y., Zhang, Y., Wu, T., Jin, Q.,
+Chanpaisit, N., Wang, Y., Chen, X., Wang, L., Lin, D., Qiao, Y., Liu, Z.: VBench:
+Comprehensive benchmark suite for video generative models. In: CVPR (2024)
+16. Jin, Z., Shen, X., Li, B., Xue, X.: Training-free diffusion model adaptation for
+variable-sized text-to-image synthesis. In: NeurIPS (2023)
+17. Jonathan Ho, Ajay N. Jain, P.A.: Denoising diffusion probabilistic models. In:
+NeurIPS (2020)
+18. Kalischek, N., Oechsle, M., Manhardt, F., Henzler, P., Schindler, K., Tombari, F.:
+Cubediff: Repurposing diffusion-based image models for panorama generation. In:
+ICLR (2025)
+19. Ke, J., Wang, Q., Wang, Y., Milanfar, P., Yang, F.: Musiq: Multi-scale image
+quality transformer. In: ICCV (2021)
+20. Kerbl, B., Kopanas, G., Leimkuehler, T., Drettakis, G.: 3d gaussian splatting for
+real-time radiance field rendering. ACM TOG (2023)
+21. Kingma, D.P., Welling, M.: Auto-encoding variational bayes. In: ICLR (2014)
+22. LAION-AI: aesthetic-predictor. https://github.com/LAION- AI/aesthetic-
+predictor (2022)
+23. Lee, Y., Kim, K., Kim, H., Sung, M.: Syncdiffusion: Coherent montage via synchro-
+nized joint diffusions. In: NeurIPS (2023)
+24. Likert, R.: A technique for the measurement of attitudes. Archives of Psychology
+(1932)
+25. Lipman, Y., Chen, R.T.Q., Ben-Hamu, H., Nickel, M., Le, M.: Flow matching for
+generative modeling. In: ICLR (2023)
+26. Liu, J., Lin, S., Li, Y., Yang, M.H.: Dynamicscaler: Seamless and scalable video
+generation for panoramic scenes. In: CVPR (2025)
+27. Liu, X., Gong, C., qiang liu: Flow straight and fast: Learning to generate and
+transfer data with rectified flow. In: ICLR (2023)
+
+
+LF-MultiDiffusion
+17
+28. Ni, J., Zhang, C.B., Zhang, Q., Zhang, J.: What makes for text to 360-degree
+panorama generation with stable diffusion? In: ICCV (2025)
+29. Nichol, A.Q., Dhariwal, P., Ramesh, A., Shyam, P., Mishkin, P., Mcgrew, B.,
+Sutskever, I., Chen, M.: GLIDE: Towards photorealistic image generation and
+editing with text-guided diffusion models. In: ICML (2022)
+30. Park, M., Kang, T., Yun, J., Hwang, S., Choo, J.: Spherediff: Tuning-free omnidi-
+rectional panoramic image and video generation via spherical latent representation.
+In: AAAI (2026)
+31. Qwen Team: Qwen3.5: Towards native multimodal agents (February 2026), https:
+//qwen.ai/blog?id=qwen3.5
+32. Radford, A., Kim, J.W., Hallacy, C., Ramesh, A., Goh, G., Agarwal, S., Sastry, G.,
+Askell, A., Mishkin, P., Clark, J., Krueger, G., Sutskever, I.: Learning transferable
+visual models from natural language supervision. In: ICML (2021)
+33. Rombach, R., Blattmann, A., Lorenz, D., Esser, P., Ommer, B.: High-resolution
+image synthesis with latent diffusion models. In: CVPR (2022)
+34. Saharia, C., Chan, W., Saxena, S., Li, L., Whang, J., Denton, E., Ghasemipour,
+S.K.S., Gontijo-Lopes, R., Ayan, B.K., Salimans, T., Ho, J., Fleet, D.J., Norouzi,
+M.: Photorealistic text-to-image diffusion models with deep language understanding.
+In: NeurIPS (2022)
+35. Tang, S., Zhang, F., Chen, J., Wang, P., Furukawa, Y.: MVDiffusion: Enabling holis-
+tic multi-view image generation with correspondence-aware diffusion. In: NeurIPS
+(2023)
+36. Voynov, A., Hertz, A., Arar, M., Fruchter, S., Cohen-Or, D.: Curved diffusion: A
+generative model with optical geometry control. In: ECCV (2024)
+37. Wang, H., Xiang, X., Fan, Y., Xue, J.H.: Customizing 360-degree panoramas
+through text-to-image diffusion models. In: WACV (2024)
+38. Wang, Q., Li, W., Mou, C., Cheng, X., Zhang, J.: 360dvd: Controllable panorama
+video generation with 360-degree video diffusion model. In: CVPR (2024)
+39. Wang, Z., BAI, L., Yue, X., Ouyang, W., Zhang, Y.: Native-resolution image
+synthesis. In: NeurIPS (2025)
+40. Wu, H., Zhang, Z., Zhang, W., Chen, C., Li, C., Liao, L., Wang, A., Zhang, E.,
+Sun, W., Yan, Q., Min, X., Zhai, G., Lin, W.: Q-align: Teaching lmms for visual
+scoring via discrete text-defined levels. In: ICML (2024)
+41. Xie, E., Chen, J., Chen, J., Cai, H., Tang, H., Lin, Y., Zhang, Z., Li, M., Zhu, L.,
+Lu, Y., Han, S.: SANA: Efficient high-resolution text-to-image synthesis with linear
+diffusion transformers. In: ICLR (2025)
+42. Ye, W., Ji, C., Chen, Z., Gao, J., Huang, X., Zhang, S.H., Ouyang, W., He, T.,
+Zhao, C., Zhang, G.: Diffpano: Scalable and consistent text to panorama generation
+with spherical epipolar-aware diffusion. In: NeurIPS (2024)
+43. Yu, H.X., Duan, H., Herrmann, C., Freeman, W.T., Wu, J.: Wonderworld: Interac-
+tive 3d scene generation from a single image. In: CVPR (2025)
+44. Yu, H.X., Duan, H., Hur, J., Sargent, K., Rubinstein, M., Freeman, W.T., Cole, F.,
+Sun, D., Snavely, N., Wu, J., Herrmann, C.: Wonderjourney: Going from anywhere
+to everywhere. In: CVPR (2024)
+45. Zhang, C., Wu, Q., Cruz Gambardella, C., Huang, X., Phung, D., Ouyang, W.,
+Cai, J.: Taming stable diffusion for text to 360◦panorama image generation. In:
+CVPR (2024)
+46. Zhang, X., Zhou, T., Zhang, X., Wei, J., Tang, Y.: Multi-scale diffusion: Enhancing
+spatial layout in high-resolution panoramic image generation (2025)
+47. Zhou, F., Gu, T., Huang, Z., Qiu, G.: Vision language modeling of content, distortion
+and appearance for image quality assessment. JSTSP (2024)
+
+
+18
+A. Hayakawa et al.
+48. Zhou, S., Fan, Z., Xu, D., Chang, H., Chari, P., Bharadwaj, T., You, S., Wang,
+Z., Kadambi, A.: Dreamscene360: Unconstrained text-to-3d scene generation with
+panoramic gaussian splatting. In: ECCV (2024)
+
+
+LF-MultiDiffusion
+19
+Linear Fusion MultiDiffusion for Fast
+Training-Free Spherical Panorama Generation
+Supplementary Material
+A
+Details of the user study
+We conducted a user study to subjectively evaluate the visual quality and seam-
+lessness of the generated panoramas. We randomly sampled four prompt sets from
+the dataset and generated panoramas using DynamicScaler [26], SphereDiff [30],
+and LF-MultiDiffusion. For each panorama, we also provided a 10-second video
+showing the scene from multiple viewing directions.
+Each participant evaluated 12 panorama-video pairs in total (4 prompt sets
+× 3 methods) and rated every sample on the following three aspects using a
+5-point Likert scale [24] (1: Poor, 2: Subpar, 3: Fair, 4: Good, 5: Excellent):
+1. Image Quality: Rate the overall visual quality of the image. Lower scores
+should be assigned to images that are blurry, noisy, lacking detail, or exhibiting
+visible artifacts.
+2. Distortion: Rate whether the image contains geometric distortions. Lower
+scores should be given if objects or scene structure look unnaturally stretched
+or deformed. Please focus on shape and structure, not on the content or style.
+Pay attention to regions away from the horizontal viewing direction, such as
+upward or downward views.
+3. Continuity: Rate how smoothly and consistently the image is connected
+across different viewing directions. Lower scores should be assigned when
+visible seams, breaks, or structural misalignments are present.
+We collected 132 ratings for each aspect from 11 participants. To assess
+statistical significance, we report 95% confidence intervals (CIs) based on the
+standard error. Table 2 in the main paper summarizes the user study results.
+LF-MultiDiffusion achieves the highest Image Quality ratings while also obtaining
+comparable or slightly better Distortion and Continuity ratings than SphereDiff
+with significantly faster inference.
+B
+Details of the Krylov solvers
+We evaluated both PCG [13] and LSMR [9] for solving Eq. (8). Algorithms A1
+and A2 summarize the update rules of the PCG and LSMR solvers, respectively.
+For PCG, we solve the regularized normal equation using the linear operator
+H(·) = S⊤S(·) + λL⊤L(·) together with a diagonal preconditioner. The diagonal
+preconditioner is derived from the squared interpolation weights corresponding
+to S⊤S. For LSMR, we instead solve the equivalent augmented least-squares
+problem. Here, S denotes the auxiliary recurrence state maintained by LSMR,
+
+
+20
+A. Hayakawa et al.
+Algorithm A1 PCG solver for regularized least squares
+Require: Initial panorama feature J(0), stacked denoised target d, stacked operator
+S, adjoint operator S⊤, regularization operator L, diagonal preconditioner M,
+regularization weight λ, # of iterations τ, and tolerance ε
+Phase 1: Initialization
+1: Define the linear operator H(·) := S⊤S(·) + λL⊤L(·) \triangleright Normal-equation operator
+2: b ←S⊤d, J ←J(0), r ←b −H(J)
+3: z ←M −1r, ρ ←⟨r, z⟩, p ←z
+\triangleright Preconditioner and search direction
+Phase 2: PCG iteration
+4: for k = 1, 2, . . . , τ do
+5:
+q ←H(p), α ←ρ/⟨p, q⟩, J ←J + αp, r ←r −αq
+\triangleright PCG step
+6:
+if ∥r∥/∥b∥< ε then
+7:
+break
+\triangleright Stop if converged
+8:
+end if
+9:
+z ←M −1r, β ←⟨r, z⟩/ρ, ρ ←⟨r, z⟩, p ←z + βp
+\triangleright Update search direction
+10: end for
+11: return J
+\triangleright Return the optimized panorama feature
+including the rotation coefficients and search-direction-related variables. In both
+solvers, S, S⊤, ˜S, and ˜S⊤are implemented as matrix-free operators, avoiding
+explicit matrix instantiation in memory.
+C
+Details of the VLM-based evaluation
+To evaluate panoramic seamlessness, specifically Distortion and Continuity, we
+used Qwen2.5-VL [1], an open-source vision-language model. Table A1 shows the
+evaluation prompt. Our evaluation protocol follows the VLM-based procedure
+introduced in SphereDiff [30]. However, we found that, when using the original
+prompt, the model tended to assign lower scores based on image content or artistic
+style rather than purely geometric criteria. We therefore explicitly instructed the
+model to ignore content and style, focusing only on geometric consistency.
+D
+Experiments with SANA
+In addition to FLUX [3], we evaluated LF-MultiDiffusion with SANA [41] and
+compared it against SphereDiff. Table A2 presents the results for SANA used as
+the base T2I model. Because SANA is a computationally efficient text-to-image
+model with a highly compressed latent space and a linear diffusion transformer,
+its inference is reported to be approximately 100× faster than FLUX. As a result,
+the cost of each MultiDiffusion step is drastically reduced, increasing the relative
+runtime contribution of the linear solver. Even in this setting, LF-MultiDiffusion
+achieves a substantial speedup (7.38×) while maintaining comparable perfor-
+mance.
+
+
+LF-MultiDiffusion
+21
+Algorithm A2 LSMR solver in LF-MultiDiffusion
+Require: Initial panorama feature J(0), augmented stacked denoised target ˜d, aug-
+mented operator ˜S, adjoint operator ˜S⊤, # of iterations T, and tolerance ε
+Phase 1: Initialization
+1: J ←J(0), r ←˜d −˜SJ
+2: β ←∥r∥, u ←r/β, α ←∥˜S⊤u∥, v ←˜S⊤u/α
+\triangleright Bidiagonalization
+3: S ←InitializeLSMRState(α, β)
+\triangleright LSMR auxiliary state
+Phase 2: LSMR iteration
+4: for k = 1, 2, . . . , T do
+5:
+β ←∥˜Sv −αu∥, u ←( ˜Sv −αu)/β
+6:
+α ←∥˜S⊤u −βv∥, v ←( ˜S⊤u −βv)/α
+7:
+(∆J, S) ←LSMRUpdate(S; α, β, v)
+\triangleright compute direction w/ state update
+8:
+J ←J + ∆J, r ←˜d −˜SJ
+\triangleright LSMR step
+9:
+if ∥r∥/∥˜d∥< ε then
+10:
+break
+\triangleright Stop if converged
+11:
+end if
+12: end for
+13: return J
+\triangleright Return the optimized panorama feature
+Table A1: Evaluation Prompt for Qwen-VL. Evaluation prompt used with
+Qwen2.5-VL [1] for assessing distortion and continuity in generated panoramas. The
+prompt follows SphereDiff [30] with slight modifications to better isolate geometric
+consistency from image content and style.
+You are an evaluator assessing an image generation model on a single-image basis.
+Your evaluation is based on the following two criteria:
+1. Distortion: Evaluate only geometric distortion (not content/style). High if it
+could pass as a normal camera photo; low if you notice stretching/warping/bending
+or inconsistent proportions.
+2. Continuity: Evaluate only continuity (not content/style). Score low if there is
+any visible break anywhere, including cut, misalignment, tearing, duplicated edges,
+or abrupt texture/lighting change.
+Each criterion is rated on a five-point scale: Excellent (5), Good (4), Fair (3),
+Subpar (2), and Poor (1). You will receive one image at a time. For each criterion,
+provide a concise reason for the score before listing the rating.
+Format your response as follows:
+- Distortion: (Brief reason) →Score
+- Continuity: (Brief reason) →Score
+E
+Panoramic Video Generation
+In addition to static panorama generation, we adapted our method to text-
+to-panoramic video generation. We used LTX-Video [11] as a pre-trained text-
+
+
+22
+A. Hayakawa et al.
+Table A2: Panorama generation results with SANA [41].
+Method
+Runtime Aesthetic Imaging QAlign CLIP Distortion Continuity
+SphereDiff
+4m 11s
+0.550
+0.531
+2.985
+27.42
+3.62
+4.15
+Ours
+34s
+0.538
+0.566
+3.001
+26.67
+3.38
+4.26
+Table A3: Quantitative comparison on text-to-panoramic video generation. Motion
+denotes motion smoothness in VBench.
+Method
+Runtime↓QAlign↑CLIP↑Distortion↑Continuity↑Motion↑
+Training-based panoramic video generation
+360DVD
+1m 31s
+2.36
+24.13
+2.98
+3.41
+0.32
+ViewPoint
+2m 54s
+1.61
+24.39
+1.89
+2.07
+0.66
+Training-free panoramic video generation
+SphereDiff
+25m 14s
+2.67
+27.72
+2.70
+3.13
+0.43
+Ours
+2m 44s
+2.36
+28.19
+3.01
+3.37
+0.44
+to-video generator. For the baselines, we compared against 360DVD [38] and
+ViewPoint [8] as training-based baselines, and SphereDiff, which uses the same
+video model, as a training-free baseline. Note that DynamicScaler was omitted
+because its official implementation only supports image-to-video generation
+(from static panorama to dynamic panorama) and does not support text-to-
+video generation. Following each default setup, the output sizes are 16 × 512 ×
+1024 for 360DVD, 49 × 512 × 1024 for ViewPoint, and 121 × 1024 × 2048 for
+SphereDiff and ours. Thus, the training-based runtimes are only references
+due to their different output sizes, whereas the SphereDiff vs. ours runtime
+comparison is direct. Table A3 shows that our method reduces the runtime over
+SphereDiff from 25m 14s to 2m 44s, while achieving better scores on most metrics
+except comparable QAlign score. These results demonstrate that our training-free
+formulation transfers to panoramic video generation with a clear efficiency gain.
+F
+Latent and projection variants
+In this section, we present results with alternative latent representations and pro-
+jection variants to demonstrate the generality of LF-MultiDiffusion. In addition
+to the ERP latent and the bilinear projection between panorama and perspective
+views used in the main paper, we also evaluate a spherical latent representation
+and a splatting-based forward projection from 3D points to perspective views. For
+clarity, in this section, we refer to the bilinear projection used in the main paper as
+a backward projection (Bwd) when comparing it with the new forward-projection
+variant (Fwd), since the key difference lies in the projection direction.
+
+
+LF-MultiDiffusion
+23
+Table A4: Panorama generation results with different latent and projection designs.
+Latent Projection Runtime Aesthetic Imaging QAlign CLIP Distortion Continuity
+ERP
+Fwd
+4m 42s
+0.609
+0.555
+3.22
+28.72
+4.47
+4.77
+ERP
+Bwd
+2m 6s
+0.616
+0.568
+3.34
+29.19
+4.64
+4.86
+SPH
+Fwd
+5m 38s
+0.605
+0.552
+3.24
+28.78
+4.36
+4.71
+SPH
+Bwd
+2m 20s
+0.631
+0.568
+3.27
+29.03
+4.57
+4.85
+F.1
+Spherical latent representation
+Inspired by SphereDiff [30], we represent a 360-degree panoramic scene using
+points distributed on the surface of a unit sphere. Specifically, we define J as
+a set of Ns points on the unit sphere. Each point has a 3D position (xi, yi, zi)
+and a c-dimensional feature vector, where c matches the latent dimension of the
+base model. We initialize the point positions using the Fibonacci lattice [12] to
+distribute them approximately uniformly over the sphere surface. We denote this
+spherical latent representation as SPH.
+With SPH, we tested both the backward projection introduced in Eq. (11)
+of the main paper and the forward projection described in the following section.
+For the backward projection, we used the four neighboring points as N(iu, ju),
+determined by the distances between the back-projected 3D point on the sphere
+corresponding to each perspective pixel (iu, ju) and the Ns sphere points.
+F.2
+Splatting-based forward projection from 3D points to
+perspective views
+As a variant of the projection from a 360-degree scene to perspective views,
+we implement a forward projection (Fwd) by splatting all 3D points onto each
+perspective view and computing interpolation weights based on distances on
+the perspective image plane. Specifically, each 3D point xp is first projected
+onto a perspective view using Eq. (9), yielding a continuous pixel location
+(up,Mt,i, vp,Mt,i). We then scatter its feature to the neighboring pixels
+  \mathcal {N}_p(u_ { p, M_{t,i}} , v_ {p, M_{t, i }}) = \ {( \ flo or {u_{p, M_{t,i}}} + \delta _u, \floor {v_{p, M_{t,i}}} + \delta _v) \mid \delta _u, \delta _v \in \{0, 1\}\} 
+with weights defined by κ(u −up,Mt,i)κ(v −vp,Mt,i). This projection differs from
+the backward projection used in Sec. 3.3 in that every 3D point can contribute to
+perspective pixels, provided that the set of perspective views covers all directions.
+In addition to the spherical latent representation, we evaluated this splatting-
+based forward projection with the ERP latent described in the main paper.
+F.3
+Performance comparison of latent and projection variants
+Table A4 compares the performance of different latent and projection variants.
+For the spherical latent representation, we used Ns = 100,000. Because forward
+
+
+24
+A. Hayakawa et al.
+Table A5: Sensitivity study for the stopping time step TM.
+TM
+QAlign ↑CLIP ↑Distortion ↑Continuity ↑
+0 (No LF-MultiDiffusion)
+2.23
+18.79
+1.60
+1.68
+5
+3.09
+27.51
+3.82
+4.43
+10
+3.35
+28.96
+4.48
+4.76
+15
+3.38
+29.25
+4.52
+4.83
+20
+3.34
+28.74
+4.60
+4.85
+23
+3.34
+29.19
+4.64
+4.89
+25
+3.34
+29.06
+4.62
+4.80
+28 (No view-wise post refinement)
+2.74
+26.80
+4.39
+4.60
+projection requires projecting all Ns points into each perspective view at ev-
+ery update, it is slower than backward projection. It also slightly degrades all
+evaluation scores. We conjecture that forward projection induces denser overlap
+among neighboring pixels than backward projection, potentially causing excessive
+averaging that leads to overly smooth or blurred representations.
+For the spherical latent representation, we observed improvement in the
+Aesthetic score while maintaining comparable performance on the other metrics.
+Considering both runtime and overall performance, we adopt ERP with backward
+projection as the default setting.
+More importantly, these results show that LF-MultiDiffusion generalizes
+across different latent representations and projection operators. In particular, it
+can be applied not only to the ERP latent used in DynamicScaler-like settings
+but also to the spherical latent representation introduced in SphereDiff, providing
+a unified framework across these design choices. Also, our additional experiments
+suggest that using a larger Ns in SPH and a higher panorama resolution in ERP
+can further improve the overall scores. These results suggest that further gains
+may be obtained by making better choices of the latent representation and the
+projection operator, which we leave for future work.
+G
+Sensitivity study on the post-refinement timesteps
+Table A5 shows a sensitivity study on the stopping timestep TM. Panorama gen-
+eration without LF-MultiDiffusion (TM = 0) produces disconnected panoramas,
+while image quality and text alignment are degraded without view-wise post
+refinement (TM = 28). Intermediate values perform better overall, and we choose
+TM = 23 for its balanced performance. This supports the importance of both the
+LF-MultiDiffusion and the post-refinement stage.
+H
+Additional generated samples
+Figure A1 presents additional panorama samples generated by LF-MultiDiffusion.
+For the text prompts, we followed SphereDiff [30] and prepared three prompts per
+
+
+LF-MultiDiffusion
+25
+scene, each describing the upper, horizontal, and lower parts of the scene. These
+text prompts are automatically generated using Qwen3.5-2B [31] based on the
+scene labels shown in the figure. We further provide a demo in the supplementary
+material for comparison with other baselines, including both panoramas and their
+corresponding perspective-view videos. A more detailed comparison is available
+on our project page: https://ahykw.github.io/lfmd/.
+
+
+26
+A. Hayakawa et al.
+Air Balloons
+Blossom
+Rock Mountain
+Moonlit Snowy Village
+Ruins
+Aurora
+Rock Mountain with Star
+City
+Lavender
+Futuristic Kitchen
+Coastal Cave
+Tropical Paradise
+Snow-covered Cottage
+Abandoned Castle
+Desert Dunes
+Rainforest
+Floating City
+Steampunk Metropolis
+Cyberpunk Alleyway
+Urban Park in Spring
+Alpine Meadow
+Enchanted Forest
+Sunlit Orchard
+Mountain Lake
+Fig. A1: Generated panoramas by LF-MultiDiffusion.

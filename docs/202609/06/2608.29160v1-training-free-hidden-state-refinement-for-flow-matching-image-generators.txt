@@ -1,0 +1,618 @@
+Title: Training-Free Hidden-State Refinement for Flow-Matching Image Generators
+
+URL Source: https://arxiv.org/pdf/2608.29160v1
+
+Published Time: Tue, 01 Sep 2026 00:45:01 GMT
+
+Number of Pages: 16
+
+Markdown Content:
+# Training-Free Hidden-State Refinement for Flow-Matching Image Generators 
+
+# Yuanyi Yan 1, Xinzhe Rao 1, Canyu Shen 2, Yang Chen 1
+
+# Yunlu Chen 3, Meng Tang 4, Teng Long 5, Vincent Tao Hu 1
+
+> 1
+
+Huazhong University of Science and Technology 
+
+> 2
+
+Tongji University 
+
+> 3
+
+King Abdullah University of Science and Technology 
+
+> 4
+
+University of California, Merced 
+
+> 5
+
+University of Amsterdam 
+
+Project Page 
+
+Figure 1: Looping inside the denoiser produces cleaner images and better quality–time trade-offs. Left: matched Scale-RAE prompts compare the no-loop baseline, Dense Token Loop, and Loop Guidance. Right: Dense and Sparse Token Loop improve GenEval and DPG-Bench over no-loop baselines with more outer sampling steps, at comparable or lower generation time; point labels denote sampling steps over loop count. 
+
+Abstract 
+
+We aim to improve frozen flow-matching image generators by adding inference computation inside the denoiser, without changing model weights or the outer sampler. Existing gener-ators usually spend extra test-time computation by increasing the number of sampling steps, which repeatedly evaluates the entire denoiser and couples quality gains to sampler cost. A key challenge is how to use extra computation inside a frozen transformer denoiser: the method must decide which tokens, layers, and sampling times receive repeated updates while preserving the original generation pipeline. We introduce a training-free looping framework that repeatedly applies se-lected transformer layers inside each denoising call. Dense and Sparse Token Loop vary the token scope; Sampling-Progress Gating and the loop layer range specify when and where looping is active; loop count and strength control the repeated updates; and Loop Guidance combines ordinary and looped vector-field predictions. Across two Scale-RAE model scales, loop variants improve primary and auxiliary quality metrics with competitive quality–efficiency trade-offs. Loop Guidance further improves both primary metrics across all three tested models; on Scale-RAE DiT2.4B, it raises GenEval from 0.4471 to 0.5691 and DPG-Bench from 0.7656 to 0.8053. Code will be released. 
+
+# Introduction 
+
+Flow matching has become a central formulation for mod-ern generative modeling because it learns a time-dependent vector field that transports a simple base distribution to data arXiv:2608.29160v1 [cs.CV] 29 Aug 2026 (Lipman et al. 2023; Liu, Gong, and Liu 2023). Its progress in image generation has come from a broad design space, including noise schedules and preconditioning (Karras et al. 2022), transformer backbones (Peebles and Xie 2023; Ma et al. 2024; Esser et al. 2024), guidance mechanisms (Dhari-wal and Nichol 2021; Ho and Salimans 2022; Hu et al. 2023a; Karras et al. 2024), inference-time scaling (Ma et al. 2025), and latent representations, from latent diffusion au-toencoders to RAEs (Rombach et al. 2022; Tong et al. 2026; Singh et al. 2026). These advances raise a practical ques-tion: beyond changing the sampler, architecture, or training objective, can a frozen flow-matching generator benefit from additional computation inside its denoiser? In parallel, looped transformer computation has re-emerged as a way to spend extra computation through re-peated hidden-state updates. Universal and looped transform-ers study recurrence as a mechanism for iterative refinement, algorithm learning, and latent reasoning (Dehghani et al. 2019; Giannou et al. 2023; Yang et al. 2024; Saunshi et al. 2025). More recent training-free looped transformers suggest that pretrained pre-norm transformers can sometimes bene-fit from repeated layer evaluations without updating weights (Chen et al. 2026). However, it remains unclear how such hidden-state looping should be used inside flow-matching image generators, where denoising time, layer depth, token routing, and guidance all interact. Our training-free inference-time approach repeatedly ap-plies selected transformer layers inside a frozen flow-matching denoiser, while leaving the model weights, text con-ditioning, latent autoencoder, and outer sampler unchanged. We organize the design around four questions: what is recom-puted, when looping is active, where it is applied, and how its effect is controlled. Dense Token Loop repeats transformer-layer computation for all tokens, whereas Sparse Token Loop limits repetition to a subset of tokens to reduce computation. Sampling-Progress Gating specifies the active interval along sampling progress, and the loop layer range specifies where looping occurs. Loop count and strength control the repeated updates, while Loop Guidance determines how ordinary and looped vector-field predictions are combined. Figure 1 presents prompt-matched qualitative compar-isons and quality–efficiency trade-offs. The examples sug-gest that our approach primarily corrects subject-level struc-ture: malformed or incomplete shapes become more coher-ent, spurious parts are suppressed, and object identities, at-tributes, and simple counts are represented more faithfully. The efficiency plots further show that internal layer looping reaches higher GenEval and DPG-Bench scores than increas-ing only the number of outer sampling steps, at comparable or lower generation time. Our contributions are: 
+
+• We formulate internal transformer-layer looping as a training-free mechanism for allocating additional infer-ence compute within frozen flow-matching image gener-ators. 
+
+• We organize internal loop design by what, when, and where computation is repeated: Dense and Sparse Token Loop operate on all or selected tokens, Sampling-Progress Gating sets the active sampling interval, and the loop layer range sets the repeated layers. 
+
+• We introduce Loop Guidance as an orthogonal prediction-space mechanism that controls how the loop-induced correction is applied by combining ordinary and looped vector-field predictions. 
+
+• We evaluate and analyze the loop design on Scale-RAE and RAEv2 through ablations of loop count, layer range, sampling-progress interval, sparsifier design, and guid-ance. 
+
+# Related Work 
+
+Flow matching and diffusion-transformer design. Flow matching provides a flexible generative modeling framework by learning vector fields between base and data distribu-tions (Lipman et al. 2023; Liu, Gong, and Liu 2023). In image generation, this formulation has been combined with diffusion-transformer backbones (Peebles and Xie 2023; Ma et al. 2024; Esser et al. 2024), improved schedule and pre-conditioning choices (Karras et al. 2022), and increasingly strong latent representations (Rombach et al. 2022; Tong et al. 2026; Singh et al. 2026). Prior work also studies latent-space manipulation in transformer-based flow matching (Hu et al. 2024a). Our work does not introduce a new training objec-tive, backbone, sampler, or autoencoder. Instead, it studies whether a frozen flow-matching transformer can use addi-tional inference compute through internal hidden-state re-evaluation. 
+
+Inference-time control and guidance. A large body of work improves diffusion and flow models at inference time through schedule design, guidance, candidate selec-tion, or prediction-space modification. Classifier guidance, classifier-free guidance, and self-guidance alter the denoising prediction without changing the generator weights (Dhariwal and Nichol 2021; Ho and Salimans 2022; Hu et al. 2023a), while autoguidance combines predictions from models of different quality (Karras et al. 2024). Other approaches scale inference by adding denoising steps, searching over noisy candidates, or applying rejection-style selection (Ma et al. 2025; Na et al. 2024). Token routing and token merging have also been used to improve diffusion training or inference ef-ficiency (Krause et al. 2025; Bolya and Hoffman 2023); our Sparse Token Loop instead applies token selection only at inference inside a frozen denoiser while retaining full-token context. Loop Guidance is related in spirit to prediction-space control, but its direction is defined by two paths through the same frozen model: an ordinary path and a looped path. 
+
+Looped transformers. Recurrent transformer computa-tion has been studied in universal transformers and recent looped-transformer models, where repeated application of shared layers can support iterative computation, algorithm learning, or latent reasoning (Dehghani et al. 2019; Giannou et al. 2023; Yang et al. 2024; Saunshi et al. 2025). Training-free looped transformers further show that repeated layer evaluation can be useful even without retraining (Chen et al. 2026). Our method differs by applying looped computation Figure 2: Overview of training-free internal looping. Sampling-Progress Gating determines when looping is active. Dense Token Loop repeats the selected layer range for all tokens, while the optional Sparse Token Loop restricts repetition to selected tokens and reuses a complement residual initialized once. All weights remain frozen, and the outer sampler is unchanged. inside frozen flow-matching image denoisers and by separat-ing Dense Token Loop, Sampling-Progress Gating, Sparse Token Loop with cached complement reuse, and prediction-space Loop Guidance. 
+
+# Method 
+
+Preliminaries 
+
+Flow matching learns a time-dependent vector field 
+
+vθ (xt, t, c ) whose numerical integration transports an ini-tial noise state toward the data distribution (Lipman et al. 2023; Liu, Gong, and Liu 2023); here xt is the latent image state, t is flow time, and c is the text condition. In DiT-based image generators, this vector field is predicted by residual transformer layers conditioned on flow time and text (Pee-bles and Xie 2023; Esser et al. 2024). Each denoising call ordinarily evaluates every transformer layer once. We in-dex the denoiser’s D shape-preserving transformer layers by 
+
+j ∈ { 0, . . . , D − 1} and write Lj for layer j. We use hj for the full token hidden state entering Lj .
+
+Naive Internal Looping. A direct way to add inference compute is to reapply the same transformer layer, or layer range, K times at every denoising call. For one layer, the naive update can be written as 
+
+Z(0) = hj ,
+
+Z(r) = Lj (Z(r−1) ; t, c ), r = 1 , . . . , K, 
+
+hj+1 = Z(K).
+
+(1) This provides additional hidden-state refinement at fixed 
+
+(xt, t, c ), before the vector-field prediction is returned. How-ever, directly repeating full layer updates can produce an ex-cessively large hidden-state displacement, applying the same amount of replay everywhere ignores the different roles of layer depth and sampling progress, and recomputing every token introduces substantial cost. These limitations motivate our controlled formulation, which normalizes each repeated residual and determines where, when, and for which tokens looping is applied. 
+
+Our Method 
+
+We add inference compute inside a frozen flow-matching denoiser by repeatedly applying a selected transformer-layer range during chosen denoising calls, an operation we call a loop. Figure 2 organizes the design around four choices. What 
+
+is repeated is set by token scope: Dense Token Loop covers all tokens, while the optional Sparse Token Loop restricts repetition to selected tokens and reuses a complement resid-ual initialized once. Sampling-Progress Gating determines 
+
+when looping is active, and the loop layer range determines 
+
+where . Loop count and strength control repeated updates, while Loop Guidance determines how ordinary and looped vector-field predictions are combined. Calls outside the ac-tive interval and layers outside the selected range follow the ordinary path. 
+
+Dense Token Loop 
+
+Dense Token Loop keeps the repeated-layer structure in Eq. (1) but controls each round as a residual update. We define the residual map of layer j together with the ordinary update: 
+
+Rj (Z; t, c ) = Lj (Z; t, c ) − Z,
+
+hj+1 = hj + Rj (hj ; t, c ) = Lj (hj ; t, c ). (2) It then repeats a selected layer for r = 1 , . . . , K rounds with per-round strength η = λloop /K :
+
+Z(0) = hj ,
+
+Z(r) = Z(r−1) + ηRj (Z(r−1) ; t, c ),
+
+hj+1 = Z(K).
+
+(3) Here K denotes the loop count, equal to the number of evaluations of the frozen layer, and λloop denotes the total loop strength distributed across the K rounds. We set λloop =1 in all subsequent experiments and omit it hereafter, so 
+
+η = 1 /K . With K = 1 , Eq. (3) recovers the ordinary layer output. Let [a, b ] denote the selected layer range {a, a + 1 , . . . , b }.Its ordinary map is Ga:b = Lb ◦ · · · ◦ La. We apply Eq. (3) successively from La through Lb and denote the resulting composition by Φa:b.
+
+Sampling-Progress Gating 
+
+Denoising follows a coarse-to-fine trajectory: high-noise calls strongly influence text-aligned content and global lay-out, whereas low-noise calls mainly remove residual noise and sharpen local details (Balaji et al. 2022; Park et al. 2024; Wang and Vastola 2023). We therefore anchor the loop win-dow at the noise side and vary only its endpoint. For N denoising calls, let ti be the flow time and si =
+
+i/ (N − 1) the normalized sampling progress, where i =0, . . . , N − 1, so si = 0 is the initial noise state and si =1 is the data endpoint. Given send ∈ [0 , 1] , we define the loop-active interval as Sloop = [0 , s end ]. Sampling-Progress Gating applies 
+
+hb+1 =
+
+Φa:b(ha; ti, c ), si ∈ S loop ,
+
+Ga:b(ha; ti, c ), otherwise . (4) Calls with si > s end follow the ordinary denoiser path. 
+
+Sparse Token Loop 
+
+Sparse Token Loop reduces repeated token computation by looping over a token subset. Let U denote the tokens eli-gible for sparse replay under the chosen sparsifier, and let 
+
+ρsel ∈ (0 , 1] denote the fraction selected for repeated com-putation. At each active denoising call and selected layer Lj ,we uniformly sample X ⊆ U , with |X| = ⌈ρsel |U |⌉ , and de-fine ¯X = U \ X. This partition is fixed across the K rounds for that layer. For any token subset A, let Rj,A (Z; t, c ) de-note the layer residual computed only for A using the full token sequence as context. We write Z(0)  
+
+> X
+
+and Z(0) ¯X for the corresponding token states obtained by partitioning Z(0) , and 
+
+Merge restores their original token order. 
+
+Initialize once. Before looping, we compute and cache only the complement-token residual: 
+
+C ¯X = Rj, ¯X (Z(0) ; t, c ). (5) 
+
+Loop K times. At round r = 1 , . . . , K , we evaluate the selected-token residual on the current all-token state and reuse C ¯X for the complement: 
+
+Z(r) 
+
+> X
+
+= Z(r−1)  
+
+> X
+
++ ηRj,X (Z(r−1) ; t, c ),
+
+Z(r)¯X = Z(r−1) ¯X + ηC ¯X ,
+
+Z(r) = Merge 
+
+
+
+Z(r) 
+
+> X
+
+, Z(r)¯X
+
+
+
+.
+
+(6) This design has two advantages. First, it reduces repeated computation because only the selected-token residual Rj,X 
+
+is freshly evaluated after the complement residual is initial-ized once. Second, both token groups are updated in every round, which keeps them synchronized in loop depth. Con-sequently, each selected-token attention update uses queries from X and keys and values from both X and ¯X, whose states have undergone the same number of loop updates, rather than using complement states frozen at initialization. Concretely, Sparse Token Loop avoids repeated query, attention-output, and MLP evaluation for the complement tokens while retain-ing keys and values from all tokens to preserve global con-text. Its implementation incurs token-partitioning, routing, and merging overhead, which partially offsets these com-putational savings. This is related to training-free feature caching for diffusion transformers, but our cache is an intra-layer complement residual tied to the current token partition rather than a cross-timestep feature cache (Zou et al. 2025). 
+
+Loop Guidance 
+
+The preceding controls alter hidden-state computation inside one denoiser path. Motivated by prediction-space extrapo-lation in classifier-free guidance and autoguidance (Ho and Salimans 2022; Karras et al. 2024), Loop Guidance combines an ordinary prediction with a looped prediction produced by either Dense Token Loop or Sparse Token Loop: 
+
+vbase = vθ (xt, t, c ),
+
+vloop = vloop  
+
+> θ
+
+(xt, t, c ),
+
+vlg = vbase + glg (vloop − vbase ) .
+
+(7) The scale glg controls the strength of the loop-induced correc-tion in prediction space, with glg > 1 extrapolating beyond the looped prediction. Because both predictions are required, Loop Guidance costs more than a single looped path. 
+
+# Experiments 
+
+Experimental Setup 
+
+We conduct experiments on two Scale-RAE configura-tions, Qwen1.5B/DiT2.4B and Qwen7B/DiT9.8B, and on RAEv2. For RAEv2, we use the public DiffusionBench RAE-SigLIP2-B checkpoint with a 615M-parameter DDT (Leng et al. 2026). All pretrained components remain frozen throughout. We identify the shared loop configuration on Scale-RAE Qwen1.5B/DiT2.4B and directly transfer it to Qwen7B/DiT9.8B and RAE-SigLIP2-B; the transferred set-ting remains effective on both target models. We use GenEval (Ghosh, Hajishirzi, and Schmidt 2023) and DPG-Bench (Hu et al. 2024b) as the primary metrics, together with CLIP Score (Radford et al. 2021), OpenCLIP Score (Cherti Model Method GenEval ↑ DPG ↑ ImageReward ↑ CLIP ↑ OpenCLIP ↑ PickScore ↑ Time (s) ↓                                                                  
+
+> w/o Loop 0.4471 0.7656 0.0994 0.3204 0.3490 0.2122 1.3054 Scale-RAE DiT2.4B Dense Token Loop (Ours) 0.5422 0.8007 0.4816 0.3302 0.3622 0.2165 2.1812 Sparse Token Loop (Ours) 0.5082 0.7893 0.2798 0.3249 0.3555 0.2144 1.6884 w/o Loop 0.5321 0.8003 0.4609 0.3285 0.3604 0.2175 1.6853 Scale-RAE DiT9.8B Dense Token Loop (Ours) 0.5977 0.8178 0.7211 0.3344 0.3682 0.2221 4.0384 Sparse Token Loop (Ours) 0.5857 0.8206 0.6365 0.3328 0.3663 0.2205 2.4410 w/o Loop 0.3829 0.7131 -0.3385 0.3076 0.3176 0.2055 0.8025 RAEv2 SigLIP2-B (615M) Dense Token Loop (Ours) 0.3795 0.7226 -0.2538 0.3101 0.3202 0.2062 1.1023 Sparse Token Loop (Ours) 0.3815 0.7152 -0.2931 0.3086 0.3187 0.2059 1.3572
+
+Table 1: Main results across three RAE-based model configurations. w/o Loop denotes ordinary denoising. The best and second-best values for each model are shown in bold and underlined, respectively.                                                       
+
+> Model Method glg GenEval ↑DPG ↑ImageReward ↑CLIP ↑OpenCLIP ↑PickScore ↑
+> Scale-RAE DiT2.4B
+> w/o Loop 0.0 0.4471 0.7656 0.0994 0.3204 0.3490 0.2122 Dense Token Loop (Ours) 2.8 0.5691 0.8053 0.5622 0.3306 0.3627 0.2171
+> Scale-RAE DiT9.8B
+> w/o Loop 0.0 0.5321 0.8003 0.4609 0.3285 0.3604 0.2175 Dense Token Loop (Ours) 6.0 0.6432 0.8264 0.7975 0.3332 0.3661 0.2229
+> w/o Loop 0.0 0.3829 0.7131 -0.3385 0.3076 0.3176 0.2055
+> RAEv2 SigLIP2-B (615M) Dense Token Loop (Ours) 9.0 0.4532 0.7521 0.0460 0.3159 0.3297 0.2090
+> Sparse Token Loop (Ours) 6.0 0.4114 0.7429 -0.1296 0.3129 0.3251 0.2074
+
+Table 2: Loop Guidance improves both primary metrics and all auxiliary metrics across the three evaluated generators. Baseline rows use glg = 0 , and guided rows use the listed scales. Best values within each model are bolded. et al. 2023), PickScore (Kirstain et al. 2023), and ImageRe-ward (Xu et al. 2023). Detailed checkpoints and evaluation protocols are provided in the appendix. Controlled ablations use Scale-RAE Qwen1.5B/DiT2.4B with 25 Euler steps, K = 4 , loop layer range [12 , 27] , and 
+
+si ∈ [0 , 0.5] ; each ablation changes only the named factor. RAE-SigLIP2-B retains its 50-step Euler schedule. We use 25 outer sampling steps because increasing the schedule to 50 steps substantially increases inference time while yielding only marginal improvements in GenEval and DPG-Bench. Complete configurations are provided in the appendix. 
+
+Main Results 
+
+Table 1 compares the unguided loop variants across three frozen generators. Both Dense Token Loop and Sparse Token Loop improve GenEval and DPG-Bench at both Scale-RAE scales. Overall, Dense Token Loop achieves stronger qual-ity gains but requires more generation time, whereas Sparse Token Loop is slightly weaker but more efficient overall. On RAEv2, both variants improve DPG-Bench and all auxiliary metrics but slightly reduce GenEval, so the unguided trans-fer result is mixed. We therefore avoid claiming a uniformly positive RAEv2 gain from the transferred Scale-RAE hyper-parameters. As shown in Table 2, Loop Guidance produces the clearer RAEv2 improvement. 
+
+Sparse Token Loop. As described in the Sparse Token Loop subsection, the method reduces repeated complement-token computation while preserving full-token attention con-text. On both Scale-RAE models, it remains above w/o Loop on all reported quality metrics while reducing generation time relative to Dense Token Loop. The reduction is substan-tially larger on DiT9.8B than on DiT2.4B. On the smaller 615M DDT, however, Sparse Token Loop is slower than Dense Token Loop, suggesting that its additional routing overhead is not offset at this scale. Specifically, Sparse To-ken Loop reduces generation time by 22.6% on DiT2.4B and 39.6% on DiT9.8B relative to Dense Token Loop. 
+
+Loop Guidance. We do not exhaustively tune the guid-ance scale; for each model, Table 2 reports one setting that performs reasonably well in our trials. Combining the ordi-nary and looped predictions improves both primary metrics across the Scale-RAE DiT2.4B and DiT9.8B checkpoints and RAEv2, together with consistent gains on the auxiliary metrics. In particular, although the unguided improvements on RAEv2 are small, adding Loop Guidance produces clear improvements on both primary metrics. On RAEv2, Loop Guidance raises GenEval from 0.3829 to 0.4532 and DPG-Bench from 0.7131 to 0.7521 while improving every aux-iliary metric. This suggests that the vector-field difference introduced by looping, vloop − vbase , encodes a small, di-rectionally useful quality correction that Loop Guidance can amplify. 
+
+Quality–Efficiency Tradeoff As shown in the right col-umn of Figure 1, internal layer looping uses inference com-pute more effectively than additional outer sampling steps. A 25-step Dense Token Loop reaches 0.5422 GenEval and Figure 3: Moderate Loop Guidance scales and loop counts capture most quality gains on Scale-RAE (DiT2.4B). Panel (a) varies the Loop Guidance scale, and panel (b) varies the loop count K.0.8007 DPG-Bench in 2.1812 s, outperforming the 50-step no-loop baseline (0.4742 and 0.7738) while remaining faster than its 2.4032 s runtime. Sparse Token Loop similarly reaches 0.5082 GenEval and 0.7893 DPG-Bench in 1.6883 s, compared with 0.4770 and 0.7673 in 1.7575 s for the 35-step no-loop baseline. These comparisons indicate that the gains arise from allocating computation to internal refine-ment rather than merely increasing total inference cost. The latency advantage remains despite repeated evaluations of the selected layer range, showing that internal compute can be allocated more selectively than full-denoiser resampling. 
+
+Loop Configuration Ablations 
+
+Using Scale-RAE DiT2.4B with 25 outer sampling steps, we ablate the Loop Guidance scale, loop count, loop layer range, and loop-active sampling-progress interval. Unless the named factor is varied, we use a loop count of K = 4 ,loop layer range [12 , 27] , and loop-active sampling-progress interval si ∈ [0 , 0.5] .
+
+Loop Guidance Scale. With the loop configuration fixed, Figure 3(a) varies glg . Moderate settings improve both pri-mary metrics, although their preferred scales differ, while overly large scales weaken the gains. This supports moderate prediction-space extrapolation. 
+
+Loop Count. With the layer range and sampling-progress interval fixed, Figure 3(b) varies the loop count. Moder-ate loop counts capture most of the gains, whereas addi-tional loop rounds give diminishing, metric-dependent re-turns while increasing computation. We therefore use a loop count of K = 4 by default. 
+
+Loop Layer Range. With a loop count of K = 4 and the sampling-progress interval fixed, Figure 4(a) compares different layer windows on DPG-Bench. Middle-to-late layer ranges consistently outperform early ranges. Looping over all 32 layers provides little additional benefit over a well-placed 16-layer range while requiring more computation. We therefore use [12 , 27] as the default loop layer range.               
+
+> Loop-active interval GenEval ↑DPG ↑Time(s) ↓
+> w/o Loop 0.4471 0.7656 1.3054
+> [0 ,1] 0.5597 0.7987 2.9957
+> [0 ,0.5] 0.5422 0.8007 2.1812
+
+Table 3: For Dense Token Loop, [0 , 1] denotes full-schedule looping and [0 , 0.5] denotes Sampling-Progress Gating; the latter preserves most full-schedule Loop quality while reduc-ing generation time on Scale-RAE. 
+
+Loop-Active Sampling-Progress Interval. With a loop count of K = 4 and the layer range fixed, Figure 4(b) varies when the loop is active along the sampling trajectory on DPG-Bench. Across interval lengths, looping during earlier, higher-noise stages is generally more effective than looping later. Table 3 isolates the no-loop, full-schedule, and default gated policies. Activating the loop over the first half of sam-pling, si ∈ [0 , 0.5] , retains most of the full-schedule benefit with less loop computation and is therefore our default. 
+
+Further Exploration 
+
+Sparsifier Comparison. Since Sparse Token Loop con-centrates repeated computation on selected tokens, a natural question is whether prioritizing tokens that are important for refinement can improve generation quality. On Scale-RAE, Table 4 compares random routing with condition-aware and attention-aware routing, which prioritize tokens that respond more strongly to conditioning and attention, respectively. Neither targeted variant clearly improves upon random. On RAEv2, whose DDT operates on a joint sequence of image and conditioning tokens, we additionally compare random routing with an image/condition split; their results remain close. Overall, the specific sparsifier designs are described in the appendix. More effective sparsifiers may exist, but ran-dom routing gives the strongest overall balance among the choices tested here. 
+
+VAE-Based Generators. Table 5 reports a transfer diag-nostic on PixArt-alpha (Chen et al. 2024) and FLUX.2 (Black Figure 4: Mid-to-late layer ranges and earlier loop-active sampling intervals give the strongest DPG-Bench settings on Scale-RAE (DiT2.4B). Panel (a) varies the loop layer range with the loop-active sampling-progress interval fixed; panel (b) varies the loop-active sampling-progress interval with the layer range fixed. The corresponding GenEval panels are provided in the appendix.                                     
+
+> Model Sparsifier Ratio GenEval ↑DPG-Bench ↑
+> w/o Loop –0.4471 0.7656 random 50% 0.5029 0.7951 condition-aware 50% 0.5039 0.7846
+> Scale-RAE attention-aware 50% 0.5008 0.7894 random 70% 0.5140 0.7962 condition-aware 70% 0.5175 0.7918 attention-aware 70% 0.5070 0.7918 w/o Loop –0.3829 0.7131
+> RAEv2 random 50% 0.4114 0.7429 image/condition –0.4170 0.7474
+
+Table 4: Sparsifier comparison on Scale-RAE and RAEv2. Forest Labs 2025). For both generators, we apply Loop Guid-ance with glg = 3 .0. Neither model shows a consistent im-provement across both primary metrics. We therefore hypoth-esize that the benefit observed on RAE-based generators may not transfer directly to VAE-based generators; understanding the underlying reason requires further investigation. 
+
+Qualitative Correction Effect of Looping. The left col-umn of Figure 1 offers a preliminary view of what loop-ing corrects under matched prompts. Corrections are mainly subject-level: malformed or incomplete shapes become co-herent, spurious parts are suppressed, and attributes bind more cleanly. The shown GenEval cases also have clearer identities and simple counts, while Loop Guidance gives cleaner DPG-Bench presentations. Appendix GenEval2 ex-amples suggest that harder counting and placement errors remain. Thus, subject-level correction appears stronger, but its mechanism remains open. 
+
+# Conclusion 
+
+We show that inference computation can be added inside a frozen flow-matching denoiser by repeatedly applying se-                 
+
+> Model Method GenEval ↑DPG-Bench ↑
+> w/o Loop 0.4778 0.7038
+> PixArt-alpha Dense Token Loop 0.4710 0.7170 Loop Guidance 0.3928 0.6986 w/o Loop 0.8459 0.8740
+> FLUX.2 Dense Token Loop 0.8482 0.8740 Loop Guidance 0.8310 0.8720
+
+Table 5: VAE transfer diagnostic on PixArt-alpha and FLUX.2. lected transformer layers, without changing model weights, conditioning, latent representations, or the outer sampler. Or-ganizing this operation by token scope, sampling progress, layer range, and prediction-space control yields Dense To-ken Loop, Sparse Token Loop, Sampling-Progress Gating, and Loop Guidance. Across both Scale-RAE scales, looping improves the primary and auxiliary quality metrics, while Sparse Token Loop provides a lower-latency alternative to dense repetition. At comparable generation time, internal looping also improves upon allocating computation only to additional outer sampling steps. Loop Guidance further im-proves GenEval and DPG-Bench on all three tested RAE-based generators. The results also clarify the current scope of the method. Looping most reliably corrects subject formation and at-tribute binding, but does not consistently repair counting or spatial composition on GenEval2. Its effect depends on layer location and sampling progress, and the tested VAE-based generators do not show a consistent gain. Internal layer looping is therefore a useful but model-dependent inference-time refinement axis. Future work should develop task-aware sparsifiers and adaptive loop policies, and determine which architectural and latent-representation properties make an image generator receptive to repeated hidden-state updates. References 
+
+Balaji, Y.; Nah, S.; Huang, X.; Vahdat, A.; Song, J.; Zhang, Q.; Kreis, K.; Aittala, M.; Aila, T.; Laine, S.; Catanzaro, B.; Karras, T.; and Liu, M.-Y. 2022. eDiff-I: text-to-image diffusion models with an ensemble of expert denoisers. arXiv preprint arXiv:2211.01324 .Black Forest Labs. 2025. FLUX.2: frontier visual intelligence. Bolya, D.; and Hoffman, J. 2023. Token merging for fast stable diffusion. In CVPR Workshops .Chen, J.; Yu, J.; Ge, C.; Yao, L.; Xie, E.; Wang, Z.; Kwok, J.; Luo, P.; Lu, H.; and Li, Z. 2024. PixArt-α: fast training of diffusion transformer for photorealistic text-to-image synthesis. In ICLR .Chen, L.; Li, J.; Liang, C.; Lao, N.; and Liu, Q. 2026. Training-free looped transformers. arXiv preprint arXiv:2605.23872 .Cheng, B.; Misra, I.; Schwing, A. G.; Kirillov, A.; and Girdhar, R. 2022. Masked-attention mask transformer for universal image segmentation. In CVPR .Cherti, M.; Beaumont, R.; Wightman, R.; Wortsman, M.; Ilharco, G.; Gordon, C.; Schuhmann, C.; Schmidt, L.; and Jitsev, J. 2023. Reproducible scaling laws for contrastive language-image learning. In CVPR .Dehghani, M.; Gouws, S.; Vinyals, O.; Uszkoreit, J.; and Kaiser, L. 2019. Universal transformers. In ICLR .Dhariwal, P.; and Nichol, A. 2021. Diffusion models beat GANs on image synthesis. In NeurIPS .Esser, P.; Kulal, S.; Blattmann, A.; Entezari, R.; Muller, J.; Saini, H.; Levi, Y.; Lorenz, D.; Sauer, A.; Boesel, F.; Podell, D.; Dockhorn, T.; English, Z.; and Rombach, R. 2024. Scaling rectified flow transformers for high-resolution image synthesis. In ICML .Ghosh, D.; Hajishirzi, H.; and Schmidt, L. 2023. GenEval: an object-focused framework for evaluating text-to-image alignment. In NeurIPS .Giannou, A.; Rajput, S.; Sohn, J.-Y.; Lee, K.; Lee, J. D.; and Papail-iopoulos, D. 2023. Looped transformers as programmable comput-ers. In ICML .Ho, J.; and Salimans, T. 2022. Classifier-free diffusion guidance. 
+
+arXiv preprint arXiv:2207.12598 .Hu, V. T.; Zhang, D. W.; Asano, Y. M.; Burghouts, G. J.; and Snoek, C. G. M. 2023a. Self-guided diffusion models. In CVPR .Hu, V. T.; Zhang, D. W.; Mettes, P.; Tang, M.; Zhao, D.; and Snoek, C. G. M. 2024a. Latent space editing in transformer-based flow matching. In AAAI .Hu, X.; Wang, R.; Fang, Y.; Fu, B.; Cheng, P.; and Yu, G. 2024b. ELLA: equip diffusion models with LLM for enhanced semantic alignment. arXiv preprint arXiv:2403.05135 .Hu, Y.; Liu, B.; Kasai, J.; Wang, Y.; Ostendorf, M.; Krishna, R.; and Smith, N. A. 2023b. TIFA: accurate and interpretable text-to-image faithfulness evaluation with question answering. In ICCV .Kamath, A.; Chang, K.-W.; Krishna, R.; Zettlemoyer, L.; Hu, Y.; and Ghazvininejad, M. 2025. GenEval 2: addressing benchmark drift in text-to-image evaluation. arXiv preprint arXiv:2512.16853 .Karras, T.; Aittala, M.; Aila, T.; and Laine, S. 2022. Elucidating the design space of diffusion-based generative models. In NeurIPS .Karras, T.; Aittala, M.; Kynkäänniemi, T.; Lehtinen, J.; Aila, T.; and Laine, S. 2024. Guiding a diffusion model with a bad version of itself. In NeurIPS .Kirstain, Y.; Polyak, A.; Singer, U.; Matiana, S.; Penna, J.; and Levy, O. 2023. Pick-a-Pic: an open dataset of user preferences for text-to-image generation. In NeurIPS .Krause, F.; Phan, T.; Gui, M.; Baumann, S. A.; Hu, V. T.; and Ommer, B. 2025. TREAD: token routing for efficient architecture-agnostic diffusion training. In ICCV .Leng, X.; Singh, J.; Liang, Z.; Smith, E.; Bell, M.; Saha, A.; Yuan, Y.; and Zheng, L. 2026. DiffusionBench: on holistic evaluation of diffusion transformers. arXiv preprint arXiv:2606.24888 .Li, C.; Xu, H.; Tian, J.; Wang, W.; Yan, M.; Bi, B.; Ye, J.; Chen, H.; Xu, G.; Cao, Z.; Zhang, J.; Huang, S.; Huang, F.; Zhou, J.; and Si, L. 2022. mPLUG: effective and efficient vision-language learning by cross-modal skip-connections. In EMNLP .Lipman, Y.; Chen, R. T. Q.; Ben-Hamu, H.; Nickel, M.; and Le, M. 2023. Flow matching for generative modeling. In ICLR .Liu, X.; Gong, C.; and Liu, Q. 2023. Flow straight and fast: learning to generate and transfer data with rectified flow. In ICLR .Ma, N.; Goldstein, M.; Albergo, M. S.; Boffi, N. M.; Vanden-Eijnden, E.; and Xie, S. 2024. SiT: exploring flow and diffusion-based generative models with scalable interpolant transformers. In 
+
+ECCV .Ma, N.; Tong, S.; Jia, H.; Hu, H.; Su, Y.-C.; Zhang, M.; Yang, X.; Li, Y.; Jaakkola, T.; Jia, X.; and Xie, S. 2025. Scaling inference time compute for diffusion models. In CVPR .Na, B.; Kim, Y.; Park, M.; Shin, D.; Kang, W.; and Moon, I.-C. 2024. Diffusion rejection sampling. In ICML .Park, B.; Woo, S.; Go, H.; Kim, J.-Y.; and Kim, C. 2024. Denoising task routing for diffusion models. In ICLR .Peebles, W.; and Xie, S. 2023. Scalable diffusion models with transformers. In ICCV .Radford, A.; Kim, J. W.; Hallacy, C.; Ramesh, A.; Goh, G.; Agarwal, S.; Sastry, G.; Askell, A.; Mishkin, P.; Clark, J.; Krueger, G.; and Sutskever, I. 2021. Learning transferable visual models from natural language supervision. In ICML .Rombach, R.; Blattmann, A.; Lorenz, D.; Esser, P.; and Ommer, B. 2022. High-resolution image synthesis with latent diffusion models. In CVPR .Saunshi, N.; Dikkala, N.; Li, Z.; Kumar, S.; and Reddi, S. J. 2025. Reasoning with latent thoughts: on the power of looped transform-ers. In ICLR .Singh, J.; Zheng, B.; Wu, Z.; Zhang, R.; Shechtman, E.; and Xie, S. 2026. Improved baselines with representation autoencoders. arXiv preprint arXiv:2605.18324 .Tong, S.; Zheng, B.; Wang, Z.; Tang, B.; Ma, N.; Brown, E.; Yang, J.; Fergus, R.; LeCun, Y.; and Xie, S. 2026. Scaling text-to-image diffu-sion transformers with representation autoencoders. arXiv preprint arXiv:2601.16208 .Wang, B.; and Vastola, J. J. 2023. Diffusion models generate images like painters: an analytical theory of outline first, details later. arXiv preprint arXiv:2303.02490 .Xu, J.; Liu, X.; Wu, Y.; Tong, Y.; Li, Q.; Ding, M.; Tang, J.; and Dong, Y. 2023. ImageReward: learning and evaluating human pref-erences for text-to-image generation. In NeurIPS .Yang, L.; Lee, K.; Nowak, R.; and Papailiopoulos, D. 2024. Looped transformers are better at learning learning algorithms. In ICLR .Zou, C.; Liu, X.; Liu, T.; Huang, S.; and Zhang, L. 2025. Accel-erating diffusion transformers with token-wise feature caching. In 
+
+ICLR .Method Pseudocode 
+
+Algorithms 1–4 summarize the four core inference-time op-erations. All model parameters remain frozen. 
+
+Algorithm 1 Dense Token Loop for a selected layer range. 
+
+Require: Frozen layers {Lj }bj=a, state ha, time t, condition c,loop count K, total loop strength λloop 
+
+Ensure: Refined state hb+1 
+
+1: η ← λloop /K 
+
+2: for j = a, . . . , b do 
+
+3: Z(0) ← hj
+
+4: for r = 1 , . . . , K do 
+
+5: Z(r) ← Z(r−1) + η[Lj (Z(r−1) ; t, c ) − Z(r−1) ]
+
+6: end for 
+
+7: hj+1 ← Z(K)
+
+8: end for 
+
+9: return hb+1 
+
+Algorithm 2 Sparse Token Loop for a selected layer range. 
+
+Require: Frozen layers {Lj }bj=a, state ha, time t, condition c,loop count K, total loop strength λloop 
+
+Require: Valid token set U , selected-token ratio ρsel 
+
+Ensure: Refined state hb+1 
+
+1: η ← λloop /K 
+
+2: for j = a, . . . , b do 
+
+3: Z(0) ← hj ; m ← ⌈ ρsel |U |⌉ 
+
+4: Sample X ⊆ U uniformly with |X| = m; ¯X ← U \ X
+
+5: C ¯X ← Rj, ¯X (Z(0) ; t, c ) ▷ initialize once 6: for r = 1 , . . . , K do 
+
+7: Z(r) 
+
+> X
+
+← Z(r−1)  
+
+> X
+
++ ηRj,X (Z(r−1) ; t, c ) ▷ full context 8: Z(r)¯X ← Z(r−1) ¯X + ηC ¯X
+
+9: Z(r) ← Merge( Z(r) 
+
+> X
+
+, Z(r)¯X )
+
+10: end for 
+
+11: hj+1 ← Z(K)
+
+12: end for 
+
+13: return hb+1 
+
+Algorithm 3 Sampling-Progress Gating. 
+
+Require: State ha, time ti, condition c, call index i, total calls N ,layer range [a, b ], loop count K, total loop strength λloop 
+
+Parameter: loop-active interval Sloop 
+
+Ensure: State hb+1 
+
+1: si ← i/ (N − 1) 
+
+2: if si ∈ S loop then 
+
+3: hb+1 ← DenseTokenLoop ({Lj }bj=a, ha, t i, c, K, λ loop )
+
+4: else 
+
+5: hb+1 ← Ga:b(ha; ti, c ) ▷ ordinary path 6: end if 
+
+7: return hb+1 
+
+Algorithm 4 Loop Guidance at one denoising call. 
+
+Require: Frozen denoiser vθ , input xti , time ti, condition c, guid-ance scale glg 
+
+Require: Loop configuration ([ a, b ], K, λ loop , Sloop )
+
+Ensure: Guided vector-field prediction vlg 
+
+1: vbase ← vθ (xti , t i, c ) ▷ ordinary path 2: vloop ← vgate+loop  
+
+> θ
+
+(xti , t i, c ) ▷ Algorithms 1–3 3: vlg ← vbase + glg (vloop − vbase )
+
+4: return vlg 
+
+# Experimental Details 
+
+Evaluation Protocol 
+
+The standard protocol uses all 553 GenEval prompts (Ghosh, Hajishirzi, and Schmidt 2023), 1065 unique DPG-Bench image prompts (Hu et al. 2024b), and all 800 GenEval2 prompts (Kamath et al. 2025). GenEval and DPG-Bench are used for the primary comparisons; GenEval2 is used for the additional qualitative analysis. Every set-ting generates one image per prompt with seed 42. Within each comparison, the baseline and all loop variants share the exact prompt, initial noise seed, checkpoint, resolu-tion, precision, sampler, outer sampling steps, text condi-tioning, and autoencoder. These complete fixed-seed bench-mark comparisons remove prompt-set and initial-noise dif-ferences between methods, but they do not estimate variation across random seeds. We therefore do not attach confidence intervals or make statistical-significance claims. GenEval records are exported to the pinned geneval-main evalu-ator and scored with its Mask2Former-based dependencies (Cheng et al. 2022). DPG-Bench records are exported to the pinned ELLA-main/dpg_bench evaluator and scored with mPLUG VQA (Li et al. 2022). Scale-RAE images are evaluated at their native 224 × 224 resolution; the DPG-Bench protocol uses one image per prompt and a 224 -pixel crop. The RAE-SigLIP2-B proxy uses its native 256 × 256 
+
+resolution. GenEval2 uses its official 800-prompt soft-TIFA-style protocol. For the four auxiliary metrics, each generated image Ij is paired only with its own generation prompt pj .CLIP Score, OpenCLIP Score, and PickScore are computed as the raw cosine similarity 
+
+sj = fI (Ij )⊤fT (pj )
+
+∥fI (Ij )∥2∥fT (pj )∥2
+
+.
+
+The respective encoders are OpenAI CLIP ViT-B/32 (Rad-ford et al. 2021), OpenCLIP ViT-H/14 pretrained on LAION-2B (s32B/b79K) (Cherti et al. 2023), and PickScore v1 (Kirstain et al. 2023). The reported values do not use the temperature-scaled logits or a batch-wise softmax. Im-ageReward is the raw scalar sj = R(pj , I j ) returned by 
+
+ImageReward-v1.0 (Xu et al. 2023). For each variant and each metric, the table reports 
+
+¯s =
+
+P 
+
+> j∈GenEval
+
+sj + P 
+
+> j∈DPG
+
+sj
+
+553 + 1065 ,
+
+equivalently the sample-count-weighted mean of the two split means. Higher is better for all four metrics. Models and Checkpoints 
+
+We evaluate two official Scale-RAE configurations with the following exact checkpoint identifiers (Tong et al. 2026): 
+
+nyu-visionx/Scale-RAE-Qwen1.5B_DiT2.4B nyu-visionx/Scale-RAE-Qwen7B_DiT9.8B 
+
+Both repositories retain their official FP32 parameter dtype and use model guidance level 1.0. For architecture trans-fer, we load the public repository diffusion-bench/ diffusion-bench (Leng et al. 2026) and its EMA check-point t2i-ddt-en28d1152hd72-dn2d2048hd128-rae-siglip2-vit-b-vpred-t4-v1.pt . This 615M-parameter RAE-SigLIP2-B/DDT checkpoint is used as a proxy and is not the unreleased official RAEv2 text-to-image checkpoint (Singh et al. 2026). Its reported runs disable classifier-free guidance. The VAE-based transfer experiments use the exact identifiers PixArt-alpha/ PixArt-XL-2-1024-MS (Chen et al. 2024) and 
+
+diffusers/FLUX.2-dev-bnb-4bit (Black Forest Labs 2025). Both use their checkpoint-provided Diffusers pipeline and scheduler. All pretrained components remain frozen. Table 6 collects the resolution, precision, sampling, and loop settings associated with these checkpoints. 
+
+Runtime Configuration and Timing 
+
+All reported generation runs use NVIDIA H100 GPUs. Each resident Scale-RAE Qwen7B/DiT9.8B generation worker is allocated two H100 GPUs and loads the check-point across them with device_map=auto ; this is layer placement rather than tensor parallelism. All other image generators use one H100 per generation worker; FLUX.2 additionally enables model CPU offload. The pinned Scale-RAE, RAE-SigLIP2-B proxy, and PixArt-alpha environment records Python 3.10, CUDA 12.4, and PyTorch 2.5.1. The separate FLUX.2 overlay records PyTorch 2.6.0 with CUDA 12.4 and pins its source-installed Diffusers revision; each official evaluator runs in its own pinned environment. The generation launcher enables TF32 for CUDA and cuDNN matmuls and sets high float32 matmul precision. Scale-RAE nevertheless retains FP32 model parameters and an FP32 dif-fusion head; the RAE-SigLIP2-B proxy and PixArt use BF16 autocast, and FLUX.2 uses BF16 compute with 4-bit model weights. Generation time is measured with a monotonic wall clock around the model generation call followed by device synchronization. It includes denoiser and sampler computa-tion but excludes model loading, prompt tokenization, image decoding, and artifact writing. Timing tables average the per-image records specified in their captions, and absolute times are compared only within a matched hardware and software source. 
+
+Detailed Hyperparameters for Main-Paper Tables and Figures 
+
+The entries below follow their first appearance in the main paper. Checkpoint-level resolution, precision, sampling, and default loop settings are collected in Table 6. 
+
+Figure 1: Qualitative examples and quality–efficiency trade-off. The left examples use Scale-RAE DiT9.8B with 25 outer steps, layers [12 , 27] , K = 4, λloop =1, and progress [0 , 0.5] . Dense Token Loop uses 
+
+glg = 1 and Loop Guidance uses glg = 6.0, un-der prompt- and seed-matched generation with seed 42. The right plots use DiT2.4B. Their no-loop points use 
+
+(N, K ) ∈ { (15 , 1) , (20 , 1) , (25 , 1) , (35 , 1) , (50 , 1) }; Dense Token Loop uses (10 , 8) , (15 , 4) , and (25 , 4) ; and Sparse To-ken Loop uses (25 , 4) . All looped points use layers [12 , 19] ,
+
+λloop = 1 , and progress [0 , 0.5] . The sparse point uses ran-dom cached-complement routing with ρsel = 0 .70 .
+
+Figure 2: Method overview. This is an algorithmic schematic rather than the output of an experimental run, so it has no checkpoint-, seed-, sampler-, or dataset-specific hyperparameters. 
+
+Table 1: Main comparison. For Scale-RAE DiT2.4B, Dense Token Loop uses layers [12 , 27] and Sparse Token Loop uses layers [12 , 19] with random cached-complement routing and ρsel = 0.70 . For DiT9.8B, both variants use [12 , 27] , and the sparse variant uses random cached-complement routing with ρsel = 0 .50 . For the RAE-SigLIP2-B proxy, both variants use [15 , 22] , and the sparse variant uses random cached-complement routing with ρsel = 0 .50 . The generator-level outer steps and precision follow Table 6. All loop variants use K = 4 , λloop = 1 , progress [0 , 0.5] , and the unguided setting glg = 1 . Scale-RAE uses model guid-ance level 1.0, whereas the RAE-SigLIP2-B proxy disables classifier-free guidance. 
+
+Table 2: Loop Guidance. The loop paths retain the pre-ceding dense and sparse configurations. DiT2.4B Dense To-ken Loop uses glg = 2 .8, DiT9.8B Dense Token Loop uses 
+
+glg = 6 .0, and the RAE-SigLIP2-B proxy uses glg = 9 .0 for Dense Token Loop and glg = 6 .0 for Sparse Token Loop. Each baseline row is the ordinary denoiser path, denoted by 
+
+glg = 0 in the table. 
+
+Figure 3: Guidance and loop-count sweeps. Both panels use Scale-RAE DiT2.4B with 25 outer steps, layers [12 , 27] ,
+
+λloop = 1 , and progress [0 , 0.5] . The guidance panel fixes 
+
+K = 4 and varies glg over the complete 20-point grid re-ported in Table 11. The loop-count panel fixes glg = 1 and varies K ∈ { 1, . . . , 8}; Table 9 reports the complete values. 
+
+Figure 4: Layer range and active progress. Both pan-els use Scale-RAE DiT2.4B with 25 outer steps, K = 4 ,
+
+λloop = 1, and glg = 1. The layer-range panel fixes progress [0 , 0.5] and varies only [a, b ]; the progress panel fixes [a, b ] = [12 , 27] and varies only the active interval. The exact candidate ranges and intervals are listed in Tables 10 and 8, respectively. 
+
+Table 3: Sampling-Progress Gating. This DiT2.4B com-parison fixes 25 outer steps, layers [12 , 27] , K = 4 , λloop =1, and glg = 1 , and changes only the active interval among no loop, [0 , 1] , and [0 , 0.5] .Generator Resolution Precision Steps Dense range Sparse range / ratio K/λ loop Progress                                                      
+
+> glg
+> dense/sparse
+> Scale-RAE DiT2.4B 224 2FP32 25 [12 ,27] [12 ,19] /70% 4/1[0 ,0.5] 2.8/–Scale-RAE DiT9.8B 224 2FP32 25 [12 ,27] [12 ,27] /50% 4/1[0 ,0.5] 6.0/–RAE-SigLIP2-B proxy 256 2BF16 50 [15 ,22] [15 ,22] /50% 4/1[0 ,0.5] 9.0/6.0
+> PixArt-alpha 1024 2BF16 20 [14 ,19] –4/1[0 ,0.5] 3.0/–FLUX.2 1024 2BF16/4-bit 28 [32 ,37] –4/1[0 ,0.5] 3.0/–
+
+Table 6: Complete loop configurations used for the main and transfer comparisons. Precision denotes parameter or weight precision. A dash indicates that Sparse Token Loop was not evaluated for that generator. The reported Loop Guidance scales are listed as dense/sparse; a dash indicates that the corresponding guided variant was not reported in the main comparison. Unguided loop variants are equivalent to glg = 1 . The Scale-RAE DiT9.8B TF32 matmul policy is described in the text, and controlled Scale-RAE ablations vary only the named factor. 
+
+Table 4: Sparsifiers. The Scale-RAE DiT2.4B rows fix 25 outer steps, layers [12 , 19] , K = 4 , λloop = 1 , progress 
+
+[0 , 0.5] , and glg = 1 . They compare random, condition-aware, and attention-aware routing at ρsel ∈ { 0.50 , 0.70 }
+
+with cached complement reuse. Random routing samples the selected-token set uniformly; condition-aware routing selects the strongest condition-dependent AdaLN responses; and attention-aware routing selects the strongest gated attention-output responses within each latent-grid row. The RAE-SigLIP2-B rows fix 50 outer steps, layers [15 , 22] , K = 4 ,
+
+λloop = 1 , progress [0 , 0.5] , and glg = 6 .0. They compare random 50% routing with an image/condition split in which image tokens form the selected set and conditioning tokens form the complement; both use cached complement reuse. 
+
+Table 5: VAE transfer. PixArt-alpha uses 20 outer steps, layers [14 , 19] , K = 4 , λloop = 1 , progress [0 , 0.5] , BF16 autocast, and model guidance 4.5. FLUX.2 uses 28 outer steps, layers [32 , 37] , the same loop settings, BF16 compute, 4-bit weights, model CPU offload, and model guidance 4.0. Dense Token Loop is unguided, and the Loop Guidance row uses glg = 3 .0 for both generators. 
+
+# Complete Scale-RAE Ablations 
+
+All ablations in this subsection use Scale-RAE Qwen1.5B/DiT2.4B. The main-paper sampling-progress, loop-count, and Loop Guidance figures use the same pinned GenEval and DPG-Bench evaluators. Their shared no-loop row uses 25 outer sampling steps. The tables below report the complete scores and per-image generation times. 
+
+Outer-sampling-step choice. Although the Scale-RAE baselines with 35 and 50 outer sampling steps score higher, we use 25 outer sampling steps as the experimental default to halve the sampling budget relative to the native 50-point schedule. Table 7 reports the official scores and per-image times for all four sampler settings.               
+
+> Outer sampling steps GenEval ↑DPG-Bench ↑
+> Time per image (s) ↓
+> 50 0.4742 0.7738 2.4032 35 0.4770 0.7673 1.7575
+> 25 0.4471 0.7656 1.3054 15 0.4418 0.7645 0.8562
+
+Table 7: Twenty-five outer sampling steps are the default efficiency setting. All rows are unlooped Scale-RAE results. For 15, 35, and 50 outer sampling steps, times average 1,618 generation records per setting; all rows use the same pinned evaluators. Sampling-progress sweep. Table 8 gives the complete comparison of loop-active sampling-progress intervals. 
+
+Progress Calls GenEval ↑
+
+DPG-Bench ↑
+
+Time/image (s) ↓
+
+baseline 0 0.4471 0.7656 1.3054 0–20% 5 0.5082 0.7942 1.6416 20–40% 5 0.5099 0.7914 1.6408 40–60% 5 0.4820 0.7816 1.6392 60–80% 5 0.4723 0.7761 1.6389 80–100% 5 0.4705 0.7684 1.6385 0–30% 8 0.5182 0.7946 1.8407 18–48% 7 0.5043 0.7933 1.7731 35–65% 7 0.4961 0.7885 1.7727 52–82% 7 0.4773 0.7794 1.7728 70–100% 8 0.4687 0.7750 1.8401 0–40% 10 0.5309 0.7999 1.9771 15–55% 10 0.5286 0.7972 1.9758 30–70% 9 0.4993 0.7916 1.9080 45–85% 10 0.4984 0.7831 1.9759 60–100% 10 0.4784 0.7780 1.9767 0–50% 13 0.5422 0.8007 2.1812 25–75% 13 0.4907 0.7956 2.1856 50–100% 13 0.4946 0.7831 2.1849 0–100% 25 0.5597 0.7987 2.9957 
+
+Table 8: Earlier and wider loop-active sampling-progress in-tervals perform best. Progress runs from the initial noise state (0%) to the data endpoint (100%). All scores use the same pinned evaluators, and times are matched-H100 generation seconds per image. 
+
+Loop-count sweep. Table 9 reports the complete range of loop counts from K = 1 through K = 8 .
+
+Loop Count GenEval ↑ DPG-Bench ↑
+
+Time per image (s) ↓
+
+1 0.4471 0.7656 1.3054 2 0.5180 0.7977 1.5949 3 0.5278 0.7962 1.8881 4 0.5422 0.8007 2.1812 5 0.5322 0.7999 2.4744 6 0.5308 0.7996 2.7676 7 0.5268 0.7990 3.0607 8 0.5376 0.8037 3.3537 
+
+Table 9: Moderate loop counts give the best quality–time balance. GenEval peaks at K = 4 , DPG-Bench peaks at K =8, and measured time per image increases nearly linearly. 
+
+Layer-range sweep. Table 10 reports the complete layer-range ablation. 
+
+#Layers Layer range GenEval ↑ DPG-Bench ↑
+
+0 baseline 0.4471 0.7656 4 28–31 0.5090 0.7807 4 18–21 0.4990 0.7889 4 10–13 0.4617 0.7726 4 0–3 0.4605 0.7650 8 16–23 0.5282 0.8009 8 24–31 0.5421 0.7850 8 12–19 0.5113 0.7942 8 8–15 0.4611 0.7767 8 0–7 0.4592 0.7695 16 12–27 0.5422 0.8007 16 16–31 0.5407 0.8049 16 4–19 0.5249 0.7978 16 0–15 0.4735 0.7773 32 0–31 0.5395 0.8087 
+
+Table 10: Mid-to-late layer ranges work best. Both metrics are computed with the same pinned evaluators. 
+
+GenEval layer-range and sampling-progress panels. 
+
+Figure 5 provides the GenEval counterparts to the main-paper DPG-Bench ablations. 
+
+Loop Guidance sweep. Table 11 reports every guidance scale covered by the complete evaluation. 
+
+glg GenEval ↑ DPG-Bench ↑
+
+0.0 0.4471 0.7656 0.5 0.5131 0.7895 1.0 0.5405 0.8011 1.5 0.5530 0.8065 2.0 0.5582 0.8083 
+
+2.4 0.5577 0.8019 2.8 0.5691 0.8053 3.2 0.5534 0.8035 3.6 0.5520 0.8028 4.0 0.5523 0.8037 4.5 0.5425 0.8025 5.0 0.5456 0.8030 5.5 0.5477 0.8035 6.0 0.5399 0.8011 7.0 0.5277 0.7977 8.0 0.5220 0.7960 9.0 0.5176 0.7825 10.0 0.5236 0.7801 11.0 0.5169 0.7759 12.0 0.5093 0.7706 
+
+Table 11: Moderate Loop Guidance gives the strongest gains. GenEval peaks at glg = 2 .8, while DPG-Bench peaks at 
+
+glg = 2 .0; all entries use the same pinned evaluators. Figure 5: GenEval counterparts for the loop layer range and loop-active sampling-progress interval ablations on Scale-RAE (DiT2.4B). Mid-to-late layer ranges and earlier sampling-progress intervals give the strongest gains, consistent with the DPG-Bench results in the main paper. 
+
+# Other Experimental Results 
+
+RAE-SigLIP2-B layer-range sweep. Table 12 reports the complete layer-range sweep underlying the direct-loop result in the main paper, and Table 13 reports the corresponding Loop Guidance sweep. We use the DiffusionBench RAE-SigLIP2-B/DDT proxy identified under Models and Check-points. All variants use 50 outer sampling steps with Euler updates, disabled CFG, the loop-active sampling-progress interval si ∈ [0 , 0.5] , and dense token updates.                                     
+
+> Layer range Loop Count GenEval ↑DPG-Bench ↑
+> No loop 10.3829 0.7131 0–3 40.0000 0.2382 6–9 40.3789 0.7135 12–15 40.3764 0.7174 18–21 40.3873 0.7172 24–27 40.0644 0.4093 0–7 40.0021 0.2379 5–12 40.3678 0.7195 10–17 40.3806 0.7170 15–22 40.3795 0.7226
+> 20–27 40.0685 0.4048
+
+Table 12: One middle RAE layer range improves both pri-mary benchmarks. Several other middle ranges raise DPG-Bench while slightly lowering GenEval, and extreme early and late ranges collapse; all entries are absolute standard scores from the pinned GenEval and DPG-Bench evaluator protocols. 
+
+RAE-SigLIP2-B Loop Guidance. The sweep fixes loop layer range [15 , 22] with a loop count of K = 4 . Increasing 
+
+glg generally strengthens both metrics: glg = 9 maximizes GenEval, while glg = 7 .5 gives the highest DPG-Bench score.                           
+
+> glg GenEval ↑DPG-Bench ↑
+> 0.00 0.3829 0.7131 1.50 0.3787 0.7271 2.25 0.3962 0.7286 3.00 0.3892 0.7350 3.75 0.3983 0.7397 4.50 0.4120 0.7393 5.25 0.4094 0.7495 6.00 0.4217 0.7468 6.75 0.4220 0.7483 7.50 0.4274 0.7526
+> 8.25 0.4308 0.7487 9.00 0.4532 0.7521
+
+Table 13: Loop Guidance substantially improves both Diffu-sionBench RAE-SigLIP2-B scores. The glg = 0 row is the no-loop prediction; all entries use the same pinned evalua-tors. 
+
+Additional Qualitative Results 
+
+Subject-level corrections. Manual review of prompt-matched pairs provides a preliminary characterization of the correction effect. On GenEval and DPG-Bench, whose prompts are dominated by a single subject or a pair of sub-jects, looping most consistently corrects subject-level appear-ance: malformed or incomplete shapes become well formed, spurious parts and duplicated features are removed, and at-tributes such as color, material, and style are more cleanly bound to their intended entity instead of bleeding into the background or a neighboring object. The sample as a whole therefore looks closer to the prompt intent, which is consis-tent with the GenEval and DPG-Bench score gains. Figure 6 provides additional prompt-matched examples. w/o Loop Dense Token Loop Loop Guidance w/o Loop Dense Token Loop Loop Guidance  
+
+> GenEval DPG-Bench
+
+Figure 6: Additional prompt-matched qualitative comparisons on Scale-RAE (DiT9.8B). Dense Token Loop uses loop layer range [12 , 27] , a loop count of K = 4 , and loop-active sampling-progress interval si ∈ [0 , 0.5] ; Loop Guidance uses glg = 6 .0.
+
+GenEval2 findings. On GenEval2, whose prompts stress object counts, positional relations, and deliberately uncon-ventional phrasing, Table 14 reports official soft-TIFA-style geometric-mean scores over 800 prompts (Hu et al. 2023b). Dense Token Loop changes the score from 0.1801 to 0.1736 ,while Loop Guidance reaches 0.1441 . Thus, neither vari-ant improves the aggregate GenEval2 score. Nevertheless, manual review of matched triplets (w/o Loop, Dense Token Loop, and Loop Guidance) reveals a structured pattern, sum-marized in Figure 7. On prompts with one or two subjects, looping gives the same correction benefit as on GenEval and DPG-Bench: objects are better formed and attributes are bound more cleanly. On counting prompts, the requested ob-ject count is usually inherited from the no-loop sample rather than corrected. On crowded multi-object prompts, individ-ual objects can remain better formed even when their global arrangement does not improve. Looped samples also some-times weaken or remove the requested background while purifying the foreground subject.     
+
+> Method GenEval2 ↑
+> w/o Loop 0.1801
+> Dense Token Loop 0.1736 Loop Guidance 0.1441
+
+Table 14: GenEval2 results on Scale-RAE (DiT9.8B) over 800 prompts. Dense Token Loop uses loop layer range 
+
+[12 , 27] , a loop count of K = 4 , and loop-active sampling-progress interval si ∈ [0 , 0.5] ; Loop Guidance additionally uses glg = 6 .0.Figure 7: GenEval2 qualitative correction study on Scale-RAE (DiT9.8B). Each row inside a panel shows the prompt followed by w/o Loop, Dense Token Loop (loop layer range [12 , 27] , a loop count of K = 4 , and sampling progress si ∈ [0 , 0.5] ), and Loop Guidance ( glg = 6 .0). Top left: few-subject prompts improve. Top right: counting prompts are not corrected. Bottom left: objects in crowded multi-object prompts stay intact. Bottom right: subjects become purer with weaker backgrounds. 
+
+# Reproducibility 
+
+Code and Data Supplement. The anonymous Code and Data Supplement contains the backend-neutral loop runtime, adapters for Scale-RAE, the public RAE-SigLIP2-B/DDT proxy, PixArt-alpha, and FLUX.2, exact JSON configura-tions, complete benchmark prompt snapshots, benchmark generation/export/aggregation utilities, CPU-only tests, and the aggregate values used by the paper tables. The archive excludes pretrained weights, generated answers and image grids, per-prompt evaluator outputs, credentials, caches, logs, and machine-specific paths. After installing the environment described in ENVIRONMENT.md , the commands python scripts/validate_release.py and python -m unittest discover tests validate the archive with-out loading a generator. REPRODUCE.md then gives the backend integration and benchmark procedure. Model check-points and official benchmark inputs are obtained separately using the public identifiers in configs/ .
+
+Composable method and hyperparameter interface. 
+
+The released resolver treats the token-loop base and Loop Guidance as orthogonal choices. --token-loop dense|sparse selects Dense Token Loop or Sparse Token Loop, while --loop-guidance may be composed with either base and never changes its token-loop type. Tables 15 and 16 list the complete shared interface for adjustable pa-per controls. Scale-RAE and RAEv2 expose both token-loop bases with or without Loop Guidance. The PixArt-α and FLUX.2 paper presets expose Dense Token Loop with or without Loop Guidance because Sparse Token Loop was not evaluated for those backends; unsupported combinations are rejected instead of being silently relabeled. Paper control JSON field Shared CLI override Semantics and accepted values 
+
+Outer sampler steps N
+
+generation.num_ inference_steps --outer-steps N Positive integer; number of outer denoising steps. Loop count K num_loops --loop-count K Positive integer; inner updates at each active outer step. Total loop strength 
+
+λloop 
+
+lambda_value --lambda-loop VALUE Positive scalar; the runtime applies λloop /K per inner round. Loop-active sampling interval 
+
+start_frac , end_frac --loop-active START END 
+
+0 ≤ START ≤ END ≤ 1; both endpoints are active. Loop layer range [a, b ] block_indices --loop-layers FIRST LAST 
+
+Inclusive, contiguous, ascending, nonnegative layer indices. Token-loop base token_operator --token-loop none|dense|sparse 
+
+Ordinary path, Dense Token Loop, or Sparse To-ken Loop. Loop Guidance switch loopguidance_enabled --loop-guidance Boolean modifier; valid with either Dense or Sparse Token Loop. Loop Guidance scale 
+
+glg 
+
+loopguidance_weight --loop-guidance-weight VALUE 0 ≤ glg ≤ 18 ; requires --loop-guidance .
+
+Table 15: Released code-facing core hyperparameter interface. The JSON files in configs/ are the exact paper presets. A CLI override is applied to a copy and sets paper_preset=false in the resolved record, preventing a custom run from being mistaken for a reported configuration. 
+
+Sparse control JSON field Shared CLI override Semantics and accepted values 
+
+Selector selector --selector NAME all , random , condition_aware ,
+
+attention_aware , or 
+
+image_condition_split .Selected-token frac-tion ρsel 
+
+selection_ratio --selection-ratio RATIO 0 < ρ sel ≤ 1 when required by the sparse selec-tor. Sparse-routing seed selector_seed --selector-seed SEED Integer seed for reproducible token routing. Eligible token domain token_domain --token-domain DOMAIN backend_default , all_tokens ,
+
+image_prefix_only , or 
+
+image_vs_condition .
+
+Table 16: Sparse Token Loop routing controls. Unsupported backend/selector combinations fail validation before model loading. 
+
+Evaluator and artifact integrity. Every reported Scale-RAE ablation row is rescored from its bound image grid with the same pinned evaluators. GenEval uses the pristine evaluator without pre-upscaling, while DPG-Bench fixes the CSV parser, one image per prompt, native evaluation reso-lution, and the local mPLUG checkpoint. Incomplete, super-seded, or evaluator-incompatible artifacts are excluded from the tables so evaluator drift is not interpreted as a method improvement.

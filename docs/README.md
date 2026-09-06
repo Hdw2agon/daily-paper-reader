@@ -6,32 +6,29 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-09-05
-- 运行时间：2026-09-05 20:45:33 UTC
+- 最新运行日期：2026-09-06
+- 运行时间：2026-09-06 21:45:01 UTC
 - 运行状态：成功
-- 本次总论文数：4
-- 精读区：1
-- 速读区：3
+- 本次总论文数：2
+- 精读区：0
+- 速读区：2
 
 ### 今日简报（AI）
-优先精读《SliceBridge》掌握医学图像修复前沿，有生成式模型或工业应用需求的读者可快速翻阅其余三篇
-- 详情：[/202609/05/README](/202609/05/README)
+今日速读 2 篇图像处理前沿论文，聚焦免训练图像生成与 ISP 画质修复基准。
+重点探讨了无需训练即可精炼 Flow-Matching 生成器隐藏状态的新方案，以及图像信号处理器中 RAW 与 RGB 恢复能力的定量测评。
+建议对图像生成效率优化及底层视觉修复感兴趣的读者快速浏览相关思路。
+- 详情：[/202609/06/README](/202609/06/README)
 
 ### 精读区论文标签
-1. [SliceBridge: context-consistent repair of corrupted slice intervals in T1-weighted MRI](/202609/05/2609.01827v1-slicebridge-context-consistent-repair-of-corrupted-slice-intervals-in-t1-weighted-mri)  
-   标签：评分：8.0/10、query:q1
-   evidence：MRI中损坏切片间隔的图像修复
+- 本次无精读推荐。
 
 ### 速读区论文标签
-1. [Linear Fusion MultiDiffusion for Fast Training-Free Spherical Panorama Generation](/202609/05/2609.01997v1-linear-fusion-multidiffusion-for-fast-training-free-spherical-panorama-generation)  
-   标签：评分：6.0/10、query:q3
-   evidence：无需训练和标签的球面全景图生成
-2. [SafeRestore: Detector-Relative Risk Certificates for Selective Industrial Image Restoration](/202609/05/2609.03475v1-saferestore-detector-relative-risk-certificates-for-selective-industrial-image-restoration)  
-   标签：评分：6.0/10、query:q1
-   evidence：选择性工业图像修复
-3. [LLaDA-Image: Building Strong Image Generators with Fully Open Training Recipes](/202609/05/2609.03796v1-llada-image-building-strong-image-generators-with-fully-open-training-recipes)  
+1. [Training-Free Hidden-State Refinement for Flow-Matching Image Generators](/202609/06/2608.29160v1-training-free-hidden-state-refinement-for-flow-matching-image-generators)  
    标签：评分：6.0/10、query:q4
-   evidence：纯图像预训练构建强大的视觉生成先验
+   evidence：图像生成器的无需训练优化
+2. [Benchmarking RAW and RGB Restoration in Image Signal Processors](/202609/06/2609.02831v1-benchmarking-raw-and-rgb-restoration-in-image-signal-processors)  
+   标签：评分：6.0/10、query:q3
+   evidence：RAW和RGB领域的盲修复基准测试
 
 
 <div class="dpr-home-promo-card">

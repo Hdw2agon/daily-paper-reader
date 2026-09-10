@@ -1,0 +1,629 @@
+Title: Diffuse2Seg: Diffusion Models Can Segment Anything Without Supervision
+
+URL Source: https://arxiv.org/pdf/2609.06491v1
+
+Published Time: Wed, 09 Sep 2026 01:37:23 GMT
+
+Number of Pages: 22
+
+Markdown Content:
+# Diffuse2Seg: Diffusion Models Can Segment Anything Without Supervision 
+
+Christoph Hümmer christoph.huemmer@cariad.technology Institute of Mathematics, Technical University of Berlin CARIAD SE, Volkswagen Group 
+
+Joachim Sicking joachim.sicking@cariad.technology CARIAD SE, Volkswagen Group 
+
+Fabian Hüger fabian.hueger@cariad.technology CARIAD SE, Volkswagen Group 
+
+Hanno Gottschalk gottschalk@math.tu-berlin.de Institute of Mathematics, Technical University of Berlin 
+
+## Abstract 
+
+Open-world entity segmentation aims to predict masks for arbitrary objects across domains and at multiple granularities, from parts to whole objects. In this setting, SAM sets a strong standard: trained on SA-1B, comprising 11M images and over 1B carefully annotated masks, it achieves remarkable zero-shot performance. Collecting such labels is expensive and time-consuming, however, which limits how far this recipe can scale. Text-to-image diffusion models offer a way around this. Their intermediate features transfer well across perception tasks, and since object structure emerges as the model denoises a noise sample into an image conditioned on a text prompt, that structure is already encoded in these representations. They can therefore be exploited for open-world entity segmentation without retraining or supervision. Building on this observation, we introduce Diffuse2Seg , which repurposes generative diffusion models for automatic mask generation by propagating a grid of point prompts through their self-attention representations in an edge-preserving manner. Diffuse2Seg produces multi-granular instance masks and outperforms prior state-of-the-art label generators by 4.3-7.1 p.p. in AR 1000 across five domains. Training an instance segmentation model on these generated masks advances detector-free open-world segmentation by 7.4 and 7.7 p.p. on “things” and “stuff+things” datasets and surpasses the detector-based UnSAM on “stuff+things” by 2.1 p.p. in AR 1000 . Finally, we show that a model trained on Diffuse2Seg labels provides a strong initialization for semi-supervised learning, outperforming its fully supervised counterpart with already 5k labeled images. 
+
+## 1 Introduction 
+
+Segmenting anything means partitioning an image into all of its coherent visual entities, countable “thing” objects such as persons and cars as well as amorphous “stuff” regions such as sky and road, and doing so without being restricted to a fixed set of class labels (Qi et al., 2022). Such a segmentation generalist enables computer vision systems to operate in the open world without retraining and is therefore highly relevant in domains that constantly need to adapt, such as robotics or medical imaging. SAM (Kirillov et al., 2023) brought this concept to life: a foundation model trained over multiple rounds on the large SA-1B dataset of class-agnostic, high-quality masks covering the full object hierarchy from part to object, with strong zero-shot capabilities. However, densely annotating such a dataset needed to train open-world entity segmentation foundation models is particularly challenging and time-consuming, limiting scalability. This raises the demand to generate multi-granularity entity labels including things, stuff and parts with no manual supervision at all. 1arXiv:2609.06491v1 [cs.CV] 6 Sep 2026 Pseudo -label examples Predictions from trained model  
+
+> UnSAM (DINO-based) without Mask Refinement Diffuse2Seg (ours) without Mask Refinement UnSAM (DINO-based) Diffuse2Seg (ours)
+> Pseudo-label generation across domains Trained-model zero-shot inference
+
+Figure 1: Diffuse2Seg: Multi-granular pseudo-labels from diffusion-based self-attention. Our method produces smooth masks with dense coverage via diffusion self-attention, outperforming prior “things”-biased DINO-based state-of-the-art UnSAM in pseudo-label average recall (AR). Training models on our diffusion-based labels improves prior state-of-the-art performance, particularly on dense segmentation datasets covering both “stuff” and “things”. One research direction tackling this issue lies in unsupervised instance mask generation from pre-trained foundation models, mainly using representations from self-supervised learning (SSL)-pretrained ViTs (Wang et al., 2023; Arica et al., 2024; Wang et al., 2024; Sick et al., 2025; Yang et al., 2025). Nevertheless, these SSL-based approaches are mostly designed for foreground instance segmentation, and only a few works explore truly dense entity annotation like SOHES (Cao et al., 2024) and UnSAM (Wang et al., 2024). In parallel, text-to-image diffusion models have emerged as universal representation learners (Gabeur et al., 2026; Wang et al., 2026b), as generative synthesis naturally forces the network to model global scene composition, contextual relationships, and fine-grained spatial layout. That means if a diffusion models generates sky or a car from an input prompt, these entities should be extractable from the internal representations. A large body of work has already shown that the features of these models can be leveraged for tasks like unsupervised semantic segmentation at different granularities (Tian et al., 2024; Couairon et al., 2024; Namekata et al., 2024; Kim et al., 2025; Zhang et al., 2026; Nakhli et al., 2026), interactive segmentation (Karmann & Urfalioglu, 2025; Karmann et al., 2025) or enhancing SSL-based instance segmentors (Jo et al., 2026). Pursuing this path, we propose Diffuse2Seg , an unsupervised entity-segmentation method that repurposes pretrained diffusion models to generate class-agnostic multi-granular instance labels. Diffuse2Seg is the first method to do so without retraining the diffusion model. Our key observation is that we can exploit emerging capabilities of a generative diffusion model for class-agnostic multi-granular instance label generation: we apply non-linear p-Laplacian-based propagation to a grid of dense point prompts using an efficiently extracted self-attention matrix to obtain soft object masks. These are then merged into multiple granularity segmentation maps and instances are isolated. Finally, we aggregate and remove duplicates from the resulting mask candidates, producing instance masks at various granularities at the original image resolution. Moreover, we show that the resulting labels are a valuable supervision signal by distilling them into a lightweight segmentation model, which yields strong zero-shot generalization. In addition, we demonstrate that our unsupervised model can be leveraged for data-efficient semi-supervised learning through simple decoder-only fine-tuning when limited ground-truth data is available. 2In summary, we make three contributions: 
+
+(i) Training-free multi-granularity instance segmentation We show that a frozen diffusion model can act as an automatic mask generator: by propagating a grid of point prompts through diffusion model self-attention, we recover dense instance masks at multiple granularities, entirely without supervision. Our generated labels surpass the previous unsupervised SOTA, UnSAM, by 
+
+4.3 - 7.1 p.p. in AR 1000 across a diverse set of five domains. 
+
+(ii) State-of-the-art pseudo-label training We propose training a lightweight instance segmentation model solely on our diffusion-based pseudo-labels outperforming the strongest detector-free baseline, SOHES, by +7.7/+7.4/+10.0 p.p. AR on stuff+things/things/parts datasets, at half of the training image budget and using a much smaller backbone and improve the prior state-of-the-art technique UnSAM in ‘stuff+things’ by +2.1 p.p. in AR in a detector-augmented setting. 
+
+(iii) Semi-supervised Diffuse2Seg-Semi We apply a simple supervised fine-tuning to our unsuper-vised model and the prior state-of-the-art and compare them to a strong reference trained on 100k SA-1B ground-truth labels on our extensive zero-shot benchmark. Our fine-tuned semi-supervised model recovers 93.5 % of a fully supervised reference at only 100 fine-tuning images and even surpasses it by 1.4 p.p. at 10k fine-tuning images, maintaining a consistent advantage compared to the prior state-of-the-art UnSAM. 
+
+## 2 Related Work 
+
+Unsupervised segmentation enabled by vision foundation models has made tremendous progress in recent years. In this section, we first introduce the relevant diffusion- and self-supervised learning-based (SSL) foundation models and then discuss how these are leveraged for unsupervised segmentation. 
+
+Vision Foundation Models that scale well with pre-training datasets, require few or no manually annotated samples, and generalize to new tasks or domains (Caron et al., 2021; He et al., 2022) are often referred to as foundation models. Important components of this group of models are scalable architectures, mostly transformer-based such as the ViT (Dosovitskiy et al., 2021), and effective pre-training tasks. Notable ones include contrastive learning (Caron et al., 2020; Chen et al., 2020; 2021), masked image modeling (He et al., 2022; Bao et al., 2022; Fang et al., 2024), and self-distillation (Caron et al., 2021; Zhou et al., 2022; Oquab et al., 2024; Siméoni et al., 2026). By scaling challenging pre-text tasks, these models learn highly transferable features, especially for image perception (Oquab et al., 2024; Kerssies et al., 2025; Cavagnero et al., 2026). Alongside SSL, generative vision models (Rombach et al., 2022; Esser et al., 2024; Podell et al., 2024) have emerged as a strong source of general features. Tang et al. (2023); Meng et al. (2024); Stracke et al. (2025) found that single-timestep feature extraction is sufficient to get semantically coherent features, outperforming strong SSL baselines. The analysis by Zhang et al. (2024) further showed that generative models seem to learn strong representations for semantics in the value-value (v-v) interaction and instance discrimination in the query-key (q-k) interaction. To benefit from generalization and spatial grouping to generate dense instance masks, we also leverage the self-attention representation in our method Diffuse2Seg. Moreover, we mainly use SD2, a UNet-based architecture, and do not extract from diffusion transformer-based models. These currently have the drawback that the VAE latents are downsampled more strongly than in UNets, which limits the ability to discover small instances. In addition, they are computationally more demanding due to higher parameter count. Nevertheless, our method is similarly applicable to diffusion transformer affinities. 
+
+Unsupervised Instance Segmentation approaches like TokenCut (Wang et al., 2022), LOST (Siméoni et al., 2021), FOUND (Siméoni et al., 2023), and MOST (Rambhatla et al., 2023) proposed methods to exploit the feature affinity of SSL pre-trainings as a graph structure and derived binary object masks based on threshold on the graph. To overcome the costly pseudo-label generation, CutLER proposed a simple training framework. At first, they labeled the ImageNet dataset with a modified NCut extended to multi-object segmentation and then trained an instance segmentation network on the labels for multiple rounds. CuVLer (Arica et al., 2024) improved this procedure by generating an ensemble of multiple pre-trained 3DINO models and creating majority vote labels. Several more advanced techniques were proposed, such as ProMerge (Li & Shin, 2024), which filtered feature similarity maps from prompts, CutS3D (Sick et al., 2025), which complemented the graph cut with depth, or UnMORE (Yang et al., 2025), which added a boundary reasoning stage on top of the CuVLer labels. One limitation of these approaches is that they operate at fixed granularities. Therefore, HASSOD (Cao et al., 2023) proposed agglomeratively merging features at different thresholds, enabling hierarchies from sub-part to object. This allows a more general label generation. SOHES (Cao et al., 2024) extended HASSOD with different thresholds and an adapted training strategy, providing an unsupervised alternative to the widely used supervised SAM (Kirillov et al., 2023). However, a significant performance gap remained that could be reduced by UnSAM. UnSAM (Wang et al., 2024) splits the task into detecting coarse objects by CutLER and clustering the finer parts of these objects with the algorithm introduced in HASSOD. Therefore, the approach can better handle high-resolution inputs and the tradeoff between parts/subparts and coarse instances. UnSAM thereby poses the state of the art in unsupervised instance segmentation. 
+
+Training-Free Segmentation with Generative Models Recently, it was shown that diffusion-based generative models can be utilized as generalist perception models. In fact, they can be easily adapted for prompt-guided universal image and video understanding using paired image/video-text datasets through supervised fine-tuning (Gabeur et al., 2026; Wang et al., 2026a;b). Specifically, a large body of work demonstrated that diffusion model representations can be leveraged for segmentation without retraining or supervision. Existing approaches broadly fall into two categories: methods that exploit image-text cross-attention to enable open-vocabulary zero-shot segmentation (Kim et al., 2025; Helbling et al., 2025; Sun et al., 2026; Meng et al., 2026), and methods that rely solely on internal model features for class-agnostic segmentation (Tian et al., 2024; Couairon et al., 2024; Karmann & Urfalioglu, 2025; Ivanova et al., 2026; Zhang et al., 2026). In this work, we focus on the latter setting and briefly review several representative approaches: DiffSeg (Tian et al., 2024), for instance, employed simple agglomerative merging on the extracted self-attention and found that attention maps can be grouped into semantic segmentation clusters. Following up on that, DiffCut (Couairon et al., 2024) and Falcon (Zhang et al., 2026) employ variations of the NCut and focus purely on feature-based affinities. However, all of these works mostly only profit from the semantic coherence of the model. TRACE (Jo et al., 2026) showed that diffusion models not only possess strong semantics but also meaningful edge information by extracting edge maps from self-attention that can post-process instance segmentation masks. M2N2 (Karmann & Urfalioglu, 2025) extracts instance masks directly, showing that diffusion models support segmentation based on user clicks without training. Our work, Diffuse2Seg, however, differs from these approaches by leveraging generative models for automatic mask generation to generate multi-granularity instance masks with dense coverage. Moreover, we address the limitations of existing work, such as M2N2, that requires user inputs and does not extract multiple granularities. 
+
+## 3 Diffuse2Seg: Diffusion-Based Instance Segmentation Without Supervision 
+
+In the following section, we first discuss the preliminaries of entity segmentation and diffusion-based feature extraction in Sec. 3.1, and provide a brief overview of our Diffuse2Seg approach in Sec. 3.2. We then elaborate on the three main steps of Diffuse2Seg in more detail: First, we explain the extraction of multi layer self-attention matrices and aggregation into an affinity matrix in Sec. 3.3. Second, in Sec. 3.4, we present the pseudo-label generation, consisting of automatic mask generation via non-linear propagation of point prompts into soft object masks using the affinity matrix, followed by mask merging and post-processing to obtain instance pseudo-labels at image resolution. Finally, in Sec. 3.5, we describe training a lightweight model on the generated pseudo-labels to predict instance masks at multiple granularities. 
+
+3.1 Preliminaries 
+
+Segment Anything introduced a model and dataset based on the entity segmentation definition (Qi et al., 2022). Its main novelty is a flexible prompt interface that takes points or boxes as input to segment coherent instances. Consistent with this definition, the training dataset SA-1B contains all kinds of objects and object parts, allowing the model to generalize across different label definitions and granularities. SA-1B is built with a complex data engine in which the SAM model is repeatedly retrained across three stages: first, 4t       
+
+> 3.Step: Two-Round Model Training 1.Step: Self-Attention Extraction via Single Step Denoising
+> Images VAE UNet Non-Linear Propagation Compute Affinity A encode extract
+> Aggregated Layer Self-Attn Affinity Pseudo-Label Pool Prompt Grid
+> Mask Merging + NMS
+> 2.Step: Prompt-based Segment Generation
+> Pseudo-Label Pool Instance Segmentor
+> Round 1
+> train predict Pseudo-Label Enrichment Enriched Pseudo-Label Pool Instance Segmentor
+> Round 2
+> train predict Zero-Shot Predictions
+> Zero-Shot Predictions on Target Domains
+
+Figure 2: Schematic depiction of our unsupervised Diffuse2Seg method. Diffuse2Seg generates multi-granular instance masks, without supervision, from a pre-trained diffusion model in three steps. 
+
+Step 1: self-attention extraction via single-step extraction encodes an input image using the SD2 VAE and performs single-step denoising with the SD2 UNet to collect and aggregate multi-layer self-attention matrices into a single affinity matrix A. Step 2: prompt-based segment generation initializes a grid of equidistant one-hot prompts and propagates them over the affinity into soft object maps using non-linear edge-stopping p-Laplacian propagation. We then produce multi-granular instance pseudo-labels through map merging, deduplication, and boundary refinement. Step 3: two-round model training trains a lightweight Mask2Former model on the generated pseudo-labels for one round, followed by self-training via crop-based prediction refinement to correct errors and discover fine-grained instances in the second round. initial manual labeling, second semi-automatic labeling with human assistance to fill blind spots, and third automatic mask generation from a grid of points, followed by a deduplication and filtering stage to produce high-quality annotations. With our method Diffuse2Seg, we mirror the latter but in an purely unsupervised setting. We place an evenly spaced grid of point prompts on the input image, generate candidate masks from the diffusion model’s self-attention, then aggregate, filter, and post-process them into a final set of pseudo-labels. Inspired by SAM, we then train a segmentation model in a two-round procedure on the collected pseudo-labels to fill gaps and improve performance. 
+
+Generative Diffusion Models are capable of learning complex data distributions through a two-directional process. Consider a data sample x0 ∼ pdata . The forward process is a Markov chain, gradually injecting Gaussian noise at each step, q(xt | xt−1) = N (√1 − βt xt−1, β tI), with t = 1 , . . . , T and a chosen variance schedule βt resulting in xT being approximately Gaussian noise. A denoiser neural network ϵθ (xt, t ) then learns to generate new samples by inverting the process and predicting the reverse transitions, pθ(xt−1 | xt). The denoiser is shared across all timesteps. To scale this process to high-resolution data, variational autoencoders (VAEs) were introduced for efficiency. Such a VAE maps the input image I into a lower-dimensional latent representation z ∈ RHf ×Wf ×C with an encoder, where Hf × Wf specifies the latent spatial resolution and 
+
+C the number of channels and reconstructs the input image again from z using a decoder. In current high-resolution image generation models, denoising is conducted only on the latent, usually using either a UNet or a diffusion transformer. Text-to-image models (Rombach et al., 2022) additionally condition denoising on a text prompt y, allowing latent features to interact with text embeddings through cross-attention. As we target class-agnostic segmentation, we omit the text prompt and only pass null text embeddings. Consequently, we restrict ourselves to image-to-image attention and ignore text-to-image cross-attention in our experiments. We primarily adopt the UNet-based SD2 architecture, whose latent is downsampled less aggressively compared to diffusion transformers. This enables us to better handle small instances and preserve fine details. Since the denoising UNet is trained to denoise at different levels t = 1 , . . . , T , it can be repurposed as a feature extractor for images running just a single step (Luo et al., 2023; Meng et al., 2024; Zhang et al., 2024; Stracke et al., 2025). This involves encoding the input image into the latent representation z without applying the forward noise. During denoising, we can cache and leverage internal representations for downstream tasks. In 5our case, we are interested in high-resolution self-attention. Therefore, we cache multi-layer self-attention outputs from the last UNet block at the highest resolution. Depending on the timestep, different features are produced. Thus, the feature extraction can be optimized for specific target tasks. 
+
+3.2 Overview of Diffuse2Seg 
+
+Our method Diffuse2Seg leverages concepts from both SAM and generative diffusion models to densely label images in a unsupervised fashion. It is inspired by SAM’s automatic mask generation and self-training for high-quality label generation, which we mimic in a purely unsupervised setting. Specifically, Diffuse2Seg consists of three steps (see Figure 2 for a schematic visualization): First, in step 1, the self-attention single-step extraction, we conduct single-step denoising to extract and aggregate self-attention matrices from a pre-trained diffusion model into a single affinity matrix. Next, in step 2, pseudo-label generation, we utilize a grid of equidistant one-hot point prompts to generate soft object maps using the affinity matrix. Subsequently, we isolate multi-granularity instances, also referred to as pseudo-labels, from these soft object maps using mask merging and non-maximum suppression. Consistent with prior work, we apply a mask refinement step to improve the quality of mask boundaries. Finally, in step 3, training on pseudo-labels, we train a segmentation network on the generated pseudo-labels. This training includes two rounds: first, a training on the generated pseudo-labels, followed by a second round on prediction-enhanced pseudo-labels to fill missing segments and correct model errors. In the following, we describe the three steps of Diffuse2Seg in greater detail. 
+
+3.3 Step 1: Self-Attention Extraction via Single-Step Denoising 
+
+For our pseudo-label generation pipeline, we start by extracting self-attention matrices from the StableDiffu-sion2 (SD2) UNet (Rombach et al., 2022). To do so, we encode an input image using the SD2 VAE encoder to obtain its latent representation z, run a single step of denoising and cache the obtained self-attention matrices. Specifically, for each layer l ∈ { 1, ..., n L} and attention head h ∈ { 1, ..., n H }, we store one N × N
+
+matrix A(l,h ) that represents the affinity between the N patch tokens. Following Karmann & Urfalioglu (2025), we use only the self-attention tensors from the first two layers at the highest resolution of the UNet decoder. We first aggregate each layer over its heads and then combine layers via weights wl. The weights wl
+
+sum to 1 and are treated as hyperparameters (see Sec. A.1). The scene representation of the diffusion model is condensed into the aggregated affinity matrix used for the subsequent steps of our label generation. The final aggregated self-attention matrix then takes the form 
+
+A = 1
+
+nhnL∑
+
+> l=1
+
+wlnH∑
+
+> h=1
+
+A(l,h ) . (1) 
+
+3.4 Step 2: Prompt-Based Segment Generation 
+
+Self-attention in generative diffusion models concentrates on semantically similar regions and encodes object boundaries (Tian et al., 2024; Karmann & Urfalioglu, 2025; Erel et al., 2025; Jo et al., 2026; Zhang & Zhang, 2026). Which are two useful properties for isolating instances. However, simply thresholding the affinity maps, as done in Li & Shin (2024), is insufficient because the self-attention matrices are sparse. Instead we treat the aggregated affinity matrix A as a graph for prompt propagation. This yields dense and coherent object maps as shown in the following steps. 
+
+Prompt Propagation We build on the non-local graph regularization of Elmoataz et al. (2008), which adaptively smooths an input signal while preserving edges. In our case, these discontinuities represent the attention differences on object edges. The smoothing process is controlled by the affinity extracted in step 1: it enforces neighboring tokens to take similar values for high-affinity neighbors while throttling the smoothing effect for low-affinity neighbors. This amplifies propagation within objects and limits it at edges. To segment the whole image, we generate a grid of equidistant prompts with fixed spacing on the latent representation. Each prompt covers a different image region and is represented by a one-hot vector f 0 ∈ RN 
+
+> +
+
+. Then we smooth these prompts into soft object maps f ∈ RN 
+
+> +
+
+by minimizing 6Regularized Propagation   
+
+> grid of point prompts point prompt soft mask
+> self -attention affinity
+
+Figure 3: Generation of soft object maps by prompt propagation. An equidistant grid of one-hot point prompts is placed across the latent token grid ( Hf × Wf ) as initial seeds (grey dots). Each prompt is propagated over the self-attention affinity graph A via edge-preserving non-linear p-Laplacian propagation (Equation (2)) until it reaches ∥f t+1 − f t∥22 ≤ τprop , yielding continuous soft object maps. In this example, we show the propagation of a single prompt (green dot). 
+
+EpA(f , f 0, λ ) = 1
+
+p
+
+> N
+
+∑
+
+> i=1
+
+
+
+> N
+
+∑
+
+> j=1
+
+Aij (fj − fi)2
+
+
+
+> p/ 2
+
++ λ
+
+2 || f − f 0|| 22 (2) with respect to f . This is done for all prompts from the grid independently and in parallel. The first term smooths a prompt f using the affinity matrix, and the second term regularizes the smoothing by anchoring it to the initial prompt. The exponent p controls how strongly discontinuities are preserved, where p = 2 is equivalent to a linear propagation, and λ governs the anchoring to the initial prompt. Following Elmoataz et al. (2008), we solve this optimization problem efficiently with Gauss-Jacobi iterations (see Sec. A.1 for details) and stop when the squared norm of the iteration update ∥f t+1 − f t∥22 falls below τprop , producing our final set of soft object maps. 
+
+Map Merging These soft object maps are often redundant or capture the same object at different granularities. Thus, we consolidate them into a set of complementary multi-granularity masks with the following steps: First, we normalize the maps into valid probability distributions pk = fk/∑ 
+
+> i
+
+fk,i . We then measure the dissimilarity of a prompt k with another prompt k′ using the symmetric Kullback-Leibler (KL) divergence 
+
+dKL = 12
+
+(
+
+DKL 
+
+(
+
+p(k) ∥ p(k′)
+
+)
+
++ DKL 
+
+(
+
+p(k′) ∥ p(k)
+
+))
+
+. (3) Based on these distances, we cluster the prompts with agglomerative average linkage clustering on D. The distance matrix D here contains the pairwise-distances for all prompts and is of shape K × K. Cutting the resulting clustering dendrogram at different threshold values h groups the prompts into clusters Ch. Small thresholds h result in a larger number of clusters and are thus suited to isolate small objects, whereas larger h values yield fewer clusters and are thus favorable for isolating whole or coarse objects. To infer high-resolution instance masks from the merged clusters, we average all maps pc belonging to a cluster C in the set of clusters {C h}h at a threshold h with ¯ pC = ∑ 
+
+> c∈C
+
+pc/C . Then we upsample the merged maps and perform argmax on them to obtain a cluster segmentation map Mh for each level h. Finally, we isolate instances out of the high-resolution segmentation by connected components (Bolelli et al., 2020). Consequently, we obtain connected regions forming our instance masks. To reduce noise, we filter out components with an area below 
+
+amin (for detailed pseudo-code, see Sec. A.1). We repeat this procedure for all clustering thresholds to add multi-granularity segmentation proposals to the candidate pool P.
+
+Mask Post-Processing Since adjacent clustering thresholds h produce similar segmentation masks, the candidate pool P We remove redundant masks via a simple area-descending non-maximum suppression. Candidate masks are sorted in descending order of pixel area and added to the final annotation set M.7A candidate mask m is rejected if any already-accepted mask m′ ∈ M satisfies IoU( m, m ′) > τ IoU . This procedure creates a set M of at most Nmax complementary masks per image, where Nmax represents the maximum amount of pseudo masks per image and is set to 1000. Similar to baselines such as UnSAM (Wang et al., 2024) and SOHES (Cao et al., 2024), we employ CascadePSP (Cheng et al., 2020) as an optional refinement step on the generated masks. 
+
+3.5 Step 3: Two-Round Model Training on Generated Segments 
+
+As the previously outlined pseudo-label generation requires inference of the pre-trained diffusion model, generating masks for new images can be costly. Moreover, the pseudo-labels are not perfect, as the pre-trained diffusion model is not an expert for instance segmentation. Therefore, we train a lightweight segmentation model on the pseudo-masks from the previous pseudo-label generation step using different image budgets that range from 1% to 4% of the full training dataset. We train for two consecutive rounds, similar to the multi-round training of SAM, such that the model can improve label quality by self-training on its own predictions. The training follows the prior work UnSAM and is based on the Mask2Former architecture Cheng et al. (2022), which is optimized in a class-agnostic manner with the loss 
+
+L = λdice Ldice + λbce Lbce + λcls Lcls . (4) The loss terms Ldice and Lbce optimize for mask quality whereas Lcls guides the model towards learning an objectness probability. The loss contributions are weighted via the respective hyperparameters. In the following, we present two different configurations of this two-round training procedure. The first one is based purely on the diffusion-based labels, whereas the second one follows the prior state-of-the-art UnSAM and augments the set of generated masks with masks from a pre-trained CutLER segmentation model. 
+
+Round 1: Training on Generated Segments For the first round, both configurations take the same pool of previously generated segments as labels. As the latent resolution of SD2 UNet is limited, we lack some small-scale segments and thus need to increase the frequency and diversity of these segments during training. This is done by applying copy-and-paste augmentation (Ghiasi et al., 2021). In our detector-augmented setting, we combine small-object pasting with predictions from CutLER, with a confidence above τCutLER ,set to 0.1 throughout experiments. This ensures a sufficient number of labels across coarse instances, parts, and sub-parts. Moreover, we make sure that not a single segment source dominates by randomly deciding the source of supervision at each iteration: i) both CutLER and Diffuse2Seg masks with a probability of 50 % each, ii) only CutLER masks with 20 %, and iii) only Diffuse2Seg masks with 30%. 
+
+Round 2: Training with Predict-and-Conquer Enrichment In the second round, we use the model trained in Round 1 to enrich the pseudo-label pool. Round 1 labels are spatially dense, but they miss fine details because of the limited latent resolution of the SD2 UNet. Inspired by UnSAM’s divide-and-conquer strategy, we therefore combine a full-image inference pass with a second pass on crops of previously predicted parent segments. We first run the Round 1 model on the whole image and keep every prediction with a score of at least θ. From this set, we discard near-full-image predictions ( > a high ) and very small predictions (< a low ), which are unlikely to contain smaller parts. A child is kept only if it is contained in its parent, as area(child ∩ parent) /area(child) ≥ τcont , so that we do not simply re-detect the parent. The surviving global and crop predictions ˆ m are then merged into the initial Round 1 pool: any original mask m with IoU( m, ˆm) > τ merge is replaced, and the remaining predictions are appended. This merge is the same for both training configurations. They differ only in whether CutLER masks are added afterward. In the detector-free setting, Round 2 trains on the merged pool above (initial Diffuse2Seg labels plus predict-and-conquer predictions). In the detector-augmented setting, we additionally append CutLER masks to that pool and enable hierarchical copy-paste of CutLER instances during training. Crop refinement itself never depends on CutLER. 84 Experiments 
+
+In this section, we evaluate our entity-segmentation method Diffuse2Seg on a variety of target datasets. First, we outline the experimental setup for pseudo-label generation and training in Sec. 4.1. Next, we compare our pseudo-label generation against SSL-based and diffusion-based label-generation baselines in Sec. 4.2. Subsequently, we train a segmentation network on our pseudo labels and report its zero-shot performance in Sec. 4.3. Next, we analyze using our trained model as initialization for efficient semi-supervised fine-tuning on labeled data in Sec. 4.4. Finally, we analyze the design choices of Diffuse2Seg in a series of ablations in Sec. 4.5. 
+
+4.1 Experimental Setup 
+
+In this subsection, we first describe the datasets used to train and evaluate Diffuse2Seg. Then, we outline the SSL-based and diffusion-based benchmark methods against which we compare Diffuse2Seg. Finally, we present the details of pseudo-label generation and training and the metrics used to evaluate segment quality. 
+
+Datasets We use different dataset setups for evaluating pseudo-label quality and model training with zero-shot inference. We perform pseudo-label generation for training on randomly sampled subsets of the SA-1B dataset, comprising 100k, 200k, and 400k images, which correspond to approximately 1%, 2%, and 4% of the entire SA-1B training dataset. We also sample 1000 additional non-overlapping images for validation, which we use throughout all experiments. To investigate our method’s ability to annotate images densely, we moreover select several additional open-world validation datasets. These include ADE20K (Zhou et al., 2017), EntitySeg (Qi et al., 2023), and UVO (Wang et al., 2021) for segmenting entities. Furthermore, we analyze the part segmentation performance on PACO (Ramanathan et al., 2023). To evaluate our trained model, we also add COCO Images (Lin et al., 2014) to cover “things”-only performance. We evaluate both the COCO and the more diverse LVIS validation annotations. Compared to prior work, we intentionally do not evaluate on PartImageNet as this dataset contains images from ImageNet, the pre-training dataset for both DINO and CutLER. Benchmarking on this dataset is thus not fair for comparing SD2- and DINO-based approaches. 
+
+Baseline Methods We evaluate our pseudo-labeling mechanism against common baselines for unsupervised segmentation. For SSL-based unsupervised segmentation, DINO pre-training poses a widely used standard. Additionally, we consider entity-segmentation baselines, including SOHES (Cao et al., 2024), which performs global clustering and local re-clustering, and UnSAM, which relies on divide-and-conquer that first discovers coarse regions and then clusters them bottom-up. For diffusion-based pre-training, there is no prior work on open-world entity segmentation. That is why we repurpose several established baselines in unsupervised semantic segmentation. DiffSeg (Tian et al., 2024) uses a similar approach and merges attention maps into segmentation masks. We adapt the work by applying connected components at the end to isolate instances. Moreover, we add the recent method M2N2 (Karmann & Urfalioglu, 2025), which repurposes generative diffusion models for interactive segmentation. It propagates user-defined point prompts into segmentation masks. To make a fair comparison, we apply the same grid of point prompts and extract the resulting masks at image resolution. For our training experiments, we compare to UnSAM, the state-of-the-art for unsupervised entity segmentation, and, additionally, to established unsupervised instance segmentation methods that incorporate training, such as SOHES and CutLER (Wang et al., 2023). 
+
+Pseudo-Label Settings For our pseudo-label creation, we mainly use the SD2 model. We perform one step of denoising at timestep 150 following Karmann & Urfalioglu (2025) and resize the input images to 1120 ×1120, as we found that SD2 generalizes to resolutions slightly above its training resolution of 1024 ×1024. Furthermore, we utilize the aggregation weights of w1 = 0 .85 and w2 = 0 .15 for the last two layers at the highest resolution of SD2’s U-Net. We only use the layers at the highest resolution to retain fine-grained image details. On our final self-attention affinity we apply temperature scaling with τatt = 0 .55 to soften propagation. For our prompting, we set the distance between prompts to six pixels horizontally and vertically. In addition, we set the propagation gradient exponent to p = 1 .6, and the anchoring penalty λ = 1 × 10 −5, as we found these values to balance small-, medium-, and large-object recall well and that prompt anchoring is only needed as slight regularization. We iterate until we reach the stopping criterion τprop = 1 × 10 −4
+
+9to preserve segmentation mask granularity. For merging, we compute six thresholds in the range [0.186, 2.99] that are log-spaced to emphasize merges at lower thresholds. The area-based deduplication is done with the geometric merging parameter τ IoU = 0 .9, which worked best to preserve recall. We remove all masks containing fewer than 100 pixels to remove noise. We performed ablations on SA-1B to validate the behavior of our pseudo-labeling parameters (see Sec. A.1). For post-processing, we largely adopt the CascadePSP parameters of UnSAM and SOHES; for details, see Sec. A.2. For training we mainly follow the hyperparameters of UnSAM, as detailed in Sec. A.3. 
+
+Pseudo-Label and Zero-Shot Metrics To evaluate both the quality of the diffusion-based pseudo-labels and the zero-shot performance of the derived entity-segmentation models, we mainly consider mean average recall (AR 1000 /mAR), which is established in open-world entity segmentation (Wang et al., 2023; Cao et al., 2024; Wang et al., 2024). It averages recall over IoU matching thresholds from 0.5 to 0.95. We always consider up to 1000 predicted masks per image for metric calculation. In addition, we report average recall filtered by object size, denoted as AR S , AR M , and AR L, following the COCO (Lin et al., 2014) definition. Because label definitions and taxonomies vary across datasets, mAP is less meaningful and is only considered for selected experiments. 
+
+4.2 Evaluation of Generated Pseudo-Labels 
+
+To evaluate the quality and generalization of our diffusion-based pseudo-labels, we first analyze their performance on SA-1B in Table 1, comparing them against the baselines described in Sec. 4.1 without mask-refinement post-processing. Labeling the high-resolution SA-1B images is particularly challenging, as most methods operate on latent representations with substantially lower resolution. Nevertheless, despite operating on such a low-resolution representation, our method achieves higher average recall than all baselines: Diffuse2Seg’s mAR is 4.7 p.p. higher than the strongest diffusion-based baseline DiffSeg (Tian et al., 2024) and 4.3 p.p. higher than the prior DINO-based state-of-the-art UnSAM (Wang et al., 2024). Comparing the diffusion-based baselines, we find DiffSeg to significantly outperform M2N2 at all object scales, likely because its agglomerative clustering covers multiple object granularities. In contrast, M2N2 (Karmann & Urfalioglu, 2025) only produces a single granularity mask per prompt. For the DINO-based baselines, prior state-of-the-art UnSAM has an advantage on small objects: its divide-and-conquer strategy uses predictions from the pre-trained CutLER instance segmenter and further splits the CutLER-based instances into smaller parts using a bottom-up approach. However, its dependency on the ImageNet pre-trained CutLER detector can cause the method to miss some coarse objects and their parts entirely if the object is not detected or assigned low objectness. This lowers UnSAM’s recall on medium and large objects relative to our approach, which avoids this dependency for pseudo-label generation.                                
+
+> Method Backbone AR SAR MAR LAR 1000
+> DINO-based labeling
+> UnSAM (Wang et al., 2024) DINO ViT-B/8 5.7 13.9 26.0 16.4 SOHES (Cao et al., 2024) DINO ViT-B/8 2.8 10.6 15.7 11.0
+> Diffusion-based labeling
+> DiffSeg (Tian et al., 2024) SD2 0.3 12.4 29.9 16.0 M2N2 (Karmann & Urfalioglu, 2025) SD2 0.0 2.8 26.5 9.7 Diffuse2Seg ( ours )SD2 2.6 15.3 38.9 20.7
+
+Table 1: Comparison of DINO- and diffusion-based pseudo-labeling methods on the SA-1B validation set. We report class-agnostic mask average recall (AR) by object size, with 1000 proposals per image. Methods are grouped by backbone type. The diffusion-based labels of Diffuse2Seg achieve significantly higher average recall compared to previous methods. Next, we compare these segmentation methods on datasets from diverse domains, as shown in Table 2, keeping the previously used hyperparameter values. This cross-domain analysis covers a broad range of datasets, ranging from ADE20k that addresses Scene Parsing with a huge number of different classes, over 10 EntitySeg that encompasses diverse entities from the open world, to UVO that provides densely annotated frames from unstructured web videos, and PACO which targets part segmentation. Among the training-free methods, our Diffuse2Seg technique clearly benefits from the generality of diffusion-model representations and consistently achieves the highest recall, reaching, for example, an AR 1000 of 13.6 on PACO, a 2.9 p.p. margin over the strongest baseline CutLER, despite the latter being trained. This demonstrates Diffuse2Seg’s ability to generate multi-granularity masks. In addition, we outperform the training-free baselines on entity-focused datasets such as ADE20k and EntitySeg, by a large margin gaining 6.5 p.p. and 4.5 p.p. of mAR compared to the prior state-of-the-art technique UnSAM. Generally, our diffusion-based approach outperforms DINO-based approaches in this setup, confirming our observation that diffusion priors are better suited for segmenting stuff+things datasets than DINO features. We further show improvements across domains compared to other diffusion-based baselines. M2N2 performs weakly on datasets with objects at different granularities and is roughly on par with Diffuse2Seg on UVO only due to the dataset’s whole-object focus. DiffSeg, in contrast, includes a mechanism to cover different granularities. However, without a propagation step, it appears to be much less stable across domains, with a gap of up to 11.0 p.p. to our method. Notably, our method outperforms the CutLER-trained detector, which was trained on 1.3M ImageNet images for segmentation, on SA-1B, EntitySeg, and PACO and stays close on UVO and ADE20k.                                              
+
+> Method Backbone AR 1000 Across Domains
+> SA-1B ADE20K EntitySeg UVO PACO
+> Training-based labeling
+> CutLER (Wang et al., 2023) DINO R50 17.0 24.8 22.1 32.3 10.7
+> DINO-based labeling
+> UnSAM (Wang et al., 2024) DINO ViT-B/8 16.4 16.0 19.3 22.8 9.3 SOHES (Cao et al., 2024) DINO ViT-B/8 11.0 11.6 11.6 19.3 5.2
+> Diffusion-based labeling
+> DiffSeg (Tian et al., 2024) SD2 16.0 14.1 17.5 18.9 9.8 M2N2 (Karmann & Urfalioglu, 2025) SD2 9.7 18.9 19.7 29.7 9.6 Diffuse2Seg ( ours )SD2 20.7 22.5 23.8 29.9 13.6
+
+Table 2: Cross-domain pseudo-label quality , as measured by class-agnostic mask AR 1000 against the ground truth of the respective dataset. Apart from SA-1B, we probe generalization to scene parsing (ADE20K), entity segmentation (EntitySeg), and open-world video objects (UVO). The diffusion features produce more robust labels across domains, as indicated by consistently higher recall values. We keep for all methods the same hyperparameters as for SA-1B. We mainly focus on the performance of the training-free approaches and report CutLER because of its integration into UnSAM and as a widely used training-based reference. 
+
+4.3 Evaluation of Zero-Shot Instance Segmentation 
+
+We now evaluate the final Diffuse2Seg instance segmentation models trained with pseudo-label supervision and compare them with unsupervised segmentation baselines trained either with or without detector supervision (Table 3). All models are optimized on SA-1B and inferred zero-shot on previously unseen datasets. When comparing Diffuse2Seg to SOHES, the strongest detector-free baseline, our method provides large gains on every benchmark: +7.4 p.p. AR on things datasets (37.2 vs. 29.8), +7.7 p.p. on stuff+things (40.3 vs. 32.6), and +10.0 p.p. on parts benchmarks (27.1 vs. 17.1). These results show that our diffusion-based approach is significantly more data-efficient, requiring only half the training images and a much smaller image encoder (ResNet50 for Diffuse2Seg vs. ViT-B for SOHES). For training with detector supervision, we compare to the prior state-of-the-art technique UnSAM, which bases its label generation on ranked proposals from a pre-trained CutLER object detector. If we augment our segment label set with the same proposals, we consistently surpass UnSAM on stuff+things datasets. 11 Method Detector Supervision # Images Things Stuff + Things Parts                                                                                                            
+
+> COCO LVIS Avg. ADE Entity SA-1B Avg. PACO
+> Supervised
+> SAM ✗11M 49.6 46.1 47.9 45.8 45.9 60.8 50.8 18.1
+> Unsupervised - label generation without a pre-trained detector
+> CutLER ✗1.3M 28.1 20.2 24.2 26.3 23.1 17.0 22.1 8.9 SOHES ✗0.2M 30.5 29.1 29.8 31.1 33.5 33.3 32.6 17.1 Diffuse2Seg ( ours )✗0.1M 37.4 36.9 37.2 37.6 39.7 43.5 40.3 27.1
+> Unsupervised - label generation with a pre-trained detector (CutLER proposals)
+> UnSAM ✓0.1M 40.5 37.7 39.1 35.7 39.6 41.9 39.1 27.5 Diffuse2Seg ( ours )✓0.1M 41.0 38.7 39.9 39.8 42.2 45.5 42.5 28.9
+> UnSAM ✓0.2M 41.2 39.7 40.5 36.8 40.3 43.6 40.2 29.1 Diffuse2Seg ( ours )✓0.2M 40.7 39.0 39.9 39.6 42.2 46.6 42.8 29.1 UnSAM ✓0.4M 42.0 40.5 41.3 39.1 41.1 44.8 41.7 29.7 Diffuse2Seg ( ours )✓0.4M 42.2 40.0 41.1 40.5 43.2 47.8 43.8 29.8
+
+Table 3: Comparison of instance segmentation methods with and without auxiliary detector supervision. While the previous state-of-the-art method UnSAM relies on an ImageNet pre-trained detector, our method can also be trained without auxiliary supervision purely on diffusion-model-based labels. Combining our method with CutLER supervision positions it as complementary to the object-biased labels of UnSAM. In fact, dense supervision leads to significant improvements on stuff+things datasets while performing on par on things-only datasets. Across all training image budgets ranging from 1% over 2% to 4% of the SA-1B dataset, we improve the mAR by +3.4 p.p., 2.6 p.p., and 2.1 p.p., respectively. On the things and parts datasets, we perform on par with UnSAM, which performs very well on things-focused datasets due to its deep integration and learned proposal ranking of the CutLER detector. Over-all, we show that our diffusion-based method Diffuse2Seg offers strong stuff+things coverage, w/o FT 100 500 1k 2k 5k 10k 
+
+> # Annotated Images
+> 40 .042 .545 .047 .550 .052 .5
+> AR 1000
+> Supervised, 100k labels (51.1) SAM, supervised 11M imgs (44.4)
+> +1.1 +1.5 +2.1 +2.1 +2.2 +2.3 +2.2
+> Diffuse2Seg-Semi UnSAM-Semi
+
+Figure 4: Semi-supervised extensions of UnSAM and Diffuse2Seg. Mean average recall vs. the number of labeled fine-tuning images. 5k images suffice for Diffuse2Seg to match the 100k supervised UnSAM reference. surpassing the state-of-the-art DINO-based UnSAM. 
+
+Comparison to supervised SAM As expected, a certain performance gap to supervised SAM remains, as SAM was trained on many more images (11M) and for many more rounds. Nevertheless, our method approaches SAM perfor-mance on generalizable stuff+things segmentation, being just 2.7 p.p. worse in mAR on EntitySeg than SAM. 
+
+4.4 Semi-Supervised Diffuse2Seg-Semi 
+
+A central promise of unsupervised segmentation is that it reduces the need for costly labeling. So far, we have shown that Diffuse2Seg produces strong segmentation models in a purely unsupervised setting. While a gap remains rela-tive to supervised SAM, a natural next question is whether we can benefit from our method when manual labeling of smaller amounts of images is feasible. Therefore, we study label-efficient semi-supervised learning by fine-tuning our best unsupervised model and UnSAM’s best unsupervised model with a simple recipe at a 4% SA-1B budget as indicated in Figure 4. We freeze the encoder to preserve generalization and unfreeze the decoder to align its mask predictions with the ground truth. As a strong supervised reference, we additionally train the same UnSAM 12 1.0 1.2 1.4 1.6 1.8 2.0   
+
+> p-Laplacian p
+> 10 12 14 16 18 20
+> mAR@1000 (%)
+> mAR@1000 mAP@1000 0.8 1.0 1.2 1.4 1.6 1.8
+> mAP@1000 (%)
+
+(a) Influence of propagation exponent p.0 100 200 300 400 500 600 700 800 900 1000    
+
+> Denoising timestep t
+> 020 40 60 80 100
+> Metric (%)
+> mAR L
+> mAR mAR M
+> mAR S
+> mAP
+> t= 150
+
+(b) Behavior of the timestep t for extraction. 
+
+Figure 5: Impact of propagation exponent and denoising timestep on Diffuse2Seg performance .Panel (a): mAR@1000 peaks at p = 1 .2, while mAP@1000 peaks at the selected p = 1 .6. Panel (b): each metric is normalized to its own best timestep; recall, particularly for small objects, degrades earlier than mAP. Dashed lines mark the selected p = 1 .6 and t = 150. All metrics use at most 1000 detections. recipe from scratch on 100k labeled samples. This fully supervised model reaches 51.1 mAR, exceeding the SAM reference at 44.4 mAR, because its design is tailored towards automatic mask generation. Fine-tuning our model is remarkably data-efficient: With just 100 samples available, our model already recovers 93.5 % of the mAR of the fully supervised 100k reference, compared to 90.7 % for UnSAM under the same protocol. In this setup, the advantage of our semi-supervised Diffuse2Seg further grows with increasing image budget. At just 5,000 examples, Diffuse2Seg-Semi matches the supervised reference performance, and at 10,000 we outperform fully supervised learning by 1.4 p.p. in average recall across all domains. This shows that our Diffuse2Seg-Semi model is not only effective in the unsupervised regime but can moreover significantly reduce the amount of labeled data required to outperform fully supervised benchmarks. 
+
+4.5 Ablation Study 
+
+In this section, we analyze the impact of Diffuse2Seg’s design choices on its pseudo-label and zero-shot performance, focusing particularly on hyperparameters of the single-step self-attention extraction, prompt propagation, and segment merging. The extraction timestep t and the propagation parameter p strongly influence label-generation performance. For extraction, Figure 5b shows that our approach’s recall degrades across timesteps on the SA-1B validation set. This is because earlier time steps focus more on fine texture, which favors our objective of segmenting objects at varying granularities, whereas later steps capture coarse semantics. We select t = 150 for our experiments, which maximizes mAP while keeping strong mAR. For propagation, we show different p values in Figure 5a from linear propagation ( p = 2) to increasingly edge-preserving smoothing ( p < 2) on the SA-1B validation set. We show that non-linear propagation in our method vastly improves mAR compared to linear propagation. While values closer to p = 1 improve recall and isolate more objects, they also lower mAP and introduce noisy masks. For our experiments, we prioritize mask precision and thus select p = 1 .6, where mAP peaks.                     
+
+> Levels AR 1000 AR SAR MAR LmAP 316.3 2.1 11.0 32.4 1.9 517.7 2.5 12.4 34.6 1.8 618.1 2.5 12.7 35.0 1.8
+
+(a) Number of levels in the map merging step                           
+
+> NMS τIoU AR 1000 AR SAR MAR LmAP 0.515.4 2.1 10.8 30.1 1.8 0.717.0 2.4 11.9 33.2 1.8 0.817.8 2.5 12.4 34.6 1.8 0.918.5 2.5 12.9 36.1 1.8
+
+(b) Cross-level deduplication 
+
+Table 4: Diffuse2Seg mAR as a function of number of hierarchy levels and NMS threshold for deduplication. We find that a higher number of hierarchy levels and a conservative τIoU in our mask merging and deduplication consistently boosts recall. 13 Configuration Things Stuff + Things Parts                   
+
+> COCO LVIS ADE20K EntitySeg SA-1B PACO Diffuse2Seg labels 35.6 35.0 36.0 38.2 39.8 25.8 + Crop labels 37.4 36.9 37.6 39.7 43.5 27.1 + CutLER mixing 41.0 38.7 39.8 42.2 45.5 28.9
+
+(a) Impact of the training supervision on mAR. Starting from global Diffuse2Seg pseudo-labels, the rows add crop-refined child masks and CutLER masks, respectively.                 
+
+> Supervision Stage # Images AR 1000
+> Things Stuff+Things Parts CutLER mixing Stage 1 0.1M 37.9 40.3 27.0 Stage 2 0.1M 38.7 40.7 27.1 + Crop labels Stage 2 0.1M 39.9 42.5 28.9
+
+(b) Self-training strategies. Self-training with our presented strategies consistently improves results. Self-training was done on 0.1M images. 
+
+Table 5: Impact of label sources and training stages. (a) Starting from global Diffuse2Seg pseudo-labels, the rows add crop-refined child masks and CutLER masks, respectively. Crop refinement adds locally re-inferred, parent-contained child masks. All rows use a 0 .1M image budget. (b) Self-training with our presented strategies significantly improves the model performance by correcting and filling gaps of the initial pseudo-labels. 
+
+Mask Merging We next ablate the parameters of our post-processing step. Increasing the number of hierarchy levels consistently improves recall, since additional levels help to isolate a bigger variety of granularities. Going from 3 to 6 levels improves mAR from 16 .3 to 18 .1 (see Table 4a). To deduplicate across levels, we use a simple area-sorted non-maximum suppression (NMS). We analyze different thresholds in Table 4b and find that a conservative threshold of τIoU = 0 .9 best retains mask candidates across granularities. Deduplication using a smaller overlap threshold, such as τIoU = 0 .5, reduces recall significantly by 3.1 p.p. in mAR. We therefore keep 6 levels and τIoU = 0 .9 for our experiments. 
+
+Training Supervision Finally, we study the different label sources and training stages for our Diffuse2Seg training. Training only on the diffusion-based labels significantly outperforms the competitor SOHES, which likewise does not use detector supervision. Our crop-refined masks from the second round improve fine structures (see Table 5a), with gains of +3.7 p.p. on SA-1B and +1.3 p.p. on PACO. CutLER mixing, in contrast, improves performance most strongly on things datasets (+3.6 p.p. on COCO). Moreover, stuff+things datasets benefit from coarse-instance coverage. On the EntitySeg dataset, for instance, augmenting with CutLER improves AR 1000 by 2.5 p.p. The stage analysis in Table 5b reveals that our initial model struggles with visual details because its pseudo-labels are generated from a low-resolution latent. Following the UnSAM configuration for a second round of self-training that merges only global predictions into the initial pseudo-label dataset yields only marginal gains in our setup, improving stuff+things mAR from 40.3 to 40.7. In contrast, our crop-based labels effectively mitigate the lack of details in our second round of fine-tuning and boost performance on the stuff+things, things, and parts datasets by +2.2 p.p., +2.0 p.p., and +1.9 p.p., respectively. 
+
+## 5 Conclusion 
+
+We proposed Diffuse2Seg, the first method to extract dense multi-granular instance pseudo-labels from pre-trained diffusion models without retraining or supervision. Our extensive experiments show not only the generality of pseudo-label generation but also the effectiveness of training segmentation models unsupervised using our pseudo-labels for strong zero-shot performance. In addition, we show that our models can serve as an effective initialization for semi-supervised learning, even surpassing a fully supervised reference with significantly fewer labeled images. This suggests that pre-trained diffusion models learn fine-grained scene representations. As a limitation, our pseudo-labels struggle with particularly small objects that cannot be recognized at the latent resolution. Additionally, the diffusion representation may encode not only semantics but also texture and therefore sometimes oversegment larger segments in the image, such as the sky. Adopting coarse-to-fine approaches and objectness ranking, as in the SSL-based literature, can be practical solutions to address these issues. Finally, our propagation framework is flexible in prompts and in-model propagation, enabling future extensions such as class-conditioned cross-attention prompting or affinity extraction from generative video models to segment objects over time. 14 References 
+
+Shahaf Arica, Or Rubin, Sapir Gershov, and Shlomi Laufer. CuVLER: Enhanced unsupervised object discoveries through exhaustive self-supervised transformers. In CVPR , 2024. Hangbo Bao, Li Dong, Songhao Piao, and Furu Wei. BEiT: BERT pre-training of image transformers. In 
+
+ICLR , 2022. Federico Bolelli, Stefano Allegretti, Lorenzo Baraldi, and Costantino Grana. Spaghetti labeling: Directed acyclic graphs for block-based connected components labeling. IEEE Transactions on Image Processing ,29:1999–2012, 2020. Shengcao Cao, Dhiraj Joshi, Liangyan Gui, and Yu-Xiong Wang. HASSOD: Hierarchical adaptive self-supervised object detection. In NeurIPS , 2023. Shengcao Cao, Jiuxiang Gu, Jason Kuen, Hao Tan, Ruiyi Zhang, Handong Zhao, Ani Nenkova, Liangyan Gui, Tong Sun, and Yu-Xiong Wang. SOHES: Self-supervised open-world hierarchical entity segmentation. In ICLR , 2024. Mathilde Caron, Ishan Misra, Julien Mairal, Priya Goyal, Piotr Bojanowski, and Armand Joulin. Unsupervised learning of visual features by contrasting cluster assignments. NeurIPS , 2020. Mathilde Caron, Hugo Touvron, Ishan Misra, Hervé Jégou, Julien Mairal, Piotr Bojanowski, and Armand Joulin. Emerging properties in self-supervised vision transformers. In ICCV , 2021. Niccolò Cavagnero, Narges Norouzi, Gijs Dubbelman, and Daan de Geus. PMT: Plain mask transformer for image and video segmentation with frozen vision encoders. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition Workshops (CVPRW) , 2026. Ting Chen, Simon Kornblith, Mohammad Norouzi, and Geoffrey Hinton. A simple framework for contrastive learning of visual representations. In ICML , 2020. Xinlei Chen, Saining Xie, and Kaiming He. An empirical study of training self-supervised vision transformers. In 2021 IEEE/CVF International Conference on Computer Vision, ICCV 2021, Montreal, QC, Canada, October 10-17, 2021 , pp. 9620–9629. IEEE, 2021. doi: 10.1109/ICCV48922.2021.00950. URL https: //doi.org/10.1109/ICCV48922.2021.00950 .Bowen Cheng, Ishan Misra, Alexander G. Schwing, Alexander Kirillov, and Rohit Girdhar. Masked-attention mask transformer for universal image segmentation. In CVPR , 2022. Ho Kei Cheng, Jihoon Chung, Yu-Wing Tai, and Chi-Keung Tang. CascadePSP: Toward class-agnostic and very high-resolution segmentation via global and local refinement. In CVPR , 2020. Paul Couairon, Mustafa Shukor, Jean-Emmanuel Haugeard, Matthieu Cord, and Nicolas Thome. DiffCut: Catalyzing zero-shot semantic segmentation with diffusion features and recursive normalized cut. In 
+
+NeurIPS , 2024. Alexey Dosovitskiy, Lucas Beyer, Alexander Kolesnikov, Dirk Weissenborn, Xiaohua Zhai, Thomas Unterthiner, Mostafa Dehghani, Matthias Minderer, Georg Heigold, Sylvain Gelly, Jakob Uszkoreit, and Neil Houlsby. An image is worth 16x16 words: Transformers for image recognition at scale. In ICLR , 2021. Abderrahim Elmoataz, Olivier Lezoray, and Sébastien Bougleux. Nonlocal discrete regularization on weighted graphs: A framework for image and manifold processing. IEEE Transactions on Image Processing , 17(7): 1047–1060, 2008. doi: 10.1109/TIP.2008.924284. Yotam Erel, Olaf Dünkel, Rishabh Dabral, Vladislav Golyanik, Christian Theobalt, and Amit H Bermano. Attention (as discrete-time markov) chains. In Advances in Neural Information Processing Systems , 2025. Patrick Esser, Sumith Kulal, Andreas Blattmann, Rahim Entezari, Jonas Müller, Harry Saini, Yam Levi, Dominik Lorenz, Axel Sauer, Frederic Boesel, et al. Scaling rectified flow transformers for high-resolution image synthesis. In CVPR , 2024. 15 Yuxin Fang, Quan Sun, Xinggang Wang, Tiejun Huang, Xinlong Wang, and Yue Cao. EVA-02: A visual representation for neon genesis. Image and Vision Computing , pp. 105171, 2024. Valentin Gabeur, Shangbang Long, Songyou Peng, Paul Voigtlaender, Shuyang Sun, Yanan Bao, Karen Truong, Zhicheng Wang, Wenlei Zhou, Jonathan T Barron, et al. Image generators are generalist vision learners. arXiv preprint arXiv:2604.20329 , 2026. Golnaz Ghiasi, Yin Cui, A. Srinivas, Rui Qian, Tsung-Yi Lin, Ekin Dogus Cubuk, Quoc V. Le, and Barret Zoph. Simple copy-paste is a strong data augmentation method for instance segmentation. In CVPR , 2021. Kaiming He, Xinlei Chen, Saining Xie, Yanghao Li, Piotr Dollár, and Ross B. Girshick. Masked autoencoders are scalable vision learners. In CVPR , 2022. Alec Helbling, Tuna Han Salih Meral, Benjamin Hoover, Pinar Yanardag, and Duen Horng Chau. Concep-tAttention: Diffusion transformers learn highly interpretable features. In ICML , 2025. Daniela Ivanova, Marco Aversa, Paul Henderson, and John Williamson. Unsupervised segmentation by diffusing, walking and cutting. In WACV , 2026. Sanghyun Jo, Ziseok Lee, Wooyeol Lee, Jonghyun Choi, Jaesik Park, and Kyungsu Kim. TRACE: Your diffusion model is secretly an instance edge detector. In ICLR , 2026. Markus Karmann and Onay Urfalioglu. Repurposing stable diffusion attention for training-free unsupervised interactive segmentation. In CVPR , June 2025. Markus Karmann, Peng-Tao Jiang, Bo Li, and Onay Urfalioglu. M2n2v2: Multi-modal unsupervised and training-free interactive segmentation. arXiv preprint arXiv:2503.16254 , 2025. Tommie Kerssies, Niccolò Cavagnero, Alexander Hermans, Narges Norouzi, Giuseppe Averta, Bastian Leibe, Gijs Dubbelman, and Daan de Geus. Your ViT is secretly an image segmentation model. In CVPR , 2025. Chaehyun Kim, Heeseong Shin, Eunbeen Hong, Heeji Yoon, Anurag Arnab, Paul Hongsuck Seo, Sunghwan Hong, and Seungryong Kim. Seg4Diff: Unveiling open-vocabulary segmentation in text-to-image diffusion transformers. In NeurIPS , 2025. Alexander Kirillov, Eric Mintun, Nikhila Ravi, Hanzi Mao, Chloe Rolland, Laura Gustafson, Tete Xiao, Spencer Whitehead, Alexander C Berg, Wan-Yen Lo, et al. Segment anything. In Proceedings of the IEEE/CVF international conference on computer vision , pp. 4015–4026, 2023. Dylan Li and Gyungin Shin. ProMerge: Prompt and merge for unsupervised instance segmentation. In 
+
+European Conference on Computer Vision (ECCV) , 2024. Tsung-Yi Lin, Michael Maire, Serge Belongie, James Hays, Pietro Perona, Deva Ramanan, Piotr Dollár, and C Lawrence Zitnick. Microsoft COCO: Common objects in context. In ECCV , 2014. Grace Luo, Lisa Dunlap, Dong Huk Park, Aleksander Holynski, and Trevor Darrell. Diffusion hyperfeatures: Searching through time and space for semantic correspondence. In NeurIPS , 2023. Benyuan Meng, Qianqian Xu, Zitai Wang, Xiaochun Cao, and Qingming Huang. Not all diffusion model activations have been evaluated as discriminative features. In NeurIPS , 2024. Benyuan Meng, Qianqian Xu, Zitai Wang, Xiaochun Cao, Longtao Huang, and Qingming Huang. Making training-free diffusion segmentors scale with the generative power. In CVPR , 2026. Ramin Nakhli, Mahesh Ramachandran, and Luca Ballan. Unlocking diffusion hierarchies: Adaptive timestep selection for zero-shot segmentation, 2026. URL https://arxiv.org/abs/2606.15590 .Koichi Namekata, Amirmojtaba Sabour, Sanja Fidler, and Seung Wook Kim. EmerDiff: Emerging pixel-level semantic knowledge in diffusion models. In ICLR , 2024. 16 Maxime Oquab, Timothée Darcet, Théo Moutakanni, Huy V. Vo, Marc Szafraniec, Vasil Khalidov, Pierre Fernandez, Daniel Haziza, Francisco Massa, Alaaeldin El-Nouby, Mido Assran, Nicolas Ballas, Wojciech Galuba, Russell Howes, Po-Yao Huang, Shang-Wen Li, Ishan Misra, Michael Rabbat, Vasu Sharma, Gabriel Synnaeve, Hu Xu, Hervé Jégou, Julien Mairal, Patrick Labatut, Armand Joulin, and Piotr Bojanowski. DINOv2: Learning robust visual features without supervision. Trans. Mach. Learn. Res. , 2024. URL 
+
+https://openreview.net/forum?id=a68SUt6zFt .Dustin Podell, Zion English, Kyle Lacey, Andreas Blattmann, Tim Dockhorn, Jonas Müller, Joe Penna, and Robin Rombach. SDXL: Improving latent diffusion models for high-resolution image synthesis. In ICLR ,2024. Lu Qi, Jason Kuen, Yi Wang, Jiuxiang Gu, Hengshuang Zhao, Philip Torr, Zhe Lin, and Jiaya Jia. Open world entity segmentation. TPAMI , 2022. Lu Qi, Jason Kuen, Tiancheng Shen, Jiuxiang Gu, Weidong Guo, Jiaya Jia, Zhe Lin, and Ming-Hsuan Yang. High-quality entity segmentation. In ICCV , 2023. Vignesh Ramanathan, Anmol Kalia, Vladan Petrovic, Yi Wen, Baixue Zheng, Baishan Guo, Rui Wang, Aaron Marquez, Rama Kovvuri, Abhishek Kadian, Amir Mousavi, Yiwen Song, Abhimanyu Dubey, and Dhruv Mahajan. PACO: Parts and attributes of common objects. In CVPR , 2023. Sai Saketh Rambhatla, Ishan Misra, Rama Chellappa, and Abhinav Shrivastava. MOST: Multiple object localization with self-supervised transformers for object discovery. In ICCV , 2023. Robin Rombach, Andreas Blattmann, Dominik Lorenz, Patrick Esser, and Björn Ommer. High-resolution image synthesis with latent diffusion models. In CVPR , 2022. Leon Sick, Dominik Engel, Sebastian Hartwig, Pedro Hermosilla, and Timo Ropinski. CutS3D: Cutting semantics in 3D for 2D unsupervised instance segmentation. In ICCV , 2025. Oriane Siméoni, Gilles Puy, Huy V. Vo, Simon Roburin, Spyros Gidaris, Andrei Bursuc, Patrick Pérez, Renaud Marlet, and Jean Ponce. Localizing objects with self-supervised transformers and no labels. In 
+
+BMVC , 2021. Oriane Siméoni, Huy V. Vo, Maximilian Seitzer, Federico Baldassarre, Maxime Oquab, Cijo Jose, Vasil Khalidov, Marc Szafraniec, Seung Eun Yi, Michaël Ramamonjisoa, Francisco Massa, Daniel Haziza, Luca Wehrstedt, Jianyuan Wang, Timothée Darcet, Théo Moutakanni, Leonel Sentana, Claire Roberts, Andrea Vedaldi, Jamie Tolan, John Brandt, Camille Couprie, Julien Mairal, Hervé Jégou, Patrick Labatut, and Piotr Bojanowski. DINOv3. Trans. Mach. Learn. Res. , 2026. URL https://openreview.net/forum?id= 2NlGyqNjns .Oriane Siméoni, Chloé Sekkat, Gilles Puy, Antonin Vobecky, Éloi Zablocki, and Patrick Pérez. Unsupervised object localization: Observing the background to discover objects. In CVPR , 2023. Nick Stracke, Stefan Andreas Baumann, Kolja Bauer, Frank Fundel, and Björn Ommer. CleanDIFT: Diffusion features without noise. In CVPR , 2025. Lin Sun, Jiale Cao, Jin Xie, Fahad Shahbaz Khan, and Yanwei Pang. iSeg: An iterative refinement-based framework for training-free segmentation. IEEE Transactions on Pattern Analysis and Machine Intelligence ,48(8):9765–9781, 2026. Luming Tang, Menglin Jia, Qianqian Wang, Cheng Perng Phoo, and Bharath Hariharan. Emergent correspondence from image diffusion. In NeurIPS , 2023. Junjiao Tian, Lavisha Aggarwal, Andrea Colaco, Zsolt Kira, and Mar Gonzalez-Franco. Diffuse, attend, and segment: Unsupervised zero-shot segmentation using stable diffusion. CVPR , 2024. Haoxiao Wang, Antao Xiang, Haiyang Sun, Peilin Sun, Changhao Pan, Yifu Chen, Minjie Hong, Weijie Wang, Shuang Chen, Yue Chen, et al. Diffusion model as a generalist segmentation learner. In ECCV , 2026a. 17 Letian Wang, Chuhan Zhang, Rishabh Kabra, Jasper Uijlings, Steven Waslander, Andrew Zisserman, Joao Carreira, Kaiming He, Misha Andriluka, Eduard Gabriel Bazavan, Andrei Zanfir, and Cristian Sminchisescu. Video generation models are general-purpose vision learners. In ECCV , 2026b. Weiyao Wang, Matt Feiszli, Heng Wang, and Du Tran. Unidentified video objects: A benchmark for dense, open-world segmentation. In ICCV , 2021. Xudong Wang, Rohit Girdhar, Stella X Yu, and Ishan Misra. Cut and learn for unsupervised object detection and instance segmentation. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pp. 3124–3134, 2023. Xudong Wang, Jingfeng Yang, and Trevor Darrell. Segment anything without supervision. In NeurIPS , 2024. Yangtao Wang, Xi Shen, Shell Xu Hu, Yuan Yuan, James L. Crowley, and Dominique Vaufreydaz. Self-supervised transformers for unsupervised object discovery using normalized cut. In CVPR , 2022. Yafei Yang, Zihui Zhang, and Bo Yang. unMORE: Unsupervised multi-object segmentation via center-boundary reasoning. ICML , 2025. Jian Zhang and Zhijun Zhang. AnchorDiff: Training-free concept grounding for MM-DiTs via anchor-based graph propagation, 2026. URL https://arxiv.org/abs/2605.26460 .Xiao Zhang, David Yunis, and Michael Maire. Deciphering ’what’ and ’where’ visual pathways from spectral clustering of layer-distributed neural representations. In CVPR , pp. 4165–4175, June 2024. Xiao Zhang, Xiangyu Han, Xiwen Lai, Yao Sun, Pei Zhang, Xia Liu, and Konrad Kording. Falcon: Fast proximal linearization of normalized cuts for unsupervised image segmentation. In ICLR , 2026. Bolei Zhou, Hang Zhao, Xavier Puig, Sanja Fidler, Adela Barriuso, and Antonio Torralba. Scene parsing through ADE20K dataset. In CVPR , 2017. Jinghao Zhou, Chen Wei, Huiyu Wang, Wei Shen, Cihang Xie, Alan Yuille, and Tao Kong. iBOT: Image BERT pre-training with online tokenizer. International Conference on Learning Representations (ICLR) ,2022. 
+
+## A Appendix 
+
+A.1 Pseudo-Label Generation 
+
+For our pseudo-label generation, we use an efficient solver following iterative Gauss-Jacobi introduced in (Elmoataz et al., 2008) which is described in Algorithm 1. We use a vectorized implementation and propagate all prompts in parallel. After producing our soft maps, we need to generate instance mask proposals from them. Our next steps consist of map merging and post-processing. Here, we show these two steps in detail in Algorithm 2. 18 Algorithm 1 Non-linear prompt propagation: A grid of one-hot prompts is propagated into soft object maps 
+
+Input: image I; SD UNet; layer weights {wl}; timestep t; anchor λ; power p; threshold τprop 
+
+Output: soft object maps {f (1) , . . . , f (K)} 
+
+> 1:
+
+// Self-attention extraction  
+
+> 2:
+
+z ← VAE( I) 
+
+> 3:
+
+ϵt ← UNet( z, t ) ▷ Denoise at timestep t  
+
+> 4:
+
+A ← ∑ 
+
+> l∈L
+
+wl 1
+
+> nh
+
+∑ 
+
+> h∈nh
+
+A(l,h ) ▷ Collect N × N affinity  
+
+> 5:
+
+// Prompt propagation  
+
+> 6:
+
+{f (1) 0 , . . . , f (K)0 } ← equidistant one-hot grid prompts on the latent  
+
+> 7:
+
+for k = 1 to K do  
+
+> 8:
+
+f ← f (0)  
+
+> k
+> 9:
+
+repeat  
+
+> 10:
+
+gi ←
+
+√∑ 
+
+> j
+
+Aij (fj − fi)2 ∀i 
+
+> 11:
+
+γij ← Aij 
+
+(g p−2 
+
+> i
+
++ g p−2
+
+> j
+
+) ∀i, j  
+
+> 12:
+
+fi ← λ f (k)0,i + ∑ 
+
+> j
+
+γij fj
+
+λ + ∑ 
+
+> j
+
+γij 
+
+∀i 
+
+> 13:
+
+until ∥f t+1 − f t∥22 ≤ τprop  
+
+> 14:
+
+f (k) ← f 
+
+> 15:
+
+end for  
+
+> 16:
+
+return {f (1) , . . . , f (K)}
+
+Algorithm 2 Mask merging: Taking the initial propagated soft object maps as input, the mask merging step produces a final set of instance mask candidates 
+
+Input: soft object maps {f(1) , . . . , f(K)}; thresholds H = {h1, . . . , h L}; min. area amin ; IoU thr. τ ; cap Mmax 
+
+Output: pseudo-mask set M 
+
+> 1:
+
+// Mask merging  
+
+> 2:
+
+pk = fk/∑ 
+
+> i
+
+fk,i ∀k ▷ Normalize to distributions  
+
+> 3:
+
+dKL ← 12
+
+(
+
+DKL 
+
+(
+
+p(k) ∥ p(k′)
+
+)
+
++ DKL 
+
+(
+
+p(k′) ∥ p(k)
+
+))
+
+▷ Compute pairwise distance between prompts  
+
+> 4:
+
+P ← ∅  
+
+> 5:
+
+for h ∈ H do  
+
+> 6:
+
+{Ch 
+
+> 1
+
+, . . . , C hKh } ← AgglomCluster (D, h ) 
+
+> 7:
+
+¯p hc ← 1 
+
+> |Chc|
+
+∑ 
+
+> k∈Chc
+
+p(k) ∀c 
+
+> 8:
+
+˜p hc ←Upsample (¯ p hc , H ×W ) ∀c 
+
+> 9:
+
+M h(x) ← arg max c ˜p hc (x) 
+
+> 10:
+
+for each label c in M h do  
+
+> 11:
+
+r ← ConnectedComponents (M h) 
+
+> 12:
+
+if area( r) ≥ amin then  
+
+> 13:
+
+P ← P ∪ { r} 
+
+> 14:
+
+end if  
+
+> 15:
+
+end for  
+
+> 16:
+
+end for  
+
+> 17:
+
+// Area-descending non-maximum suppression  
+
+> 18:
+
+sort P by descending area; M ← ∅  
+
+> 19:
+
+for p ∈ P do  
+
+> 20:
+
+if |M| < N max and max q∈M IoU( p, q ) ≤ τIoU then  
+
+> 21:
+
+M ← M ∪ { p} 
+
+> 22:
+
+end if  
+
+> 23:
+
+end for  
+
+> 24:
+
+return M
+
+19 128 160 192 0.05 0.10 0.15 0.20 0.25                             
+
+> AR 1000
+> (a) attention res. r
+> 0.4 0.6 0.8 1.0
+> (b) softmax temp. τatt
+> 0.5 0.7 0.9
+> (c) layer weight w1
+> 1.0 1.4 1.8
+> (d) p-Laplacian p
+> 0.05 0.15 0.25 0.05 0.10 0.15 0.20 0.25
+> AR 1000
+> (e) KL min height hmin
+> 2345
+> (f) KL max height hmax
+> 3568
+> (g) hierarchy levels L
+> 5810 12
+> (h) grid spacing s
+> 0.008 0.012 0.016 0.020
+> mAP
+> 0.008 0.012 0.016 0.020
+> mAP
+> AR 1000 mAP
+
+Figure 6: Parameter sweeps of Diffuse2Seg label generation on a SA-1B holdout set. Each panel varies a single parameter with all others held at a reference configuration. AR 1000 (blue, left axis) and mAP (purple, right axis) are shown at their true values, using identical scales across all panels to enable direct comparison of parameter sensitivities. In some cases a shared optimum for both metrics ( e.g., τatt ) can be observed. However, often there is tradeoff, for instance recall being stable but precision decreasing ( e.g., w1,
+
+L), and trade-offs of in-domain recall and precision ( e.g., p). Moreover, increasing some parameters incurs higher computational cost, such as grid spacing s and resolution r.Diffuse2Seg generates pseudo-labels without training, so we determine all label-generator hyperparameters once on a held-out SA-1B 1k split and keep them frozen across all datasets and downstream training runs. We show the hyperparameter behavior in Figure 6. For our productive configuration, we aim to balance mask precision and recall. In detail, we resize the images to 1120 × 1120 ( r = 140), which is outside the native resolution of SD2 but still yields good segmentation results. We combine features from the top two decoder layers with w1 = 0 .85 and w2 = 0 .15, which lies on the precision plateau. Affinities are sharpened with τatt = 0 .55, the optimum for recall and precision. Our prompt seeds are placed on an equidistant grid with spacing ( s = 6), retaining 96.6% of the recall of a denser s = 5 grid. We set the propagation exponent to 
+
+p = 1 .6 to prioritize precision (0.018 vs. 0.015 at p = 1 .2, avoiding noisy boundary fragments for downstream student training) with prompt anchoring λ = 1 × 10 −5. Finally, multi-granularity masks are formed via average-link clustering over L = 6 log-spaced thresholds between hmin = 0 .186 and hmax = 2 .99, followed by NMS at τIoU = 0 .9 and noise filtering at Amin = 100 px. 
+
+A.2 CascadePSP Pseudo-Label Post-Processing 
+
+Our post-processing with CascadePSP (Cheng et al., 2020) follows UnSAM and discards refined masks with area fraction > 0.9 or refinement overlap IoU( m, ˜m) < 0.5. We group mask crops into spatial buckets and pad them to squares with zeros. We execute CascadePSP with FP16 autocast. In UnSAM, the refinement crop side length L scales up to Lmax = 900. As we generate more large masks that need less refinement, we cap post-processing at Lmax = 480 to accelerate refinement. 20 A.3 Training Hyperparameters 
+
+For training our segmentation models, we follow UnSAM and use Mask2Former (Cheng et al., 2022) with a ResNet-50 backbone. Moreover, we use three different training dataset budgets: 1%, 2%, and 4%. All experiments share the same optimizer and architecture: AdamW, learning rate 5 × 10 −5, weight decay 0 .05, backbone multiplier 0 .1, batch size 16 on 4 A100 GPUs, gradient clipping 0 .01, input resolution 1024 ×1024, 2,000 queries and loss weights λcls = 2, λmask = λdice = 5. The encoder in Round 1 is initialized from DINO ResNet-50, and decoder weights are initialized randomly. Round 2 is initialized from the matching Round-1 checkpoint. 
+
+Round 1. We train for approximately eight epochs at each budget, with learning-rate decays at 90% and 96% of the schedule. Warmup is 5 ,000 iterations. The detector-free model is trained on Diffuse2Seg labels only. Both Round-1 configurations with and without detector use hierarchical copy-paste with pcp =0 .5, small-object paste probability 0 .8, area threshold 4096 pixels, and paste scale in [0 .5, 1.0]. 
+
+Round 2. For the label enrichment, we re-infer the Round-1 model on the entire image and the padded parent crops of size Href ×Wref =1024 ×1024 (with a padding ratio of 0.05). Parents are the top-k predictions for which the area fraction falls within the interval [ alow , a high ]=[0 .003 , 0.30] and whose pairwise IoU is no more than 0.30. We retain the predictions that have a score of at least θ and those children for which the containment is τcont =0 .70. We replace the original masks m with the new masks ˆ m when the intersection over union of the two masks exceeds τmerge , which is set to 0.5. We set θ to 0.55, k to 12, and use a cropping NMS of 0.75 (with an intra-crop NMS of 0.40) when CutLER is not used. When augmenting with CutLER, we use 
+
+θ=0 .65, k=9, crop NMS 0 .85 (intra-crop NMS 0 .50), and then append CutLER masks. Independent of the Round-1 training image budget, Round 2 fine-tunes only with 0 .1M crop-refined labels to maintain efficiency. 
+
+Semi-Supervised Learning For semi-supervised fine-tuning, we keep the unsupervised checkpoint as initialization, freeze the ResNet-50 backbone, and fine-tune only the Mask2Former decoder on different image budgets of SAM ground-truth masks. We consider budgets of 100, 500, 1k, 2k, 5k, and 10k labeled images, plus a fully supervised 100k baseline trained from scratch on the same SAM-GT pool. We compare two initializations at every budget: Our final Round-2 0 .4M checkpoint and the public UnSAM 0 .2M (4% SA-1B) checkpoint. The optimizer matches unsupervised training (AdamW, learning rate 5 ×10 −5, weight decay 0 .05, batch size 16, copy-paste with pcp =0 .5). The schedule consists of max(1000 , ⌊B/ 2⌋) iterations, including a 10% warmup phase and then decaying at 90% and 96% of the run. We always use the latest checkpoint and assess it on the same zero-shot benchmark as our unsupervised models. 21 A.4 Semi-Supervised Results 
+
+Figure 7: Qualitative comparison of semi-supervised instance segmentation on ADE20K. Each column (a–d) shows a different indoor/outdoor scene. Top: raw input image, middle: predictions of the UnSAM checkpoint fine-tuned on 10k labeled images, bottom: predictions of our Diffuse2Seg model fine-tuned on 10k labeled images. Under the same 10k-label budget, initializing from our diffusion-based unsupervised model yields higher mask coverage, crisper object boundaries, and better segmentation of fine structures (e.g., furniture legs, windows, and facade details). 22

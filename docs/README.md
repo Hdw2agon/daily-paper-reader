@@ -6,58 +6,46 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-09-09
-- 运行时间：2026-09-09 21:38:07 UTC
+- 最新运行日期：2026-09-10
+- 运行时间：2026-09-10 21:34:36 UTC
 - 运行状态：成功
-- 本次总论文数：12
-- 精读区：2
-- 速读区：10
+- 本次总论文数：8
+- 精读区：1
+- 速读区：7
 
 ### 今日简报（AI）
-今日精选 12 篇前沿论文，聚焦胶囊内镜超分辨率与深度补全技术突破。
-重点推荐 UnCapsTSR 无监督超分模型，其在医学影像处理上的表现尤为亮眼。
-建议优先研读精读列表中的两篇核心论文，以掌握图像生成与修复领域的最新范式。
-- 详情：[/202609/09/README](/202609/09/README)
+今日精选 8 篇前沿论文，重点解析了面向丢包信道的轻量级生成式图像语义通信技术。
+核心推荐关注生成式图像语义通信的鲁棒性优化，以及视频驱动的组合式世界建模进展。
+建议优先阅读精读论文以掌握通信效率提升的关键，其余速读内容可按需查阅以拓宽视野。
+- 详情：[/202609/10/README](/202609/10/README)
 
 ### 精读区论文标签
-1. [UnCapsTSR: An Unsupervised Transformer-based Image Super-Resolution Approach for Capsule Endoscopy Images](/202609/09/2609.02476v1-uncapstsr-an-unsupervised-transformer-based-image-super-resolution-approach-for-capsule-endoscopy-images)  
-   标签：评分：9.0/10、query:q2
-   evidence：基于无监督 Transformer GAN 的图像超分辨率
-2. [Depth-to-Image Synthesis-Driven Generative Unguided Depth Completion](/202609/09/2609.06007v1-depth-to-image-synthesis-driven-generative-unguided-depth-completion)  
+1. [Lightweight Generative Image Semantic Communication over Packet Erasure Channels](/202609/10/2609.06989v1-lightweight-generative-image-semantic-communication-over-packet-erasure-channels)  
    标签：评分：8.0/10、query:q1
-   evidence：使用2D生成模型的生成式无引导深度补全
+   evidence：将丢包下的图像恢复重新表述为条件生成任务
 
 ### 速读区论文标签
-1. [MARR: Decoupling Policy, Execution, and Calibration for All-in-One Medical Image Restoration](/202609/09/2609.06645v1-marr-decoupling-policy-execution-and-calibration-for-all-in-one-medical-image-restoration)  
-   标签：评分：7.0/10、query:q7
-   evidence：全能型医学图像修复框架
-2. [AstraMoE-SR: Trajectory-Guided Diffusion for Blind Satellite Jitter Deblurring and Super-Resolution](/202609/09/2609.07012v1-astramoe-sr-trajectory-guided-diffusion-for-blind-satellite-jitter-deblurring-and-super-resolution)  
-   标签：评分：7.0/10、query:q4
-   evidence：用于盲修复和超分辨率的轨迹引导扩散模型
-3. [Bottom-up Modeling of Repeated Elements via Single Image Analysis-by-Synthesis](/202609/09/2609.07939v1-bottom-up-modeling-of-repeated-elements-via-single-image-analysis-by-synthesis)  
-   标签：评分：7.0/10、query:q2
-   evidence：无需标注的单张图像自下而上建模与合成
-4. [When Depth Hurts: Reliability-Aware Geometry Distillation for Depth-Free RGB-D Salient Object Detection](/202609/09/2609.03378v1-when-depth-hurts-reliability-aware-geometry-distillation-for-depth-free-rgb-d-salient-object-detection)  
+1. [Reflection-aware Generative Novel View Synthesis](/202609/10/2609.05382v1-reflection-aware-generative-novel-view-synthesis)  
    标签：评分：6.0/10、query:q3
-   evidence：用于修复相关任务的无标签几何蒸馏
-5. [Rethinking 3D Noise: Learning 3D-Aware Video Priors via Optimization-Free Morphological Perturbations](/202609/09/2609.03657v1-rethinking-3d-noise-learning-3d-aware-video-priors-via-optimization-free-morphological-perturbations)  
+   evidence：镜像场景中无需训练的生成式新视角合成
+2. [WorldSculpt: Generating Compositional Worlds from Grounded Videos](/202609/10/2609.05416v1-worldsculpt-generating-compositional-worlds-from-grounded-videos)  
+   标签：评分：6.0/10、query:q4
+   evidence：针对遮挡区域不完整几何形状的生成式先验
+3. [WorldSculpt: Generating Compositional Worlds from Grounded Videos](/202609/10/2609.05416v2-worldsculpt-generating-compositional-worlds-from-grounded-videos)  
+   标签：评分：6.0/10、query:q1
+   evidence：针对遮挡区域不完整几何形状的生成先验
+4. [Diffuse2Seg: Diffusion Models Can Segment Anything Without Supervision](/202609/10/2609.06491v1-diffuse2seg-diffusion-models-can-segment-anything-without-supervision)  
    标签：评分：6.0/10、query:q3
-   evidence：用于3D伪影修复和空间一致性的免优化正则化器
-6. [PASTEL: Panoramic Alignment for Monocular 4D Scene Reconstruction](/202609/09/2609.06099v1-pastel-panoramic-alignment-for-monocular-4d-scene-reconstruction)  
+   evidence：利用扩散模型特征的无监督分割
+5. [RelightFormer: Feed-forward Generative Transformer for Multiview Object Relighting](/202609/10/2609.07414v1-relightformer-feed-forward-generative-transformer-for-multiview-object-relighting)  
    标签：评分：6.0/10、query:q4
-   evidence：用于不可见区域生成和场景合成的生成式先验
-7. [Object-Aware Background-Controlled Editing via Weighted Velocity Guidance](/202609/09/2609.06288v1-object-aware-background-controlled-editing-via-weighted-velocity-guidance)  
+   evidence：用于图像合成与重光照的生成模型
+6. [Geodesic-informed Generative Diffusion Model For Topology-preserved Image Video Generation](/202609/10/2609.08153v1-geodesic-informed-generative-diffusion-model-for-topology-preserved-image-video-generation)  
    标签：评分：6.0/10、query:q4
-   evidence：使用生成式流匹配模型的免训练图像编辑
-8. [OracleZoom: On-Policy Self-Distillation Inspired Reference-Constrained Recursive Image Super Resolution](/202609/09/2609.06490v1-oraclezoom-on-policy-self-distillation-inspired-reference-constrained-recursive-image-super-resolution)  
-   标签：评分：6.0/10、query:q7
-   evidence：基于自蒸馏的无监督递归超分辨率
-9. [Multi-History-Step SDE Inversion for Image Editing with Superior Regional Awareness](/202609/09/2609.06602v1-multi-history-step-sde-inversion-for-image-editing-with-superior-regional-awareness)  
+   evidence：用于图像合成与重建的生成式扩散模型
+7. [StreetDiff: Multi-view Street Scenes Generation via Cross-view Consistent Multi-view Stable Diffusion with Structure Prompts](/202609/10/2609.09890v1-streetdiff-multi-view-street-scenes-generation-via-cross-view-consistent-multi-view-stable-diffusion-with-structure-prompts)  
    标签：评分：6.0/10、query:q4
-   evidence：使用扩散SDE逆向的免训练图像编辑
-10. [Poisson Image Denoising Using Minimax Concave and Reweighted $\ell_1$ Penalties: Nonblind and Blind Approaches](/202609/09/2609.07916v1-poisson-image-denoising-using-minimax-concave-and-reweighted-ell1-penalties-nonblind-and-blind-approaches)  
-   标签：评分：6.0/10、query:q3
-   evidence：盲图像修复与去噪
+   evidence：用于街景生成的多视图扩散模型
 
 
 <div class="dpr-home-promo-card">

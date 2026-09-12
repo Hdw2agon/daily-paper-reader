@@ -1,0 +1,641 @@
+Title: ReaDiT Guidance: Control for Image and Video Generation using Diffusion Transformer Features
+
+URL Source: https://arxiv.org/pdf/2609.04649v1
+
+Published Time: Mon, 07 Sep 2026 00:24:55 GMT
+
+Number of Pages: 21
+
+Markdown Content:
+# ReaDiT Guidance: Control for Image and Video Generation using Diffusion Transformer Features 
+
+## Jay Mahajan ∗ Chang Liu ∗ Rauf Makharov Viraj Shah § Alexander Schwing † Svetlana Lazebnik †
+
+## University of Illinois Urbana-Champaign 
+
+## https://readit.github.io/ 
+
+## Abstract 
+
+We present DiT Readout (ReaDiT) Guidance, a lightweight framework for controlling generation with Diffusion Trans-former (DiT) models via their internal feature representa-tions. ReaDiT Guidance uses features from a single DiT block to steer the generative process according to spatial targets – like depth, pose, or edge maps – provided at test time. Furthermore, since modern text-to-video models are largely built on DiT backbones, ReaDiT Guidance natu-rally extends to video generation, enabling camera and mo-tion control. Experimental results demonstrate that our ap-proach achieves competitive or improved results compared to existing feature-based and off-the-shelf adapter-based approaches while requiring fewer parameters. 
+
+## 1. Introduction 
+
+Diffusion models have been tremendously successful in generating high-quality images and videos from a given text prompt. However, it is difficult to only use the text prompt to guide generation towards nuanced spatial targets, such as a desired depth-map, pose-skeleton-map, or edge-map. While more recent architectures have increasingly supported additional image-based conditioning, the desire and necessity for fine-grained, localized control of the out-put via other data modalities, such as encouraging the depth, pose, or edge maps of generated subjects, remains of high interest. Existing plug-and-play solutions for fine-grained, local-ized control, such as ControlNet [39] and similar adapter networks [4, 16, 20, 35], are highly effective for image gen-eration. Yet, methods like ControlNet require large amounts of paired training data and introduce substantial additional parameters. More recent lightweight alternatives [30, 41] significantly reduce this overhead, but are designed for spe-   
+
+> *Equal contribution. Main correspondence to Jay Mahajan
+> §Currently at Google.
+> †Equal advising
+
+cific backbones and image generation. When extending ControlNet and other adapter networks to video generation, these limitations become a significant bottleneck. Scaling up these methods is computationally demanding and data-intensive. Existing lightweight methods that bypass heavy adapters are task specific. For instance, a technique de-signed for motion control cannot be seamlessly applied to depth conditioning, and vice versa. To develop a unified method that does not rely on ex-pensive adapters, one can turn to the internal feature repre-sentations of the diffusion models themselves. Prior work, such as “Readout Guidance” (RG) [19] , successfully pro-posed the use of lightweight predictor networks and an inference-time guidance mechanism to achieve controllable generation. However, this foundational method was de-signed specifically for U-Net-based [22] diffusion archi-tectures, utilizing features extracted across internal U-Net layers. With the recent paradigm shift towards Diffusion Transformers (DiT) [21], it remains unclear whether such an approach is viable, as the DiT feature space differs fun-damentally. In this work, we propose ReaDiT, an efficient architec-ture for spatially controlling DiT models via its features. It is based on the observation that, in contrast to U-Net-based models, the internal features from a single trans-former block suffice to predict and guide the spatial at-tributes of a generated image. Based on this observation, we develop a lightweight prediction architecture and a tailored guidance strategy that steers the generative process accord-ing to provided spatial targets. Crucially, as our method builds on the DiT’s own learned features, our method natu-rally extends to video generation. This enables spatial ma-nipulation (depth, pose, edge) and motion control (camera trajectories and motion dynamics), under a single unified framework, requiring only a small dataset for training. Compared to prior control methods, which typically ad-dress individual tasks or modalities, ReaDiT covers both spatial and motion control across image and video genera-tion with a compact architecture and minimal training data. Since ReaDiT does not modify the base model, it can also 1arXiv:2609.04649v1 [cs.CV] 4 Sep 2026 be combined with adapter-based methods such as Control-Net for further improvement. Our key contributions are the following: • We introduce ReaDiT, a compact framework that enables control using DiT features extracted from a single trans-former block. • We extend our method to video generation, achieving spa-tial, camera, and motion manipulation without requiring large-scale video training overhead of traditional video control approaches. • We provide comprehensive experiments demonstrating that our approach achieves competitive or improved guid-ance accuracy compared to feature-based and adapter-based approaches while using substantially fewer pa-rameters, and demonstrating compatibility with adapter-based methods. 
+
+## 2. Related Work 
+
+Controlling Diffusion Models. Diffusion models generate samples from the data distribution via gradual denoising, starting from a Gaussian noise sample and given a condi-tion such as text. For text-to-image and text-to-video gen-eration, it is common to use latent diffusion models [27], 
+
+i.e ., the denoising is performed in the latent space defined by a pretrained variational autoencoder [11], which reduces the computational cost of generation. To train these models, flow-matching [18] is common. Beyond text-conditioned generation, many applications require controlling pretrained text-to-image diffusion mod-els towards a given spatial target such as a depth-map, a pose-skeleton-map, or an edge-map. A widely adopted ap-proach is to freeze the pretrained model and train an ex-ternal adapter that directly interacts with the model’s fea-tures. ControlNet [39] and T2I-Adapter [20] train encoder branches that inject conditional signals into the denoising network, while ControlNet++ [13] further improves adher-ence through consistency feedback. More recent works achieve similar control with fewer parameters on DiT ar-chitectures. OminiControl [30, 31] concatenates condition tokens into the DiT’s attention stream, and EasyControl [41] introduces a lightweight LoRA-based injection mod-ule. These adapter-based methods achieve effective feedfor-ward control, though they modify the base model’s inputs or weights and are typically trained for a specific backbone. Instead, we leverage learned diffusion features as con-trol signals, building specifically upon “Readout Guidance” (RG) [19]. RG trains an auxiliary model to predict spa-tial targets ( e.g ., depth, pose, edges) from a frozen diffu-sion model’s features, using gradient updates on the latents to steer the generation process. We extend this framework to Diffusion Transformers (DiTs), offering new insights into DiT feature control and demonstrating its potential for video generation.                                           
+
+> Table 1. Comparison of DiT Control Approaches. Overview of supported modalities, parameter overhead, training data require-ments, and whether the method utilizes Implicit Model Condition-ing (i.e., the diffusion model does not process the condition during its forward pass). For ControlNet, parameters for image and video are estimated from SD3-Medium and CogVideoX-5B respectively.
+> Method Image Video Params (M) Data Implicit Model Conditioning
+> OminiControl ✓✗14.5 Small ✗
+> ControlNet (Image) ✓✗1487 Small ✗
+> ControlNet (Video) ✗✓2500 Large ✗
+> RG ✓✗13.5 Small ✓
+> DiTFlow ✗✓(Motion only) 0None ✗
+> Tora ✗✓(Motion only) 1100 Large ✗
+> ReaDiT (Ours) ✓✓53 Small ✓
+
+Diffusion Transformer Insights. Several works aim to un-derstand how large, pretrained diffusion models work in-ternally and how their learned features can be readily ap-plied to tasks, such as correspondence prediction [32], pose prediction [15], depth prediction [29], and stylization [33]. However, many of these works study U-Net based diffusion models, which are no longer state-of-the-art for image and video generation. Meanwhile, while DiTs have achieved state-of-the-art for several modalities, an understanding of what the features of DiTs have learned is lacking. Our work sheds light in this direction as we investigate how to best leverage DiT features by developing a multi-resolution ar-chitecture inspired by [26] to predict spatial targets and use those predictions to control the generation. 
+
+Video Control. As more text-to-video models are pub-licly available, interest in controlling the generated output increased. For motion control, prior works either train ad-ditional modules on top of video DiTs [8, 14, 42], which is expensive, or employ separate LoRAs [43] for each mo-tion, which is inefficient. Alternatively, training-free or optimization-based methods such as Frame Guidance [9], Time-to-Move [28], and DiTFlow [23] avoid additional training through denoising manipulation or attention flow optimization. However, these methods primarily address motion or camera control and are not uniformly applica-ble to multiple spatial tasks for both image and video. Our work enables a more unified approach, applicable to both spatial and motion control. 
+
+Comparison with our approach. To summarize, adapter-based methods such as ControlNet and OminiControl achieve effective spatial control by feeding conditions di-rectly into the diffusion model, but require modifying the base model’s internal representation. Video control meth-ods like Tora and DiTFlow address motion guidance but do not cover spatial tasks. Feature-based methods like RG avoid modifying the base model but do not necessarily ex-tend to modern video models. Our method achieves uni-fied spatial and motion control across both image and video generation, without modifying the base model or requiring large-scale training data. Table 1 summarizes this. 23. ReaDiT Guidance 
+
+Our goal is to guide the diffusion process encoded in a pre-trained and frozen transformer-based image- or video-generation model (DiT) towards a given guidance target y.This is illustrated in Figure 1 (left). In doing so, we want generated images or videos to remain diverse while simul-taneously following the given guidance target y.To achieve this, we develop a “readout” module ˆy =
+
+gθ ({f lt }l∈L, t ), which predicts the desired output ˆy from a set of DiT features {f lt }l∈L extracted at diffusion time t
+
+from DiT block l ∈ L of a pre-trained DiT-based image-or video-generation model. We let L denote the set of all DiT layers used for prediction in our “readout” module. We detail the architecture of our developed transformer-based readout module gθ in Sec. 3.1, training in Sec. 3.2, and use of the module for guidance in Sec. 3.3. We extend our method to guidance for video generation in Sec. 3.4. 
+
+3.1. DiT Readout Model ReaDiT 
+
+We highlight that the same architecture is used across all possible outputs, while only the training target differs. An overview of our ReaDiT architecture is shown in Figure 2. Generally, the network gθ ({f lt }l∈L, t ) takes DiT features 
+
+f lt ∈ RN ×D ∀l ∈ L and conditioning timestep t as input. Here, N denotes the number of tokens and D denotes the feature dimension. Importantly, we find features extracted from DiT-based models to differ significantly from those obtained from U-Net-based models like SDXL. Concretely, we find U-Net-based features are much more diverse across layers, while DiT-based features are very similar across different DiT blocks. We suspect this is due to the nature of the DiT ar-chitecture: U-Net models are convolutional, i.e ., each layer is more localized, whereas transformers process the out-put sequentially and therefore learn a global representation. Using this observation, we find that, as illustrated in Fig-ure 1(left), a feature f lt extracted from a single DiT block 
+
+l generally suffices for predicting compelling readouts ˆy.This finding has been corroborated by other works [7, 38]. We hence use |L| = 1 . We provide additional experiments and analysis in the supplementary material and discuss our readout model architecture next. We divide the network into three core components: en-coder, rescale blocks, and fusion blocks. The model’s out-puts are then passed into a task-specific head. 
+
+Encoder. Since DiT features are conditioned on t, their distribution varies across timesteps. To account for this, an AdaLN layer conditioned on t is first applied to feature f lt .Note, t produces scale γ and shift β to modulate the feature distribution. The modulated feature is then fed into a linear projection layer that reduces the channel dimension from D
+
+to D′, producing a more compact feature. 
+
+Rescale blocks. The compressed feature is reshaped from a token sequence ( RN ×D′
+
+) to a 2D spatial grid ( Rh×w×D′
+
+). From this single-resolution grid, four parallel branches gen-erate multi-scale features at 0.5×, 1×, 2× and 4× the spatial size through convolutional downsampling and up-sampling respectively. Each branch applies another linear projection to map the features to a common channel di-mension D′′ , resulting in multi-scale feature maps {ri ∈
+
+Rhi×wi×D′′ 
+
+}4
+
+> i=1
+
+.
+
+Fusion blocks. To prepare the multi-scale representations for decoding, an additional AdaLN conditioned on t is ap-plied to each feature map ri. The maps are then progres-sively fused from the coarsest ( 0.5h × 0.5w × D′′ ) to the finest ( 4h × 4w × D′′ ) resolution. At each fusion stage, the coarser feature map is refined via spatial convolution and upsampled to double its spatial resolution. Then it is com-bined with the higher-resolution feature through a residual connection. A subsequent spatial convolution further re-fines the fused representation. This process repeats three more times to achieve the final resolution of 4h × 4w × D′′ .
+
+Task-specific head. The fused features are passed through a set of convolutional layers that map the latent represen-tation to the target spatial map ˆy with task-specific output channels. In summary, the extracted DiT feature f lt is first mod-ulated by t and projected to a multi-scale representation. These multi-scale representations are further modulated by 
+
+t and progressively fused to decode the final spatial map. We refer interested readers to the appendix for more details regarding the design of this architecture. 
+
+3.2. Training 
+
+Next, we discuss training of our readout module gθ . This is illustrated in Figure 1 (right). Our ReaDiT gθ depends on features f lt extracted from a frozen DiT at timestep t. For training, given an input image x, we add noise at a sampled timestep t to its latent z0 to obtain zt. Intermediate features 
+
+f lt are extracted via a forward pass through the DiT, which we denote as f lt (x). The training target y is obtained by applying a state-of-the-art task-specific model to x, which we denote as y(x). The general optimization applied across all tasks reads as follows: 
+
+min  
+
+> θ
+
+Et∼[tmin ,t max ],x 
+
+L(gθ (f lt (x), t ), y (x))  . (1) Here, L is a task-dependent loss which we discuss below. The choice of how t is sampled significantly influences the training quality. While all timesteps encode partially useful information, only sampling from low-noise timesteps (t → tmin ) or over-sampling high-noise timesteps ( t →
+
+tmax ) is suboptimal. To balance the information across timesteps, we adopt a log-based sampling strategy as fol-lows: log t ∼ U (log tmin , log tmax ). This strategy empha-sizes lower-noise timesteps while still enabling the model to consider other timesteps. 3DiT 
+
+> … …
+
+𝑡 
+
+> ReaDiT
+
+Image  Inference-
+
+time  Guidance 
+
+Latent 𝑧 𝑡 
+
+Guidance 
+
+target 
+
+ℒ
+
+> Feat.
+
+𝑡 
+
+> ReaDiT
+
+Training 
+
+Training 
+
+target 
+
+ℒ 
+
+> Feat.
+> Noisify to
+> timestep
+
+𝑡 
+
+> ReaDiT Forward
+> Backward
+> DiT
+> … …
+
+Figure 1. Method Overview. Left: ReaDiT takes a single intermediate feature from the frozen DiT and predicts spatial outputs, which are used to guide image generation by optimizing the latent zt. Right: ReaDiT is trained to predict task-specific outputs from DiT features extracted by noising an input image to timestep t and passing it through the frozen DiT. AdaLN  MLP  AdaLN Rescale 0.5 ×        
+
+> 𝑡 𝑡
+> 𝑓 𝑡 𝑙
+> AdaLN
+> 𝑡
+> AdaLN
+> Fusion
+> 𝑡
+> AdaLN
+> 𝑡
+> Rescale 1 ×
+> Rescale 2 ×
+> Rescale 4 ×
+> Fusion
+> Fusion
+> Fusion
+> Head
+> Reshape Resize
+> Project Rescale 𝒏 ×
+> Residual
+> Conv Unit
+> Residual
+> Conv Unit
+> Upscale 2 ×
+> Project Fusion
+
+Figure 2. Architecture of ReaDiT. Input features are conditioned on t and encoded into multi-resolution feature maps. The feature maps are progressively fused and upsampled to a final feature map, from which a task-specific head produces the spatial output. 
+
+The tasks we consider can be categorized into dense spa-tial prediction (depth, pose, edge) and sparse spatial corre-spondence prediction. 
+
+Dense spatial prediction tasks. For dense spatial predic-tion tasks (depth, pose, edge), the target y is a dense map such as a depth-map, a pose-skeleton-map, or an edge-map, produced by off-the-shelf state-of-the-art models. For these tasks, we use as the loss L the mean squared error (MSE) between prediction ˆy = gθ (f lt , t ) and target y.
+
+Sparse spatial correspondence prediction task. The goal of the sparse spatial correspondence prediction task is to correctly predict the optical flow y from a pair of frames. Given two related inputs xa and xb, ( e.g ., two frames from a video clip), we extract the features f l,a t and f l,b t and pass them through ReaDiT gθ to get two point descriptors 
+
+da, d b ∈ RN ×D′′ 
+
+, where N is the product of the point de-scriptors’ height and width, and D′′ stands for the point descriptors’ channels. To find the corresponding relation-ships between the two frames, we compute a similarity ma-trix S ∈ RN ×N via Sij = da,i ·db,j   
+
+> ∥da,i ∥∥ db,j ∥
+
+. We apply a row-wise softmax with a temperature parameter in order to get a probability distribution P ∈ RN ×N . For each pixel, we take the expected location as our final predicted value. To compute the expected location, let G = {(x, y )|x, y ∈{1, 2, . . . , N }} ∈ RN ×2 be a coordinate grid of all the co-ordinate pairs in the feature map. The expected location of a target point is then ˆpi = PNj=1 Pij Gj , where ˆpi ∈ R2.Given a set of source points, ps, the predicted optical flow can be calculated as ˆyi = ˆ pi − ps. For this task, the loss L
+
+is the L1 loss between the predicted optical flow ˆyi and the ground truth optical flow yi.
+
+3.3. Image Guidance 
+
+Via the trained ReaDiT gθ , we predict the spatial output at any denoising timestep from the DiT features. We use the obtained prediction to guide the image generation pro-cess. Specifically, we update the latent zt at each denoising timestep t such that the prediction gθ (f lt , t ) better matches a given guidance target y. The procedure is illustrated in Fig-ure 1(left). A general algorithm is provided in Algorithm 1. At each denoising step, we compute the guidance loss between the prediction ˆy = gθ (f lt , t ) and target y, and up-date zt via gradient descent steps. Note, the update is re-4ReaDiT  ReaDiT ReaDiT     
+
+> Edge Depth Pose
+> Input Input Input Reference Reference Reference
+
+Figure 3. Spatial Prediction Results. We compare the prediction of ReaDiT to off-the-shelf models across depth, pose, and edge tasks. ReaDiT produces meaningful predictions from frozen DiT features, which can also be used to monitor spatial properties during the generation process. Additional examples are presented in the supplementary material. 
+
+peated M times at each denoising timestep before the flow-matching step. During this process, the DiT and ReaDiT remain frozen, and only zt is updated. The guidance can be applied to all spatial tasks (depth, pose, edge) by chang-ing the target y and the corresponding trained ReaDiT. For insights regarding the refinements steps and learning rates, we refer readers to the appendix. 
+
+Algorithm 1: Image Guidance via Latent Optimization                                                                             
+
+> Input: Target y, denoising steps T, refinement steps M, learning rate η, frozen DiT D, ReaDiT gθ
+> Output: Optimized latent z0
+> 1Initialize zT∼ N (0 , I )for t=Tto 0do
+> 2for i= 0 to Mdo
+> 3flt=D(zit, t )|block =l// Extract lth feat.
+> 4ˆy=gθ(flt, t )// Predict spatial output
+> 5L=L(y, ˆy)// Guidance loss
+> 6zi+1
+> t←zit−ηt∇ztL
+> 7end
+> 8vt←D(zMt, t )// Predict velocity
+> 9z0
+> t−1←Step (vt, t, z Mt)// Flow-match update
+> 10 end
+
+3.4. Video ReaDiT 
+
+Finally, we extend our method to DiT-based video gener-ation models, as spatio-temporal features exhibit similar representation abilities to image DiTs. This includes spa-tial (depth, pose, and edge map) video guidance as well as motion-based (optical flow) video guidance. 
+
+Video spatial guidance. To train ReaDiT on video models, we follow the training strategy for images: ReaDiT predicts a spatial output ˆy = gθ (f lt , t ) for a single frame. During inference, ReaDiT guides the generation toward a target se-quence Y = {y1, ..., y K } that specifies the desired spatial map for each frame. By applying the same latent optimiza-tion strategy described in Sec. 3.3, we minimize the loss 
+
+L between the prediction ˆyk = gθ (f lt,k , t ) and target yk
+
+summed across all frames k, and update the video latent. Note that some video architectures temporally downsample the latent space by a factor s, i.e ., one latent frame corre-sponds to s generated frames. In this case, the guidance loss L is computed between the k-th predicted output ˆyk
+
+with the k · s-th target yk·s from the target sequence. 
+
+Video motion guidance. Using the sparse spatial corre-spondence training strategy described in Sec. 3.2, ReaDiT also learns to predict optical flow, which can be used to guide the video generation towards a reference optical flow. In this setting, we pass the features f lt, 1 and f lt,k to ReaDiT to obtain point descriptors d1 and dk for the first frame and the k-th frame. The prediction ˆyk represents the optical flow of the k-th frame relative to a reference frame ( e.g ., the first frame), calculated as ˆyk = ˆ pk −p1, where ˆpk is the expected value in frame k corresponding to a source point p1 in the reference frame. Similar to training, the guidance loss L is defined as the ℓ1 distance between the predicted flow ˆyk and a target optical flow yk. Following the optimization process discussed in Sec. 3.3, the motion of the generated video can be guided to follow specific point trajectories. 
+
+## 4. Experiments 
+
+4.1. Implementation Details 
+
+We implement our method on SD3-Medium [5] & FLUX.1-dev [12] for images, and CogVideoX [37] for video, both at 512 resolution. For image tasks, we use PascalVOC [6] (∼16K images) as the training dataset, with labels gener-ated by off-the-shelf models: depth-maps from DepthAny-thingV2 [36], pose-skeleton-maps from OpenPose [3], and edge-maps from HED [34]. For video spatial tasks, we train on single frames following the same protocol. For optical flow task, we use DAVIS videos [24] with point tracks from CoTracker3 [10]. For both images and videos, training and guidance requires a single NVIDIA A40. 5Target  Guidance  Target  Guidance  Target  Guidance  
+
+> … marble
+> … humanoid … hold newspaper
+> … hold a cup
+> … hold a cup
+> … origami
+> … in court
+> … in studio
+
+Edge 
+
+Depth 
+
+Pose 
+
+> … in Dojo
+
+Figure 4. Spatial Image Guidance. Given a target spatial map, the trained ReaDiT guides the generation process to match the specific layout while maintaining image quality and adherence to the text prompt. Each column is generated from a text prompt following a shared format with varying suffixes, e.g ., column1: “A standing [suffix] in a studio”, where key suffixes are annotated in the figure. Full prompts and more results can be found in the supplementary material. RG  RG Ours  Ours Ours  RG Edge Depth  Pose  
+
+> Target Target Target
+
+Figure 5. Qualitative Comparison. Guidance of different spatial tasks from ReaDiT compared against RG [19]. Generation guided by ReaDiT follows the target more faithfully even under complex spatial maps. More examples are provided in the supplementary material. 
+
+4.2. Spatial Prediction Results 
+
+We first evaluate the prediction quality of ReaDiT to vali-date that the network extracts meaningful spatial informa-tion from frozen DiT features. Figure 3 shows qualitative prediction results across depth, pose and edge tasks. De-spite being a lightweight network trained on a small dataset solely on DiT features, ReaDiT produces reasonable predic-tions that capture the overall spatial structure of the input, 
+
+e.g ., fine edge details and accurate human poses. This con-firms that DiT features encode rich spatial information, and that ReaDiT can effectively extract it for task-specific use. Though ReaDiT does not always outperform task-specific models such as DepthAnythingv2 which is trained on over 62M images, it produces predictions sufficient for effective guidance. 
+
+4.3. Spatial Image Guidance 
+
+We evaluate image guidance on depth, pose, and edge tasks. Figure 4 shows qualitative results across all three tasks. We consider two evaluation settings: (i) control maps from gen-erated images, and (ii) control maps from real images. Set-ting (i) provides cleaner targets, while setting (ii) evaluates adherence under more challenging real-world conditions. Further details on the evaluation pipeline are provided in the . We compare ReaDiT with RG [19], which also uses dif-fusion features for control, but is designed for U-Net archi-tectures and uses a convolution-based decoder for spatial tasks. We re-implement their method on SD3 using mul-tiple DiT block features. Details of the re-implementation are provided in the supplementary material. 
+
+Qualitative results. Figure 5 shows a comparison across all three tasks. RG frequently fails to follow the input guid-ance signal, and when it does follow, the generated images may contain artifacts such as stretched and distorted objects. ReaDiT consistently follows the input target while produc-ing natural and high-quality results across all tasks, improv-ing upon RG. 6Table 2. Guidance Accuracy Comparison between ReaDiT, RG, and ControlNet. We evaluate under two settings: control maps from generated images (Gen) and from real images (Real). Best model score per setting is bolded ; second best is underlined. ReaDiT outperforms RG across all tasks and metrics under both settings. With significantly fewer parameters, ReaDiT achieves comparable or better accuracy than ControlNet. Furthermore, ReaDiT is complementary to ControlNet, and combining the two further improves performance. We also compare against Flux-based OminiControl and implement our method on Flux. 
+
+Depth Pose Edge RMSE ( ↓) PCK@ 0.2 (↑) mAP ( ↑) ODS ( ↑)Method Params (M) Gen Real Gen Real Gen Real Gen Real RG [19] 13.5 0.3704 0.4436 0.4881 0.3380 0.2739 0.1598 0.5783 0.5733 ControlNet [39] 1487 0.2618 0.3016 0.5012 0.4375 0.2946 0.2563 0.4908 0.5489 ReaDiT (Ours) 53 0.2492 0.3374 0.5380 0.4856 0.3709 0.3412 0.6968 0.6644 
+
+ControlNet + ReaDiT (Ours) 1540 0.2595 0.2961 0.4977 0.5386 0.3659 0.4067 0.5688 0.6192 OminiControl [30] 14.5 0.0969 0.1290 0.5649 0.5143 0.4818 0.4657 0.7103 0.6684 ReaDiT (Flux [12]) (Ours) 77.5 0.2734 0.3427 0.6770 0.5758 0.5760 0.4711 0.6727 0.7071 “a deer by a stream”  
+
+> v
+> “A photographer painting a giant mural”
+
+Figure 6. Spatial Video Guidance. Given a target spatial video input, ReaDiT guides the video generation process to match the specified spatial layout while maintaining visual quality and prompt adherence. Additional examples are shown in the supplementary material. 
+
+Quantitative results. Table 2 provides a quantitative com-parison, assessing guidance accuracy for both evaluation settings. We apply the same off-the-shelf models on the generated images and compute the corresponding metrics against the input target. We report RMSE for depth, PCK@ 0.2 [1] and mAP for pose, and ODS for edge, which are standard metrics for evaluating accuracy in these tasks. As shown in Table 2, ReaDiT achieves better scores across all tasks and metrics under both settings, indicating more effective guidance that better adheres to the input target. 
+
+Comparison with ControlNet and OminiControl. Sim-ilarly, we compare our method to ControlNet and Omini-Control. For a fair comparison, we train both methods on the same dataset as ReaDiT (PascalVOC) for all three tasks. As shown in Table 2, ReaDiT achieves comparable or bet-ter performance across most tasks, while using only ∼53M parameters compared to ControlNet’s ∼1487M parameters. Furthermore, ReaDiT is compatible with adapter specific methods, such as ControlNet, and combining the two fur-ther improves performance across most tasks. For Omini-Control, we implement our method on the same base model (Flux) and run the same evaluation suite. The results show that our method achieves comparable or better performance across most tasks. 
+
+Dual guidance. Since ReaDiT guides generation via latent optimization, trained ReaDiT models for different modal-ities can be straightforwardly combined by backpropagat-ing through all of their losses jointly. We demonstrate this by combining depth and pose guidance using control maps extracted from the same images. Compared to single-task guidance, dual guidance further improves adherence to both targets, as single-task guidance alone may not faithfully capture both the spatial structure and the human pose. For example, in Figure 8, depth-only guidance does not recog-nize the statue as a human figure, while pose-only guidance does not reproduce the scene layout. Dual guidance re-solves this by leveraging both signals simultaneously. This demonstrates the flexibility of ReaDiT. Further quantitative 7Motion 
+
+Inputs 
+
+Motion 
+
+Captured Guidance 
+
+Motion 
+
+Captured 
+
+No 
+
+Guidance 
+
+“A medieval castle with guards” Figure 7. Motion Video Guidance Results. From left to right: target motion inputs, unguided generation and its captured motion, guided generation and its captured motion. ReaDiT successfully guides video generation to follow the target motion input, as confirmed by the closer correspondence between the motion inputs and motion captured. Without guidance, the generated video fails to reproduce the intended motion. 
+
+analysis of dual guidance is provided in the supplementary material. Dual guidance can also be applied with inconsistent con-trol maps, where the depth and pose targets are extracted from entirely different images. To handle the potential spa-tial conflict, our method automatically detects a pose mask and decouples the two guidance signals by applying the mask. Pose guidance is applied to the full image while depth guidance is restricted to the unmasked region. As shown in Figure 9, ReaDiT accurately follows both the depth layout and the pose target, producing high-quality generations even when the two control maps are spatially incompatible. 
+
+4.4. Video Guidance 
+
+All video experiments use CogVideoX with temporal down-sampling factor s = 4 , following the training strategy in Sec. 3.4 for each respective task. ReaDiT is trained sepa-rately for spatial guidance and motion (optical flow) guid-ance. 
+
+Spatial guidance results. As shown in Figure 6, Rea-DiT adheres to the spatial video input while maintaining high video quality. Notably, despite not explicitly learning the temporal upsampling, ReaDiT still produces temporally Dual Guidance    
+
+> Pose Depth Pose Depth Depth Pose Pose Depth
+> Guidance Target
+> Original Image
+
+Figure 8. Consistent Dual Guidance. Depth and pose targets are extracted from the same source image. Compared to single-task guidance, dual guidance better captures both the scene geometry and the human pose. 
+
+consistent videos. 
+
+Spatial guidance comparison. Due to computation con-straints, training a video ControlNet is infeasible. Instead, we adapt RG on top of CogVideoX and follow the same evaluation setting as in Sec. 4.3 on a subset of videos. Fur-ther evaluation details are provided in the supplementary material. 8Depth Pose                        
+
+> Depth
+> Pose Figure 9. Inconsistent Dual Guidance. Depth and pose targets are extracted from different source images with potentially con-flicting spatial layouts. Rows correspond to different depth targets, while columns to different pose targets. Despite the spatial mis-match, ReaDiT produces coherent, high-quality images that fol-low both the depth configuration and the pose. Table 3. Spatial Video Guidance Comparison between ReaDiT and RG. Best model score is bolded . ReaDiT outperforms RG in all tasks and in all metrics demonstrating its superior performance and extendability to video guided generation.
+> Depth Pose Edge
+> Method Params (M) RMSE ( ↓)PCK@ 0.2(↑)mAP ( ↑)ODS ( ↑)
+> RG [19] 13.5 0.4610 0.1892 0.0496 0.5304 ReaDiT (Ours) 53 0.4225 0.3651 0.1555 0.6101
+
+As shown in Table 3, ReaDiT shows higher adherence to spatial control than RG, both quantitatively and qualita-tively (see supplementary material and supplementary ma-terial). RG’s performance degrades significantly under spa-tial video inputs, whereas ReaDiT successfully translates spatial video inputs into coherent videos. 
+
+Motion guidance results. As shown in Figure 7, ReaDiT guides video generation to adhere to the input motion. Fur-thermore, ReaDiT supports various types of camera mo-tions, such as panning right, left, up, down, as well as zoom-ing in and out from a reference video or user-specified in-put, with additional results presented in the supplementary material. 
+
+Motion guidance comparison. For motion guidance, we compare our work to ImageConductor [14], DiTFlow [23], and Tora [42]. Since ImageConductor requires an input im-age, we use the first frame of our generated video as input for a fair comparison. Motion adherence is evaluated using endpoint error (EPE), defined as the ℓ2 distance between the predicted and input motion fields, represented as optical flow (see supplementary material for further details). As shown in Table 4, our method performs competi-tively against ImageConductor, but falls short of dedicated motion-specific methods. We attribute this gap primarily to the lack of temporal upsampling ability, which is crucial for capturing fast temporal dynamics. Addressing this remains a direction for future work.             
+
+> Table 4. Motion Video Guidance Comparisons. ReaDiT per-forms competitively against dedicated motion-control baselines. While our approach does not surpass the state of the art in quanti-tative metrics, it provides a highly versatile, architecture-agnostic alternative that can be seamlessly integrated with existing frame-works.
+> Method Params (M) EPE ( ↓)
+> ImageConductor [14] 417 30.304 Tora [42] 1100 16.100 DiTFlow [23] 018.576 ReaDiT (Ours) 53 29.644
+
+## 5. Conclusion 
+
+We introduced ReaDiT Guidance, a versatile method for controlling Diffusion Transformers via a single DiT feature. Our approach enables universal control across various vi-sion task, including depth, pose and edge guidance for both image and video generation, as well as motion-guided video synthesis. 
+
+Limitations. As our method optimizes the latent during inference, it increases generation time compared to feed-forward approaches. E.g ., guided image generation takes roughly 1 minute (vs. 30s unguided), and guided 16-frame video takes approximately 10 minutes (vs. 1.5 minutes un-guided) on a single A40. Furthermore, motion guidance has difficulty with fast motion. Future work includes reducing inference cost through distillation and improving guidance for fast dynamics. 
+
+Acknowledgments. We would like to thank Aiyu Cui, Ozgur Kara, David Forsyth, Anand Bhattad, Vaibhav Vav-ilala, and Shivansh Patel for their helpful suggestions and comments. Finally, we thank Grace Luo, the first author of Readout Guidance, for helping with the implementation and answering specific questions of their prior work. This research used both the DeltaAI advanced comput-ing and data resource, which is supported by the National Science Foundation (award OAC 2320345) and the State of Illinois, and the Delta advanced computing and data re-source which is supported by the National Science Founda-tion (award OAC 2005572) and the State of Illinois. Delta and DeltaAI are joint efforts of the University of Illinois Urbana-Champaign and its National Center for Supercom-puting Applications. 
+
+## References  
+
+> [1] Mykhaylo Andriluka, Leonid Pishchulin, Peter Gehler, and Bernt Schiele. 2d human pose estimation: New benchmark and state of the art analysis. In CVPR , 2014. 7 [2] Jinze Bai, Shuai Bai, Shusheng Yang, Shijie Wang, Sinan Tan, Peng Wang, Junyang Lin, Chang Zhou, and Jingren Zhou. Qwen-vl: A versatile vision-language model for un-
+
+9derstanding, localization, text reading, and beyond. arXiv preprint arXiv:2308.12966 , 2023. 21 [3] Zhe Cao, Gines Hidalgo, Tomas Simon, Shih-En Wei, and Yaser Sheikh. Realtime multi-person 2d pose estimation us-ing part affinity fields. In CVPR , 2017. 5 [4] Lunhao Duan, Shanshan Zhao, Wenjun Yan, Yinglun Li, Qing-Guo Chen, Zhao Xu, Weihua Luo, Kaifu Zhang, Ming-ming Gong, and Gui-Song Xia. Unic-adapter: Unified image-instruction adapter with multi-modal transformer for image generation. In CVPR , 2025. 1 [5] Patrick Esser, Sumith Kulal, Andreas Blattmann, Rahim Entezari, Jonas M¨ uller, Harry Saini, Yam Levi, Dominik Lorenz, Axel Sauer, Frederic Boesel, Dustin Podell, Tim Dockhorn, Zion English, Kyle Lacey, Alex Goodwin, Yan-nik Marek, and Robin Rombach. Scaling rectified flow trans-formers for high-resolution image synthesis. In ICML , 2024. 5, 12, 13, 18, 21 [6] Mark Everingham, Luc Van Gool, Christopher KI Williams, John Winn, and Andrew Zisserman. The pascal visual object classes (voc) challenge. IJCV , 2010. 5 [7] Chaofan Gan, Yuanpeng Tu, Xi Chen, Tieyuan Chen, Yuxi Li, Mehrtash Harandi, and Weiyao Lin. Unleashing diffu-sion transformers for visual correspondence by modulating massive activations. In NeurIPS , 2025. 3, 12 [8] Daniel Geng, Charles Herrmann, Junhwa Hur, Forrester Cole, Serena Zhang, Tobias Pfaff, Tatiana Lopez-Guevara, Carl Doersch, Yusuf Aytar, Michael Rubinstein, Chen Sun, Oliver Wang, Andrew Owens, and Deqing Sun. Motion prompting: Controlling video generation with motion trajec-tories. In CVPR , 2025. 2 [9] Sangwon Jang, Taekyung Ki, Jaehyeong Jo, Jaehong Yoon, Soo Ye Kim, Zhe Lin, and Sung Ju Hwang. Frame guidance: Training-free guidance for frame-level control in video dif-fusion models. In ICLR , 2026. 2 [10] Nikita Karaev, Iurii Makarov, Jianyuan Wang, Natalia Neverova, Andrea Vedaldi, and Christian Rupprecht. Co-tracker3: Simpler and better point tracking by pseudo-labelling real videos, 2024. 5 [11] Diederik P Kingma and Max Welling. Auto-encoding varia-tional bayes. In ICLR , 2014. 2 [12] Black Forest Labs. Flux. https://github.com/ black-forest-labs/flux , 2024. 5, 7, 12, 13, 18 [13] Ming Li, Taojiannan Yang, Huafeng Kuang, Jie Wu, Zhaon-ing Wang, Xuefeng Xiao, and Chen Chen. Controlnet++: Improving conditional controls with efficient consistency feedback. In ECCV , 2024. 2 [14] Yaowei Li, Xintao Wang, Zhaoyang Zhang, Zhouxia Wang, Ziyang Yuan, Liangbin Xie, Yuexian Zou, and Ying Shan. Image conductor: Precision control for interactive video syn-thesis. In AAAI , 2024. 2, 9 [15] Shuang Liang, Jing He, Chuanmeizhi Wang, Lejun Liao, Guo Zhang, Yingcong Chen, and Yuan Yuan. Sdpose: Ex-ploiting diffusion priors for out-of-domain and robust pose estimation, 2025. 2 [16] H Lin, J Cho, A Zala, and M Bansal. Ctrl-adapter: An ef-ficient and versatile framework for adapting diverse controls to any diffusion model. In ICLR , 2025. 1 [17] Tsung-Yi Lin, Michael Maire, Serge Belongie, Lubomir Bourdev, Ross Girshick, James Hays, Pietro Perona, Deva Ramanan, C. Lawrence Zitnick, and Piotr Doll´ ar. Microsoft coco: Common objects in context. In ECCV , 2014. 18 [18] Yaron Lipman, Ricky T. Q. Chen, Heli Ben-Hamu, Maxi-milian Nickel, and Matt Le. Flow matching for generative modeling. In ICLR , 2023. 2 [19] Grace Luo, Trevor Darrell, Oliver Wang, Dan B Goldman, and Aleksander Holynski. Readout guidance: Learning con-trol from diffusion features. In CVPR , 2024. 1, 2, 6, 7, 9, 13, 14, 15, 16, 18 [20] Chong Mou, Xintao Wang, Liangbin Xie, Yanze Wu, Jian Zhang, Zhongang Qi, Ying Shan, and Xiaohu Qie. T2i-adapter: Learning adapters to dig out more controllable ability for text-to-image diffusion models. arXiv preprint arXiv:2302.08453 , 2023. 1, 2 [21] William Peebles and Saining Xie. Scalable diffusion models with transformers. In ICCV , 2023. 1, 12 [22] Dustin Podell, Zion English, Kyle Lacey, Andreas Blattmann, Tim Dockhorn, Jonas M¨ uller, Joe Penna, and Robin Rombach. Sdxl: Improving latent diffusion models for high-resolution image synthesis. In ICLR , 2024. 1, 12 [23] Alexander Pondaven, Aliaksandr Siarohin, Sergey Tulyakov, Philip Torr, and Fabio Pizzati. Video motion transfer with diffusion transformers. In CVPR , 2025. 2, 9 [24] Jordi Pont-Tuset, Federico Perazzi, Sergi Caelles, Pablo Ar-bel´ aez, Alex Sorkine-Hornung, and Luc Van Gool. The 2017 davis challenge on video object segmentation, 2018. 5 [25] Alec Radford, Jong Wook Kim, Chris Hallacy, Aditya Ramesh, Gabriel Goh, Sandhini Agarwal, Girish Sastry, Amanda Askell, Pamela Mishkin, Jack Clark, et al. Learn-ing transferable visual models from natural language super-vision. In ICML , 2021. 18 [26] Ren´ e Ranftl, Alexey Bochkovskiy, and Vladlen Koltun. Vi-sion transformers for dense prediction. In ICCV , 2021. 2 [27] Robin Rombach, Andreas Blattmann, Dominik Lorenz, Patrick Esser, and Bj¨ orn Ommer. High-resolution image syn-thesis with latent diffusion models. In CVPR , 2022. 2 [28] Assaf Singer, Noam Rotstein, Amir Mann, Ron Kimmel, and Or Litany. Time-to-move: Training-free motion controlled video generation via dual-clock denoising, 2026. 2 [29] Nick Stracke, Stefan Andreas Baumann, Kolja Bauer, Frank Fundel, and Bj¨ orn Ommer. Cleandift: Diffusion features without noise. In CVPR , 2025. 2 [30] Zhenxiong Tan, Songhua Liu, Xingyi Yang, Qiaochu Xue, and Xinchao Wang. Ominicontrol: Minimal and universal control for diffusion transformer. In ICCV , 2025. 1, 2, 7 [31] Zhenxiong Tan, Qiaochu Xue, Xingyi Yang, Songhua Liu, and Xinchao Wang. Ominicontrol2: Efficient conditioning for diffusion transformers. arXiv preprint arXiv:2503.08280 ,2025. 2 [32] Luming Tang, Menglin Jia, Qianqian Wang, Cheng Perng Phoo, and Bharath Hariharan. Emergent correspondence from image diffusion. In NeurIPS , 2023. 2 [33] Narek Tumanyan, Michal Geyer, Shai Bagon, and Tali Dekel. Plug-and-play diffusion features for text-driven image-to-image translation. In CVPR , 2023. 2 
+
+10 [34] Saining Xie and Zhuowen Tu. Holistically-nested edge de-tection. In ICCV , 2015. 5 [35] Yifeng Xu, Zhenliang He, Shiguang Shan, and Xilin Chen. Ctrlora: An extensible and efficient framework for control-lable image generation. In ICLR , 2025. 1 [36] Lihe Yang, Bingyi Kang, Zilong Huang, Zhen Zhao, Xiao-gang Xu, Jiashi Feng, and Hengshuang Zhao. Depth any-thing v2. In NeurIPS , 2024. 5 [37] Zhuoyi Yang, Jiayan Teng, Wendi Zheng, Ming Ding, Shiyu Huang, Jiazheng Xu, Yuanming Yang, Wenyi Hong, Xiao-han Zhang, Guanyu Feng, Da Yin, Yuxuan Zhang, Weihan Wang, Yean Cheng, Bin Xu, Xiaotao Gu, Yuxiao Dong, and Jie Tang. Cogvideox: Text-to-video diffusion models with an expert transformer. In ICLR , 2025. 5, 12, 13, 18, 21 [38] Sihyun Yu, Sangkyung Kwak, Huiwon Jang, Jongheon Jeong, Jonathan Huang, Jinwoo Shin, and Saining Xie. Representation alignment for generation: Training diffusion transformers is easier than you think. In ICLR , 2025. 3, 12 [39] Lvmin Zhang, Anyi Rao, and Maneesh Agrawala. Adding conditional control to text-to-image diffusion models. In 
+
+ICCV , 2023. 1, 2, 7 [40] Richard Zhang, Phillip Isola, Alexei A Efros, Eli Shechtman, and Oliver Wang. The unreasonable effectiveness of deep features as a perceptual metric. In CVPR , 2018. 18 [41] Yuxuan Zhang, Yirui Yuan, Yiren Song, Haofan Wang, and Jiaming Liu. Easycontrol: Adding efficient and flexible con-trol for diffusion transformer. In ICCV , 2025. 1, 2 [42] Zhenghao Zhang, Junchao Liao, Menghao Li, Zuozhuo Dai, Bingxue Qiu, Siyu Zhu, Long Qin, and Weizhi Wang. Tora: Trajectory-oriented diffusion transformer for video genera-tion. In CVPR , 2025. 2, 9 [43] Rui Zhao, Yuchao Gu, Jay Zhangjie Wu, David Junhao Zhang, Jiawei Liu, Weijia Wu, Jussi Keppo, and Mike Zheng Shou. Motiondirector: Motion customization of text-to-video diffusion models. arXiv preprint arXiv:2310.08465 ,2023. 2 
+
+11 ReaDiT Guidance: Control for Image and Video Generation using Diffusion Transformer Features 
+
+# Supplementary Material 
+
+## Contents 
+
+A. Architecture and Training Details 12 
+
+A.1. ReaDiT Architecture Details . . . . . . . . . 12 A.2. Training Details . . . . . . . . . . . . . . . 12 
+
+B. PCA Analysis 12 C. Additional Results 13 
+
+C.1. Additional Results on Spatial Prediction . . . 13 C.2. Additional Results on Spatial Image Guidance 13 C.3. Prompt Influence on Spatial Image Guidance 16 C.4. Additional Discussion on Dual Guidance . . 16 C.5. Additional Results on Video Guidance . . . . 17 C.6. Additional Verification on Diversity and Text Alignment . . . . . . . . . . . . . . . . . . 18 
+
+D. Guidance Details 18 E. Evaluation Setup 18 F. Prompt Details 21 G. Asset Licenses and Terms of Use 21 
+
+## A. Architecture and Training Details 
+
+A.1. ReaDiT Architecture Details 
+
+As discussed in Sec. 3.1, we design a time-conditioned Rea-DiT architecture based on AdaLN. Since Diffusion Trans-former (DiT) [21] features are conditioned on timestep t,their distribution varies across diffusion timesteps. Addi-tionally, prior work [7] finds that AdaLN layers in DiT blocks introduce massive activations, i.e ., extreme outlier activation values that negatively impact downstream spatial prediction tasks. To take into account both points, we apply AdaLN layers conditioned on t to modulate the features, which suppresses outlier activations while preserving the timestep-dependent information encoded in the features. For the task-specific head, when considering dense spa-tial prediction tasks, we use a small convolution network to map the fused latent representation to the target spatial map. When considering the sparse spatial correspondence prediction task, no head is needed as the predicted point de-scriptors are directly used to compute the optical flow, as described in Sec. 3.2. 
+
+A.2. Training Details 
+
+Table 5 summarizes the training hyperparameters to train ReaDiT for all tasks. We extract features from a single block in each backbone: block 12 for SD3-Medium [5], joint block 18 for FLUX.1 [dev] [12], and block 15 for CogVideoX [37]. 
+
+## B. PCA Analysis 
+
+Within the realm of diffusion, U-Net-based models differ significantly from DiT-based models. As our method is based on the intermediate features of the diffusion denoising network, we also study the internal representations of both architectures. For this, we first use the Principal Component Analysis (PCA). We take two pretrained text-to-image mod-els, the U-Net-based SDXL [22] and the DiT-based SD3-Medium (SD3) [5], and extract three feature maps from each of the 3 U-Net’s up-blocks, and one feature map from SD3’s last 9 sequential DiT blocks. For each output, we perform PCA and plot the first three principal components using RGB color images. Figure 10 shows the PCA visualizations of the extracted features. U-Net-based features are more diverse, capturing high and low level details of the image, while DiT features remain very similar across different blocks. To quantify this observation, we fit a linear mapping from one DiT block’s features to each of the remaining blocks, obtaining an aver-age (over the blocks) R2 score of 0.7, where 1.0 indicates perfect linear dependence. This confirms that there is a sig-nificant degree of redundancy within the information pro-vided by the different DiT blocks. We attribute this to the fundamental difference between the two architectures. U-Net models are convolutional, forcing a hierarchical differ-entiation between the layers. In contrast, transformers pro-cess the inputs at constant dimension and spatial resolution, causing more similar token representations across blocks. This PCA analysis suggests that features from a sin-gle block may suffice for downstream prediction, which is also supported by observations in [38]. To verify this, we conduct an additional experiment: for each l-th block, we extract feature f lt and train ReaDiT glθ for depth pre-diction. Each trained ReaDiT glθ is then used to predict the depth map ˆy. We assess its quality via the RMSE q 1
+
+> M
+
+PMi=1 (yi − ˆyi)2, where M denotes the total number of pixels and yi denotes the ground-truth depth map. We also run the same experiment with features from the last ten blocks f Lt and train ReaDiT gLθ , to assess whether multiple 12 Table 5. Training Hyperparameters for ReaDiT. Base Model Spatial Task Batch Size Learning Rate Epochs                             
+
+> SD3-Medium [5] Depth, Pose, Edge 81×10 −52Flux [12] Depth, Pose, Edge 45×10 −52CogVideoX [37] Depth 45×10 −5
+> 3Pose 3Edge 2Motion 11×10 −52Input Image U-Net Features
+> DiT Features
+> Figure 10. U-Net (SDXL) Up-Block Features vs. DiT (SD3) Features from the last 9 Blocks. U-Net features have much more variation across different layers compared to DiT features, which remain largely identical. Thus, while RG [19] uses the nlast blocks, our ReaDiT builds upon the information extracted from a single block.
+
+blocks are needed. Figure 11 shows the RMSE of ReaDiT glθ trained on features from the l-th DiT block, evaluated on both SD3-Medium and SD3-Large as base models. ReaDiT trained on a single DiT block’s feature f lt consistently achieves lower RMSE compared to ReaDiT trained on the combination of features from the last ten blocks, confirming that a single DiT block generally suffices for predicting compelling read-outs ˆy.Intuitively, using multiple blocks should do at least as well as using a single block since the multiple blocks con-tain at least as much information as a single block. How-ever, in light of the multi-collinearity results and the earlier PCA plots, we believe that the redundant information be-tween the DiT blocks may be inhibiting the performance of the model as the learned weights become more sensitive and unstable when using redundant inputs, thus causing worse generalization on unseen data. This suggests that a single block might be enough to accurately predict the spatial at-tribute of interest. 
+
+## C. Additional Results 
+
+C.1. Additional Results on Spatial Prediction 
+
+ReaDiT achieves competitive prediction performance com-pared to task-specific models despite being trained on a much smaller dataset. To further validate the quality of our learned features, we compare the prediction results with Readout Guidance (RG) [19] in Figure 12. For depth prediction, RG produces noticeably noisier outputs that fail to recover clean subject boundaries and lack depth details. For pose prediction, RG captures only a rough map of the subject and struggles to produce a struc-tured skeleton map, suggesting that RG struggles to ex-tract semantically meaningful information from DiT fea-tures. Similarly, RG produces noisier edge maps. Across all three tasks, ReaDiT consistently produces cleaner and more structured predictions, which we attribute to the time-conditioned architecture and the log-based training strategy. Both enable a more effective extraction of spatial informa-tion from DiT features. 
+
+C.2. Additional Results on Spatial Image Guidance 
+
+An advantage of ReaDiT is that it provides stable and con-sistent guidance across diverse scenes and styles. We pro-vide additional qualitative results for spatial image guidance in Figure 13. The results further show that ReaDiT effec-tively guides the generation to adhere to the input spatial tar-get while maintaining natural, high-quality outputs across various prompts and conditions. We also present additional comparison results with RG in Table 6 and Figure 14. RG is designed for U-Net back-bones, whose decoder naturally provides features at multi-ple resolutions, whereas features from the DiT blocks are token sequences of the same length and width. We there-fore adapt RG’s readout architecture to accept DiT fea-tures. After extracting DiT features from different trans-former blocks, we concatenate them along the channel di-mension and reshape the token sequence into a 2D spatial grid. We then add several convolutional upsampling lay-ers to turn this single-resolution grid into feature maps of multiple resolutions. The resulting maps are then passed to the RG network. At inference time, for a complete and fair comparison, we evaluate RG under two settings: (1) the strategy proposed in its original paper, and (2) our strategy, 
+
+i.e ., performing M refinement steps at each denoising step, with M set to the same value as in ReaDiT (Sec. D). As shown in Table 6, RG improves under our guidance 13 Figure 11. RMSE ( ↓) vs. Block Index for Depth Prediction Using Features from each DiT Block. RMSE measures the accuracy of depth prediction. Results are shown for SD3-Medium (left) and SD3-Large (right). The red dots are the three lowest RMSE values obtained across all DiT blocks. The dotted red line is the RMSE using the last 10 blocks together. Using a single block to predict depth consistently outperforms using the last 10 blocks together. Edge 
+
+Depth 
+
+Pose 
+
+RG Input  Reference  Ours RG Input  Reference  Ours 
+
+Figure 12. Additional Spatial Prediction Results. Qualitative comparison of spatial predictions from ReaDiT against RG [19] and off-the-shelf task-specific models across depth, pose, and edge tasks. ReaDiT consistently outperforms RG in prediction quality, demonstrating its superior ability to leverage DiT features for spatial understanding. 
+
+strategy on most tasks and metrics, yet ReaDiT still per-forms best on most of them. The advantage of ReaDiT therefore comes not only from the guidance strategy, but also from its readout architecture and training strategy. Figure 14 qualitatively compares the two methods under the same guidance strategy. RG either struggles to follow the spatial target or forces adherence at the cost of visible artifacts, such as the distorted human in RG’s depth guid-14 Guidance  Guidance 
+
+Target  Target 
+
+> … in library
+> … in cafe
+> … marble
+> … hold flower
+> … hold umbrella
+
+Edge 
+
+Depth 
+
+Pose  
+
+> … hold umbrella
+
+Target  Guidance   
+
+> …painter
+> …librarian
+> … vintage style
+
+Figure 13. Additional Spatial Image Guidance. We present additional guided generation results given a target spatial map. The results again show that ReaDiT guides the outputs to matches the target spatial layout across diverse scenes and styles while preserving visual quality. Target  RG  RG Ours  Ours 
+
+Edge 
+
+Depth 
+
+Pose 
+
+Target 
+
+Figure 14. Additional Qualitative Comparison on Image Guidance. Additional group of guidance comparison between ReaDiT and RG [19]. ReaDiT consistently follows the target spatial map without artifacts observed in RG. 
+
+15 Table 6. Guidance Accuracy Comparison between ReaDiT, RG, and RG with Our Guidance Strategy. We evaluate under two settings: control maps from generated images (Gen) and from real images (Real). Best score per setting is bolded ; second best is underlined. Applying our guidance strategy to RG improves it on most tasks and metrics, but ReaDiT still outperforms both across nearly all settings.                                       
+
+> Depth Pose Edge RMSE ( ↓)PCK@ 0.2(↑)mAP ( ↑)ODS ( ↑)Method Gen Real Gen Real Gen Real Gen Real RG [19] 0.3704 0.4436 0.4881 0.3380 0.2739 0.1598 0.5783 0.5733 RG + Our Strategy 0.3720 0.4257 0.4846 0.3595 0.2806 0.1937 0.6992 0.6635 ReaDiT (Ours) 0.2492 0.3374 0.5380 0.4856 0.3709 0.3412 0.6968 0.6644
+
+ance example. In contrast, ReaDiT achieves effective guid-ance without such degradation, producing artifact-free re-sults that faithfully follow the input target. 
+
+C.3. Prompt Influence on Spatial Image Guidance 
+
+As demonstrated in Sec. C.2, ReaDiT performs well across various prompts. To further illustrate how a prompt in-fluences the guidance, we present a comparison of pose-guided generation with different prompts in Figure 15. Al-though ReaDiT works well with simple prompts, more de-tailed prompts help generate richer details, such as the back-ground and lighting. Furthermore, when the prompts par-tially conflict with the input target, ReaDiT successfully guides the conflicting parts to follow the prompt. For exam-ple, a couple shaking hands maintains the same body pose as the input target, while their hands follow the prompt de-scription. This adherence to both the prompt and the input target further demonstrates the robustness of ReaDiT. 
+
+C.4. Additional Discussion on Dual Guidance 
+
+We provide additional quantitative results and analyze how the individual guidance components influence the dual guidance outcome. 
+
+Quantitative results. Table 7 compares the guidance ac-curacy of single-task guidance (depth only or pose only) against dual guidance (depth + pose jointly) under the con-sistent setting, where both control maps are extracted from the same source image. Dual guidance improves pose ad-herence compared to pose-only guidance, suggesting that the depth signal provides complementary geometric infor-mation that benefits pose prediction, particularly for incom-plete or unusual poses. Depth accuracy remains comparable under dual guidance, which is expected. Pose guidance pri-marily affects the human region and has limited influence on the overall scene geometry as long as the guided output does not deviate substantially from the depth target.                              
+
+> Table 7. Dual Guidance Quantitative Results (Consistent).
+> Comparison of single-task and dual-task guidance accuracy. Dual guidance achieves comparable or better adherence to both targets, indicating that the two guidance signals are complementary.
+> Depth Pose
+> RMSE ( ↓)PCK@ 0.2(↑)mAP ( ↑)Guidance Gen Real Gen Real Gen Real
+> Depth only 0.3234 0.3658 ––––Pose only ––0.3709 0.3412 0.5380 0.4856 Depth + Pose 0.3232 0.3534 0.5773 0.3589 0.6712 0.5017
+
+Influence of guidance weight ratio. To better under-stand how each guidance signal contributes to dual guid-ance, we analyze the effect of varying the relative weight between depth and pose losses. Specifically, we restrict this analysis to a fixed subset of evaluation images in which both control signals are well posed, i.e ., the human figure is fully visible so that pose guidance is not degenerate. On this sub-set we fix the weight of one task and sweep the weight of the other, measuring adherence to both targets. Table 8a shows the effect of varying the pose weight while keep-ing the depth weight fixed, and Table 8b shows the effect of varying the depth weight while keeping the pose weight fixed. Across both sweeps, we observe a consistent tradeoff: increasing the weight of one task improves its adherence at the cost of the other. However, when the depth and pose weights are roughly balanced (ratio ∼ 1), the model achieves the best overall performance across both tasks. Ex-treme ratios degrade one of the two targets noticeably. e.g ., a high pose weight relative to depth yields the best pose metrics but weakens depth adherence, while a high depth weight relative to pose achieves the lowest depth RMSE but reduces pose accuracy. These results suggest that the two guidance signals compete for modulating latent, and a balanced ratio is necessary to maintain strong adherence to both targets simultaneously. 16 Simple Prompts  Detailed Prompts 
+
+Person paints an easel 
+
+An artist paints an easel 
+
+set up in a forest, with a 
+
+tree stump as a seat, in focus 
+
+Person paints a landscape 
+
+A painter sketches a landscape in a courtyard in the glow of lanterns at night, high-resolution 
+
+Person stands with an easel 
+
+A couple shake hands 
+
+A couple play chess inside a bookstore, studio lighting, 
+
+high-resolution 
+
+Two people play chess 
+
+Conflict Prompts 
+
+Two friends set off fireworks in a 
+
+courtyard in golden light, 
+
+high-resolution 
+
+Person works on laptop 
+
+Two friends dance in a yard 
+
+Two people dance in a yard 
+
+Pose 
+
+Target Figure 15. Comparison of Spatial Image Guidance Results under Different Prompt Settings. ReaDiT adheres to the input spatial target while respecting the text prompt, handling cases where the two partially conflict. Table 8. Influence of Guidance Ratio on Dual Guidance. We vary the ratio between depth and pose guidance losses. A balanced ratio yields the best overall performance across both tasks.   
+
+> (a) Fix depth = 4 , vary pose.
+> Depth:Pose
+
+Depth Pose    
+
+> Ratio RMSE ( ↓)mAP ( ↑)PCK ( ↑)
+
+4:1 (4.0) 0.2501 0.7706 0.8305 4:3 (1.3) 0.2724 0.8976 0.9546 
+
+4:8 (0.5) 0.2874 0.8602 0.9108 4:12 (0.3) 0.3089 0.8298 0.9054   
+
+> (b) Fix pose = 8 , vary depth.
+> Depth:Pose
+
+Depth Pose    
+
+> Ratio RMSE ( ↓)mAP ( ↑)PCK ( ↑)
+
+1:8 (0.1) 0.3377 0.8229 0.9099 4:8 (0.5) 0.2874 0.8602 0.9108 10:8 (1.3) 0.2744 0.8975 0.9495 
+
+16:8 (2.0) 0.2601 0.7979 0.8602 
+
+C.5. Additional Results on Video Guidance 
+
+Beyond image generation, ReaDiT extends naturally to video generation, as shown in Sec. 3.4. We provide addi-tional spatial video guidance results for depth, pose, and edge in Figure 17, and additional motion guidance results in Figure 18. Compared to unguided generation, ReaDiT consistently adheres to the input spatial signal while main-taining temporal consistency and visual quality across all tasks. For visual comparisons, Figure 16 shows the perfor-17 “a bunny among tall dandelions”  “two people exploring an abandoned buildin g” Figure 16. Qualitative Comparison for Spatial Video Guidance. Compared to RG [19], ReaDiT demonstrates stronger spatial control across both depth and pose conditions, while generating consistent video sequences. Table 9. Influence of Guidance on Diversity and Text Align-ment. Pairwise LPIPS and CLIP-T with and without our method, using spatial maps from generated and real images. Scores are nearly identical, indicating that diversity and text alignment are preserved.              
+
+> Generated Real
+> Method CLIP-T ( ↑)LPIPS ( ↑)CLIP-T ( ↑)LPIPS ( ↑)
+> No Guidance 36.14 0.594 32.32 0.647
+> Guided (Ours) 35.68 0.592 32.18 0.644
+
+mance between RG and our method on spatial tasks. 
+
+C.6. Additional Verification on Diversity and Text Alignment 
+
+By design, ReaDiT constrains only the modality it is trained to guide, e.g ., depth, pose, edge, or motion, and should leave the diversity of the generation and its alignment with the text prompt unchanged. We verify both with two metrics. CLIP-T measures text alignment as the cosine similarity be-tween the CLIP [25] embeddings of a generated image and its prompt. Pairwise LPIPS [40] measures diversity as the average LPIPS distance between images generated from the same prompt. We compare unguided and ReaDiT-guided generation using the same prompts, seeds, and the guidance control maps as described in Sec. E. As shown in Table 9, the two rows are nearly identical under both settings, thus sug-gesting that ReaDiT preserves diversity and text alignment while enforcing the target spatial attribute. 
+
+Table 10. Inference Guidance Details. Learning rate (LR) sched-ule relative to the denoising step range. 
+
+Base Model Task Steps LR 
+
+SD3-Medium [5] Depth, Pose, Edge 0–34 1.5×10 −3
+
+35–60 1.0×10 −3
+
+Flux [12] Depth, Pose, Edge 0–34 3.0×10 −3
+
+35–60 1.0×10 −3
+
+CogVideoX [37] Depth 0–60 2.0×10 −3
+
+Pose 0–34 1.0×10 −3
+
+35–60 5.0×10 −4
+
+Edge 0–34 1.5×10 −3
+
+35–60 1.0×10 −4
+
+Motion 0–60 1.0×10 −3
+
+## D. Guidance Details 
+
+To optimize the latent effectively, multiple optimization steps per denoising step are needed to reach our intended spatial signal. For all tasks, we use 100 denoising steps with AdamW optimizer. The learning rate and denoising steps configurations for various DiT models and spatial tasks are detailed in Table 10. For the first 34 steps, we use 5 re-finement steps, for steps 35-49, we use 7 refinement steps, and for steps from 50-60, we use 1 refinement step. Beyond 60 steps, we observe that further optimization does not con-tribute to guidance quality and is therefore skipped. 
+
+## E. Evaluation Setup 
+
+We evaluate all of the models on the MSCOCO [17] dataset, specifically the 2017 validation data, and a syn-18 “a person releasing paper boats ”   
+
+> v
+> “a dancer at a lantern festival”
+> “a raccoon in the shade ”“a rooster crowing on a farm fence ”
+> v
+> “A lion roaring on top of a cliff,” “a cat sitting on a windowsill ”
+
+Figure 17. Additional Spatial Video Guidance. Additional examples of spatial video guidance across depth, pose, and edge conditions. ReaDiT successfully guides video generation to follow the target spatial video. 
+
+thetic dataset. The two evaluation settings differ in how the guidance control maps are obtained. In both cases, we run each guidance method conditioned on the prompt ki and control map yi to produce a guided image ˆxgi . We then ap-ply the same off-the-shelf spatial predictor to ˆxgi to obtain the predicted control map ˆyi and compute metrics between 
+
+yi and ˆyi.19 “a dock at sunset” 
+
+Motion Inputs 
+
+Motion 
+
+Captured Guidance 
+
+Motion 
+
+Captured 
+
+No 
+
+Guidance 
+
+“a snowy mountain top” Figure 18. Additional Motion Video Guidance Results. Additional examples of motion-guided generation results, showing zoom-in (top) and pan-right (bottom) camera motions. For each example, we present the unguided and guided results alongside their corresponding captured motion. The motion captured in videos guided by ReaDiT consistently follows the input motion, demonstrating the effectiveness of ReaDiT in motion-guided video generation. 
+
+20 Real control maps (Real). For each real image xi, we generate the corresponding prompt ki using an off-the-shelf Video-Language-Model [2] and the control map yi using the same task-specific spatial predictor. We treat ki and yi
+
+as the real image’s ground truth prompt and control map. 
+
+Generated control maps (Gen). We generate 250 di-verse prompts ki using ChatGPT, covering a range of scenes, objects, animals and compositions in a realistic style. Each prompt ki is fed into SD3 [5] to produce an un-guided image ˆxi, from which we extract the control map yi
+
+using the corresponding off-the-shelf spatial predictor (e.g, DepthAnythingV2 for depth, OpenPose for pose, HED for edge). This control map yi serves as the guidance target. Figure 19 shows both evaluation pipelines with example im-ages and their corresponding prompts.             
+
+> (a) MSCOCO image with generated evaluation prompt: “The image de-picts a cozy living room with a warm, inviting atmosphere, featur-ing a yellow wall, a wooden dining table with chairs, a flat-screen TV mounted on the wall, and a small plant on a side table.”
+> (b) Generated image by SD3-Medium with prompt: “A adelie penguin sharing a picnic with ex-plorers inside an ancient forest tem-ple in Kyoto during asummer storm, Realistic Style.”
+> Figure 19. Examples of Evaluation Images and Prompts. (a) A real MSCOCO image with its VLM-generated caption. (b) A generated image from SD3-Medium with its text prompt.
+
+Video motion guidance evaluation. For motion guid-ance, we first generate 6 reference motions from CogVideoX [37] (zoom in, zoom out, right, left, up, and down). From here, we generate 20 prompts using ChatGPT covering a range of scenes, objects, and compositions in a realistic style. For each prompt, we randomly select a mo-tion and feed a prompt with our selected motion into our setup. 
+
+Video spatial guidance evaluation. For spatial guidance, we generate over 100 prompts from ChatGPT covering a range of scenes, objects, animals and compositions in a re-alistic style. Each prompt ki is fed into CogVideoX [5] to produce an unguided video ˆxi, from which we extract the control maps yi using the corresponding off-the-shelf spa-tial predictor (e.g, DepthAnythingV2 for depth, OpenPose for pose, HED for edge). These control maps yi serve as the guidance target. 
+
+## F. Prompt Details 
+
+In our experiments, we use various prompts covering dif-ferent scene complexity styles, and semantic categories. Specifically, the results shown in Figure 4 use prompts of the same format but describing different actions and styles to showcase the stability and generalization of our method. The full prompts used in this figure are (from top to bottom, left to right, column by column): • A white paper-cut sculpture of a standing philosopher in a uniform studio. • A humanoid made of polished liquid chrome, standing in a uniform studio. • A white marble sculpture of a standing man in a uniform studio. • A woman in a dojo uniform is sweeping the floor in a dojo at night time. • A woman in a sportswear is playing and passing a volley-ball in a volleyball court. • A female student wearing a white t-shirt and jeans is sweeping the floor in an empty studio. • A doctor in a white lab coat, sitting in a minimalist chair, holds a white ceramic mug in a light-blue walled studio. • A woman in pajamas is reading a newspaper and sitting in an armchair in a bedroom. • An actor in a suit is holding a coffee cup and sitting in a wooden chair in a studio. These prompts are deliberately selected to span a range of object materials, human actions, lighting conditions, and environments to ensure a comprehensive evaluation of Rea-DiT’s generalization capability. 
+
+## G. Asset Licenses and Terms of Use 
+
+The pre-trained models used in this work are released un-der the following licenses: CogVideoX is licensed under Apache 2.0, while Stable Diffusion 3 and FLUX.1 [dev] op-erate under custom non-commercial research licenses. The official repositories and model cards, which contain the full license agreements, are provided in our references. 21

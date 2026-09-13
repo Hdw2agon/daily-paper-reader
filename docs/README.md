@@ -6,32 +6,29 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-09-12
-- 运行时间：2026-09-12 21:29:37 UTC
+- 最新运行日期：2026-09-13
+- 运行时间：2026-09-13 21:41:36 UTC
 - 运行状态：成功
-- 本次总论文数：3
+- 本次总论文数：2
 - 精读区：0
-- 速读区：3
+- 速读区：2
 
 ### 今日简报（AI）
-今日速览三篇生成式 AI 前沿论文，涵盖图像视频控制、3D 场景纹理及 3D 生成引导技术。
-重点关注 Diffusion Transformer 特征控制与 3D 场景光照一致性，这些方法显著提升了生成内容的精确度。
-建议关注 3D 生成与控制领域，尝试将这些新技术应用于个人创作或模型微调实践中。
-- 详情：[/202609/12/README](/202609/12/README)
+今日聚焦计算病理与 3D 生成领域，探索无标记虚拟染色及大规模场景网格重建技术。
+重点关注无标记虚拟染色在病理分析中的应用潜力，以及多视角图像生成 3D 场景的扩展性突破。
+建议关注 AI 在医疗影像与数字孪生领域的交叉进展，了解前沿技术如何提升数据处理效率。
+- 详情：[/202609/13/README](/202609/13/README)
 
 ### 精读区论文标签
 - 本次无精读推荐。
 
 ### 速读区论文标签
-1. [ReaDiT Guidance: Control for Image and Video Generation using Diffusion Transformer Features](/202609/12/2609.04649v1-readit-guidance-control-for-image-and-video-generation-using-diffusion-transformer-features)  
+1. [Seamless Whole Slide Label-Free Virtual Staining](/202609/13/2609.10914v1-seamless-whole-slide-label-free-virtual-staining)  
+   标签：评分：7.0/10、query:q3
+   evidence：无标签虚拟染色与图像一致性
+2. [Scaling 3D Generative Priors to Large-Scale Scene Meshes from Multi-View Images](/202609/13/2609.06385v1-scaling-3d-generative-priors-to-large-scale-scene-meshes-from-multi-view-images)  
    标签：评分：6.0/10、query:q4
-   evidence：通过空间目标控制图像生成的生成式框架
-2. [SceneHI: High-Resolution 3D-Consistent Scene Texturing with Controllable Illumination](/202609/12/2609.10363v1-scenehi-high-resolution-3d-consistent-scene-texturing-with-controllable-illumination)  
-   标签：评分：6.0/10、query:q4
-   evidence：无需微调的纹理合成生成流水线
-3. [Guiding Image-to-3D Generation with Test-Time Partial Observations](/202609/12/2609.10531v1-guiding-image-to-3d-generation-with-test-time-partial-observations)  
-   标签：评分：6.0/10、query:q3
-   evidence：基于部分观测的免训练框架
+   evidence：大规模场景合成的免训练生成先验
 
 
 <div class="dpr-home-promo-card">

@@ -6,35 +6,49 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-09-14
-- 运行时间：2026-09-14 22:00:29 UTC
+- 最新运行日期：2026-09-15
+- 运行时间：2026-09-15 22:28:13 UTC
 - 运行状态：成功
-- 本次总论文数：4
-- 精读区：0
-- 速读区：4
+- 本次总论文数：9
+- 精读区：1
+- 速读区：8
 
 ### 今日简报（AI）
-今日聚焦图像编辑与多维数据恢复的前沿进展，探索生成式 AI 在具身智能与视觉处理中的应用。
-重点关注语义对齐的图像编辑技术及低秩张量分解在图像恢复中的高效表现。
-建议关注生成式模型如何赋能具身智能数据构建，为后续视觉任务提供更精准的训练支撑。
-- 详情：[/202609/14/README](/202609/14/README)
+今日精选 9 篇图像修复与特征恢复前沿论文，重点解析上下文感知互学习模型。
+核心推荐关注《Context-Aware Mutual Learning》，其在盲图像修复任务中展现了卓越的性能与泛化潜力。
+建议优先研读精读论文以掌握核心架构，再结合低秩张量补全等速读内容拓宽技术视野。
+- 详情：[/202609/15/README](/202609/15/README)
 
 ### 精读区论文标签
-- 本次无精读推荐。
+1. [Context-Aware Mutual Learning for Blind Image Inpainting and Beyond](/202609/15/2609.14439v1-context-aware-mutual-learning-for-blind-image-inpainting-and-beyond)  
+   标签：评分：10.0/10、query:q1
+   evidence：盲图像修复与掩码估计
 
 ### 速读区论文标签
-1. [Semantically Aligned Gradient-Driven Context-Preserving Image Editing](/202609/14/2609.12691v1-semantically-aligned-gradient-driven-context-preserving-image-editing)  
-   标签：评分：7.0/10、query:q4
-   evidence：生成式图像编辑与上下文保留合成
-2. [Pre-Trained Low-Rank Tensor Decomposition for Multi-Dimensional Image Recovery](/202609/14/2609.12843v1-pre-trained-low-rank-tensor-decomposition-for-multi-dimensional-image-recovery)  
+1. [Restore What Matters: Lessons from Joint Restoration and Recognition](/202609/15/2609.13791v1-restore-what-matters-lessons-from-joint-restoration-and-recognition)  
    标签：评分：7.0/10、query:q3
-   evidence：利用预训练模型进行多维图像恢复
-3. [IM-ENGINE: Image Editing for Embodied Data Generation](/202609/14/2609.06279v1-im-engine-image-editing-for-embodied-data-generation)  
+   evidence：利用任务信号的联合修复与识别范式
+2. [Robust low-rank tensor completion via factorized weighted tensor schatten-p norm minimization](/202609/15/2609.14307v1-robust-low-rank-tensor-completion-via-factorized-weighted-tensor-schatten-p-norm-minimization)  
+   标签：评分：7.0/10、query:q1
+   evidence：从不完整和损坏的观测值中进行张量补全
+3. [Feature Recovery for Object Understanding After Irreversible Fire Damage](/202609/15/2609.12078v1-feature-recovery-for-object-understanding-after-irreversible-fire-damage)  
+   标签：评分：6.0/10、query:q1
+   evidence：受损物体的特征恢复与降解前理解
+4. [Recurrent Dynamic Range Extension](/202609/15/2609.13135v1-recurrent-dynamic-range-extension)  
+   标签：评分：6.0/10、query:q3
+   evidence：从单次曝光图像中重建完整动态范围
+5. [DNF-SR: Dual-Input and Negative-Aware Feature Fine-Tuning for Real-World Image Super-Resolution](/202609/15/2609.15120v1-dnf-sr-dual-input-and-negative-aware-feature-fine-tuning-for-real-world-image-super-resolution)  
+   标签：评分：6.0/10、query:q7
+   evidence：用于图像修复的生成先验
+6. [Does Attention-Guided Masking Really Help Object Discovery in Object-Centric Learning?](/202609/15/2609.15187v1-does-attention-guided-masking-really-help-object-discovery-in-object-centric-learning)  
+   标签：评分：6.0/10、query:q2
+   evidence：重建掩膜图像内容以提供自监督
+7. [MedDiME: Efficient Latent Diffusion with Adaptive Masking for Medical Counterfactual Generation](/202609/15/2609.15647v1-meddime-efficient-latent-diffusion-with-adaptive-masking-for-medical-counterfactual-generation)  
    标签：评分：6.0/10、query:q4
-   evidence：图像编辑作为生成的中间表示
-4. [An End-to-End Automated Pipeline for Controllable Crack Data Synthesis](/202609/14/2609.12431v1-an-end-to-end-automated-pipeline-for-controllable-crack-data-synthesis)  
+   evidence：带有自适应掩码的生成式潜空间扩散
+8. [LynnReal-Omni: Native multi-modal Video Generation for Agentic Visual Workflows](/202609/15/2609.15863v1-lynnreal-omni-native-multi-modal-video-generation-for-agentic-visual-workflows)  
    标签：评分：6.0/10、query:q4
-   evidence：使用GAN和扩散模型进行裂缝合成的生成式增强
+   evidence：包含编辑和退化视频修复的多模态视频生成框架
 
 
 <div class="dpr-home-promo-card">

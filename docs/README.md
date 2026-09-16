@@ -6,49 +6,38 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-09-15
-- 运行时间：2026-09-15 22:28:13 UTC
+- 最新运行日期：2026-09-16
+- 运行时间：2026-09-16 21:53:38 UTC
 - 运行状态：成功
-- 本次总论文数：9
-- 精读区：1
-- 速读区：8
+- 本次总论文数：5
+- 精读区：0
+- 速读区：5
 
 ### 今日简报（AI）
-今日精选 9 篇图像修复与特征恢复前沿论文，重点解析上下文感知互学习模型。
-核心推荐关注《Context-Aware Mutual Learning》，其在盲图像修复任务中展现了卓越的性能与泛化潜力。
-建议优先研读精读论文以掌握核心架构，再结合低秩张量补全等速读内容拓宽技术视野。
-- 详情：[/202609/15/README](/202609/15/README)
+今日精选 5 篇前沿论文，涵盖低光高斯溅射、能量模型优化及免训练伪装生成等技术探索。
+重点关注 NOVA-GS 在低光环境下的视角一致性提升，以及 EBM-AE 框架在生成模型中的协同优化潜力。
+建议关注生成式 AI 的免训练范式与低光视觉增强，这些方向正逐步降低复杂场景下的算法落地门槛。
+- 详情：[/202609/16/README](/202609/16/README)
 
 ### 精读区论文标签
-1. [Context-Aware Mutual Learning for Blind Image Inpainting and Beyond](/202609/15/2609.14439v1-context-aware-mutual-learning-for-blind-image-inpainting-and-beyond)  
-   标签：评分：10.0/10、query:q1
-   evidence：盲图像修复与掩码估计
+- 本次无精读推荐。
 
 ### 速读区论文标签
-1. [Restore What Matters: Lessons from Joint Restoration and Recognition](/202609/15/2609.13791v1-restore-what-matters-lessons-from-joint-restoration-and-recognition)  
-   标签：评分：7.0/10、query:q3
-   evidence：利用任务信号的联合修复与识别范式
-2. [Robust low-rank tensor completion via factorized weighted tensor schatten-p norm minimization](/202609/15/2609.14307v1-robust-low-rank-tensor-completion-via-factorized-weighted-tensor-schatten-p-norm-minimization)  
-   标签：评分：7.0/10、query:q1
-   evidence：从不完整和损坏的观测值中进行张量补全
-3. [Feature Recovery for Object Understanding After Irreversible Fire Damage](/202609/15/2609.12078v1-feature-recovery-for-object-understanding-after-irreversible-fire-damage)  
-   标签：评分：6.0/10、query:q1
-   evidence：受损物体的特征恢复与降解前理解
-4. [Recurrent Dynamic Range Extension](/202609/15/2609.13135v1-recurrent-dynamic-range-extension)  
-   标签：评分：6.0/10、query:q3
-   evidence：从单次曝光图像中重建完整动态范围
-5. [DNF-SR: Dual-Input and Negative-Aware Feature Fine-Tuning for Real-World Image Super-Resolution](/202609/15/2609.15120v1-dnf-sr-dual-input-and-negative-aware-feature-fine-tuning-for-real-world-image-super-resolution)  
+1. [NOVA-GS: Noise-Aware View-Consistent Gaussian Splatting for Low-Light Novel View Synthesis](/202609/16/2609.12682v1-nova-gs-noise-aware-view-consistent-gaussian-splatting-for-low-light-novel-view-synthesis)  
    标签：评分：6.0/10、query:q7
-   evidence：用于图像修复的生成先验
-6. [Does Attention-Guided Masking Really Help Object Discovery in Object-Centric Learning?](/202609/15/2609.15187v1-does-attention-guided-masking-really-help-object-discovery-in-object-centric-learning)  
-   标签：评分：6.0/10、query:q2
-   evidence：重建掩膜图像内容以提供自监督
-7. [MedDiME: Efficient Latent Diffusion with Adaptive Masking for Medical Counterfactual Generation](/202609/15/2609.15647v1-meddime-efficient-latent-diffusion-with-adaptive-masking-for-medical-counterfactual-generation)  
+   evidence：增强与去噪的统一框架
+2. [Learning Through Energy Refinement and Manifold Projection: A Cooperative EBM-AE Framework](/202609/16/2609.13917v1-learning-through-energy-refinement-and-manifold-projection-a-cooperative-ebm-ae-framework)  
    标签：评分：6.0/10、query:q4
-   evidence：带有自适应掩码的生成式潜空间扩散
-8. [LynnReal-Omni: Native multi-modal Video Generation for Agentic Visual Workflows](/202609/15/2609.15863v1-lynnreal-omni-native-multi-modal-video-generation-for-agentic-visual-workflows)  
-   标签：评分：6.0/10、query:q4
-   evidence：包含编辑和退化视频修复的多模态视频生成框架
+   evidence：结合去噪自编码器与能量模型的生成建模
+3. [Rethinking Camouflage Image Generation towards a Training-Free Paradigm](/202609/16/2609.14377v1-rethinking-camouflage-image-generation-towards-a-training-free-paradigm)  
+   标签：评分：6.0/10、query:q3
+   evidence：图像合成与融合的免训练范式
+4. [AlayaVista: Streaming World Modeling from Panoramic States to Perspective Video](/202609/16/2609.14462v1-alayavista-streaming-world-modeling-from-panoramic-states-to-perspective-video)  
+   标签：评分：6.0/10、query:q1
+   evidence：合成全景视图并补全上下文
+5. [LIMODENet: Attention-Free Compact Encoders for Information-Preserving Onboard Satellite Image Restoration](/202609/16/2609.14690v1-limodenet-attention-free-compact-encoders-for-information-preserving-onboard-satellite-image-restoration)  
+   标签：评分：6.0/10、query:q1
+   evidence：使用紧凑型编码器的星载卫星图像修复
 
 
 <div class="dpr-home-promo-card">

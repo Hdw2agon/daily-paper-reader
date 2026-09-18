@@ -6,49 +6,43 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-09-17
-- 运行时间：2026-09-17 22:20:26 UTC
+- 最新运行日期：2026-09-18
+- 运行时间：2026-09-18 21:32:52 UTC
 - 运行状态：成功
-- 本次总论文数：9
-- 精读区：3
+- 本次总论文数：7
+- 精读区：1
 - 速读区：6
 
 ### 今日简报（AI）
-今日精选 9 篇前沿论文，聚焦量子启发张量网络与双向流引导的 3D 视觉补全技术。
-量子启发张量网络在图像修复任务中表现卓越，展现了参数高效学习的巨大潜力。
-建议重点关注图像修复与视频对象移除领域，通过这些前沿模型提升视觉处理的精细度。
-- 详情：[/202609/17/README](/202609/17/README)
+今日精选 7 篇前沿论文，重点解析无需训练的图像编辑新范式。
+生成式细化网络（GRN）在图像编辑任务中表现卓越，展现了无需额外训练即可实现精准修改的潜力。
+建议关注图像生成与编辑领域的技术演进，尝试将该方法应用于个人创意工作流中。
+- 详情：[/202609/18/README](/202609/18/README)
 
 ### 精读区论文标签
-1. [Quantum-Inspired Trainable and Parameter-Efficient Tensor Networks for Image Inpainting](/202609/17/2609.17298v1-quantum-inspired-trainable-and-parameter-efficient-tensor-networks-for-image-inpainting)  
-   标签：评分：10.0/10、query:q1
-   evidence：用于图像修复的张量网络
-2. [Bi-FlowGS: Bridging Generative View Completion and Gaussian Geometry through Bidirectional Flow Co-Refinement](/202609/17/2609.17039v1-bi-flowgs-bridging-generative-view-completion-and-gaussian-geometry-through-bidirectional-flow-co-refinement)  
-   标签：评分：8.0/10、query:q1
-   evidence：用于 3D 场景重建的生成式视图补全
-3. [ORCA: Occlusion-Aware Refinement and Completion for Novel View Synthesis](/202609/17/2609.17450v1-orca-occlusion-aware-refinement-and-completion-for-novel-view-synthesis)  
-   标签：评分：8.0/10、query:q1
-   evidence：用于新视角合成的遮挡感知补全
+1. [Refinement Is Inherently Editable: Training-Free Prompt-to-Prompt Image Editing with Generative Refinement Network](/202609/18/2609.20633v1-refinement-is-inherently-editable-training-free-prompt-to-prompt-image-editing-with-generative-refinement-network)  
+   标签：评分：8.0/10、query:q3
+   evidence：无需训练的提示词到提示词图像编辑与细化
 
 ### 速读区论文标签
-1. [GraLoD: Graphics-Inspired Continuous Level-of-Detail Learning for Image Restoration](/202609/17/2609.16578v1-gralod-graphics-inspired-continuous-level-of-detail-learning-for-image-restoration)  
+1. [Printing the Underdetermined: Materializing Multi-solutionness in Figurative Paintings](/202609/18/2609.19782v1-printing-the-underdetermined-materializing-multi-solutionness-in-figurative-paintings)  
    标签：评分：7.0/10、query:q1
-   evidence：用于图像修复的连续细节层次学习
-2. [VOR-Bench: A Human Perception-Driven Benchmark for Video Object Removal](/202609/17/2609.16878v1-vor-bench-a-human-perception-driven-benchmark-for-video-object-removal)  
+   evidence：未观测内容的合理补全
+2. [LIFD: Anchored Diffusion for 3D-Aware Scene Memory in Robotic Manipulation](/202609/18/2609.19796v1-lifd-anchored-diffusion-for-3d-aware-scene-memory-in-robotic-manipulation)  
    标签：评分：7.0/10、query:q1
-   evidence：视频对象移除基准
-3. [LoopVAE: Recurrent Depth Across Scales for Visual Tokenization](/202609/17/2609.11516v1-loopvae-recurrent-depth-across-scales-for-visual-tokenization)  
+   evidence：推断缺失内容并补全场景标记表示
+3. [FRPSS: Feature Rearrangement in Pre-Shape Space for Single-Image Generation](/202609/18/2609.16594v1-frpss-feature-rearrangement-in-pre-shape-space-for-single-image-generation)  
    标签：评分：6.0/10、query:q4
-   evidence：使用VAE进行视觉标记化和图像重建
-4. [MDN-Control: Mask-Depth-Noise Guided Region Control for Multi-Subject Video Editing](/202609/17/2609.16475v1-mdn-control-mask-depth-noise-guided-region-control-for-multi-subject-video-editing)  
+   evidence：用于单图生成和结构合成的生成模型。
+4. [PDA++: Field-Aligned Planning and Scene-Adaptive Insertion in Remote Sensing](/202609/18/2609.18329v2-pda-field-aligned-planning-and-scene-adaptive-insertion-in-remote-sensing)  
    标签：评分：6.0/10、query:q4
-   evidence：用于多主体视频编辑和生成的免训练框架
-5. [Visual Autoregressive Priors for RAW-to-sRGB Image Signal Processing](/202609/17/2609.18302v1-visual-autoregressive-priors-for-raw-to-srgb-image-signal-processing)  
-   标签：评分：6.0/10、query:q7
-   evidence：用于图像修复和细节恢复的视觉自回归先验
-6. [PDA++: Field-Aligned Planning and Scene-Adaptive Insertion in Remote Sensing](/202609/17/2609.18329v1-pda-field-aligned-planning-and-scene-adaptive-insertion-in-remote-sensing)  
-   标签：评分：6.0/10、query:q1
-   evidence：遥感图像补全中的目标插入与同化
+   evidence：环境感知物体插入与同化的生成式框架
+5. [Spatially Adaptive Noise Injection](/202609/18/2609.18466v1-spatially-adaptive-noise-injection)  
+   标签：评分：6.0/10、query:q4
+   evidence：用于图像修复的生成式扩散采样
+6. [Paint-Anything: Unified Any-Color Control for Image Generation and Editing](/202609/18/2609.20816v1-paint-anything-unified-any-color-control-for-image-generation-and-editing)  
+   标签：评分：6.0/10、query:q4
+   evidence：用于图像编辑和着色的生成模型，使用十六进制提示接口。
 
 
 <div class="dpr-home-promo-card">

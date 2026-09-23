@@ -1,0 +1,1289 @@
+Title: ParticleSplat: Self-supervised Object-centric Latent Particle Splatting
+
+URL Source: https://arxiv.org/pdf/2609.19463v1
+
+Published Time: Fri, 18 Sep 2026 00:27:34 GMT
+
+Number of Pages: 29
+
+Markdown Content:
+# ParticleSplat: Self-supervised Object-centric Latent Particle Splatting 
+
+## Lyuxing He 1 ✉, Daniel Guo 1, Elizabeth Terveen 1, Deepak Pathak 1, David Held 1, Tal Daniel 11Robotics Institute, Carnegie Mellon University 
+
+## Abstract 
+
+We present ParticleSplat, a self-supervised object-centric representation learning method that decomposes scenes into a set of latent “particles” representing semantic en-tities through feedforward 3D Gaussian Splatting. Building on the Deep Latent Particles (DLP) framework, which rep-resents images as a set of particles with attributes such as position, scale, and visual appearance, we address a key limitation of DLP: its inherently 2D nature, which prevents explicit 3D spatial and geometric reasoning that are critical for downstream tasks such as robotic manipulation. Lever-aging the structural similarity between latent particles and 3D Gaussian primitives, we introduce a 3D latent particle space trained with a novel view synthesis objective. Our model jointly encodes multiple views with camera poses into a shared 3D object-centric latent space, then trans-forms particles into particle-aligned 3D Gaussians whose composition reconstructs the full scene. On simulated and real-world datasets, we show that this formulation inher-ently learns object masks without supervision and supports controllable 3D scene editing, such as moving objects by modifying particles in the latent space. We further establish that the learned 3D representation improves downstream performance on robotic manipulation tasks. Videos and code are available: https://lyuxinghe.github. io/ParticleSplat-website/ 
+
+## 1. Introduction 
+
+3D Gaussian Splatting (3DGS [26]) has driven much of the recent progress in 3D reconstruction, offering real-time, high-fidelity novel view synthesis from multi-view RGB images via differentiable rendering. While the original for-mulation optimizes a separate Gaussian representation for each scene, often resulting in millions of primitives and limiting its suitability for downstream applications, recent work has extended 3DGS to neural feedforward models that perform generalizable 3D reconstruction from sets of input images [24, 72]. For decision making that could benefit 
+
+> ✉Corresponding author: Lyuxing He ( lyuxingh@andrew.cmu.edu ).
+
+from rich 3D information (e.g., occlusions or fine-grained manipulation), however, typical feedforward approaches do not impose a representation bottleneck and remain high-dimensional, so the potential advantages of 3DGS represen-tations for downstream policy learning in robotic manipula-tion remain largely underexplored. In robotic domains, complex multi-object manipulation from visual observations demands scene representations that capture the objects, gripper, and obstacles in a form suitable for policy learning; however, such structured repre-sentations are non-trivial to obtain. While recent object-centric approaches have shown promising performance, many rely on supervised annotations [47, 71] from large pre-trained models, which limits their applicability in new or visually diverse environments. As a result, methods that employ self-supervised object-centric learning [16, 43] have emerged, demonstrating significant performance gains on long-horizon, multi-object manipulation tasks and exhibit-ing strong compositional generalization. Yet these repre-sentations are typically learned from 2D RGB observations and do not explicitly exploit available 3D information in-duced from multi-view observations and camera geome-try, potentially missing important geometric cues, such as depth, that are critical for robust decision-making in 3D. Consequently, a complementary line of work directly ex-ploits 3D information, such as point clouds or voxels, show-ing clear advantages over purely 2D image inputs in settings with severe occlusions and tasks that critically depend on accurate object geometry [12–14, 49, 54, 63, 65]. In paral-lel, several recent methods propose to use Gaussian primi-tives learned via a 3DGS objective [35, 62, 64] as the un-derlying scene representation for downstream manipulation from multi-view RGB or RGBD observations, demonstrat-ing that 3D Gaussians can serve as powerful, task-relevant features. However, both of these directions typically op-erate directly in high-dimensional 3D spaces, which ne-cessitates memory-efficient architectures, increases training and inference costs, and does not exploit structured object-centric bottlenecks that could improve data efficiency, gen-eralization, and interpretability. In this work, we aim to bridge this gap by learning self-supervised object-centric representations that explicitly 1arXiv:2609.19463v1 [cs.CV] 16 Sep 2026 embed 3D information in their latent space through a 3D Gaussian splatting objective. Interestingly, the recent self-supervised object-centric framework Deep Latent Particles (DLP [9]), which represents scenes as sets of latent parti-cles, exhibits a close structural alignment with the Gaussian primitives used in 3DGS: both associate each element with geometric coordinates (position) and transparency-like at-tributes, but DLP particles are inherently 2D whereas Gaus-sian primitives are defined in 3D. Motivated by this connec-tion, we introduce ParticleSplat , the first self-supervised object-centric feedforward Gaussian splatting model. Our approach builds on DLP by extending the particle encoder to jointly process multi-view inputs and camera poses, and by replacing the pixel-based decoder with a differentiable renderer applied to 3D Gaussians obtained via a learned transformation from latent particles, and aligned to them, thereby propagating 3D structure back into the latent space. We show that this yields a controllable, compact, object-centric 3D latent representation that supports scene editing (e.g., moving or reconfiguring objects in 3D) and enables more efficient and higher-performing downstream robotic manipulation policies. Our contributions are as follows: (1) we propose Par-ticleSplat, the first—to the best of our knowledge—end-to-end self-supervised object-centric latent representation trained via feedforward 3D Gaussian splatting; (2) we demonstrate higher-fidelity novel view synthesis on both simulated and real-world datasets compared to similar representation-oriented baselines; (3) we show that the disentangled, compositional latent space enables intuitive scene editing, such as moving objects in 3D and render-ing modified novel views; and (4) we demonstrate that our learned 3D object-centric representation improves perfor-mance on complex downstream robotic manipulation tasks compared to 2D object-centric representations and non-object-centric Gaussian splatting models. 
+
+## 2. Related Work 
+
+We provide an overview of the three main research direc-tions related to our work: self-supervised object-centric representations, feedforward 3D Gaussian splatting for effi-cient view synthesis, and scene reconstruction methods de-signed to support downstream decision-making. 
+
+Self-supervised Object-centric Representations : Re-cent self-supervised object-centric methods for RGB-based image and video decomposition can be broadly categorized into three families: patch-based [7, 31], slot-based [3, 15, 33], and particle-based [8–10]. These approaches typically encode a set of latent entities from the input image and reconstruct it by composing their decoded representations. Our method extends the particle-based DLP framework [10] to encode multi-view RGB or RGBD observations into 3D entities, which are subsequently transformed into 3D Gaus-sians that render pixel-space novel views, instead of relying on a decoder that directly predicts pixels. Several recent methods have also extended self-supervised object-centric representations to novel view synthesis, where new views are generated directly by a pixel-space decoder, using either patch-based [5] or slot-based [18, 30, 46, 61] decomposi-tions. In contrast, our approach integrates feedforward 3D Gaussian Splatting into the DLP framework, such that novel views are rendered from an explicitly 3D latent space. Other works have explored neural radiance fields (NeRFs) as the underlying scene representation [37, 51, 52, 60], but these typically incur higher inference-time costs because they re-quire querying scene content at many continuous coordi-nates, whereas splatting-based methods enable more effi-cient, rasterization-based rendering. 
+
+Feedforward 3D Gaussian Splatting : Instead of op-timizing Gaussians per scene [26], feedforward Gaussian Splatting methods learn predictors that directly regress Gaussian primitives from a set of context views. Early works predict pixel-aligned Gaussians from posed multi-view inputs by leveraging epipolar attention [4] or plane-sweeping cost volumes [6]. DepthSplat [59] fuses monoc-ular features into cost-volume formulations to explicitly regress depth maps for Gaussian initialization, while Vol-Splat [56] uses geometry-aware features to populate a sparse 3D voxel grid. Although such architectures achieve impressive visual fidelity and scalability, they bake ex-plicit cross-view correlation inductive biases (e.g., cost vol-umes, epipolar constraints) into the model and are primarily designed as general-purpose reconstruction systems rather than as compact, interpretable representations for control. LatentSplat [58] regresses a set of 3D Gaussians from posed input views with deterministic geometry and spherical har-monic (SH) RGB coefficients, placing a variational distri-bution only over latent SH feature coefficients. The vari-ational modeling is largely confined to appearance, and the resulting latent codes are not demonstrated to support downstream decision-making or object-centric control. In contrast, our goal is not to compete with large-scale feed-forward 3DGS methods on raw visual fidelity, but to learn a compact, structured, and controllable latent representation that is directly useful for decision making. To this end, our method maximizes a modified evidence lower bound (ELBO) tailored to a fully variational particle-based repre-sentation that avoids explicit geometric constructs, yield-ing an object-centric latent space that is interpretable and amenable to downstream robotic manipulation policies. 
+
+Scene Reconstruction for Decision-making : Visual imitation learning methods typically mimic expert demon-strations by encoding observations into latent feature vec-tors; however, a growing subset of approaches enhances policy learning by explicitly training these representa-tions through scene reconstruction. Neural radiance fields 2(NeRFs) [39] have been explored in diverse policy back-bones ranging from reinforcement learning algorithms [11, 48] to transformer-based behavior cloning agents [62]. Ex-tending this direction, KP-NeRF [55] moved beyond static geometry by conditioning the radiance field on keypoints to model scene dynamics, enabling prediction of future states for model-based control. Despite these advances, NeRFs often suffer from high rendering latency; consequently, 3D Gaussian Splatting (3DGS, [26]) has emerged as an alter-native, offering real-time rendering speeds while maintain-ing explicit geometric structure. Recent work integrating 3DGS in decision-making includes language-guided grasp-ing [23, 69] and dynamic prediction [32, 35, 36, 64]. In this work, we leverage the expressivity of 3DGS to learn a structured object-centric representation latent space, and demonstrate its efficacy in manipulation tasks that require compositional reasoning. 
+
+## 3. Background 
+
+In this work, we introduce 3D rendering to particle-based self-supervised object-centric representations. Below, we provide background on the main foundations of our method: Deep Latent Particles (DLP) and 3D Gaussian Splatting (3DGS). 
+
+Deep Latent Particles (DLP [10]) 1: a variational au-toencoder (VAE [28]) based self-supervised object-centric model that provides a structured, disentangled latent space. For a given image I ∈ RC×H×W , where C, H, and W de-note the number of channels, height, and width respectively, DLP encodes it into a set of L foreground latent particles and a single background particle. Each foreground particle is defined as 
+
+zfg = [ zp, z s, z d, z t, z f ] ∈ R6+ dobj ,
+
+where each component encodes a disentangled stochastic attribute: position zp ∼ N (μp, σ 2 
+
+> p
+
+) ∈ R2, representing the 2D keypoint coordinates; scale zs ∼ N (μs, σ 2 
+
+> s
+
+) ∈
+
+R2, representing bounding-box dimensions; depth zd ∼N (μd, σ 2
+
+> d
+
+) ∈ R, specifying compositing order to indicate occlusion relationships; transparency zt ∼ Beta( a, b ) ∈
+
+[0 , 1] , controlling per-particle opacity; and visual features 
+
+zf ∼ N (μf , σ 2 
+
+> f
+
+) ∈ Rdobj , encoding appearance of the lo-cal region around the particle (summing to 6 + dobj dimen-sions). The background is represented by a single particle 
+
+zbg ∼ N (μbg , σ 2
+
+> bg
+
+) ∈ Rdbg , fixed at the image center and modeling background visual features. DLP learns this de-composition through a compositing operation where each particle is decoded into a spatial appearance map, which is then composited based on position, scale, depth, and trans-parency to reconstruct the input image. 
+
+> 1DLP was originally introduced in [8], then improved to DLPv2 [9], and recently updated to DLPv3 [10]. We use the latter and simply refer to it as DLP.
+
+3D Gaussian Splatting (3DGS [26]) : represents a 3D scene as a set of N anisotropic 3D Gaussians G =
+
+{(μi, Σi, ci, α i)}Ni=1 , where μi ∈ R3 is the mean position, 
+
+Σi ∈ R3×3 is the covariance, ci denotes appearance pa-rameters (e.g., RGB or low-order spherical-harmonic co-efficients), and αi ∈ (0 , 1) is opacity. To ensure Σi
+
+remains positive semi-definite, it is factorized into a di-agonal scaling matrix Si ∈ R3×3 and a rotation matrix 
+
+Ri ∈ R3×3, such that Σi = RiSiSiT RiT . To render the scene from a given camera view W, each 3D Gaus-sian primitive is projected onto the image plane. The 3D mean μi is projected to 2D screen coordinates μ′
+
+> i
+
+, while the covariance is transformed to a 2D planar covariance 
+
+Σ′ 
+
+> i
+
+= JWΣ iWT JT using the viewing transform and the affine Jacobian approximation J. The screen-space in-fluence of the i-th Gaussian at pixel x is then modeled as G′
+
+> i
+
+(x) = exp  − 12 (x − μ′
+
+> i
+
+)T Σ′− 1 
+
+> i
+
+(x − μ′
+
+> i
+
+). The fi-nal pixel color C(x) and depth D(x) are computed us-ing differentiable front-to-back alpha compositing. Let-ting αi(x) = σ(oi)G′
+
+> i
+
+(x) be the effective opacity and 
+
+Ti(x) = Q
+
+> j<i
+
+(1 − αj (x)) be the transmittance, the ren-dering is formulated as: 
+
+C(x) = X
+
+> i∈N
+
+Ti(x)αi(x)ci, D(x) = X
+
+> i∈N
+
+Ti(x)αi(x)zi,
+
+where zi is the depth of the Gaussian center in camera space. In this work, rather than adhering to the standard paradigm of optimizing G via iterative per-scene gradi-ent descent, we employ a generalizable feedforward net-work [4, 6] to directly regress Gaussian primitives from 2D observations. 
+
+## 4. ParticleSplat: Self-supervised Object-centric Latent Particle Splatting 
+
+We seek to learn a structured 3D latent representation from a set of V posed 2D observations O = {(xv , Pv , Kv )}Vv=1 .For each view v, the camera extrinsic pose is Pv = [ Rv |
+
+tv ] ∈ SE (3) , with rotation Rv ∈ SO (3) and translation 
+
+tv ∈ R3, and the camera intrinsics are given by Kv ∈
+
+R3×3. Each observation xv ∈ RC×H×W has dimensions 
+
+H, W and C ∈ { 3, 4} channels for RGB or RGB-D inputs, respectively. This formulation supports both multi-view and monocular setups, with monocular RGB-D ( V = 1 , C = 4 )strictly required to resolve scale ambiguity where object size and depth are indistinguishable without parallax. Crucially, the particle structure in Deep Latent Particles (DLP)—with explicit position, scale, depth, transparency, and appearance attributes—closely mirrors the attributes of 3D Gaussian primitives in 3DGS, but remains confined to 2D image space. We bridge this gap by extending DLP par-ticles to 3D scene space, enabling self-supervised learning of geometry-aware, object-centric representations that nat-3urally yield segmentation masks without explicit supervi-sion. Our formulation adopts a self-supervised VAE with particle-based latents: we define a multi-view particle rep-resentation, design a view-aware encoder that fuses 2D ob-servations with camera geometry to infer particle posteri-ors, and introduce a Gaussian-splatting decoder that trans-forms particles into 3D Gaussians and renders them via dif-ferentiable rasterization, optimized under a view-aware ge-ometric ELBO. In the main text, we focus on this decoder and training objective as the core contribution, and refer the reader to Appendices A.1 for extended details on the multi-view latent particles, encoder, decoder, and loss. Together, this yields the first self-supervised object-centric VAE for 3D Gaussian Splatting, producing compact particle repre-sentations that enable both high-fidelity novel view syn-thesis and interpretable control for downstream decision-making. Our model is illustrated in Figure 1. 
+
+Multi-view Latent Particles (Appendix A.1.1). We structure the latent space as a set of multi-view particles 
+
+Z = {zv,ℓ  
+
+> fg
+
+}V,L v=1 ,ℓ =1 ∪ { zv
+
+> bg
+
+}Vv=1 , consisting of V × (L + 1) 
+
+entities, where V is the number of views, L is the num-ber of foreground particles, and each view is augmented with a single background particle. Each foreground parti-cle zfg = [ zp, z s, z d, z e, z t, z f ] ∈ R7+ dobj encodes disen-tangled stochastic attributes that explicitly separate image-plane geometry (projected 2D appearance in the camera view) from volumetric structure (3D extent in world coor-dinates). The attributes follow DLP [10] as described in Sec. 3, with one key 3D extension: in addition to depth 
+
+zd ∼ N (μd, σ 2
+
+> d
+
+) ∈ R (encodes distance from camera along the viewing ray and determines compositing order), we in-troduce depth extent ze ∼ N (μe, σ 2 
+
+> e
+
+) ∈ R, which controls the particle’s thickness along the viewing direction—e.g., a large ze creates “deep” objects spanning multiple depth planes (like a box), while a small ze yields “flat” objects concentrated near zd (like a sheet). 
+
+Encoder (Appendix A.1.2). The encoder qϕ(Z | O )
+
+models the posterior distribution over multi-view latent par-ticles given posed observations. We build on the hierarchi-cal particle encoder of DLP [10], which extracts keypoint proposals via differentiable spatial softmax [21], crops local glimpses with a Spatial Transformer Network (STN [19]), and predicts particle attributes using small CNNs. An attention-based interaction module then refines depth and appearance through cross-view attention over the particles of all context views. Similarly to recent feedforward Gaus-sian splatting models [4, 6, 25, 67, 72], we condition par-ticle features on camera geometry to relate observations across views. For each pixel (and hence each particle loca-tion), we compute its associated camera ray from intrinsics and extrinsics, and encode it using Pl¨ ucker coordinates r ∈
+
+R6 [66], which provide a continuous, translation-invariant representation of 3D lines. These ray embeddings are in-jected into convolutional feature maps via spatially aligned projection networks and into particle embeddings via FiLM modulation [42] before self-attention, enabling the encoder to infer consistent 3D particle distributions from 2D views. Furthermore, extending DLP to the single-view RGB+D setting (to resolve scale ambiguity) requires concatenating depth as a 4th input channel and adapting the CNNs ac-cordingly. While effective, we found that processing RGB and depth features separately via parallel CNNs then fus-ing multi-level features yields superior performance. Full architectural details are provided in Appendix A.1.2. 
+
+Decoder (Appendix A.1.3). The decoder pθ (x | Z )
+
+replaces the pixel-space decoder of DLP with a 3D Gaus-sian renderer: it maps latent particles to a set of world-space 3D Gaussian primitives and renders them with a dif-ferentiable 3DGS rasterizer [26]. Given V posed cam-eras {(P v , K v )}Vv=1 and the multi-view latent particle set 
+
+Z = {zv,ℓ  
+
+> fg
+
+}V,L v=1 ,ℓ =1 ∪ {zv
+
+> bg
+
+}Vv=1 , the decoder produces per-view RGB and depth reconstructions {(ˆIv , ˆDv )}Vv=1 by decoding each particle into a local Gaussian field, lifting all Gaussians to world space, and then “stitching” them into a single scene representation for rendering. In practice, both the foreground and background decoders are implemented as CNNs with dedicated Gaussian heads. 
+
+Foreground particles. The foreground decoder Dfg first maps the visual features zv,ℓ f to a canonical patch of N =
+
+ShSw Gaussians in a local 2D coordinate frame: 
+
+G v,ℓ  
+
+> fg
+
+= Dfg (zv,ℓ f ) = {cv,ℓ i , δv,ℓ i , ∆dv,ℓ i , qv,ℓ i , sv,ℓ i , o v,ℓ i }Ni=1 ,
+
+where each Gaussian has SH color coefficients cv,ℓ i , a sub-cell offset δv,ℓ i , a depth residual ∆dv,ℓ i , a quaternion qv,ℓ i ,anisotropic scales sv,ℓ i , and an opacity logit ov,ℓ i .We then apply the particle’s affine transform (param-eterized by position and scale (zv,ℓ p , z v,ℓ s )) to move these Gaussians from the canonical patch frame into the full im-age plane. Concretely, canonical grid coordinates and sub-cell offsets are combined to give patch-normalized centers, which are mapped through the affine transform to image-normalized coordinates; the same affine map is applied to Gaussian covariances via its Jacobian, ensuring that ellip-soids are consistently scaled and placed in the image do-main. At this point, each foreground Gaussian has a well-defined image-plane center and covariance, while its SH color, depth residual, and opacity logit remain unchanged. Next, we lift these image-plane Gaussians into world-space 3D Gaussians using the particle’s depth attributes and camera geometry. The depth and extent latents (zv,ℓ d , z v,ℓ e )
+
+are converted into a bounded planar-Z depth interval, and each Gaussian receives a depth ζv,ℓ i within [dmin , d max ]
+
+by adding a bounded residual ∆dv,ℓ i . Given the pixel-normalized center uv,ℓ i and camera pose (P v , K v ), we com-4Figure 1. ParticleSplat architecture. Given multi-view context observations (RGB images, camera poses encoded as Pl¨ ucker ray co-ordinates, and optional depth maps), the view-aware encoder infers a set of object-centric latent particles. The decoder transforms these particles into world-space 3D Gaussian primitives, enabling compositional novel view synthesis. The object-centric structure naturally provides per-particle segmentation masks (SEG) alongside learned geometric attributes such as keypoints (KP) and bounding boxes (BB). 
+
+pute the camera ray and place the Gaussian mean at 
+
+μv,ℓ i = ov + ζv,ℓ i dv (uv,ℓ i ),
+
+where ov is the camera center and dv (·) is the unnormal-ized ray direction. Covariances are formed from bounded scales and normalized quaternions in a camera-aligned frame and rotated into world coordinates; opacities pass 
+
+ov,ℓ i through a bounded nonlinearity gated by the trans-parency zv,ℓ t , and SH coefficients are rotated into the world frame. This yields a set of world-space 3D Gaussians 
+
+Gv,ℓ  
+
+> fg
+
+= {(μv,ℓ i , Σv,ℓ i , cv,ℓ i , α v,ℓ i )}Ni=1 for each foreground particle. 
+
+Background particle. For each view v, a background particle zv 
+
+> bg
+
+is decoded by a background decoder Dbg into a dense field of pixel-aligned Gaussians at resolution H × W ,
+
+G v 
+
+> bg
+
+= Dbg (zv
+
+> bg
+
+), parameterized analogously to the fore-ground case. Since these Gaussians are already defined in the full image plane, they do not require the patch-to-image affine unwarping; we directly lift them to world-space 3D Gaussians using the same ray- and depth-based mapping as for foreground Gaussians, obtaining Gv
+
+> bg
+
+.
+
+Stitching and rendering. The foreground and back-ground Gaussians from all views are concatenated into a single scene set G; this simple “stitching” suffices thanks to the compositional nature of Gaussian splatting (Ap-pendix A.1.3). Given any target camera (P t, K t), we ren-der RGB and depth via the standard 3DGS rasterizer with front-to-back alpha compositing, (ˆIt, ˆDt) = R(G; P t, K t),enabling multi-view reconstruction and novel view synthe-sis directly from the compact object-centric latent particles. Furthermore, because each foreground particle corresponds to a subset of Gaussians, we can render particles indepen-dently to obtain explicit 3D object decompositions and con-trollable scene edits; we detail these per-particle renderings and editing operations in Appendix A.1.3. 
+
+Loss (Appendix A.1.4). Given a set of posed observa-tions O = {(xv , Pv , Kv )}, we partition the views into a context set C and a target set T . Context views are en-coded to multi-view latent particles Z, while target views supervise the Gaussian-splatting decoder and encourage 3D consistency and occlusion reasoning. We optimize a multi-view ELBO that treats Z as describing a single underlying 3D scene and each xv as a 2D projection of that scene. Concretely, we average reconstruction terms over all context and target views, but apply a single scene-level KL term that is not normalized by the number of views: 
+
+LELBO = 1
+
+|C| + |T | 
+
+
+
+βctx rec 
+
+X
+
+> v∈C
+
+E(xv , ˆxv ) + βtgt rec 
+
+X
+
+> t∈T
+
+E(xt, ˆxt)
+
+| {z }
+
+> Lrec
+
++ βKL KL( qϕ(Z | C ) ∥ p(Z)) 
+
+| {z }
+
+> LKL
+
+.
+
+where βctx rec and βtgt rec weight context and target reconstruc-tions, and βKL controls the strength of scene-level regular-ization. For each view i, the reconstruction compares the ground-truth RGB–depth pair xi = ( Ii, Di) with its ren-dering ˆxi = ( ˆIi, ˆDi):
+
+E(xi, ˆxi) = L(i)img + λ(i) 
+
+> D
+
+˜Di − ˜ˆDi 22,
+
+where λ(i) 
+
+> D
+
+balances depth supervision relative to the image loss 2. The image term L(i)img is either a pixel-wise MSE or a 
+
+> 2Our model can be trained end-to-end with multi-view RGB observa-
+
+5VGG-based perceptual loss [17], depending on the experi-ment. We provide the full loss details in Appendix A.1.4. 
+
+Training and Implementation Details. We implement our method in PyTorch [41] using the Adam [27] optimizer with a batch size of 8. Unless otherwise specified, we use an initial learning rate of 8e−5 and train until convergence. Training is performed on a single A6000 GPU and takes approximately 30 hours for RLBench dataset, and 2 hours for the real-world dataset. Full training details and hyper-parameters are provided in Appendix A.4. We additionally provide a representation compactness and runtime analysis in Appendix A.5.1, showing that ParticleSplat maintains a compact particle bottleneck while supporting practical pol-icy learning with low memory usage and real-time latency. 
+
+## 5. Experiments 
+
+We conduct experiments with four primary goals: (1) evaluate ParticleSplat’s object-centric scene decomposition and novel-view synthesis capabilities against non-object-centric, representation-oriented baselines of comparable scale (Sec. 5.1 and 5.2); (2) demonstrate the interpretability and controllability of the learned representation through la-tent space modifications and rendering (Sec. 5.2); (3) ablate the contributions of our novel components within the DLP framework (Sec. 5.1); and (4) demonstrate the efficacy of the learned representation for downstream complex robotic manipulation tasks (Sec. 5.3). 
+
+Datasets. We evaluate on both synthetic and real-world datasets to evaluate novel-view synthesis and assess the applicability of our learned representations to downstream tasks. Our primary synthetic benchmark consists of 10 scenes with a total of 166 variations and 200 episodes of multi-view demonstrations from the RLBench robotic ma-nipulation benchmark [22] (approximately 660k frames). We also report additional imitation learning results on Mim-icGen [38] against a broader set of baselines for a holistic comparison. Details on the specific tasks are provided in Appendix A.2. We train a single unified model as the rep-resentation shared across all tasks. For real-world experi-ments, we setup multi-object robotic manipulation scenes and collect multi-view videos with a total amount of 3,000 frames using a mobile phone. We provide a simple, repro-ducible data preparation recipe in Appendix A.5.6. 
+
+Baselines. We compare against methods that use novel view synthesis with Gaussian splatting or NeRF for robotic manipulation representations: ManiGaussian [35] and GN-Factor [62]. ManiGaussian learns a 3D voxel representation that predicts spatiotemporal semantic Gaussian primitives, while GNFactor builds a NeRF-style 3D semantic feature field using large pretrained 2D foundation models. Both 
+
+> tions without explicit depth maps, as the splatting objective and Pl¨ ucker ray conditioning provide sufficient geometric supervision. Depth is used only optionally for RGB-D inputs.
+
+require multi-view supervision during training but operate from single RGB-D observations at inference, matching our evaluation protocol. Details are provided in Appendix A.3. We also introduce VAE-GS (Appendix A.3.3), an abla-tion baseline that retains our CNN-based 3D-aware encoder and Gaussian decoder but replaces the object-centric par-ticle latent with a non-structured patchified image latent. VAE-GS uses the same ELBO formulation, differing only in latent parameterization and KL regularization. Finally, we include Deep Latent Particles (DLP [10]) as a strong self-supervised object-centric baseline trained on 2D images (Sec. 3). We focus these targeted comparisons on representation learning methods suitable for control rather than large-scale reconstruction methods, which do not pro-duce latents for downstream policy integration. 
+
+5.1. Novel View Synthesis 
+
+We first demonstrate that ParticleSplat captures consistent 3D scene structure through novel view synthesis on syn-thetic RLBench environments and real-world multi-object scenes. Large novel view synthesis models that impose no representation bottleneck [4, 6, 56, 59] are orthogonal to our scope. We instead use novel view synthesis as a diag-nostic of the representation. Accurate rendering from held-out views indicates that the compact particle bottleneck has captured view-consistent 3D geometry rather than merely fitting image-space appearance, which is what enables de-composition, controllability, and downstream manipulation. 
+
+Setup. For RLBench, we use the front camera alongside a NeRF-style trajectory of 21 posed views for supervision and evaluation. In the single-view setting, models receive only the front RGB-D observation; in the multi-view set-ting, two RGB-D views are randomly sampled from the tra-jectory as context. Evaluation renders four held-out views of the same trajectory, fixed across all methods for fair-ness. For real-world scenes, we focus on the multi-view RGB-only setting and evaluate on every fourth view of the capture trajectory. Images are downsampled to 128 × 128 ,following prior work [35, 62], so that a single representa-tion serves both novel view synthesis and imitation learning. RE10K [70] results at 256 × 256 are in Appendix A.5.3. 
+
+Metrics. We report standard novel view synthesis met-rics averaged across all evaluation views and scenes: PSNR, SSIM [57], and LPIPS [68]. 
+
+Results. Table 1 reports quantitative novel view synthe-sis performance on RLBench and real-world scenes, while Fig. 2 shows representative qualitative results. Both GN-Factor [62] and ManiGaussian [35] are non-object-centric methods that rely on action-conditioned optimization, and they produce substantially lower-fidelity renderings as seen in Fig. 2, highlighting the challenge of learning high-quality multi-object scene representations when reconstruction and policy learning are jointly optimized. VAE-GS captures 6Figure 2. Qualitative Novel View Synthesis Results. We visual-ize novel view renderings produced by our learned representation on RLBench scenes (top) and real-world scenes (bottom), together with applicable results from baseline methods; zoom in for best vi-sual comparison. Blue-framed images show RGB images, while green-framed images show depth images. 
+
+coarse texture and structure but lacks object-centric reason-ing, leading to geometrically inconsistent Gaussian place-ments, structural misalignment, and inaccurate depth es-timates (Fig. 2). In contrast, ParticleSplat achieves the best PSNR, SSIM, and LPIPS across both single-view and multi-view settings on RLBench, and maintains strong per-formance on real-world scenes from just two RGB inputs without depth supervision, where its rendered depth maps nevertheless remain geometrically consistent across views. Qualitatively, our method preserves sharp edges and high-frequency details, indicating that the object-centric particle representation simultaneously captures coherent 3D geom-etry and semantic consistency. Extended qualitative results, including larger reference-view gaps and depth visualiza-tions, are provided in Appendix A.5.3. 
+
+Ablations. We conduct ablations on novel view synthe-sis performance to validate key design choices. Full results and discussion are provided in Appendix A.5.3. Removing the object-centric particle structure, replacing the Gaussian splatting decoder with a 2D pixel decoder, disabling pose conditioning via Pl¨ ucker rays, and omitting depth feature fusion all substantially degrade the visual metrics, confirm-ing the importance of each component. 
+
+5.2. Self-supervised Object-centric 3D Scene De-composition 
+
+We showcase the resulting object-centric decomposition in Figures 1 and 3. Since our self-supervised particles capture scene structure at a granularity that may differ from human-annotated masks, there is no unique ground-truth target for quantitatively evaluating objectness or latent edits. In par-ticular, human masks are not always available, and when they are, they reflect semantic notions of objects that may not coincide with the scene parts induced by our reconstruc-tion objective. Consequently, keypoint- and particle-based methods [8, 29, 40, 43], which ParticleSplat extends, evalu-ate discovered entities through their downstream use rather than against annotation masks. Following the same proto-col, we use these visualizations, followed by downstream policy performance, as evidence of coherent and control-lable entities. Notably, our method produces explicit, disen-tangled entities reflecting task-relevant semantics in Fig. 3.                                          
+
+> Dataset Method Input PSNR ↑SSIM ↑LPIPS ↓
+> RLBench GNFactor [62] 1×RGB-D 16.20 0.5273 0.6819 ManiGaussian [35] 1×RGB-D 15.87 0.5154 0.6793 VAE-GS 1×RGB-D 21.85 0.6858 0.4838
+> ParticleSplat (Ours) 1×RGB-D 25.35 0.7293 0.3563
+> VAE-GS 2×RGB-D 25.93 0.7326 0.3404
+> ParticleSplat (Ours) 2×RGB-D 28.77 0.8144 0.2565
+> Real-world VAE-GS 2×RGB 20.33 0.4659 0.6587
+> ParticleSplat (Ours) 2×RGB 24.24 0.8455 0.1153
+
+Table 1. Quantitative novel view synthesis results. We evaluate on RLBench (RGB-D) and real-world scenes (RGB-only), report-ing PSNR ↑, SSIM ↑, and LPIPS ↓ under single-view (1 ×RGB-D) and multi-view (2 ×RGB-D / 2 ×RGB) settings.                          
+
+> Method /Task Group Object-centric interaction 3D geometry Both Overall
+> GNFactor [62] 32.3 63.4 9.8 31.7 ManiGaussian [35] 52.3 66.3 19.1 45.2 VAE-GS 48.9 62.8 16.8 42.0 DLP [10] 64.7 37.0 21.0 46.6
+> ParticleSplat (Ours) 82.6 86.1 50.6 73.0
+
+Table 2. Imitation learning performance with different repre-sentations (single-view). Success rates (%) on RLBench manipu-lation tasks using policies conditioned on different learned repre-sentations, averaged over the tasks of each task group defined in Sec. 5.3 and over all 10 tasks; per-task results are reported in Ta-ble 9 in Appendix A.5.5. Results are means over three seeds (25 episodes per task per seed).               
+
+> Method /Task Group Basic Contact-Rich Long-Horizon Overall
+> DLP [10] 46.4 50.6 3.4 34.1
+> ParticleSplat (Ours) 80.4 66.9 27.9 56.1
+
+Table 3. Additional imitation learning performance on Mimic-Gen (multi-view). Success rates (%) on MimicGen [38] manip-ulation tasks, averaged over the tasks of each official task group and over all 12 tasks. Per-task results, together with a compar-ison against the state-of-the-art methods on this benchmark, are reported in Table 10 in Appendix A.5.5. Results are means over three seeds (50 rollouts per task per seed). Multi-view DLP results are reproduced from [65]. 
+
+We further demonstrate the interpretability and controlla-bility of our latent space by manually perturbing particle at-tributes and observing the corresponding geometric changes in rendered scenes. As shown in Fig. 4, we apply (i) trans-lations to a particle’s latent position zp and (ii) scaling to its latent scale zs. Because each particle corresponds to a fixed set of aligned 3D Gaussians, these perturbations prop-agate consistently in an object-centric manner: translating 
+
+zp rigidly shifts the object in 3D world space, while scal-ing zs expands the object proportionally in its local frame. These results highlight the structured, semantically mean-ingful nature of our particle latents, enabling intuitive 3D scene editing directly in the latent space. 7Figure 3. Scene decomposition with ParticleSplat. Self-supervised object-centric decomposition on real-world data.      
+
+> Figure 4. Latent controllability. Perturbing particle position zp
+> translates objects in 3D space; scaling zsproportionally expands objects in their local frame.
+
+5.3. Imitation Learning with ParticleSplat 
+
+We assess the benefits of our representation for downstream decision making via imitation learning. Our main bench-mark is language-conditioned RLBench [22], on which we compare and ablate all representations (Table 2; per-task re-sults in Table 9). As a secondary benchmark, we use Mim-icGen [38], on which we compare with DLP and, in the appendix, with the state-of-the-art methods of that bench-mark (Table 3; per-task results in Table 10). We reserve this section for RLBench and refer to Appendix A.5.5 for the MimicGen experimental setup and results analysis. 
+
+Policies. A single policy network cannot be shared across representation families. ManiGaussian [35] and GN-Factor [62] output dense 100 3 voxel volumes, which re-quire an efficient-attention architecture (Perceiver [20]) to learn a policy over the voxel lattice. The compact entity tokens of ParticleSplat, VAE-GS, and DLP instead admit a full-attention policy. Therefore, we use EC-Diffuser [43], a diffusion-based behavioral cloning method that operates on entity tokens and models multi-object dynamics and actions in a permutation-equivariant manner. We adapt it to our multi-view latent particles by treating language instructions as additional “particles” and enabling joint self-attention between language and entity tokens (Appendix A.5.2). Since neither policy applies to the other family, VAE-GS and DLP provide the comparison in which only the repre-sentation varies, while ManiGaussian and GNFactor serve as imitation-learning baselines whose results reflect repre-sentation and policy as a whole. 
+
+Evaluation. On RLBench, we report task success rates averaged over three fixed random seeds, evaluating 25 episodes per task per seed, and summarize results as mean success and standard deviation across seeds. During evalu-ation, policies receive only a single RGB image and depth map from the front camera as input, and actions are gen-erated by rolling out the learned policy. Additional imple-mentation details are provided in Appendix A.5.5. 
+
+Results. Table 2 presents success rates on RLBench manipulation tasks (per-task results in Table 9 in the Ap-pendix), categorized by reasoning requirements: (i) object-centric interaction tasks ( push buttons , meat off grill , slide block , drag stick , sweep to dustpan ), (ii) 3D geometry tasks (turn tap , open drawer ), and (iii) tasks requiring both ( put in drawer , stack blocks , close jar ). Object-centric interaction tasks primarily require entity tracking and interaction modeling, where 2D object-centric methods like DLP perform competitively. Geometry-focused tasks demand precise 3D pose estimation and oc-clusion reasoning, favoring reconstruction methods like ManiGaussian. However, all baselines struggle on tasks requiring both object-centric reasoning and accurate 3D structure—such as put in drawer , stack blocks , and close jar —which involve long-horizon multi-object interactions with precise spatial alignment and occlusion handling. By jointly modeling object-centric structure and explicit 3D ge-ometry, ParticleSplat achieves robust performance across all categories and substantial gains on these most challeng-ing tasks. Overall, our method significantly outperforms all baselines (73.0% vs. 31.7–46.6%), confirming the value of 3D object-centric representations for robotic manipulation. The same trend holds on MimicGen (Table 3), where Par-ticleSplat improves over multi-view DLP on all three task groups (56.1% vs. 34.1% overall). Extended multi-view RLBench results and the full MimicGen results are in Ap-pendix A.5.5. 
+
+## 6. Conclusion 
+
+ParticleSplat introduces the first self-supervised object-centric representation trained end-to-end with feedforward 3D Gaussian splatting, bridging structured 2D latent parti-cles with explicit 3D scene geometry. We demonstrate that this approach achieves strong novel view synthesis qual-ity while providing an interpretable, controllable 3D la-tent space that enables scene editing and significantly im-proves performance on complex robotic manipulation tasks compared to non-object-centric 3D representations and 2D object-centric baselines. 
+
+Limitations. Like other self-supervised object-centric methods [10, 33], ParticleSplat performs best on scenes with limited background variability; scaling to large-scale in-the-wild environments and larger models remains an im-portant challenge. The fixed particle budget L also bounds the number of entities that can be represented, and entities beyond the budget are absorbed in the background. Addi-tionally, our approach requires ground-truth camera poses during both training and inference. Future work could ex-plore unposed multi-view settings, joint camera pose es-timation, and dynamics prediction for world models [10], and integration with reinforcement learning beyond imita-tion learning. 8References 
+
+[1] Apple Inc. ARKit . Apple, 2024. [2] Apple Inc. Xcode . Apple Inc., Cupertino, CA, 2026. Version 15.0. [3] Christopher P Burgess, Loic Matthey, Nicholas Watters, Rishabh Kabra, Irina Higgins, Matt Botvinick, and Alexan-der Lerchner. Monet: Unsupervised scene decomposition and representation. arXiv preprint arXiv:1901.11390 , 2019. [4] David Charatan, Sizhe Lester Li, Andrea Tagliasacchi, and Vincent Sitzmann. pixelsplat: 3d gaussian splats from image pairs for scalable generalizable 3d reconstruction. In Pro-ceedings of the IEEE/CVF conference on computer vision and pattern recognition , pages 19457–19467, 2024. [5] Chang Chen, Fei Deng, and Sungjin Ahn. Roots: Object-centric representation and rendering of 3d scenes. Journal of Machine Learning Research , 22(259):1–36, 2021. [6] Yuedong Chen, Haofei Xu, Chuanxia Zheng, Bohan Zhuang, Marc Pollefeys, Andreas Geiger, Tat-Jen Cham, and Jianfei Cai. Mvsplat: Efficient 3d gaussian splatting from sparse multi-view images. In European Conference on Computer Vision , pages 370–386. Springer, 2024. [7] Eric Crawford and Joelle Pineau. Spatially invariant unsuper-vised object detection with convolutional neural networks. In 
+
+AAAI , 2019. [8] Tal Daniel and Aviv Tamar. Unsupervised image representa-tion learning with deep latent particles. In Proceedings of the 39th International Conference on Machine Learning , pages 4644–4665. PMLR, 2022. [9] Tal Daniel and Aviv Tamar. DDLP: Unsupervised object-centric video prediction with deep dynamic latent particles. 
+
+Transactions on Machine Learning Research , 2024. [10] Tal Daniel, Carl Qi, Dan Haramati, Amir Zadeh, Chuan Li, Aviv Tamar, Deepak Pathak, and David Held. Latent parti-cle world models: Self-supervised object-centric stochastic dynamics modeling. In The Fourteenth International Con-ference on Learning Representations , 2026. [11] Danny Driess, Ingmar Schubert, Pete Florence, Yunzhu Li, and Marc Toussaint. Reinforcement learning with neural ra-diance fields. Advances in Neural Information Processing Systems , 35:16931–16945, 2022. [12] Theophile Gervet, Zhou Xian, Nikolaos Gkanatsios, and Katerina Fragkiadaki. Act3d: 3d feature field transform-ers for multi-task robotic manipulation. arXiv preprint arXiv:2306.17817 , 2023. [13] Ankit Goyal, Jie Xu, Yijie Guo, Valts Blukis, Yu-Wei Chao, and Dieter Fox. Rvt: Robotic view transformer for 3d object manipulation. In Conference on Robot Learning , pages 694– 710. PMLR, 2023. [14] Ankit Goyal, Valts Blukis, Jie Xu, Yijie Guo, Yu-Wei Chao, and Dieter Fox. Rvt-2: Learning precise manipulation from few demonstrations. arXiv preprint arXiv:2406.08545 , 2024. [15] Klaus Greff, Rapha¨ el Lopez Kaufman, Rishabh Kabra, Nick Watters, Christopher Burgess, Daniel Zoran, Loic Matthey, Matthew Botvinick, and Alexander Lerchner. Multi-object representation learning with iterative variational inference. In International Conference on Machine Learning , pages 2424–2433. PMLR, 2019. [16] Dan Haramati, Tal Daniel, and Aviv Tamar. Entity-centric reinforcement learning for object manipulation from pixels. In The Twelfth International Conference on Learning Repre-sentations , 2024. [17] Yedid Hoshen, Ke Li, and Jitendra Malik. Non-adversarial image synthesis with generative latent nearest neighbors. In 
+
+Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition , pages 5811–5819, 2019. [18] Allan Jabri, Sjoerd van Steenkiste, Emiel Hoogeboom, Mehdi S. M. Sajjadi, and Thomas Kipf. DORSal: Diffu-sion for object-centric representations of scenes et al. In The Twelfth International Conference on Learning Representa-tions , 2024. [19] Max Jaderberg, Karen Simonyan, Andrew Zisserman, et al. Spatial transformer networks. Advances in neural informa-tion processing systems , 28:2017–2025, 2015. [20] Andrew Jaegle, Felix Gimeno, Andrew Brock, Andrew Zis-serman, Oriol Vinyals, and Joao Carreira. Perceiver: General perception with iterative attention, 2021. [21] Tomas Jakab, Ankush Gupta, Hakan Bilen, and Andrea Vedaldi. Unsupervised learning of object landmarks through conditional image generation. In Proceedings of the 32nd International Conference on Neural Information Processing Systems , pages 4020–4031, 2018. [22] Stephen James, Zicong Ma, David Rovick Arrojo, and An-drew J Davison. Rlbench: The robot learning benchmark & learning environment. IEEE Robotics and Automation Let-ters , 5(2):3019–3026, 2020. [23] Mazeyu Ji, Ri-Zhao Qiu, Xueyan Zou, and Xiaolong Wang. Graspsplats: Efficient manipulation with 3d feature splatting. 
+
+arXiv preprint arXiv:2409.02084 , 2024. [24] Lihan Jiang, Yucheng Mao, Linning Xu, Tao Lu, Kerui Ren, Yichen Jin, Xudong Xu, Mulin Yu, Jiangmiao Pang, Feng Zhao, et al. Anysplat: Feed-forward 3d gaussian splatting from unconstrained views. ACM Transactions on Graphics (TOG) , 44(6):1–16, 2025. [25] Haian Jin, Haoyu Jiang, Hao Tan, Kai Zhang, Sai Bi, Tianyuan Zhang, Fujun Luan, Noah Snavely, and Zexiang Xu. LVSM: A large view synthesis model with minimal 3D inductive bias. In International Conference on Learning Representations , 2025. [26] Bernhard Kerbl, Georgios Kopanas, Thomas Leimk¨ uhler, and George Drettakis. 3d gaussian splatting for real-time radiance field rendering. ACM Trans. Graph. , 42(4):139–1, 2023. [27] Diederik Kingma and Jimmy Ba. Adam: A method for stochastic optimization. International Conference on Learn-ing Representations , 2014. [28] Diederik P. Kingma and Max Welling. Auto-encoding vari-ational bayes. In ICLR , 2014. [29] Tejas D Kulkarni, Ankush Gupta, Catalin Ionescu, Sebas-tian Borgeaud, Malcolm Reynolds, Andrew Zisserman, and Volodymyr Mnih. Unsupervised learning of object keypoints for perception and control. In Advances in Neural Informa-tion Processing Systems , 2019. [30] Nanbo Li, Cian Eastwood, and Robert Fisher. Learning object-centric representations of multi-object scenes from 
+
+9multiple views. Advances in neural information processing systems , 33:5656–5666, 2020. [31] Zhixuan Lin, Yi-Fu Wu, Skand Vishwanath Peri, Weihao Sun, Gautam Singh, Fei Deng, Jindong Jiang, and Sungjin Ahn. Space: Unsupervised object-oriented scene representa-tion via spatial attention and decomposition. arXiv preprint arXiv:2001.02407 , 2020. [32] Zhenyang Liu, Yikai Wang, Kuanning Wang, Longfei Liang, Xiangyang Xue, and Yanwei Fu. Spatial-temporal aware vi-suomotor diffusion policy learning. In Proceedings of the IEEE/CVF International Conference on Computer Vision ,pages 7122–7131, 2025. [33] Francesco Locatello, Dirk Weissenborn, Thomas Un-terthiner, Aravindh Mahendran, Georg Heigold, Jakob Uszkoreit, Alexey Dosovitskiy, and Thomas Kipf. Object-centric learning with slot attention. arXiv preprint arXiv:2006.15055 , 2020. [34] H Christopher Longuet-Higgins. A computer algorithm for reconstructing a scene from two projections. Nature , 293 (5828):133–135, 1981. [35] Guanxing Lu, Shiyi Zhang, Ziwei Wang, Changliu Liu, Ji-wen Lu, and Yansong Tang. Manigaussian: Dynamic gaus-sian splatting for multi-task robotic manipulation. In Eu-ropean Conference on Computer Vision , pages 349–366. Springer, 2024. [36] Guanxing Lu, Baoxiong Jia, Puhao Li, Yixin Chen, Ziwei Wang, Yansong Tang, and Siyuan Huang. Gwm: Towards scalable gaussian world models for robotic manipulation. In 
+
+Proceedings of the IEEE/CVF International Conference on Computer Vision , pages 9263–9274, 2025. [37] Rundong Luo, Hong-Xing Yu, and Jiajun Wu. Unsupervised discovery of object-centric neural fields. Transactions on Machine Learning Research , 2025. [38] Ajay Mandlekar, Soroush Nasiriany, Bowen Wen, Iretiayo Akinola, Yashraj Narang, Linxi Fan, Yuke Zhu, and Dieter Fox. MimicGen: A data generation system for scalable robot learning using human demonstrations. In Conference on Robot Learning , 2023. [39] Ben Mildenhall, Pratul P Srinivasan, Matthew Tancik, Jonathan T Barron, Ravi Ramamoorthi, and Ren Ng. Nerf: Representing scenes as neural radiance fields for view syn-thesis. Communications of the ACM , 65(1):99–106, 2021. [40] Matthias Minderer, Chen Sun, Ruben Villegas, Forrester Cole, Kevin Murphy, and Honglak Lee. Unsupervised learn-ing of object structure and dynamics from videos. In Ad-vances in Neural Information Processing Systems , 2019. [41] Adam Paszke, Sam Gross, Soumith Chintala, Gregory Chanan, Edward Yang, Zachary DeVito, Zeming Lin, Alban Desmaison, Luca Antiga, and Adam Lerer. Automatic dif-ferentiation in PyTorch. In NIPS Autodiff Workshop , 2017. [42] Ethan Perez, Florian Strub, Harm De Vries, Vincent Du-moulin, and Aaron Courville. Film: Visual reasoning with a general conditioning layer. In Proceedings of the AAAI con-ference on artificial intelligence , 2018. [43] Carl Qi, Dan Haramati, Tal Daniel, Aviv Tamar, and Amy Zhang. EC-diffuser: Multi-object manipulation via entity-centric behavior generation. In The Thirteenth International Conference on Learning Representations , 2025. [44] Alec Radford, Jong Wook Kim, Chris Hallacy, Aditya Ramesh, Gabriel Goh, Sandhini Agarwal, Girish Sastry, Amanda Askell, Pamela Mishkin, Jack Clark, et al. Learning transferable visual models from natural language supervi-sion. In International conference on machine learning , pages 8748–8763. PmLR, 2021. [45] Robin Rombach, Andreas Blattmann, Dominik Lorenz, Patrick Esser, and Bj¨ orn Ommer. High-resolution image syn-thesis with latent diffusion models, 2022. [46] Mehdi SM Sajjadi, Daniel Duckworth, Aravindh Mahen-dran, Sjoerd van Steenkiste, Filip Paveti´ c, Mario Luˇ ci´ c, Leonidas J Guibas, Klaus Greff, and Thomas Kipf. Ob-ject scene representation transformer. arXiv preprint arXiv:2206.06922 , 2022. [47] Junyao Shi, Jianing Qian, Yecheng Jason Ma, and Dinesh Ja-yaraman. Composing pre-trained object-centric representa-tions for robotics from” what” and” where” foundation mod-els. In 2024 IEEE International Conference on Robotics and Automation (ICRA) , pages 15424–15432. IEEE, 2024. [48] Dongseok Shim, Seungjae Lee, and H Jin Kim. Snerl: Semantic-aware neural radiance fields for reinforcement learning. In International Conference on Machine Learning ,pages 31489–31503. PMLR, 2023. [49] Mohit Shridhar, Lucas Manuelli, and Dieter Fox. Perceiver-actor: A multi-task transformer for robotic manipulation. In Conference on Robot Learning , pages 785–799. PMLR, 2023. [50] Brandon Smart, Chuanxia Zheng, Iro Laina, and Vic-tor Adrian Prisacariu. Splatt3r: Zero-shot gaussian splatting from uncalibrated image pairs. arXiv preprint arXiv:2408.13912 , 2024. [51] Cameron Omid Smith, Hong-Xing Yu, Sergey Zakharov, Fredo Durand, Joshua B. Tenenbaum, Jiajun Wu, and Vin-cent Sitzmann. Unsupervised discovery and composition of object light fields. Transactions on Machine Learning Re-search , 2023. [52] Karl Stelzner, Kristian Kersting, and Adam R Kosiorek. De-composing 3d scenes into objects via unsupervised volume segmentation. arXiv preprint arXiv:2104.01148 , 2021. [53] Shimon Ullman. The interpretation of structure from mo-tion. Proceedings of the Royal Society of London. Series B. Biological Sciences , 203(1153):405–426, 1979. [54] Dian Wang, Stephen Hart, David Surovik, Tarik Kelestemur, Haojie Huang, Haibo Zhao, Mark Yeatman, Jiuguang Wang, Robin Walters, and Robert Platt. Equivariant diffusion pol-icy. arXiv preprint arXiv:2407.01812 , 2024. [55] Weiyao Wang, Andrew S Morgan, Aaron M Dollar, and Gre-gory D Hager. Dynamical scene representation and control with keypoint-conditioned neural radiance field. In 2022 IEEE 18th International Conference on Automation Science and Engineering (CASE) , pages 1138–1143. IEEE, 2022. [56] Weijie Wang, Yeqing Chen, Zeyu Zhang, Hengyu Liu, Haoxiao Wang, Zhiyuan Feng, Wenkang Qin, Zheng Zhu, Donny Y Chen, and Bohan Zhuang. Volsplat: Rethinking feed-forward 3d gaussian splatting with voxel-aligned pre-diction. arXiv preprint arXiv:2509.19297 , 2025. [57] Zhou Wang, Alan C Bovik, Hamid R Sheikh, and Eero P Si-moncelli. Image quality assessment: from error visibility to 
+
+10 structural similarity. IEEE transactions on image processing ,13(4):600–612, 2004. [58] Christopher Wewer, Kevin Raj, Eddy Ilg, Bernt Schiele, and Jan Eric Lenssen. latentsplat: Autoencoding varia-tional gaussians for fast generalizable 3d reconstruction. In 
+
+European conference on computer vision , pages 456–473. Springer, 2024. [59] Haofei Xu, Songyou Peng, Fangjinhua Wang, Hermann Blum, Daniel Barath, Andreas Geiger, and Marc Pollefeys. Depthsplat: Connecting gaussian splatting and depth. In 
+
+Proceedings of the Computer Vision and Pattern Recognition Conference , pages 16453–16463, 2025. [60] Hong-Xing Yu, Leonidas Guibas, and Jiajun Wu. Unsuper-vised discovery of object radiance fields. In International Conference on Learning Representations , 2022. [61] Jinyang Yuan, Bin Li, and Xiangyang Xue. Unsupervised learning of compositional scene representations from multi-ple unspecified viewpoints. In Proceedings of the AAAI Con-ference on Artificial Intelligence , pages 8971–8979, 2022. [62] Yanjie Ze, Ge Yan, Yueh-Hua Wu, Annabella Macaluso, Yuying Ge, Jianglong Ye, Nicklas Hansen, Li Erran Li, and Xiaolong Wang. Gnfactor: Multi-task real robot learning with generalizable neural feature fields. In Conference on robot learning , pages 284–301. PMLR, 2023. [63] Yanjie Ze, Gu Zhang, Kangning Zhang, Chenyuan Hu, Muhan Wang, and Huazhe Xu. 3d diffusion policy: Gen-eralizable visuomotor policy learning via simple 3d repre-sentations. arXiv preprint arXiv:2403.03954 , 2024. [64] Di Zhang, Weicheng Duan, Dasen Gu, Hongye Lu, Hai Zhang, Hang Yu, Junqiao Zhao, and Guang Chen. Learn-ing geometrically-grounded 3d visual representations for view-generalizable robotic manipulation. arXiv preprint arXiv:2601.22988 , 2026. [65] Ellina Zhang, Madhavan Iyengar, Amir Zadeh, Chuan Li, David Held, Deepak Pathak, and Tal Daniel. 3d-dlp: Self-supervised 3d object-centric scene representation learning. In International Conference on Machine Learning (ICML) ,2026. [66] Jason Y. Zhang, Amy Lin, Moneish Kumar, Tzu-Hsuan Yang, Deva Ramanan, and Shubham Tulsiani. Cameras as rays: Pose estimation via ray diffusion. In The Twelfth Inter-national Conference on Learning Representations , 2024. [67] Kai Zhang, Sai Bi, Hao Tan, Yuanbo Xiangli, Nanxuan Zhao, Kalyan Sunkavalli, and Zexiang Xu. GS-LRM: Large re-construction model for 3D gaussian splatting. In European Conference on Computer Vision , 2024. [68] Richard Zhang, Phillip Isola, Alexei A Efros, Eli Shecht-man, and Oliver Wang. The unreasonable effectiveness of deep features as a perceptual metric. In Proceedings of the IEEE conference on computer vision and pattern recogni-tion , pages 586–595, 2018. [69] Yuhang Zheng, Xiangyu Chen, Yupeng Zheng, Songen Gu, Runyi Yang, Bu Jin, Pengfei Li, Chengliang Zhong, Zeng-mao Wang, Lina Liu, et al. Gaussiangrasper: 3d lan-guage gaussian splatting for open-vocabulary robotic grasp-ing. IEEE Robotics and Automation Letters , 2024. [70] Tinghui Zhou, Richard Tucker, John Flynn, Graham Fyffe, and Noah Snavely. Stereo magnification: Learning view synthesis using multiplane images. arXiv preprint arXiv:1805.09817 , 2018. [71] Yifeng Zhu, Abhishek Joshi, Peter Stone, and Yuke Zhu. Vi-ola: Imitation learning for vision-based manipulation with object proposal priors. In Conference on Robot Learning ,pages 1199–1210. PMLR, 2023. [72] Chen Ziwen, Hao Tan, Kai Zhang, Sai Bi, Fujun Luan, Yi-cong Hong, Fuxin Li, and Zexiang Xu. Long-LRM: Long-sequence large reconstruction model for wide-coverage gaussian splats, 2025. 
+
+11 A. Appendix 
+
+A.1. ParticleSplat: Extended Method 
+
+We seek to learn a structured 3D latent representation from a set of V posed 2D observations O = {(xv , Pv , Kv )}Vv=1 . For each view v, the camera extrinsic pose is Pv = [ Rv |tv ] ∈ SE (3) , with rotation Rv ∈ SO (3) and translation tv ∈ R3.The camera intrinsics are given by Kv ∈ R3×3. Each observation xv ∈ RC×H×W has spatial dimensions H, W and 
+
+C ∈ { 3, 4} channels for RGB or RGB-D inputs, respectively. This formulation supports both multi-view and monocular setups, with monocular RGB-D ( V = 1 , C = 4 ) strictly required to resolve scale ambiguity where object size and depth are indistinguishable without parallax. Crucially, the particle structure in Deep Latent Particles (DLP)—with explicit position, scale, depth, transparency, and appearance attributes—closely mirrors the attributes of 3D Gaussian primitives in 3DGS, but remains confined to 2D image space. We bridge this gap by extending DLP particles to 3D scene space, enabling self-supervised learning of geometry-aware, object-centric representations that naturally yield segmentation masks without explicit supervision. This formulation adopts a self-supervised VAE with particle-based latents, where our view-aware encoder fuses 2D observations with camera geometry to propose particle posteriors, and our generative process employs a Gaussian Splatting decoder that transforms particles into 3D Gaussians via differentiable rasterization. We optimize a view-aware geometric evidence lower bound (ELBO) that balances reconstruction with view-dependent KL regularization. Together, this yields the first self-supervised object-centric VAE for 3D Gaussian Splatting, producing compact particle representations that enable both high-fidelity novel view synthesis and interpretable control for downstream decision-making. Our model is illustrated in Figure 1. 
+
+A.1.1. Multi-view Latent Particles 
+
+We structure the latent space as a set of multi-view particles Z = {zv,ℓ  
+
+> fg
+
+}V,L v=1 ,ℓ =1 ∪ {zv
+
+> bg
+
+}Vv=1 consisting of V × (L + 1) 
+
+entities, where V is the number of views, L is the number of foreground particles, and each view is augmented with a single background particle. Each foreground particle zfg = [ zp, z s, z d, z e, z t, z f ] ∈ R7+ dobj encodes disentangled stochas-tic attributes that explicitly separate image-plane geometry (projected 2D appearance in the camera view) from volumetric 
+
+structure (true 3D extent in world coordinates). The image-plane attributes include position zp ∼ N (μp, σ 2 
+
+> p
+
+) ∈ R2, rep-resenting 2D keypoint coordinates, and scale zs ∼ N (μs, σ 2 
+
+> s
+
+) ∈ R2, defining the particle’s spatial extent in pixel space (bounding-box dimensions). The volumetric attributes comprise depth zd ∼ N (μd, σ 2
+
+> d
+
+) ∈ R, encoding distance from the camera along the viewing ray to determine compositing order, and depth extent ze ∼ N (μe, σ 2 
+
+> e
+
+) ∈ R, modeling the particle’s thickness along the viewing direction. For example, a large ze creates “deep” objects spanning multiple depth planes (like a box), while a small ze yields “flat” objects concentrated near zd (like a sheet). Each particle also includes transparency 
+
+zt ∼ Beta( a, b ) ∈ [0 , 1] for alpha compositing and visual features zf ∼ N (μf , σ 2 
+
+> f
+
+) ∈ Rdobj encoding local appearance and semantics. Per-view background particles zbg ∼ N (μbg , σ 2
+
+> bg
+
+) ∈ Rdbg capture residual scene appearance not modeled by foreground particles. This factorization enables consistent lifting of 2D-inferred particles into coherent 3D representations. 
+
+A.1.2. Encoder 
+
+The encoder qϕ(Z | O ) models the posterior distribution over latent particles given sets of posed observations. We extend the DLP encoder [10] to support multi-view inputs, depth, and camera geometry. The encoding proceeds hierarchically: keypoint proposals are first extracted from each view via differentiable spatial softmax (SSM [21]) over patch-based feature maps. For each proposal, a spatial glimpse of dimensions Hp × Wp is extracted using a Spatial Transformer Network (STN [19]) with bilinear sampling, and the remaining particle attributes (Sec. A.1.1) are encoded via small CNNs. An attention-based interaction module [10] then refines relative depth and appearance features through cross-view attention over the particles of all context views. Extracting 3D geometry from 2D observations is ill-posed [34], so we introduce camera-conditioned modifications detailed below. 
+
+Geometric Priors via Ray Embeddings. To inject 3D-aware priors, we fuse spatially-aligned geometric conditioning into both convolutional and attention modules. For each pixel at 2D coordinates (u, v ), we compute its corresponding camera ray with origin o ∈ R3 (camera center from extrinsics) and direction d ∈ R3 (unprojected via K−1, rotated by R, and 
+
+L2-normalized): 
+
+d = RK −1[u, v, 1] T
+
+∥RK −1[u, v, 1] T ∥ .
+
+We encode rays using Pl¨ ucker coordinates r = ( d, o × d) ∈ R6 [66], providing a continuous, translation-invariant parame-terization of 3D lines. 12 Convolutional Conditioning. Let hl ∈ RCl×Hl×Wl be an intermediate feature map at layer l, and let C = {ci}Mi=1 be the set of M geometric tensors (e.g., ray maps, optional depth). Each ci is resampled to (Hl, W l) via bilinear interpolation, with direction components L2-normalized post-interpolation. The tensors are then projected to channel space via 1 × 1
+
+convolutions and additively fused: 
+
+h′ 
+
+> l
+
+= hl +
+
+> M
+
+X
+
+> i=1
+
+(Wi ∗ ϕ(˜ ci) + bi) ,
+
+where ϕ is an activation, and Wi, bi are learned per-tensor projections. 
+
+Attention Conditioning. For particle z with image-plane position zp = ( up, v p), we compute its associated ray r ∈ R6
+
+as above. This pose signal modulates the particle embedding hz via feature-wise linear modulation (FiLM [42]) before self-attention: 
+
+hz = f (z), (γ, β) = g(r),
+
+˜hz = γ ⊙ hz + β,
+
+where f projects to transformer dimension, g maps rays to FiLM parameters (initialized near identity: γ ≈ 1, β ≈ 0), and 
+
+⊙ is element-wise multiplication. Figure 5 shows a high-level, PyTorch-style sketch of this ray-conditioned attention block.                                                              
+
+> 1h_z =f(z) #embed particle zinto token features
+> 2r=plucker_ray(z_p, K, R, o) #ray from particle image location z_p=(u,v);
+> 3#K: intrinsics, R: rotation, o: camera center
+> 4gamma, beta =g(r) #FiLM scale and shift from ray embedding
+> 5h_z_tilde =gamma * h_z +beta #geometry-conditioned particle token
+> 6H=SelfAttention({h_z_tilde}) #refine all particle tokens jointly
+
+Figure 5. Ray-conditioned attention (PyTorch-style pseudocode). Each particle token is FiLM-modulated using the Pl¨ ucker ray corre-sponding to its image-plane position before self-attention. 
+
+A.1.3. Decoder 
+
+The decoder models the likelihood pθ (x | Z ) and defines the generative mapping from the latent particle set Z to image observations. Given V posed cameras {(P v , K v )}Vv=1 and the multi-view latent particle set 
+
+Z = {zv,ℓ  
+
+> fg
+
+}V,L v=1 ,ℓ =1 ∪ { zv
+
+> bg
+
+}Vv=1 ,
+
+with L foreground particles per view, the decoder first transforms all particles into an explicit set of world-space 3D Gaus-sian primitives and then renders them via a differentiable 3D Gaussian splatting rasterizer. Concretely, for each view v and foreground particle ℓ we decode a particle-aligned local Gaussian field anchored to that particle, while each background par-ticle produces a dense, pixel-aligned background Gaussian field. The final scene representation is obtained by concatenating all foreground and background Gaussians and rendering them into each camera view to obtain RGB and depth reconstruc-tions (ˆIv , ˆDv ) ∈ R3×H×W × R1×H×W for all v ∈ { 1, . . . , V }. In practice, both the foreground and background decoders are implemented as CNNs with dedicated Gaussian heads that predict SH color, position offsets, depth residuals, scales, orientations, and opacities from particle appearance features. 
+
+Step 1: Foreground particle → canonical patch of Gaussians. Each foreground particle 
+
+zv,ℓ  
+
+> fg
+
+= zv,ℓ p , z v,ℓ s , z v,ℓ d , z v,ℓ e , z v,ℓ t , z v,ℓ f
+
+
+
+is parameterized by image-plane position zv,ℓ p ∈ R2, image-plane scale zv,ℓ s ∈ R2, depth zv,ℓ d ∈ R, depth extent zv,ℓ e ∈ R,transparency zv,ℓ t ∈ [0 , 1] , and an appearance latent zv,ℓ f ∈ Rdobj . The foreground decoder Dfg uses only the appearance latent to produce a fixed-resolution canonical patch of size Sh × Sw, yielding a grid-aligned set of N = ShSw Gaussians in a local patch coordinate frame: 
+
+G v,ℓ  
+
+> fg
+
+= Dfg (zv,ℓ f ) = {cv,ℓ i , δv,ℓ i , ∆dv,ℓ i , qv,ℓ i , sv,ℓ i , o v,ℓ i }Ni=1 .
+
+Each Gaussian in this canonical patch is parameterized by spherical-harmonic (SH) color coefficients cv,ℓ i , a sub-cell offset 
+
+δv,ℓ i ∈ R2, a depth residual ∆dv,ℓ i ∈ R, a quaternion qv,ℓ i ∈ R4, anisotropic scales sv,ℓ i ∈ R3, and an opacity logit ov,ℓ i ∈ R.At this stage, all Gaussians live in a canonical patch coordinate system, analogous to the canonical glimpse frame in DLP. 13 Step 2: Canonical patch → image-plane Gaussians. In DLP, decoded RGB patches are “unwarped” back to the image using the STN sampling transform. Here, instead of resampling pixels, we must transform the Gaussian parameters (centers and covariances) from patch coordinates into the full-image coordinate frame using the same affine map. We represent the canonical patch grid by u ∈ [0 , 1] 2 (one coordinate per cell). For each Gaussian, the decoder predicts a bounded sub-cell offset from δ ∈ R2 via a sigmoid: 
+
+∆u =  σ(δ) − 12
+
+ ⊙   1 
+
+> Sw
+
+, 1
+
+> Sh
+
+,
+
+and the patch-normalized center is 
+
+u(patch) = 2( u + ∆ u) − 1,
+
+where the factor 2( ·) − 1 converts from [0 , 1] 2 to the STN convention [−1, 1] 2.The particle’s STN transform defines an affine map from patch-normalized to image-normalized coordinates: 
+
+Av,ℓ =
+
+sx 0 px
+
+0 sy py
+
+
+
+,
+
+(px, p y ) = zpv,ℓ , (sx, s y ) = σ(zv,ℓ s ).
+
+Lifting to homogeneous coordinates v(patch) = [ u(patch) ; 1] , the corresponding image-frame centers in [−1, 1] 2 are 
+
+u(img) = Av,ℓ v(patch) ,
+
+and we finally map to pixel-normalized coordinates [0 , 1] 2 via 
+
+u(img) ← 12 (u(img) + 1) .
+
+We apply an analogous transformation to Gaussian covariances. Let Σ(patch) ∈ R3×3 be a covariance in the canonical patch frame. The Jacobian Jv,ℓ of the affine map scales the x,y axes according to the particle scale and patch size, 
+
+Jv,ℓ = diag 
+
+ sx 
+
+> sw
+
+, sy 
+
+> sh
+
+, 1
+
+
+
+, sw = Sw/W, sh = Sh/H, 
+
+and the corresponding covariance in the image-aligned frame is 
+
+Σ(img) = Jv,ℓ Σ(patch) (Jv,ℓ )⊤.
+
+This yields per-Gaussian centers and covariances that are properly placed and scaled in the full image domain. Non-spatial attributes (SH color, depth residuals, opacity logits) are carried over unchanged at this stage. 
+
+Step 3: Image-plane Gaussians → world-space 3D Gaussians. The latent particle attributes (zv,ℓ d , z v,ℓ e , z v,ℓ t ), together with camera geometry, provide exactly the degrees of freedom needed to place Gaussians in 3D. For each view v and particle 
+
+ℓ, we transform the image-plane Gaussians 
+
+G v,ℓ  
+
+> fg
+
+= {cv,ℓ i , δv,ℓ i , ∆dv,ℓ i , qv,ℓ i , sv,ℓ i , o v,ℓ i }Ni=1 
+
+into a set of world-space 3D Gaussians 
+
+Gv,ℓ  
+
+> fg
+
+= {(μv,ℓ i , Σv,ℓ i , cv,ℓ i , α v,ℓ i )}Ni=1 ,
+
+where μv,ℓ i ∈ R3 and Σv,ℓ i ∈ R3×3 are the world-space mean and covariance, cv,ℓ i are SH color coefficients, and αv,ℓ i ∈ [0 , 1] 
+
+are the final opacities. 
+
+Depth and 3D means. We first map the particle depth and extent latents to a bounded metric depth along the camera Z
+
+axis: 
+
+dv,ℓ = dmin + σ(zv,ℓ d ) ( dmax − dmin ),
+
+∆v,ℓ = 12 (dmax − dmin ) σ(zv,ℓ e ),ζv,ℓ i = dv,ℓ + ∆ v,ℓ tanh(∆ dv,ℓ i ),
+
+14 where [dmin , d max ] defines the valid depth range and ζv,ℓ i is the planar-Z depth for Gaussian i. Let uv,ℓ i ∈ [0 , 1] 2 be its pixel-normalized image-plane center. Using the camera pose P v = [ Rv | ov ] and intrinsics Kv , we form an unnormalized ray direction 
+
+ov ∈ R3, dv (u) = Rv (Kv )−1
+
+
+
+ux
+
+uy
+
+1
+
+ .
+
+The world-space mean is then 
+
+μv,ℓ i = ov + ζv,ℓ i dv (uv,ℓ i ).
+
+Covariances. We post-process predicted scales and quaternions to enforce validity: 
+
+sv,ℓ i = smin + ( smax − smin ) σ(sv,ℓ i ), qv,ℓ i = qv,ℓ i
+
+∥qv,ℓ i ∥ + ϵ .
+
+A positive semi-definite covariance in the camera-aligned local frame is constructed as 
+
+Σv,ℓ i, cam = Q(qv,ℓ i ) diag  sv,ℓ i ⊙ sv,ℓ i
+
+ Q(qv,ℓ i )⊤,
+
+where Q(·) converts a unit quaternion to a 3 × 3 rotation matrix. We then rotate covariances into the world frame using Rv :
+
+Σv,ℓ i = Rv Σv,ℓ i, cam (Rv )⊤.
+
+Opacity and SH coefficients. We map opacity logits to bounded opacities and gate them by the particle transparency, 
+
+αv,ℓ i = zv,ℓ t ψ σ(ov,ℓ i ),
+
+where ψ(·) is a monotonic opacity mapping (optionally scheduled during warm-up). The decoded SH coefficients cv,ℓ i
+
+parameterize view-dependent appearance; we rotate them into a consistent world SH frame using Rv (standard SH rotation). Altogether, each foreground particle yields a set of world-space 3D Gaussians Gv,ℓ  
+
+> fg
+
+fully determined by its attributes and the camera geometry. 
+
+Background particle → world-space Gaussians. Each view v additionally contains a single background latent particle 
+
+zv
+
+> bg
+
+, decoded by a global background decoder Dbg into a dense H × W field of pixel-aligned Gaussians: 
+
+G v 
+
+> bg
+
+= Dbg (zv
+
+> bg
+
+).
+
+Since these Gaussians are already defined at full-image resolution, they do not require the patch-to-image affine unwarping step used for foreground glimpses. We lift each background Gaussian to world space using the same camera-geometry mapping (ray and depth parameterization) as above, obtaining Gv
+
+> bg
+
+.
+
+Stitching and differentiable rendering. We form global foreground and background Gaussian sets by aggregating across views and particles: 
+
+Gfg = [
+
+> v,ℓ
+
+Gv,ℓ  
+
+> fg
+
+, Gbg = [
+
+> v
+
+Gv
+
+> bg
+
+, G = Gfg ∪ G bg .
+
+Thanks to the compositional nature of Gaussian splatting, stitching is implemented as simple concatenation. Given any target camera (P t, K t), we render RGB and depth using the standard 3DGS rasterizer with front-to-back alpha compositing, 
+
+(ˆIt, ˆDt) = R(G; P t, K t),
+
+enabling multi-view reconstruction and novel view synthesis directly from the compact object-centric latent particles. Moreover, we can render each foreground particle independently to obtain an explicit 3D object decomposition. Let Gv,ℓ 
+
+> fg
+
+be the set of world-space Gaussians associated with particle ℓ from view v. For a target camera (P t, K t), per-particle RGBD is obtained by 
+
+(ˆIt,v,ℓ  
+
+> fg
+
+, ˆDt,v,ℓ  
+
+> fg
+
+) = R(Gv,ℓ  
+
+> fg
+
+; P t, K t),
+
+15 while background-only RGBD is rendered as 
+
+(ˆIt
+
+> bg
+
+, ˆDt
+
+> bg
+
+) = R(Gbg ; P t, K t).
+
+More generally, any subset Gsub ⊆ G can be rendered via 
+
+(ˆIt
+
+> sub
+
+, ˆDt
+
+> sub
+
+) = R(Gsub ; P t, K t),
+
+supporting object-wise masks, scene editing, and controllable recomposition directly in 3D Gaussian space. 
+
+A.1.4. Loss 
+
+Given a set of posed observations O = {(xv , Pv , Kv )}, we partition the views into a context set C and a target set T .The context views are encoded to infer the multi-view latent particle representation Z, while the target views are used to supervise novel views and encourage 3D consistency and occlusion reasoning. The decoder renders per-view RGB and depth by transforming Z into 3D Gaussians and rasterizing them under the corresponding camera parameters. We modify the ELBO objective to account for view geometry as follows. We treat the multi-view latent particles Z as describing a single underlying 3D scene, while each observation xv is a 2D projection of that scene. Reconstruction terms are averaged over all context and target views, whereas the KL term is applied once at the scene level and is not normalized by the number of views. The negative ELBO is 
+
+LELBO = 1
+
+|C| + |T | 
+
+
+
+βctx rec 
+
+X
+
+> v∈C
+
+E(xv , ˆxv ) + βtgt rec 
+
+X
+
+> t∈T
+
+E(xt, ˆxt)
+
+| {z }
+
+> Lrec
+
++ βKL KL( qϕ(Z | C ) ∥ p(Z)) 
+
+| {z }
+
+> LKL
+
+,
+
+where βctx rec and βtgt rec weight reconstruction on context and target views, respectively, and βKL controls the strength of scene-level regularization. 
+
+Reconstruction loss For each view i, the reconstruction compares the ground-truth RGB–depth pair xi = ( Ii, Di) with its rendering ˆxi = ( ˆIi, ˆDi):
+
+E(xi, ˆxi) = L(i)img + λ(i) 
+
+> D
+
+˜Di − ˜ˆDi 22,
+
+where λ(i) 
+
+> D
+
+is a scalar weight that balances the depth reconstruction term relative to the image loss for view i, and the image reconstruction term L(i)img is either a pixel-wise mean-squared error, 
+
+L(i)img = Ii − ˆIi 22,
+
+or a VGG-based perceptual loss [17], 
+
+L(i)img = X
+
+> ℓ
+
+Φℓ(Ii) − Φℓ(ˆIi) 22,
+
+with Φℓ denoting features extracted from layer ℓ of a fixed pretrained VGG network. Following Splatt3R [50], we additionally introduce a supervision mask M i ∈ { 0, 1}H×W in the monocular setting ( |C| =1) to restrict losses to pixels that are geometrically reconstructible from the single context view. When rendering target views that may cover regions outside the context camera frustum, pixels with M i = 0 are excluded from both image and depth terms, while pixels with M i = 1 receive full supervision. This masking avoids penalizing unavoidable hallucinations and stabilizes training under wide-baseline novel-view supervision from monocular input. 
+
+KL-divergence loss. Following DLP [9], we regularize the inferred latent particles with a masked KL-divergence against fixed priors. In our setting, however, the latent set Z represents a single 3D scene inferred from the context set C, rather than a sequence of per-frame latent states. Accordingly, the KL term is applied once at the scene level and is not averaged over views. Recall that 
+
+Z = {zv,ℓ  
+
+> fg
+
+}V,L v=1 ,ℓ =1 ∪ { zv
+
+> bg
+
+}Vv=1 ,
+
+16 where each foreground particle is 
+
+zv,ℓ  
+
+> fg
+
+= zv,ℓ p , z v,ℓ s , z v,ℓ d , z v,ℓ e , z v,ℓ t , z v,ℓ f
+
+.
+
+Here, zv,ℓ p and zv,ℓ s denote image-plane offset and scale, zv,ℓ d and zv,ℓ e denote depth and depth extent, zv,ℓ t denotes transparency, and zv,ℓ f denotes the particle appearance feature. The background latent zv 
+
+> bg
+
+contains only background appearance features, following LPWM. We adopt the masked KL formulation of DLP, where particles with low transparency contribute less to the KL penalty for geometric and appearance attributes. The scene-level KL loss is 
+
+LKL =
+
+> V
+
+X
+
+> v=0
+> L
+
+X
+
+> ℓ=0
+
+X
+
+> att ∈{ o,s,d,e }
+
+KL 
+
+
+
+qϕ(zv,ℓ  
+
+> att
+
+| C ) ∥ patt (z)
+
+
+
+⊙ zv,ℓ t
+
++ KL 
+
+
+
+qϕ(zv,ℓ t | C ) ∥ pt(z)
+
+
+
++ βf KL 
+
+
+
+qϕ(zv,ℓ f | C ) ∥ pf (z)
+
+
+
+⊙ zv,ℓ t
+
+!
+
++
+
+> V
+
+X
+
+> v=0
+
+βf KL( qϕ(zbg | C ) ∥ pbg (z)) ,
+
+where βf balances the KL contribution of appearance features relative to geometric attributes. As in DLP, the KL terms for geometry and appearance are masked by zv,ℓ t , while the KL term for transparency itself is not masked. Intuitively, particles that are effectively inactive should not be penalized for their geometric or appearance latents, but the model must still learn whether each particle should be active. Relative to DLP, the key difference is that the posterior is conditioned on the multi-view context set C and parameterizes a single scene-level latent representation shared across all rendered views. Therefore, the KL divergence loss regularizes the scene decomposition jointly across observations, encouraging a compact particle representation whose projections remain consistent under changes in viewpoint. 
+
+Particle regularization. In addition to the KL term, we optionally follow DLP [9] and regularize particle transparency to discourage the degenerate solution in which all particles remain active. In our setting, this failure mode would allow the model to explain a scene using many redundant particles, weakening object-centric decomposition and reducing 3D consistency. We therefore apply an L2 penalty to the transparency variables: 
+
+Lreg =
+
+> V
+
+X
+
+> v=0
+> L
+
+X
+
+> ℓ=0
+
+(zv,ℓ t )2.
+
+This regularization biases the model toward activating only a limited number of particles to explain the scene. As particles with near-zero transparency contribute little to the rendered output, the model is encouraged to allocate representational capacity to a smaller set of informative particles. This promotes a more efficient scene decomposition and reduces redundancy among particles, which in turn stabilizes training and improves the consistency of the decoded 3D Gaussian representation during novel-view rendering. The final training objective augments the ELBO with this regularization term: 
+
+LELBO = Lrec + βKL LKL + βreg Lreg ,
+
+where βreg controls the strength of particle sparsity regularization. Following DLP, we set βreg = βKL unless stated other-wise. We provide the detailed hyperparameters for the prior distributions of different attributes in Table 7. 
+
+A.2. Experiments Details 
+
+A.2.1. RLBench Experiments 
+
+We evaluate our method on RLBench [22] in simulation, a widely used benchmark for language-conditioned robotic manip-ulation that provides multi-view visual observations and diverse task variations. 
+
+Dataset overview. To ensure fair comparison with prior work, we follow exactly the same 10-task subset (see Table 4) used by GNFactor [62] and ManiGaussian [35]. This setup contains 166 task variations in total. During training, we use 20 demonstrations per task, resulting in 200 training episodes overall. During evaluation, we run 25 rollout episodes per task. 17 Task Variation Type Number of Variations Language Template                                          
+
+> close jar color 20 “close the jar”
+> open drawer placement 3“open the drawer”
+> sweep to dustpan size 2“sweep dirt to the dustpan”
+> meat off grill category 2“take the off the grill”
+> turn tap placement 2“turn tap”
+> slide block color 4“slide the block to target”
+> put in drawer placement 3“put the item in the drawer”
+> drag stick color 20 “use the stick to drag the cube onto the target”
+> push buttons color 50 “push the button, [then the button]”
+> stack blocks color, count 60 “stack blocks”
+
+Table 4. RLBench dataset task variations and corresponding language templates. Each task is described by its own variation type, number of variations, and associated language template. 
+
+Figure 6. RLBench camera views. Left: the front camera observation. Right: the auxiliary 21-view camera set rendered around the scene. The green box marks the viewpoint used to train and evaluate the imitation learning policy in the single-view setting. The red boxes indicate the viewpoints used for training and evaluation in the multi-view setting. 
+
+Task variations. The 166 variations arise from controlled changes in both object attributes and scene layout. In particular, RLBench varies object appearance over a palette of 20 colors, object extent over two size regimes (short and tall), and task cardinality over three count settings (1, 2, and 3 objects), while placement-specific and category-specific options are defined on a per-task basis. For example, tasks such as open drawer vary by the target drawer location, whereas other tasks vary the manipulated object category or its spatial target. Beyond these discrete semantic factors, the initial arrangement of objects is further randomized by sampling tabletop poses within bounded regions, introducing additional geometric diversity across demonstrations. Together, these sources of variation require the policy to learn transferable structure across tasks rather than overfitting to a narrow set of scene instantiations. 
+
+Language instructions. For each episode, RLBench provides a natural language instruction describing the manipulation goal. We use these language annotations as the task specification paired with the corresponding visual observations, and encode the language instructions using a pre-trained CLIP [44] language encoder following prior works [35, 49, 62]. 
+
+Camera views. RLBench provides synchronized observations from multiple cameras for each episode (as shown in Fig 6). In our setup, we use the front camera observation as the primary input stream and retain its associated RGB image, depth map, and camera pose. In addition, following the data generation protocol of GNFactor and ManiGaussian, we render an auxiliary 21-view multi-view dataset for each scene, consisting of RGB images, depth maps, and corresponding camera poses. These auxiliary views provide richer geometric supervision for 3D representation learning. 
+
+3D reconstruction details. We train our representation using a 3D reconstruction objective, where the scene is recon-structed conditioned on a set of context cameras C and supervised using images from a set of target cameras T . During training, the reconstruction is evaluated against the union of context and target views, i.e., C ∪ T , while predictions are conditioned on the context observations. 18 Task Video Clip Horizon (timesteps)              
+
+> task a clip 0 514 clip 1 427 clip 2 495
+> antacid in drawer
+> clip 0 340 clip 1 279 clip 2 303 clip 3 278 clip 4 285 clip 5 286
+> Total 3207
+> Table 5. Real-world dataset video clips and planning horizons for each task. Each task contains multiple video clips of different configurations with different time-step horizons.
+
+For the multi-view setting, context and target views are sampled from the auxiliary set of 21 cameras rendered around the scene. Following the view sampling strategy of [6], we sample two context views ( |C| = 2 ) and four target views ( |T | = 4 ). At the beginning of training, the two context views are selected to be spatially close to each other, with a view index gap 
+
+sampled from the range [1 , 4] . As training progresses, the separation between the context views is gradually increased, allowing the view index gap to expand to [5 , 20] , with the maximum gap reached halfway through the training schedule. Target views are then randomly sampled from the views whose indices lie between the two selected context views. In the single-view setting, the front camera is used as the sole context view ( |C| = 1 ), and two target views ( |T | = 2 )are sampled from the auxiliary set of 21 cameras. Since the context view is fixed, target views are sampled relative to the front camera. At the start of training, the target views are chosen from viewpoints close to the front camera, centered around the view index that most closely corresponds to the front observation (index 10), with a view index gap in the range [1 , 2] 
+
+(approximately indices 8–12). As training progresses, the sampling range gradually expands, increasing the view index gap to [5 , 10] , with the maximum gap reached halfway through training. 
+
+Imitation learning details. Once the representation model is trained, we freeze its parameters and use the encoder to extract features from the demonstration observations. These encoded representations serve as inputs to our imitation learning policy, which is then trained to imitate the demonstrations of the RLbench manipulation tasks. The imitation learning policy is a modified version of EC-Diffuser [43] that predicts a sequence of actions with a planning horizon of 5 given the current encoded observation and additionally a language instruction conditioning. We include the details of its implementation in Sec. A.5.2. At execution time, only the first action in the predicted trajectory is applied to the environment before the observation is updated and the next prediction step begins, following a receding-horizon control scheme. Under the multi-view setting, the policy receives observations from a fixed subset of cameras selected from the auxiliary 21-view camera set, as indicated by the red boxes in Fig. 6. Under the single-view setting, the policy instead takes only the front camera observation as input, as indicated by the green box in Fig. 6. Further implementation details of the imitation policy are provided in Sec. A.5.2. 
+
+A.2.2. Real-world Experiments 
+
+We further evaluate our method in real-world settings using a robotic manipulator performing simple tabletop manipulation tasks. Our goal is to assess the portability of our approach by capturing multi-view observations using only a handheld iPhone. Specifically, we record a video while walking around the scene, which allows us to obtain dense multi-view observations without requiring a calibrated multi-camera setup. Given strong simulation results on decision-making alongside successful real-world decomposition and novel view synthesis here, future work can explore decision-making applications on this real-world data. 
+
+Dataset overview. We construct two real-world robotic manipulation scenes, antacid in drawer and pick up cup 
+
+(Fig. 7). The dataset consists of six and three video clips for the two tasks, respectively. In each clip, the robot arm is held at a fixed pose corresponding to a particular stage of the manipulation process. To increase scene diversity between each video clip, we vary both the robot arm configuration and the object arrangement to mimic snapshots of different manipulation states. This design allows the learned representation to capture the structure of the task and generalize to unseen configurations and intermediate states. 19 Figure 7. Samples from the Real-world dataset. Top: selected RGB images from video clips of antacid in drawer task. Bottom:   
+
+> selected RGB images from video clips of pick up cup task.
+
+For each video clip, we split the captured trajectory into training and evaluation sets by selecting every fourth frame as a held-out evaluation view, while the remaining frames are used for training. The time-step horizons of the clips are summarized in Table 5. 
+
+3D reconstruction details. Since depth observations are unavailable in this real-world dataset, we train and evaluate our method only under the multi-view setting. We adopt the same multi-view training protocol used in RLBench, where two context views and four target views are sampled using the same view sampler. The initial context view gap is sampled from the range [10 , 100] , and gradually increases to [50 , 200] as training progresses. Implementation details of the iPhone-captured real-world dataset generation pipeline are provided in Sec. A.5.6. 
+
+A.3. Baselines 
+
+In this section, we provide extended details on the baselines used in this work. 
+
+A.3.1. GNFactor [62]. 
+
+GNFactor learns 3D semantic feature volumes from single RGB-D observations using Generalizable Neural Feature Fields (GNF). These volumes, which are distilled from pre-trained 2D foundation models via multi-view rendering and Stable Diffusion features [45]—are processed by a Perceiver Transformer [20] conditioned on language to predict multi-task actions via behavior cloning. 
+
+A.3.2. ManiGaussian [35]. 
+
+ManiGaussian extends Gaussian splatting with temporal dynamics and per-primitive semantic features, assuming rigid ob-ject motion. Given an observation and candidate action, its world model comprises: (i) a representation network for visual features, (ii) Gaussian parameter regression, (iii) deformation prediction for temporal evolution, and (iv) rendering for super-vision. A PerceiverIO [20] predicts discretized actions from the Gaussian representation and language, trained via weighted reconstruction, feature alignment, action prediction, and future-frame consistency losses. 20 A.3.3. VAE-GS 
+
+We additionally consider a baseline, termed VAE-GS, that uses the same 3D geometry-aware encoder and Gaussian decoder as introduced in Sec. A.1, but replaces the object-centric latent space with a dense patch-level one. Specifically, the input images are first patchified and processed by the same CNN backbone. Similar to the object-centric formulation, this baseline retains a compact latent bottleneck that can be used as the visual representation for downstream imitation learning; however, this bottleneck is organized as patch-level latent features rather than object-centric particles. The resulting latent features are then upsampled back to the original patch resolution and decoded into pixel-aligned Gaussians. Accordingly, components that depend on an object-centric latent decomposition—such as attention conditioning in the encoder and particle-aligned Gaussian transformations in the decoder—are removed. To ensure a fair comparison, we use the same patch size as in our method and train VAE-GS with an ELBO objective analogous to Sec. A.1.4: 
+
+LELBO = Lrec + βKL LKL .
+
+Here, Lrec uses the same multi-view reconstruction objective as in Sec. A.1.4. The key difference lies in the KL term: instead of regularizing an object-centric set of latent particles with masked attribute-wise priors, VAE-GS regularizes a dense patch-level latent tensor with a standard Gaussian prior. Concretely, given multi-view observations O, the encoder predicts a diagonal Gaussian posterior 
+
+qϕ(Znoc | O ) = N  Znoc ; μϕ(O), diag  σ2
+
+> ϕ
+
+(O) ,
+
+where Znoc ∈ RNp×d denotes the non-object-centric patch latent representation, with Np the number of patches and d the latent dimension. The decoder maps this latent code to pixel-aligned Gaussian parameters, 
+
+G = Dθ (Znoc ),
+
+which are then rendered into context and target views. The KL term is therefore defined as 
+
+LKL = DKL (qϕ(Znoc | O ) ∥ p(Znoc )) , p(Znoc ) = N (0, I),
+
+and, since both posterior and prior are diagonal Gaussians, it is computed in closed form as 
+
+DKL (qϕ(Znoc | O ) ∥ p(Znoc )) = 12
+
+X
+
+> j
+
+ μ2 
+
+> j
+
++ σ2 
+
+> j
+
+− log σ2 
+
+> j
+
+− 1 .
+
+This baseline isolates the effect of replacing the object-centric latent space with a compact non-object-centric patch bottleneck while keeping the same 3D geometric conditioning and rendering framework. 
+
+A.4. Hyperparameters and Training Details 
+
+Training. We implement our method in PyTorch [41] and optimize all models using Adam [27] with β1 = 0 .9, β2 = 0 .999 ,and ϵ = 10 −6. Unless otherwise specified, we use a constant learning rate of 8 × 10 −5 and a batch size of 8, and train for 50,000 gradient steps. Training is performed on a single A6000 GPU and takes approximately 30 hours for RLBench dataset, and 2 hours for the real-world dataset. 
+
+Data preprocessing and augmentation. All input images are center-cropped and resized to 128 × 128 . During training, we apply random horizontal flipping as data augmentation. We normalize camera intrinsics, and convert camera extrinsics to the camera-to-world ( c2w ) convention. 
+
+Hyperparameters. We provide the full set of hyperparameters in Table 6, with separate configurations reported for RL-Bench and real-world experiments. 
+
+A.5. Extended Experiment Results 
+
+A.5.1. Representation compactness and efficiency Latent space compactness We present an explicit compactness analysis against ManiGaussian in the single-view RLBench RGB-D setting used for policy-facing evaluation. Under the same output Gaussian field used for rendering ( 128 2 predicted 21 Hyperparameter RLBench Real-world                                                        
+
+> L(# Particles) 20 40
+> M(# KP Proposals) 256 256 Reconstruction Loss MSE LPIPS
+> βKL 0.02 0.1
+> βKP 0.02 0.01
+> λD0.001 -KP Proposal Patch Size 88Glimpse Ratio 0.125 0.25
+> dfg 16 16
+> dbg 516
+> dproj 512 512 FG CNN Ch. Mult. [1 ,4,8] [1 ,1,4,8]
+> BG CNN Ch. Mult. [1 ,1,1,4,8] [1 ,1,1,4,8]
+> Particle Interaction Transformer Layers 66Particle Interaction Transformer Heads 88SH Degree 14
+> dmax 5.0 10.0
+> dmin 0.5 0.01
+> smax 15.0 15.0
+> smin 0.5 0.5
+
+Table 6. Hyperparameters across datasets. The top section lists model hyperparameters, while the bottom section lists renderer hyper-parameters. We set the base CNN channel count to 32 for all experiments.                                                              
+
+> Attribute Distribution RLBench Real-world
+> Position Offset zoNormal, N(μ, σ 2)μ= 0 , σ = 0 .2μ= 0 , σ = 0 .1
+> Scale zsNormal, N(μ, σ 2)μ= Sigmoid −1(0 .25)
+> σ= 0 .3
+> μ= Sigmoid −1(0 .125)
+> σ= 0 .15
+> Depth zdNormal, N(μ, σ 2)μ= 0 , σ = 1 μ= 0 , σ = 1
+> Depth Extent zeNormal, N(μ, σ 2)μ= Sigmoid −1(0 .3)
+> σ= 0 .3
+> μ= Sigmoid −1(0 .3)
+> σ= 0 .3
+> Transparency ztBeta, Beta( a, b )a= 0 .01 , b = 0 .01 a= 0 .01 , b = 0 .01
+> Appearance Features zf, z bg Normal, N(μ, σ 2)μ= 0 , σ = 1 μ= 0 , σ = 1
+
+Table 7. Prior distribution parameters across datasets. We use dataset-specific prior settings for the latent attributes in our object-centric representation. 
+
+Gaussians, 23 parameters per Gaussian), ParticleSplat stores the scene in only 20 latent particles of 23 dimensions each, yielding a compression ratio of (128 2 ·23) /(20 ·23) = 819 .2×. In contrast, ManiGaussian uses a dense pre-Gaussian voxel feature grid: with voxel shape 100 , patch size 5, and 128-D features, the effective state is (100 /5) 3×128 = 20 3×128 , giving 
+
+(128 2 ·23) /(20 3 ·128) = 0 .368 ×.
+
+Runtime analysis Although Gaussians are decoded per view and stitched into a global set, the total effective number of gaussians is limited by the finite particle budget, opacity gating, and scene-level KL. In single-view RGB-D, ParticleSplat uses 251.1 MiB peak CUDA memory, 30.91 ms model-only latency, and 32.35 samples/s; with two views, it uses 347.3 MiB, 33.65 ms, and 29.72 samples/s. This shows practical policy learning applications under the real-time setting and efficient scaling with input views. 
+
+A.5.2. EC-Diffuser with language 
+
+In its original formulation, EC-Diffuser encodes each observation into a set of entity tokens, appends the action as an addi-tional token, and trains a conditional diffusion model to denoise future entity states and actions conditioned on the current state and a goal state. In RLBench, however, the task is specified by a natural language instruction rather than a goal obser-vation. We therefore replace goal conditioning with language conditioning .In our implementation, we use the self-attention variant of the language-conditioned denoiser. Specifically, the frozen visual encoder first maps each observation to a compact set of latent tokens, which serve as the state representation for the policy. The language instruction is encoded using a pre-trained CLIP text encoder, projected into the same transformer dimension, and treated as a set of additional tokens. That is, we treat the language tokens as additional particles and concatenate them with the action token and visual latent tokens before passing them to the transformer. The denoiser then jointly processes action, visual, and language tokens through self-attention over the planning horizon, 22 Figure 8. Extended qualitative Novel View Synthesis Results from RLBench scenes. We provide additional visualizations for novel view renderings produced by our learned representation as well as other baselines on RLBench scenes. 
+
+while the diffusion timestep is injected through adaptive layer normalization. In this way, task semantics from language can directly interact with the visual latent representation and action tokens within a shared token space, without requiring a separate cross-attention module. The model is trained with the standard diffusion denoising objective used in EC-Diffuser. During training, the visual encoder is frozen after representation learning, and only the diffusion policy is optimized on top of the extracted latent features. At inference time, the model predicts a sequence of future actions conditioned on the current encoded observation and language instruction, and only the first action is executed before replanning, following the same receding-horizon control scheme as EC-Diffuser. 
+
+A.5.3. Novel View Synthesis – Extended Results 
+
+This section extends the novel view synthesis results of Sec. 5.1. We provide additional qualitative comparisons on RLBench and real-world scenes (Figs. 8 and 9), an ablation of the 3D-aware priors in the encoder under the single-view and multi-view settings (Table 8), and results on a subset of RE10K at 256 × 256 resolution (Fig. 10). 
+
+Additional qualitative results. We provide extended qualitative results for novel view synthesis on RLBench scenes in Fig. 8 and real-world scenes in Fig. 9. Specifically, we include visualizations on RLBench under the single-view RGB-D setting to compare our method against competing baselines, as well as results on real-world scenes under the multi-view RGB setting. As shown in the figures, our method consistently produces renderings with high visual fidelity, preserving fine scene details and maintaining geometric consistency across viewpoints. Notably, these results highlight the benefit of our object-centric representation: by explicitly structuring the scene around coherent object-level entities, the learned representation captures both appearance and geometry in a way that supports more faithful view synthesis and more interpretable scene understanding. This is further reflected in the predicted depth, which remains visually interpretable and physically plausible, exhibiting coherent object boundaries and reasonable spatial layout. Together, these qualitative results suggest that the object-centric design of our representation contributes to strong generalization across both simulated and real-world environments while preserving both appearance quality and 3D structural consistency. 
+
+Ablations analysis - encoder. We ablate the 3D-aware priors in our encoder through novel view synthesis, since this evaluation directly measures how well the learned representation captures geometrically consistent scene structure. Rather than assessing downstream control, this experiment isolates the contribution of encoder-side 3D cues to multi-view consis-tency by comparing the full model against variants without pose input and without depth input. Table 8 reports the resulting novel view synthesis performance under both single-view and multi-view settings. 23 Figure 9. Extended qualitative Novel View Synthesis Results from Real-world scenes. We provide additional visualizations for novel view renderings produced by our learned representation as well as other learned baselines on real-world scenes. 
+
+Here, w/o pose removes all camera-pose conditioning from the encoder, including both the FiLM-based attention condi-tioning and the convolutional conditioning with pose-derived geometric features. In contrast, w/o depth removes depth from the convolutional conditioning pathway and also removes depth supervision from the reconstruction loss, so the model is trained purely from RGB reconstruction. All other components are kept unchanged. Several trends are clear from Table 8. First, pose conditioning is consistently effective across both settings: removing it degrades performance in both single-view and multi-view reconstruction, confirming that explicit camera geometry provides a strong inductive bias for learning view-consistent scene representations. This result supports our design choice of injecting pose information into both convolutional features and particle interactions. Second, depth supervision is essential in the single-view setting. When only one context view is available, removing depth causes a large drop in reconstruction quality. This is expected, since monocular reconstruction is fundamentally ambiguous, and explicit depth supervision and conditioning provide a critical signal for recovering 3D structure from a single observation. In contrast, depth is much less critical in the multi-view setting. With two context views, the performance gap between the full model and the variant without depth is comparatively small. Intuitively, under multi-view supervision the model can infer much of the scene geometry from cross-view consistency alone. In particular, the object-centric latent formulation encourages particles to align across views and explain a shared underlying 3D scene, which provides a form of self-supervised geometric alignment even without explicit depth supervision. As a result, the model can still learn meaningful depth structure from RGB-only multi-view reconstruction, although explicit depth remains beneficial. 
+
+Additional RE10K subset results. Although ParticleSplat is designed primarily as a self-supervised object-centric repre-sentation learning method for downstream decision making, we additionally evaluate it on the RE10K subset provided by MVSplat [6] to assess whether the learned particle-based representation generalizes beyond robot-tabletop scenes. This set-ting contains more diverse and visually complex in-the-wild scenes, and we conduct these experiments at 256 ×256 resolution to examine whether our compact particle bottleneck can preserve higher-frequency appearance and view-consistent geome-try. As shown in Fig. 10, ParticleSplat produces coherent novel-view renderings on held-out test scenes and achieves 24.21 PSNR, 0.816 SSIM, and 0.177 LPIPS. While under-performing RE10K-specialized SOTA due to the smaller training/eval-uation subset, these results demonstrate that the proposed representation remains effective beyond the manipulation-focused 24 Dataset Method Input PSNR ↑ SSIM ↑ LPIPS ↓                        
+
+> RLBench ParticleSplat (Ours) w/o depth 1×RGB 19.63 0.4248 0.6836 ParticleSplat (Ours) w/o pose 1×RGB-D 23.91 0.6815 0.4012
+> ParticleSplat (Ours) 1×RGB-D 25.35 0.7293 0.3563
+> ParticleSplat (Ours) w/o depth 2×RGB 28.38 0.7862 0.2894 ParticleSplat (Ours) w/o pose 2×RGB-D 27.62 0.7798 0.3016
+> ParticleSplat (Ours) 2×RGB-D 28.77 0.8144 0.2565
+
+Table 8. Ablation on RLBench novel view synthesis. We compare the full model with variants without camera pose input and without depth input under single-view and multi-view settings. We report PSNR ↑, SSIM ↑, and LPIPS ↓.
+
+Figure 10. Additional Novel View Synthesis Results from RE10k subset. We provide additional visualizations for novel view renderings produced by our learned representation on the subset of RE10k dataset. 
+
+distributions used in the main experiments. 
+
+A.5.4. Self-supervised Object-centric 3D scene Decomposition - Extended results 
+
+We present additional object-centric decompositions of 3D scenes in Fig. 11. Across both the synthetic RLBench dataset and the real-world dataset, our method yields clean 3D entity decompositions on unseen test scenes, highlighting its strong generalization capability. In the cluttered real-world setting, we apply non-maximum suppression as a post-processing step to remove redundant particles with overlapping bounding boxes and improve visual clarity. Additional videos of the novel view rendering of the decompositions can be found in the supplementary. 
+
+A.5.5. Imitation Learning - Extended results 
+
+This section extends the imitation-learning results of Sec. 5.3. We report per-task success rates on RLBench in the single-view setting (Table 9), results in the multi-view setting together with an ablation of the representation under both settings (Table 11), and the per-task MimicGen comparison against the state-of-the-art methods of that benchmark (Table 10), together with its experimental setup and result analysis. 25 Figure 11. Additional scene decompositions with ParticleSplat. Additional self-supervised object-centric decomposition on both syn-thetic RLBench data and real-world data.                                                               
+
+> Method /Task push buttons meat off grill slide block drag stick sweep to dustpan
+> GNFactor [62] 18.7 ±10.0 57.3 ±18.9 20.0 ±15.0 37.3 ±13.2 28.0 ±15.0 ManiGaussian [35] 20.4 ±12.2 60.2 ±18.2 24.3 ±12.8 92.3 ±11.4 64.5 ±13.4 VAE-GS 22.3 ±11.4 58.8 ±7.9 25.7 ±10.9 90.6 ±7.8 46.9 ±8.1 DLP [10] 36.7 ±8.9 65.4 ±4.1 54.6 ±5.2 93.1 ±5.5 73.5 ±7.3
+> ParticleSplat (Ours) 57.2 ±7.1 76.0 ±8.4 92.3 ±2.0 96.7 ±2.5 90.6 ±6.9
+> Method /Task turn tap open drawer put in drawer stack blocks close jar Overall
+> GNFactor [62] 50.7 ±8.2 76.0 ±5.7 0.0 ±0.0 4.0 ±3.3 25.3 ±6.8 31.7 ManiGaussian [35] 56.2 ±6.8 76.3 ±6.2 16.6 ±3.2 12.4 ±3.2 28.4 ±5.4 45.2 VAE-GS (EC-Diff.) 52.5 ±6.3 73.1 ±5.4 12.1 ±3.0 8.6 ±3.0 29.6 ±5.0 42.0 DLP [10] (EC-Diff.) 36.2 ±5.8 37.8 ±9.6 30.8 ±4.7 11.4 ±4.6 20.7 ±4.9 46.6
+> ParticleSplat (Ours) 83.8 ±4.6 88.4 ±4.3 78.4 ±5.8 19.4 ±2.9 54.1 ±4.7 73.0
+
+Table 9. Per-task imitation learning performance with different representations (single-view). Success rates (%) on RLBench manip-ulation tasks using policies conditioned on different learned representations. Results are mean ± standard deviation over three seeds (25 episodes per task per seed); Table 2 reports the per-category averages 
+
+Multi-view imitation learning. Unlike prior works using monocular RGB-D, we leverage multi-view inputs at inference. Since extending other policies to multi-view is nontrivial, we compare only against VAE-GS and DLP. Table 11 shows that ParticleSplat remains the strongest representation under the multi-view setting, achieving an overall success rate of 83.0%, compared with 59.4% for DLP and 52.7% for VAE-GS. The advantage is consistent across all ten tasks, including object-centric interaction tasks such as push buttons , meat off grill , and slide block , geometry-sensitive tasks such as open drawer and turn tap , and tasks that require both accurate spatial reasoning and object-level understanding, such as close jar , put in drawer , and stack blocks . While the relative benefit of additional viewpoints varies across 26 Method / Task Stack Stack Three Square Threading Coffee Three Pc. Asmbl.                                                           
+
+> DLP [10] (multi-view) 78.0 ±2.8 14.7 ±6.2 45.3 ±10.5 45.3 ±6.8 82.0 ±2.8 29.3 ±7.7 3D-DLP [65] 94.6 ±0.9 70.0 ±1.6 51.3 ±0.9 36.0 ±1.6 36.0 ±1.6 38.0 ±4.0 EquiDiff [54] (voxel only) 82.0 ±0.0 12.7 ±5.7 50.0 ±2.8 42.0 ±0.0 70.7 ±3.4 31.3 ±3.7
+> ParticleSplat (Ours) 92.7 ±2.5 68.0 ±4.3 58.7 ±5.0 54.0 ±4.3 89.7 ±3.4 46.7 ±4.1
+> Method /Task Hammer Cl. Mug Cl. Kitchen Nut Asmbl. Pick Place Coffee Prep. Overall
+> DLP [10] (multi-view) 66.7 ±2.5 34.7 ±7.5 0.0 ±0.0 8.7 ±2.5 4.7 ±2.5 0.0 ±0.0 34.1 3D-DLP [65] 94.6 ±0.9 64.0 ±4.3 86.7 ±3.4 6.0 ±1.6 0.0 ±0.0 0.0 ±0.0 48.1 EquiDiff [54] (voxel only) 92.6 ±3.3 34.0 ±2.8 95.0 ±2.5 10.7 ±2.1 12.7 ±2.2 34.0 ±4.9 47.3
+> ParticleSplat (Ours) 90.0 ±2.8 62.0 ±4.9 76.0 ±5.7 16.0 ±3.3 12.7 ±3.4 6.7 ±2.5 56.1
+
+Table 10. Per-task imitation learning performance on MimicGen (multi-view). Success rates (%) on 12 single-arm MimicGen [38] tasks; representation-learning methods (DLP, 3D-DLP, ParticleSplat) share the same EC-Diffuser policy, whereas EquiDiff is a voxel-based diffusion policy; mean ± standard deviation over three seeds (50 rollouts per task per seed), 200 demonstrations per task. For a thorough comparison against the state-of-the-art methods on this benchmark, we include 3D-DLP [65] and the voxel-based EquiDiff [54] policy; their results and the multi-view DLP results are reproduced from [65]. Tasks are ordered by the benchmark’s official groups: Basic ( Stack ,
+
+Stack Three ), Contact-Rich ( Square to Mug Cleanup ), and Long-Horizon ( Kitchen to Coffee Preparation ); Table 3 reports the per-group averages. 
+
+methods and tasks, the main observations are that additional viewpoints benefit all methods, and ParticleSplat continues to deliver the best downstream manipulation performance in the multi-view regime. This suggests that explicit 3D object-centric structure remains a strong inductive bias even when richer visual input is available. 
+
+Ablation analysis. We ablate our 3D-aware object-centric representation through downstream decision-making perfor-mance across both single-view and multi-view settings, as this evaluation enables a direct comparison among representations that span the key design dimensions relevant to manipulation: 2D object-centric structure, non-object-centric representations trained to encode 3D information, and our combined object-centric formulation that explicitly captures 3D scene information. Table 11 isolates the effect of representation design by comparing DLP, VAE-GS, and ParticleSplat under both single-view and multi-view settings. DLP outperforms VAE-GS in both single-view (46.6% vs. 42.0%) and multi-view (59.4% vs. 52.7%), suggesting that object-centric decomposition is more beneficial for downstream manipulation than a non-object-centric patch-based latent space, even when the latter uses the same encoder and decoder family as our method and is trained to encode 3D information. In contrast, ParticleSplat substantially surpasses both baselines, reaching 73.0% in the single-view setting and 83.0% in the multi-view setting. This result indicates that the performance gain cannot be attributed solely to the reconstruction objective or decoder architecture. Rather, the advantage comes from combining object-centric structure with 
+
+explicit 3D scene information . By representing the scene as object-centric 3D Gaussians, ParticleSplat produces features that are better aligned with both interaction-centric reasoning and geometric control, leading to improved policy learning in both sparse-view and multi-view regimes. 
+
+Additional MimicGen results. We additionally evaluate ParticleSplat on MimicGen [38] alongside a contemporary 3D object-centric representation method (3D-DLP) and an end-to-end voxel policy (EquiDiff) for a holistic picture of where ParticleSplat’s learned representation helps (Table 10, reproduced from [65]). 3D-DLP [65] is the method closest to ours: it also lifts DLP particles to 3D (position, scale, transparency, appearance) and feeds frozen particle tokens to the same EC-Diffuser policy, but it operates on a dense 64 3 RGB voxel grid built from the static cameras’ point clouds, whereas ParticleSplat infers particles directly from posed images and decodes them into splatted 3D Gaussians, never materialising a volumetric grid. EquiDiff (voxel-only) [54] is not a representation but a strong SE(3)-equivariant diffusion policy acting on the same voxels. All methods use 200 D0 demonstrations per task, the same two static third-person cameras (no eye-in-hand), 50 rollouts per task over three seeds, and the adapted EC-Diffuser backbone for the particle methods (details in [65]). ParticleSplat receives exactly the baselines’ context views. Similar to RLBench, additional rendered views serve only as reconstruction targets during representation learning. As shown in Table 10, ParticleSplat attains the best overall success rate (56.1% vs. 48.1% for 3D-DLP and 47.3% for EquiDiff), wins five tasks and ties Pick Place , with the largest margin on the contact-rich group (66.9% vs. 53.3%/53.4%). These tasks hinge on sub-centimetre alignment of small parts whose geometric evidence a 64 3 voxelisation (1–2 cm per cell) largely averages away, whereas ParticleSplat retains it at image resolution and refines particle position and scale through multi-view rendering consistency; 3D-DLP stays 2–5 points ahead on stacking and cleanup, and the equivariant voxel policy leads the long-horizon Kitchen and Coffee Preparation .27 Setting Method / Task close jar open drawer sweep to dustpan meat off grill turn tap                                                                       
+
+> Single-view VAE-GS 29.6 ±5.0 73.1 ±5.4 46.9 ±8.1 58.8 ±7.9 52.5 ±6.3 DLP [10] 20.7 ±4.9 37.8 ±9.6 73.5 ±7.3 65.4 ±4.1 36.2 ±5.8
+> ParticleSplat (Ours) 54.1 ±4.7 88.4 ±4.3 90.6 ±6.9 76.0 ±8.4 83.8 ±4.6 Multi-view VAE-GS 34.2 ±5.6 79.3 ±6.1 62.8 ±7.4 57.1 ±8.6 72.9 ±6.8 DLP [10] 41.7 ±5.1 63.4 ±8.7 83.6 ±6.9 66.8 ±4.5 48.5 ±6.2
+> ParticleSplat (Ours) 82.6 ±4.3 91.2 ±4.9 94.1 ±6.2 86.9 ±7.6 91.4 ±4.2
+> Setting Method /Task slide block put in drawer drag stick push buttons stack blocks Overall
+> Single-view VAE-GS 25.7 ±10.9 12.1 ±3.0 90.6 ±7.8 22.3 ±11.4 8.6 ±3.0 42.0 DLP [10] 54.6 ±5.2 30.8 ±4.7 93.1 ±5.5 36.7 ±8.9 11.4 ±4.6 46.6
+> ParticleSplat (Ours) 92.3 ±2.0 78.4 ±5.8 96.7 ±2.5 57.2 ±7.1 19.4 ±2.9 73.0
+> Multi-view VAE-GS 47.9 ±11.2 31.4 ±3.6 92.1 ±8.4 39.8 ±10.7 9.7 ±3.5 52.7 DLP [10] 69.3 ±5.6 56.6 ±5.1 95.0 ±5.0 54.1 ±9.3 15.2 ±4.2 59.4
+> ParticleSplat (Ours) 94.2 ±2.4 86.3 ±6.1 96.1 ±2.9 82.7 ±6.6 24.8 ±3.2 83.0
+
+Table 11. Ablation on representation design under single-view and multi-view settings. We compare DLP, VAE-GS, and ParticleSplat on RLBench manipulation tasks under different view settings. Numbers denote success rate (%) as mean ± standard deviation over three seeds (25 episodes per task per seed). 
+
+A.5.6. A Recipe for Real-World Data Collection 
+
+We propose a simple iPhone-based pipeline mimicking Structure-from-Motion (SfM [53]) datasets, providing accurate point clouds via known intrinsics and extrinsics. Unlike RLBench’s direct access, real-world RGB videos lack this information. We bridge this using ARKit 3 [1], which tracks device pose via visual-inertial odometry in a gravity-aligned world frame. Intrinsics come from hardware specs. Table 12 details all ARKit outputs. Our implementation 4, covering Xcode 5 [2] setup, for extraction of intrinsics and extrinsics, through video capture guide-lines, is outlined in Fig. 12. 
+
+Field Description 
+
+Intrinsic Matrix 3×3 affine encoding focal lengths and principal point Principal Point Optical axis intersection with image plane (pixels) Focal Length Hardware-calibrated (pixels) Transform Matrix 4×4 camera-to-world pose (translation + rotation) Translation Camera origin offset in world coordinates (m) Rotation Matrix 3×3 orientation in world frame Euler Angles Roll/pitch/yaw parameterization (rad) Projection Matrix 4×4 world-to-image homogeneous mapping 
+
+Table 12. ARKit calibration fields. All data synchronized per video frame for accurate 3D reconstruction. 
+
+> 3
+
+https://developer.apple.com/augmented-reality/arkit/ 
+
+> 4
+
+Tested on iPhone 15 and Apple M2 Pro (requires iOS 11.0+, A9+ processor). Code will be released publicly. 
+
+> 5
+
+https://developer.apple.com/xcode/ 
+
+28 1 class ARSessionManager: 
+
+2 calibration_stream : AsyncStream<CalibrationData> # live intrinsics/extrinsics 
+
+3 video_stream : AsyncStream<URL> # final MP4 path on stop 
+
+4 calibration_frames : list[CalibrationData] = [] # per-written-frame record 
+
+5 is_recording : bool = False 
+
+67 def init(): 
+
+8 """Launch ARWorldTracking with gravity alignment and depth support""" 
+
+9 session.run(ARWorldTrackingConfiguration()) 
+
+10 11 def start_recording(): 
+
+12 """Initialize video writer; begin paired frame+calibration capture""" 
+
+13 calibration_frames.clear() 
+
+14 video_writer = AudioVisualAssetWriter() 
+
+15 video_writer.start_session() 
+
+16 attach(FRAME_UPDATED_EVENT, process_updates_callback) 
+
+17 self.is_recording = True 
+
+18 19 def stop_recording() -> tuple[URL, list[CalibrationData]]: 
+
+20 """Finalize MP4, emit path, return synchronized calibration frames""" 
+
+21 self.is_recording = False 
+
+22 video_writer.finish() # async disk flush 
+
+23 video_stream.yield(output_url) 
+
+24 return output_url, calibration_frames 
+
+25 26 def process_updates_callback(frame: ARFrame): 
+
+27 """ARKit delegate (˜60Hz): extract RGB+calibration per frame""" 
+
+28 rgb, calibration = process_frame(frame) 
+
+29 calibration_stream.yield(calibration) # live feed 
+
+30 if self.is_recording: 
+
+31 if video_writer.append(rgb, timestamp=frame.timestamp): 
+
+32 calibration.frame_index = len(calibration_frames) 
+
+33 calibration_frames.append(calibration) 
+
+34 35 def process_frame(frame: ARFrame) -> tuple[CGImage, CalibrationData]: 
+
+36 """Extract synchronized RGB image and calibration data""" 
+
+37 rgb = frame.captured_image 
+
+38 cal = CalibrationData( 
+
+39 intrinsics = frame.camera.intrinsics, # 3x3 
+
+40 transform = frame.camera.transform, # 4x4 camera-to-world 
+
+41 projection = frame.camera.projection, # 4x4 
+
+42 euler = frame.camera.euler_angles, 
+
+43 timestamp = frame.timestamp 
+
+44 )
+
+45 return rgb, cal 
+
+Figure 12. High-level ARKit camera manager pseudocode. The delegate processes frames at ∼60Hz, recording calibration only for successfully-written video frames to ensure synchronization. 
+
+29

@@ -6,37 +6,35 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-09-24
-- 运行时间：2026-09-24 21:44:24 UTC
+- 最新运行日期：2026-09-25
+- 运行时间：2026-09-25 22:27:58 UTC
 - 运行状态：成功
-- 本次总论文数：5
-- 精读区：1
+- 本次总论文数：4
+- 精读区：0
 - 速读区：4
 
 ### 今日简报（AI）
-今日精选 5 篇视觉生成与编辑前沿论文，重点突破零样本物体移除技术。
-首推《Zero-Shot Object Removal》通过注意力掩码与潜空间锚定，实现了极高精度的图像修复。
-建议关注扩散模型在复杂场景编辑中的应用，尝试将此类技术集成至日常修图工作流中。
-- 详情：[/202609/24/README](/202609/24/README)
+今日精选 4 篇前沿论文，涵盖稀疏视角 3D 高斯溅射、可解释神经网络去噪及零训练图像编辑技术。
+重点关注 GAPS 算法在稀疏视角 3D 重建中的生成式主动选择策略，以及基于可解释网络的 DCT 图像去噪研究。
+建议优先阅读 GAPS 论文以掌握 3D 视觉领域最新进展，并关注图像编辑技术的轻量化趋势。
+- 详情：[/202609/25/README](/202609/25/README)
 
 ### 精读区论文标签
-1. [Zero-Shot Object Removal via Attention Masking, Latent Anchoring, and Refinement](/202609/24/2609.28342v1-zero-shot-object-removal-via-attention-masking-latent-anchoring-and-refinement)  
-   标签：评分：10.0/10、query:q3
-   evidence：受限潜空间修复的零样本框架
+- 本次无精读推荐。
 
 ### 速读区论文标签
-1. [Diff-RF: Mutually Reinforced Image Registration and Fusion via Degradation-Aware Learning](/202609/24/2609.28235v1-diff-rf-mutually-reinforced-image-registration-and-fusion-via-degradation-aware-learning)  
-   标签：评分：7.0/10、query:profile-1
-   evidence：复杂退化条件下的信息修复与融合
-2. [PhysReflect: Geometry and Perception Guided Diffusion for Physically-Plausible Mirror Reflections](/202609/24/2609.23442v1-physreflect-geometry-and-perception-guided-diffusion-for-physically-plausible-mirror-reflections)  
+1. [GAPS: Generative Active Pseudo-view Selection for Sparse-View 3D Gaussian Splatting](/202609/25/2609.23436v2-gaps-generative-active-pseudo-view-selection-for-sparse-view-3d-gaussian-splatting)  
+   标签：评分：7.0/10、query:q4
+   evidence：用于视图合成与补全的生成式扩散模型
+2. [A Study of the Limits of Collaborative DCT-Based Image Denoising via Interpretable Neural Networks](/202609/25/2609.29334v1-a-study-of-the-limits-of-collaborative-dct-based-image-denoising-via-interpretable-neural-networks)  
+   标签：评分：7.0/10、query:q7
+   evidence：用于图像修复和去噪的可解释神经网络
+3. [Refinement Is Inherently Editable: Training-Free Prompt-to-Prompt Image Editing with Generative Refinement Network](/202609/25/2609.20633v3-refinement-is-inherently-editable-training-free-prompt-to-prompt-image-editing-with-generative-refinement-network)  
    标签：评分：6.0/10、query:q4
-   evidence：用于生成物理上合理的镜面反射的扩散模型
-3. [PrismGPT: Proxy-Guided Learning for Region-Aware Photo Editing with Self-Synthesized Reasoning](/202609/24/2609.24768v1-prismgpt-proxy-guided-learning-for-region-aware-photo-editing-with-self-synthesized-reasoning)  
+   evidence：使用生成网络的免训练图像编辑
+4. [HARMONY: Hierarchical Agentic Reasoning for MONocular Image-to-Scene Synthesis](/202609/25/2609.26793v1-harmony-hierarchical-agentic-reasoning-for-monocular-image-to-scene-synthesis)  
    标签：评分：6.0/10、query:q1
-   evidence：区域感知照片编辑与美学修复
-4. [ASTRA-SR: Atmospheric Seeing and Turbulence Restoration for Astronomical Image Super-Resolution](/202609/24/2609.26731v1-astra-sr-atmospheric-seeing-and-turbulence-restoration-for-astronomical-image-super-resolution)  
-   标签：评分：6.0/10、query:q7
-   evidence：天文图像修复的盲修复框架
+   evidence：从单张图像恢复完整的3D场景
 
 
 <div class="dpr-home-promo-card">

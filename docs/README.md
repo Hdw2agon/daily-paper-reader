@@ -6,35 +6,38 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-09-25
-- 运行时间：2026-09-25 22:27:58 UTC
+- 最新运行日期：2026-09-26
+- 运行时间：2026-09-26 21:30:38 UTC
 - 运行状态：成功
-- 本次总论文数：4
+- 本次总论文数：5
 - 精读区：0
-- 速读区：4
+- 速读区：5
 
 ### 今日简报（AI）
-今日精选 4 篇前沿论文，涵盖稀疏视角 3D 高斯溅射、可解释神经网络去噪及零训练图像编辑技术。
-重点关注 GAPS 算法在稀疏视角 3D 重建中的生成式主动选择策略，以及基于可解释网络的 DCT 图像去噪研究。
-建议优先阅读 GAPS 论文以掌握 3D 视觉领域最新进展，并关注图像编辑技术的轻量化趋势。
-- 详情：[/202609/25/README](/202609/25/README)
+今日精选 5 篇前沿论文，涵盖双摄变焦、事件相机及异常检测等视觉领域进展。
+重点关注 ZoomDiff 在双摄平滑变焦上的高保真表现，以及 LiFR v2 在高频密集预测中的补全优化。
+建议优先阅读 ZoomDiff 论文，深入了解扩散模型如何提升多镜头协同的视觉质量。
+- 详情：[/202609/26/README](/202609/26/README)
 
 ### 精读区论文标签
 - 本次无精读推荐。
 
 ### 速读区论文标签
-1. [GAPS: Generative Active Pseudo-view Selection for Sparse-View 3D Gaussian Splatting](/202609/25/2609.23436v2-gaps-generative-active-pseudo-view-selection-for-sparse-view-3d-gaussian-splatting)  
-   标签：评分：7.0/10、query:q4
-   evidence：用于视图合成与补全的生成式扩散模型
-2. [A Study of the Limits of Collaborative DCT-Based Image Denoising via Interpretable Neural Networks](/202609/25/2609.29334v1-a-study-of-the-limits-of-collaborative-dct-based-image-denoising-via-interpretable-neural-networks)  
-   标签：评分：7.0/10、query:q7
-   evidence：用于图像修复和去噪的可解释神经网络
-3. [Refinement Is Inherently Editable: Training-Free Prompt-to-Prompt Image Editing with Generative Refinement Network](/202609/25/2609.20633v3-refinement-is-inherently-editable-training-free-prompt-to-prompt-image-editing-with-generative-refinement-network)  
-   标签：评分：6.0/10、query:q4
-   evidence：使用生成网络的免训练图像编辑
-4. [HARMONY: Hierarchical Agentic Reasoning for MONocular Image-to-Scene Synthesis](/202609/25/2609.26793v1-harmony-hierarchical-agentic-reasoning-for-monocular-image-to-scene-synthesis)  
+1. [ZoomDiff: A High-Fidelity Diffusion Model for Dual-Camera Smooth Zooming](/202609/26/2609.28083v1-zoomdiff-a-high-fidelity-diffusion-model-for-dual-camera-smooth-zooming)  
+   标签：评分：7.0/10、query:q1
+   evidence：用于图像插值和补全的生成式扩散模型
+2. [LiFR v2: Completion-Augmented Event Propagation for High-Rate Dense Prediction](/202609/26/2609.25803v2-lifr-v2-completion-augmented-event-propagation-for-high-rate-dense-prediction)  
    标签：评分：6.0/10、query:q1
-   evidence：从单张图像恢复完整的3D场景
+   evidence：用于稠密预测的补全增强型事件传播
+3. [When Does Unsupervised Learning Succeed or Fail? A PoS Perspective on Reconstruction-Based Anomaly Detection](/202609/26/2609.28832v1-when-does-unsupervised-learning-succeed-or-fail-a-pos-perspective-on-reconstruction-based-anomaly-detection)  
+   标签：评分：6.0/10、query:q2
+   evidence：基于扰动的无监督重建学习
+4. [TOLA: Text-aware One-Step Latent Adaptation for Diffusion-based Text Image Super-Resolution](/202609/26/2609.29240v1-tola-text-aware-one-step-latent-adaptation-for-diffusion-based-text-image-super-resolution)  
+   标签：评分：6.0/10、query:q3
+   evidence：利用扩散模型在未知退化下进行图像修复
+5. [Can Frozen Hyperspherical Features Guide the Selection of Pseudo Masks?](/202609/26/2609.30080v1-can-frozen-hyperspherical-features-guide-the-selection-of-pseudo-masks)  
+   标签：评分：6.0/10、query:q3
+   evidence：利用自监督特征进行无标签掩码选择
 
 
 <div class="dpr-home-promo-card">

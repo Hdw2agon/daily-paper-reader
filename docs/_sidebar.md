@@ -1,6 +1,9 @@
 * <a class="dpr-sidebar-root-link" href="#/">首页</a>
 * <a class="dpr-sidebar-root-link dpr-sidebar-noactive-link" href="javascript:void(0)" data-dpr-hash="#/tutorial/README">使用教程</a>
 * Daily Papers
+  * 2026-09-27 <!--dpr-date:20260927-->
+    * 速读区
+      * <a class="dpr-sidebar-item-link dpr-sidebar-item-structured" href="#/202609/27/2609.27317v1-breaking-weather-content-coupling-type-severity-guided-progressive-disentanglement-for-all-in-one-infrared-restoration" data-sidebar-item="{&quot;title&quot;: &quot;Breaking Weather-Content Coupling: Type-Severity Guided Progressive Disentanglement for All-in-One Infrared Restoration&quot;, &quot;link&quot;: &quot;https://arxiv.org/abs/2609.27317v1-breaking-weather-content-coupling-type-severity-guided-progressive-disentanglement-for-all-in-one-infrared-restoration&quot;, &quot;score&quot;: &quot;6.0&quot;, &quot;tags&quot;: [{&quot;kind&quot;: &quot;query&quot;, &quot;label&quot;: &quot;q3&quot;}], &quot;evidence&quot;: &quot;红外图像修复与渐进式解耦&quot;}">Breaking Weather-Content Coupling: Type-Severity Guided Progressive Disentanglement for All-in-One Infrared Restoration</a>
   * 2026-09-26 <!--dpr-date:20260926-->
     * 速读区
       * <a class="dpr-sidebar-item-link dpr-sidebar-item-structured" href="#/202609/26/2609.28083v1-zoomdiff-a-high-fidelity-diffusion-model-for-dual-camera-smooth-zooming" data-sidebar-item="{&quot;title&quot;: &quot;ZoomDiff: A High-Fidelity Diffusion Model for Dual-Camera Smooth Zooming&quot;, &quot;link&quot;: &quot;https://arxiv.org/abs/2609.28083v1-zoomdiff-a-high-fidelity-diffusion-model-for-dual-camera-smooth-zooming&quot;, &quot;score&quot;: &quot;7.0&quot;, &quot;tags&quot;: [{&quot;kind&quot;: &quot;query&quot;, &quot;label&quot;: &quot;q1&quot;}], &quot;evidence&quot;: &quot;用于图像插值和补全的生成式扩散模型&quot;}">ZoomDiff: A High-Fidelity Diffusion Model for Dual-Camera Smooth Zooming</a>

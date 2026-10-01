@@ -6,49 +6,38 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-09-30
-- 运行时间：2026-09-30 22:39:20 UTC
+- 最新运行日期：2026-10-01
+- 运行时间：2026-10-01 23:03:11 UTC
 - 运行状态：成功
-- 本次总论文数：9
-- 精读区：2
-- 速读区：7
+- 本次总论文数：5
+- 精读区：0
+- 速读区：5
 
 ### 今日简报（AI）
-今日精选 9 篇前沿论文，重点突破扩散模型逆问题求解与超声图像修复技术。
-扩散模型在逆问题上的高效条件化方法及超声图像的风格驱动增强方案表现卓越，极具参考价值。
-建议优先研读 Perturb-and-Solve 算法，探索其在复杂图像生成任务中的应用潜力。
-- 详情：[/202609/30/README](/202609/30/README)
+今日精选 5 篇前沿论文，涵盖图像生成、纹理映射与 3D 世界构建等领域。
+重点关注 ImageNet 生成质量的突破及基于轻量级代理的 3D 世界生成技术。
+建议优先查阅 Latent-Rollout 生成方法，探索其在提升图像生成效率与质量上的具体实现。
+- 详情：[/202610/01/README](/202610/01/README)
 
 ### 精读区论文标签
-1. [Perturb-and-Solve: Efficient Learned-Operator Conditioning for Latent Diffusion Inverse Problems](/202609/30/2609.33171v1-perturb-and-solve-efficient-learned-operator-conditioning-for-latent-diffusion-inverse-problems)  
-   标签：评分：9.0/10、query:q1
-   evidence：用于包括图像修复在内的潜空间扩散模型
-2. [Style-Driven Data Synthesis and Degradation-Aware Enhancement for Ultrasound Image Restoration](/202609/30/2609.35120v1-style-driven-data-synthesis-and-degradation-aware-enhancement-for-ultrasound-image-restoration)  
-   标签：评分：8.0/10、query:q3
-   evidence：无需对齐样本的超声图像无标签修复
+- 本次无精读推荐。
 
 ### 速读区论文标签
-1. [Retraction-Based Gradient Projection Algorithms on Manifolds](/202609/30/2609.30885v1-retraction-based-gradient-projection-algorithms-on-manifolds)  
-   标签：评分：7.0/10、query:q1
-   evidence：在图像补全任务上进行了数值验证
-2. [GeoCR: Learning a Generalist Cloud Removal Prior from Heterogeneous Observations](/202609/30/2609.32510v1-geocr-learning-a-generalist-cloud-removal-prior-from-heterogeneous-observations)  
-   标签：评分：7.0/10、query:q1
-   evidence：去云作为图像补全/修复任务
-3. [ProDyGS: Dynamic Gaussian Splatting from a Single Static Monocular Camera](/202609/30/2609.32711v1-prodygs-dynamic-gaussian-splatting-from-a-single-static-monocular-camera)  
-   标签：评分：6.0/10、query:q3
-   evidence：用于视角补全的无标签代理图像合成
-4. [GenNVS: Geometry-enhanced Novel View Synthesis via Disentangled 3D Prior](/202609/30/2609.34579v1-gennvs-geometry-enhanced-novel-view-synthesis-via-disentangled-3d-prior)  
+1. [An End-to-End Latent-Rollout Approach for Pushing Few-Step ImageNet-$256$ Generation to FID $1.11$ without Fréchet Losses](/202610/01/2609.32376v1-an-end-to-end-latent-rollout-approach-for-pushing-few-step-imagenet-256-generation-to-fid-111-without-frchet-losses)  
    标签：评分：6.0/10、query:q4
-   evidence：基于扩散的新视角合成与场景补全
-5. [GenNVS: Geometry-enhanced Novel View Synthesis via Disentangled 3D Prior](/202609/30/2609.34579v2-gennvs-geometry-enhanced-novel-view-synthesis-via-disentangled-3d-prior)  
-   标签：评分：6.0/10、query:q4
-   evidence：用于新视角合成和场景补全的生成式扩散模型
-6. [CoBrush: A Hierarchical Planning Framework for Human-Robot Co-Painting](/202609/30/2609.35476v1-cobrush-a-hierarchical-planning-framework-for-human-robot-co-painting)  
+   evidence：用于图像合成的生成模型和潜空间演化
+2. [DirectUV: Image-Conditioned UV Texture Generation with Surface-Aware Positional Encoding](/202610/01/2609.34651v1-directuv-image-conditioned-uv-texture-generation-with-surface-aware-positional-encoding)  
    标签：评分：6.0/10、query:q1
-   evidence：草图补全与图像合成
-7. [Attention-Scoped Guidance: Training-Free Spatial Control for Image Editing](/202609/30/2609.37492v1-attention-scoped-guidance-training-free-spatial-control-for-image-editing)  
+   evidence：图像引导的纹理生成与补全
+3. [Proxy2World: Learning to Generate Worlds From Lightweight Proxies without Seeing Them](/202610/01/2609.35023v1-proxy2world-learning-to-generate-worlds-from-lightweight-proxies-without-seeing-them)  
    标签：评分：6.0/10、query:q4
-   evidence：基于生成式引导的无需训练的图像编辑空间控制
+   evidence：无需在配对数据上训练即可从 RGBD 视频中学习的生成式世界模型
+4. [Multiresolution Block-Coordinate Plug-and-Play Algorithm for Image Reconstruction](/202610/01/2609.35227v1-multiresolution-block-coordinate-plug-and-play-algorithm-for-image-reconstruction)  
+   标签：评分：6.0/10、query:q3
+   evidence：用于图像重建的即插即用算法
+5. [FlowTool: Controlling Tool Parameter in Image Retouching via Flow Matching](/202610/01/2609.35673v1-flowtool-controlling-tool-parameter-in-image-retouching-via-flow-matching)  
+   标签：评分：6.0/10、query:q4
+   evidence：用于图像编辑的生成式流匹配
 
 
 <div class="dpr-home-promo-card">

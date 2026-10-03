@@ -1,0 +1,1471 @@
+Title: Simultaneous Neural Optimal Transport
+
+URL Source: https://arxiv.org/pdf/2609.37424v1
+
+Published Time: Wed, 30 Sep 2026 01:46:01 GMT
+
+Number of Pages: 24
+
+Markdown Content:
+Preprint 
+
+# SIMULTANEOUS NEURAL OPTIMAL TRANSPORT 
+
+Milena Gazdieva ∗
+
+Applied AI Institute AXXX Moscow, Russia 
+
+milenagazdieva@gmail.com 
+
+Kirill Sokolov 
+
+Lomonosov Moscow State University Moscow, Russia 
+
+Jiawei Chen 
+
+MIRIAI †
+
+Moscow, Russia 
+
+Evgeny Burnaev 
+
+Applied AI Institute AXXX Moscow, Russia 
+
+Alexander Korotin 
+
+Applied AI Institute AXXX Moscow, Russia 
+
+# ABSTRACT 
+
+Optimal Transport (OT) provides a principled framework for learning transfor-mations between probability distributions from unpaired samples. In many appli-cations, however, a single transformation must map several source distributions to a common target distribution. For example, image restoration might require handling different types of degradation without knowing the degradation of each input at inference time. Simple approaches of pooling the source distributions only encourage alignment with the target at the aggregate level and may leave individual sources misaligned. In our paper, we consider the simultaneous OT problem which formalizes the task of learning a shared transport map that minimizes the average transport cost while aligning each source distribution with a prescribed target. We propose a neural method for solving the simultaneous OT problem by learning a shared transport map that minimizes the average transport cost while aligning each source distribution with a prescribed target. We derive a max-min formulation for learning this map. We illustrate its application to image restoration, where a single model handles multiple degradation types using a common collection of clean target images. Input Cond. + clf. SimNOT (ours) Clean reference Input Cond. + clf. SimNOT (ours) Clean reference 
+
+Figure 1: Restoration of selected CelebA 64 ×64 test images under bilinear downsampling with an unseen factor ( ×3 at test time versus ×4 during training). Each group shows the degraded input, conditional OT with classifier-based routing, SimNOT (ours), and the clean reference. 
+
+# 1 INTRODUCTION 
+
+Learning transformations between probability distributions from unpaired samples underlies a range of applications, including image-to-image translation (Zhu et al., 2017), voice conversion (Chun et al., 2023), and prediction of single-cell perturbation responses (Bunne et al., 2023). In many practical scenarios, the input data originate from several distributions, while a single model is expected to transform them into a common target distribution. The challenge is to learn one transformation that produces suitable outputs for each source distribution while preserving relevant properties of the inputs. For example, all-in-one image restoration aims to handle multiple types of degradation within 
+
+> ∗
+
+Corresponding author 
+
+> †
+
+Moscow Independent Research Institute of Artificial Intelligence 
+
+1arXiv:2609.37424v1 [cs.LG] 29 Sep 2026 Preprint one model without requiring the degradation type at inference time (Potlapalli et al., 2023). In the unpaired setting, the learner has access to degraded and clean images but not to their correspondences. Optimal Transport (OT) provides a mathematical framework for learning such transformations (Peyré et al., 2019). It seeks a transport map or plan that aligns the source and target distributions while minimizing a prescribed transport cost. The cost specifies which input–output correspondences are preferable and can be chosen to encourage preservation of particular attributes. Neural OT methods make it possible to approximate transport maps between distributions available only through samples and apply the learned maps to previously unseen inputs (Fan et al., 2023; Korotin et al., 2023a;b). These methods provide a natural starting point for learning transformations shared across several source distributions. A straightforward approach is to pool the source datasets and learn an OT map from their mixture to the target distribution. However, matching the transformed mixture to the target does not guarantee that the transformed distribution of each source matches the target individually. For example, different sources may be mapped to different parts of the target distribution, producing a correct aggregate distribution despite substantial discrepancies for individual sources. Alternatively, learning a separate map for each source does not yield a single transformation that can be applied without selecting a source-specific model. This motivates learning a shared map while explicitly accounting for each source distribution. The simultaneous optimal transport (SOT) framework (Wang & Zhang, 2025) formalizes transport under multiple distributional constraints using a common map or stochastic kernel. We consider its many-to-one setting: a single transformation must align several source distributions with a prescribed target while minimizing the average transport cost. The shared transformation couples the source-specific transport tasks, and the individual alignment requirements retain information that is lost when the sources are treated only as a mixture. Our focus is on the computational setting in which the distributions are unknown and available through unpaired samples, and the learned transformation must generalize to new inputs. To develop a practical learning method, we consider an unbalanced formulation of simultaneous transport, replacing hard marginal constraints with divergence penalties. Unbalanced OT has already been used to learn generative models and transport maps between a pair of distributions (Choi et al., 2023; Gazdieva et al., 2024; Yang & Uhler, 2018; Klein et al., 2024; Eyring et al., 2024). In our setting, this relaxation provides an adjustable trade-off between transport cost and marginal agreement while retaining the shared transport structure and separate objectives for the sources. We derive a variational training objective and use it to learn a single neural transport map together with source-specific potentials. The source identity is used to select the appropriate potential during training, whereas the transport map itself is shared and does not require this identity at inference time. 
+
+Contributions. We develop Simultaneous Neural Optimal Transport (SimNOT) , a continuous solver for learning a shared transport map from multiple source distributions to a prescribed target using unpaired samples. We introduce a divergence-based unbalanced formulation of simultaneous OT, establish its exact semi-dual representation ( M4.1), and provide neural approximation guarantees (M4.3). These results yield a neural solver with one shared map and source-specific potentials, requiring no source labels at inference time (§4.2). We demonstrate its effectiveness on simultaneous Gaussian-to-Swiss-roll transport and unpaired image restoration with multiple degradation types, including evaluation under unseen degradation strengths (§5). 
+
+Notation. We take the source and target domains to be nonempty closed sets X ⊆ RDx and Y ⊆ RDy .We write Z for an auxiliary noise space. For a Borel space E, P(E) and M+(E) denote the sets of Borel probability measures and finite non-negative Borel measures on E, respectively, and Cb(E)
+
+denotes the bounded continuous real-valued functions on E. The source distributions are denoted by 
+
+P1, . . . , PK ∈ P (X ), and the common target distribution by P∗ ∈ P (Y). For a measurable map T ,
+
+T#μ denotes the pushforward of a measure μ. We represent a stochastic map by T : X × Z → Y ,where z ∼ S ∈ P (Z) is independent of the input; its output distribution for source Pk is T#(Pk ⊗ S).For a probability kernel γ(· | x) from X to Y, we write γ#μ for the output measure R γ(· | x) dμ (x).For γ ∈ M +(X × Y ), its marginals are denoted by γx and γy . We use Π( μ, ν ) for the set of finite non-negative measures on the product space with marginals μ and ν (when these marginals have the same total mass); in particular, for probability marginals these are probability couplings. 2Preprint 
+
+# 2 RELATED WORK 
+
+We review the most closely related OT formulations and solvers below. Extended related work on OT barycenters and all-in-one image restoration is discussed in Appendix B. 
+
+Learning optimal transport maps. OT has been used in generative modeling both as a discrepancy between generated and target distributions and as a principle for learning the transformation itself. For example, Wasserstein GANs (Arjovsky et al., 2017) use an OT discrepancy as a training loss, but do not require the generator to minimize the transport cost between its inputs and outputs. More closely related to our work are continuous neural OT solvers, which learn transport maps or plans from samples (Makkuva et al., 2020; Rout et al., 2022; Korotin et al., 2023b). These methods exploit OT duality to construct optimization objectives for neural potentials and transport maps, with applications to generation and unpaired translation. Partial transport formulations also permit relaxing distribution matching while controlling the similarity between inputs and outputs (Gazdieva et al., 2023). These works consider transport between a pair of distributions; our focus is on learning one transformation jointly for several sources. 
+
+Simultaneous optimal transport. Wang & Zhang (2025) introduce simultaneous OT as transport between vector-valued measures: a common map or transport kernel must transport several source measures to their respective targets. They study Monge and Kantorovich formulations, existence, and duality. The balanced problem with a common target considered in our work is a particular case of this framework. Its defining requirement is that the same transformation satisfy the transport constraints for every source. Learning independent pairwise OT maps does not impose this require-ment, while matching a pooled source distribution to the target does not ensure that each source is matched individually. We build on this perspective to develop a neural method for learning shared transformations from samples. We also consider divergence-based marginal relaxation; this differs from the inequality-constrained unbalanced formulation studied by Wang & Zhang (2025). 
+
+Unbalanced optimal transport. Unbalanced OT replaces exact marginal constraints with penalties for deviations from the prescribed measures (Liero et al., 2018). Among continuous solvers, Yang & Uhler (2018) propose an adversarial approach that jointly learns a transport map and a source mass scaling function. UOTM (Choi et al., 2023) learns a transport network and a potential through a semi-dual objective. The latter approach is particularly relevant to the optimization principles used in our work. Both methods consider transport between two measures. Our method combines marginal relaxation with a shared transformation and source-specific potentials. The role of the unbalanced formulation here is to provide a flexible transport objective for simultaneous learning. 
+
+# 3 BACKGROUND 
+
+In this section, we recall the OT formulations relevant to our work and specify the simultaneous OT problem with a common target. We then introduce the marginal relaxation considered in this paper. For background on OT and unbalanced OT, we refer to Villani (2009) and Chizat (2017), respectively. 3.1 OPTIMAL TRANSPORT 
+
+Let P ∈ P (X ), Q ∈ P (Y) be probability measures, c : X × Y → R+ − continuous function. 
+
+Monge formulation. The Monge OT problem seeks a measurable map T : X → Y that transports P
+
+to Q while minimizing the transport cost given by function c(·, ·):
+
+inf   
+
+> T:T#P=Q
+
+Z
+
+> X
+
+c(x, T (x)) dP(x). (1) A minimizer T ∗ of equation 1, when it exists, is called an optimal transport (OT) map. 
+
+Kantorovich formulation. Monge OT problem may admit no feasible map or no minimizer. Thus, it is common to consider its Kantorovich relaxation which allows splitting the mass of each input point: 
+
+OT c(P, Q) = inf 
+
+> π∈Π( P,Q)
+
+Z
+
+> X ×Y
+
+c(x, y ) dπ (x, y ). (2) 3Preprint Here Π( P, Q) is the set of probability measures on X × Y with marginals πx = P and πy = Q.Under the assumptions of this paper, a minimizer π∗ of equation 2 always exists, but need not be unique (Villani, 2009). Such a minimizer is called an optimal transport plan. Disintegration gives dπ (x, y ) = dπ x(x) dπ (y | x), where π(· | x) is the conditional distribution of outputs for an input x. An OT plan π∗ thus defines a stochastic transport map x 7 → π∗(· | x). If 
+
+π∗(· | x) = δT ∗(x), then π∗ = (id X , T ∗)#P and T ∗ is an OT map. 
+
+Unbalanced formulation. Unbalanced OT (UOT) relaxes the marginal constraints in equation 2 by penalizing deviations of the marginals from P and Q. For finite non-negative measures μ, ν on the same space, we define the ψ-divergence as 
+
+Dψ (μ∥ν) = 
+
+Z
+
+ψ
+
+ dμ dν 
+
+
+
+dν, μ ≪ ν, 
+
++∞, otherwise .
+
+(3) Here ψ : [0 , ∞) → [0 , ∞] is convex, lower semicontinuous, vanishes only at 1, and satisfies 
+
+lim u→∞ ψ(u)/u = + ∞. We define Dϕ analogously. Examples include the Kullback–Leibler and 
+
+χ2 divergences, generated by ψ(u) = u log u − u + 1 and ψ(u) = ( u − 1) 2, respectively. The UOT problem is given by (Liero et al., 2018) 
+
+UOT c,ψ,ϕ (P, Q) = inf 
+
+> γ∈M +(X ×Y )
+
+" Z
+
+> X ×Y
+
+c(x, y ) dγ (x, y ) + Dψ (γx∥P) + Dϕ(γy ∥Q)
+
+#
+
+, (4) where M+(X × Y ) is the set of finite non-negative measures, and γx, γ y are the marginals of γ. A minimizer γ∗ is called an unbalanced OT plan. Its total mass is not constrained to equal one. The strength of the marginal penalties can be adjusted by scaling the generators ψ and ϕ.The balanced problem equation 2 is recovered when ψ and ϕ are the convex indicators of {1}: the divergence terms then enforce γx = P and γy = Q.As in the balanced case, disintegration gives dγ (x, y ) = dγ x(x) dγ (y | x). The conditional distribu-tions γ∗(· | x) define a stochastic transport map acting on the source marginal γ∗
+
+> x
+
+, which may differ from P. In the deterministic case, γ∗(· | x) = δT ∗(x) and γ∗ 
+
+> y
+
+= T ∗
+
+> #
+
+γ∗
+
+> x
+
+.3.2 SIMULTANEOUS OPTIMAL TRANSPORT 
+
+Figure 2: A schematic illustration of simultaneous OT. Simultaneous OT seeks a shared transport rule that trans-ports several source measures to their respective target measures (Wang & Zhang, 2025). Here, we consider the case of K source distributions P1, . . . , PK ∈ P (X ) and a common prescribed target distribution P∗ ∈ P (Y).
+
+Balanced formulation. A simultaneous transport plan from P1, . . . , PK to P∗ is represented by a family of plans 
+
+πk ∈ Π( Pk, P∗) sharing a common conditional distribu-tion π(· | x):
+
+dπ k(x, y ) = dPk(x) dπ (y | x), k = 1 , . . . , K. (5) Thus, the same conditional distribution of outputs is used for a given input x across all sources. The balanced simul-taneous OT problem seeks such a family minimizing the average transport cost: 
+
+inf   
+
+> π(·| x): (πk)y=P∗, k =1 ,...,K
+
+1
+
+K
+
+> K
+
+X
+
+> k=1
+
+Z
+
+> X ×Y
+
+c(x, y ) dπ k(x, y ). (6) Here, the infimum is taken over shared conditional probability distributions, with the plans πk defined by equation 5. A minimizing family {π∗
+
+> k
+
+}Kk=1 , when it exists, is called a simultaneous optimal transport (OT) plan. Its shared conditional distribution π∗(· | x) defines a stochastic transport map x 7 → π∗(· | x) that transports every Pk to P∗. In the special case of deterministic plans, 4Preprint 
+
+π(· | x) = δT (x) for a shared map T : X → Y satisfying T#Pk = P∗ for all k, see Fig. 2. Optimizing equation 6 over such plans yields the simultaneous Monge problem. When the source distributions have pairwise disjoint supports, simultaneous OT reduces to indepen-dent pairwise OT problems: the corresponding transport maps, when they exist, can be combined into a single map. For overlapping sources, independently obtained maps may disagree on the overlap, whereas simultaneous OT requires the same transformation for every source. 
+
+Unbalanced formulation. We consider an unbalanced relaxation of equation 6 that penalizes deviations from the prescribed marginals while retaining a shared conditional distribution. Specifically, we consider finite nonnegative transport plans γ1, . . . , γ K of the form 
+
+dγ k(x, y ) = d(γk)x(x) dγ (y | x), k = 1 , . . . , K, (7) where γ(· | x) is a shared conditional probability distribution. The source marginals (γk)x are optimized jointly with this conditional distribution, and the plans γk need not have unit mass. The resulting simultaneous UOT problem is 
+
+inf   
+
+> γ(·| x),{(γk)x}Kk=1
+
+1
+
+K
+
+> K
+
+X
+
+> k=1
+
+" Z
+
+> X ×Y
+
+c(x, y ) dγ k(x, y ) + Dψ (( γk)x∥Pk) + Dϕ(( γk)y ∥P∗)
+
+#
+
+. (8) Here, the infimum is taken over shared conditional probability distributions and finite nonnegative source marginals, with the plans γk defined by equation 7. The divergences penalize deviations of the source and target marginals from Pk and P∗, respectively. A minimizing family {γ∗ 
+
+> k
+
+}Kk=1 , when it exists, is called a simultaneous UOT plan. Its shared conditional distribution γ∗(· | x) defines the corresponding stochastic transport map. In the case of deterministic plans, γ(· | x) = δT (x) for a shared map T : X → Y , and (γk)y = T#(γk)x for all k.To the best of our knowledge, this divergence-based formulation of simultaneous unbalanced OT has not been studied previously. The unbalanced formulation of Wang & Zhang (2025) uses marginal domination constraints. 3.3 COMPUTATIONAL SETUP 
+
+The distributions P1, . . . , PK and P∗ are unknown and accessible only through finite unpaired samples. Our goal is to learn a shared transport map for the underlying distributions that admits new inputs not present in the training data. This setup is typically called continuous (Fan et al., 2023; Rout et al., 2022; Korotin et al., 2023a) and differs from the discrete one, which seeks transport couplings between empirical measures (Cuturi, 2013; Chizat et al., 2018). 
+
+# 4 SIMULTANEOUS NEURAL OT M ETHOD 
+
+In this section, we derive our novel optimization objective for learning simultaneous UOT plans (M4.1) and propose an algorithm to solve ( M4.2). We then study the approximation properties of shared neural maps ( M4.3). The proofs of all theoretical results are given in Appendix A. 4.1 DERIVING THE OPTIMIZATION OBJECTIVE 
+
+Direct optimization of equation 8 is difficult from samples because the marginal divergences involve unknown measures. We therefore derive an equivalent semi-dual objective whose dependence on the data distributions is only through expectations. For the result below, assume that P1, . . . , PK are atomless, c : X × Y → [0 , ∞) is finite and continuous, and that ψ and ϕ satisfy the assumptions stated in Section 3.1 and ϕ(0) < +∞, ψ(0) <
+
++∞. Put P = 1
+
+> K
+
+PKk=1 Pk. This is equivalent to atomlessness of P: an average of atomless measures is atomless, while each Pk is absolutely continuous with respect to P. The atomlessness assumption is used only in the purification argument of Lemma 1. Let J∗ denote the infimum in equation 8. 
+
+Theorem 1 (Semi-dual formulation of simultaneous UOT) . Under the assumptions above, 
+
+J∗ = sup 
+
+> v∈Cb(Y)K
+
+inf  
+
+> γ
+
+J (v, γ ) = sup 
+
+> v∈Cb(Y)K
+
+inf   
+
+> T:X →Y
+
+J (v, T ), (9) 5Preprint 
+
+where the first infimum is over all probability kernels γ(· | x) from X to Y and 
+
+J (v, γ ) = − 1
+
+K
+
+> K
+
+X
+
+> k=1
+
+"
+
+Ex∼Pk Ey∼γ(·| x) ¯ψ(vk(y) − c(x, y )) + Ey∼P∗ ¯ϕ(−vk(y)) 
+
+#
+
+. (10) 
+
+For a deterministic map T , we use the shorthand J (v, T ) := J (v, δ T (·)).
+
+In equation 10, the distributions enter only through expectations and can be estimated from samples. 
+
+Remark on attainment. Theorem 1 concerns optimal values and does not require attainment of the primal infimum. Existence is assumed explicitly whenever it is needed. The deterministic representation in equation 9 refers only to the inner semi-dual problem; the structure of primal minimizers is addressed separately in Theorem 3. 4.2 PARAMETRIZATION AND TRAINING 
+
+Parametrization. To optimize over the shared conditional distribution γ(· | x) in equation 9, we represent it using a stochastic or deterministic map, following Choi et al. (2023). Let Z ⊆ RDz be a Borel set and S ∈ P (Z) be an atomless noise distribution. Every shared conditional distribution 
+
+γ(· | x) in equation 9 admits a measurable realization T : X × Z → Y with z ∼ S: γ(· | x)[= γT (· | 
+
+x)] = ( T (x, ·)) # S, where the map T and the noise distribution S are shared across all sources. Using this representation, we rewrite the optimization problem equation 9 as 
+
+J∗ = sup  
+
+> v1,...,v K∈C(Y)
+
+inf  
+
+> T
+
+J (v1, . . . , v K , T ), (11) where the infimum is over measurable maps T : X × Z → Y and 
+
+J(v1, . . . , v K , T ) = − 1
+
+K
+
+> K
+
+X
+
+> k=1
+
+h
+
+Ex∼Pk
+
+> z∼S
+
+¯ψ(vk(T (x, z )) −c(x, T (x, z )))+ Ey∼P∗ ¯ϕ(−vk(y)) 
+
+i
+
+. (12) In some settings, stochasticity of the conditional distribution is not needed. We can then consider a shared measurable map T : X → Y , which defines deterministic conditional distributions γT (· | 
+
+x) = δT (x). In this case, the expectation over S in equation 12 is omitted. Theorem 3 below motivates this choice when the transport cost is quadratic and both marginal penalties are KL divergences. To solve equation 11, we parametrize the shared map and the potentials by neural nets Tθ : X ×Z → Y
+
+and vωk : Y → R, k = 1 , . . . , K , with trainable parameters θ and ω1, . . . , ω K , respectively. The noise input is omitted for deterministic maps. In practice, we scale the transport cost c by an unbalancedness parameter τ > 0: smaller values favor balanced simultaneous OT, while larger values allow greater marginal deviations. 
+
+Training. In our setup, the source distributions P1, . . . , PK and the target distribution P∗ are accessi-ble only through samples. We therefore estimate the objective J (vω1 , . . . , v ωK , T θ ) in equation 12 using Monte Carlo with random mini-batches from the source, target and noise distributions. Training alternates between gradient ascent with respect to the potential parameters ω1, . . . , ω K and gradient descent with respect to the map parameters θ. Each potential is trained using its corresponding source distribution and the common target, while the shared map receives contributions from all sources. The training procedure is summarized in Algorithm 1. 
+
+Inference. Given a new input x, we generate an output Tθ (x, z ) with z ∼ S, or Tθ (x) in the deterministic case. The source index and the potentials are not required at inference time. 4.3 THEORETICAL PROPERTIES 
+
+The semi-dual formulation allows an arbitrary shared stochastic kernel. We first ask whether one neural map with a noise input is expressive enough to approximate such a kernel simultaneously for all source distributions. For the approximation results in this subsection only, assume that Y = [ a, b ]Dy for some a < b , and let S = Unif[0 , 1] . The compact box assumption makes the W2 statement automatic and allows coordinatewise clipping to Y to be implemented by ReLU operations. 6Preprint 
+
+Algorithm 1: Simultaneous Neural Optimal Transport (SimNOT) 
+
+Input: Distributions P1, . . . , PK , P∗ and S accessible by samples; transport cost 
+
+c : X × Y → R+; parameter τ > 0; conjugate functions ¯ψ, ¯ϕ; shared map Tθ and potentials 
+
+vωk , k = 1 , . . . , K ; number NT of inner iterations; batch sizes. 
+
+Output: Trained shared (stochastic) map Tθ .
+
+repeat 
+
+Sample batches Xk ∼ Pk, k = 1 , . . . , K , and Y ∼ P∗;For each x ∈ Xk, independently sample zk,x ∼ S;
+
+cLv ← − 1
+
+> K
+
+PKk=1 
+
+h 1 
+
+> |Xk|
+
+P
+
+> x∈Xk
+
+¯ψ(vωk (Tθ (x, z k,x )) − τ c (x, T θ (x, z k,x ))) +  
+
+> 1
+> |Y|
+
+P 
+
+> y∈Y
+
+¯ϕ(−vωk (y)) 
+
+i
+
+;Update ω1, . . . , ω K using ∇ωk
+
+cLv to maximize cLv , keeping θ fixed; 
+
+for nT = 1 , 2, . . . , N T do 
+
+Sample batches Xk ∼ Pk, k = 1 , . . . , K ;For each x ∈ Xk, independently sample zk,x ∼ S;
+
+cLT ← − 1
+
+> K
+
+PKk=1 1 
+
+> |Xk|
+
+P
+
+> x∈Xk
+
+¯ψ(vωk (Tθ (x, z k,x )) − τ c (x, T θ (x, z k,x ))) ;Update θ using ∇θ cLT to minimize cLT , keeping ω1, . . . , ω K fixed; 
+
+until converged ;
+
+Theorem 2 (Approximation by a shared neural map) . Let γ(· | x) be a Borel probability kernel from 
+
+X to Y. For every ε > 0, there exists a finite fully connected ReLU network 
+
+Tθ : RDx+1 → Y 
+
+such that, with 
+
+γθ (· | x) = ( Tθ (x, ·)) # S,
+
+we have simultaneously for every k = 1 , . . . , K ,
+
+Z
+
+> X
+
+W 22 (γθ (· | x), γ (· | x)) dPk(x) < ε (13) 
+
+and 
+
+W 22 (( Tθ )#(Pk ⊗ S), γ #Pk) < ε. (14) The theorem shows that any shared stochastic transport mechanism can be approximated by a single neural map, simultaneously and with a common accuracy bound for all source distributions. 
+
+Corollary 1 (Consistency of the neural parametrization) . Assume the conditions of Theorem 1 and 
+
+Y = [ a, b ]Dy . Let Tn be increasing classes of ReLU maps X × [0 , 1] → Y whose union contains every finite ReLU network with coordinatewise clipped output. Let Vm be increasing compact subsets of C(Y)K whose union is uniformly dense in C(Y)K . Define 
+
+Dm,n = sup 
+
+> v∈V m
+
+inf  
+
+> T∈T n
+
+J (v, T ). (15) 
+
+Then 
+
+lim  
+
+> m→∞
+
+lim  
+
+> n→∞
+
+Dm,n = J∗. (16) The corollary shows that the neural parametrization is also consistent at the level of the optimization problem: as the map and potential classes become sufficiently expressive, the restricted population value converges to the exact value J∗. This statement concerns optimal values; it does not require convergence of particular network parameters. The proof is given in Appendix A.2. We finally ask a different question. The previous theorem shows that stochastic kernels can be represented by neural maps; it does not say whether randomization is actually needed by an optimal primal solution. For quadratic cost and KL marginal penalties, an attained optimum is deterministic under a standard regularity assumption on the source densities. 7Preprint 
+
+Figure 3: Simultaneous transport from five Gaussian sources to a common Swiss roll target. Each panel shows the outputs of the same learned map for one source (colored points), overlaid with target samples (gray points). The visualization uses independent samples after 100K training iterations. 
+
+Theorem 3 (Monge structure in the quadratic KL case) . Let X = Y = Rd,
+
+c(x, y ) = ∥x − y∥2, ψ(t) = ϕ(t) = t log t − t + 1 .
+
+Assume that there exists an open set Ω ⊆ Rd such that Pk(Ω) = 1 for all k, and the restriction of Pk to Ω admits a strictly positive density pk ∈ C2(Ω) with respect to d-dimensional Lebesgue measure. If the infimum in equation 8 is attained by  γ∗, {(γ∗ 
+
+> k
+
+)x}Kk=1 
+
+ , then there exists a Borel map 
+
+T ∗ : Rd → Rd such that 
+
+γ∗(· | x) = δT ∗(x) σ-a.e. , σ =
+
+> K
+
+X
+
+> k=1
+
+(γ∗ 
+
+> k
+
+)x. (17) 
+
+Consequently, 
+
+γ∗ 
+
+> k
+
+= (id Rd , T ∗)#(γ∗ 
+
+> k
+
+)x, k = 1 , . . . , K. 
+
+# 5 EXPERIMENTS 
+
+We evaluate SimNOT on a synthetic example and an unpaired image restoration task. In §5.1, we investigate the learned shared transformation between several Gaussian source distributions and a common Swiss roll target. In §5.2, we apply our method to CelebA images with different degradations, using a single model to restore them to a common clean image distribution. 5.1 TOY EXPERIMENT 
+
+We consider a two-dimensional example to illustrate the ability of our method to learn a shared transformation from several source distributions to a common target. The sources P1, . . . , P5 are Gaussian distributions with identity covariance matrices and means (0 , 0) , (3 , 0) , (0 , 3) , (−3, 0) , and 
+
+(0 , −3) , respectively. The target P∗ is a noisy Swiss-roll distribution. We learn a single deterministic map Tθ : R2 → R2 with five source-specific potentials. The map receives only the input coordinates, without the source index. Further experimental details are provided in Appendix D.1. 
+
+Results. Figure 3 shows the transported samples from each source alongside samples from the common target. The shared map recovers the overall spiral structure for all five sources. The outputs differ in their spread around the spiral, and some samples lie between its branches. Thus, the experiment illustrates simultaneous approximation of the target geometry, while leaving visible discrepancies between the transported and target distributions. 5.2 UNPAIRED IMAGE RESTORATION WITH MULTIPLE DEGRADATIONS 
+
+Experimental setup. We consider unpaired image restoration on CelebA at resolution 64 × 64 .The five source distributions correspond to bicubic and bilinear downsampling, JPEG compression, Gaussian blur, and additive Gaussian noise. The common target consists of clean images. We use disjoint sets of images to construct the source distributions, the clean target, and the test set. Each source image is assigned to one degradation, and its clean counterpart is not used as a training target. Our goal is to learn a shared restoration map that processes inputs without receiving their degradation labels. Data preparation and training details are provided in Appendix D.2. 8Preprint                   
+
+> Method Mean FID ↓Max FID ↓PSNR ↑
+> Degraded input 87.60 178.94 25.19 Pooled UOT 9.96 14.39 27.51 Conditional UOT + classifier 6.39 8.33 28.21
+> SimNOT (ours) 8.23 11.88 27.85
+
+Table 1: CelebA restoration on held-out images with the training degradation parameters. Each of the five degradations is applied to the same full set of test images. Mean and Max FID aggregate the five source-specific FIDs. PSNR (dB) is averaged over images and degradation conditions. The best and second-best results among restoration methods are bold and underlined, respectively.                                              
+
+> Bilinear ×3Bilinear ×5
+> Method FID ↓LPIPS ↓PSNR ↑FID ↓LPIPS ↓PSNR ↑
+> Degraded input 92.82 0.1821 25.02 317.44 0.3717 20.93 Pooled UOT 27.71 0.0717 24.23 99.22 0.2342 20.51 Conditional UOT + classifier 35.16 0.1185 24.35 80.87 0.2670 20.80 SimNOT (ours) 18.44 0.0635 25.03 32.15 0.1134 20.93
+> Conditional UOT + known family 21.42 0.0637 23.99 77.23 0.1983 20.69
+
+Table 2: Generalization to unseen bilinear downsampling factors. Models trained with factor ×4 are evaluated at factors ×3 and ×5 without retraining. Each setting uses all 20 ,259 test images. The last row supplies the bilinear family label directly to Conditional UOT. Bold indicates the best result among restoration methods. 
+
+Baselines. We compare SimNOT with two UOT baselines. Pooled UOT learns a shared map and a single potential by treating the source distributions as an equally weighted mixture. Conditional UOT 
+
+conditions both the map and the potential on the degradation label. For blind restoration, this label is predicted by a separately trained degradation classifier which uses the same five degradation types and fixed parameters as restoration training. All models use the same data split and are evaluated using their final exponential moving average (EMA) checkpoints after 100 K training steps. 
+
+Evaluation. We assess distribution matching using FID and reconstruction accuracy using PSNR against the corresponding clean images. For the original degradation settings, we compute FID separately for each source and report the mean and maximum across the five degradations. 
+
+Results on training degradations. Table 1 reports results on held-out images with the degradation parameters used during training. SimNOT outperforms Pooled UOT in both mean and maximum source-specific FID and in PSNR. Conditional UOT achieves the best results in this setting. The degradation classifier attains 100% accuracy, so using its predictions yields the same results as supplying the true degradation labels. 
+
+Generalization to unseen degradation strengths. We further evaluate the trained models on bilinear downsampling with factors ×3 and ×5, while training uses factor ×4. All models, including the classifier, are applied without retraining. We additionally report LPIPS to assess perceptual similarity to the clean reference images. As shown in Table 2, SimNOT achieves the lowest FID and LPIPS and the highest PSNR among the restoration methods at both factors. The classifier fails to identify the bilinear family in either setting. To distinguish classification errors from limitations of the conditional model, we also evaluate Conditional UOT with the known bilinear label. It improves FID and LPIPS, but SimNOT retains an advantage, particularly at factor ×5. Experiments with altered bicubic, JPEG, blur, and noise parameters are reported in Appendix C. While performance of SimNOT varies across degradations, it preserves perceptual similarity more consistently under shifts in degradation parameters. 9Preprint 
+
+# 6 CONCLUSION 
+
+We introduce SimNOT, a neural solver that brings simultaneous OT to the continuous, sample-based setting. Our method learns a single transport map for multiple source distributions, with a sepa-rate distribution-matching objective for each source. We develop a divergence-based unbalanced formulation, derive its exact semi-dual representation, and establish neural approximation guaran-tees. Experiments on synthetic data and image restoration demonstrate that SimNOT learns shared transformations from unpaired samples and handles multiple degradations without requiring their labels at inference time. Our work extends the scope of neural OT from pairwise transport to simulta-neous learning across multiple sources, providing a principled framework for this broader class of transformation problems. We discuss limitations and future research directions in Appendix E. REPRODUCIBILITY STATEMENT 
+
+Experimental details, including data preparation, architectures, hyperparameters, and evaluation protocols, are provided in Appendix D. Our code and instructions for reproducing the experiments will be made publicly available. AI USE STATEMENT 
+
+AI tools were used to assist with polishing and drafting the text, checking proofs, and supporting the implementation and analysis of experiments. All AI-assisted work was reviewed and verified by the authors, who take full responsibility for the final content of this work. 
+
+# REFERENCES 
+
+Martin Arjovsky, Soumith Chintala, and Léon Bottou. Wasserstein generative adversarial networks. In International conference on machine learning , pp. 214–223. PMLR, 2017. Charlotte Bunne, Stefan G Stark, Gabriele Gut, Jacobo Sarabia Del Castillo, Mitch Levesque, Kjong-Van Lehmann, Lucas Pelkmans, Andreas Krause, and Gunnar Rätsch. Learning single-cell perturbation responses using neural optimal transport. Nature Methods , 20(11):1759–1768, 2023. Lenaic Chizat, Gabriel Peyré, Bernhard Schmitzer, and François-Xavier Vialard. Scaling algorithms for unbalanced optimal transport problems. Mathematics of Computation , 87(314):2563–2609, 2018. Lénaïc Chizat. Unbalanced optimal transport: Models, numerical methods, applications . PhD thesis, Université Paris sciences et lettres, 2017. Jaemoo Choi, Jaewoong Choi, and Myungjoo Kang. Generative modeling through the semi-dual formulation of unbalanced optimal transport. In Advances in Neural Information Processing Systems , volume 36, 2023. Chanjun Chun, Young Han Lee, Geon Woo Lee, Moongu Jeon, and Hong Kook Kim. Non-parallel voice conversion using cycle-consistent adversarial networks with self-supervised representations. In 2023 IEEE 20th consumer communications & networking conference (CCNC) , pp. 931–932. IEEE, 2023. Marco Cuturi. Sinkhorn distances: Lightspeed computation of optimal transport. In Advances in neural information processing systems , volume 26, pp. 2292–2300, 2013. URL https://proceedings.neurips.cc/paper_files/paper/2013/ file/af21d0c97db2e27e13572cbf59eb343d-Paper.pdf .Luca Eyring, Dominik Klein, Théo Uscidda, Giovanni Palla, Niki Kilbertus, Zeynep Akata, and Fabian Theis. Unbalancedness in neural monge maps improves unpaired domain translation. In 
+
+The Twelfth International Conference on Learning Representations , 2024. Jiaojiao Fan, Shu Liu, Shaojun Ma, Yongxin Chen, and Hao-Min Zhou. Scalable computation of monge maps with general costs. In ICLR Workshop on Deep Generative Models for Highly Structured Data , 2021. 10 Preprint Jiaojiao Fan, Shu Liu, Shaojun Ma, Hao-Min Zhou, and Yongxin Chen. Neural monge map estimation and its applications. Transactions on Machine Learning Research , 2023. ISSN 2835-8856. URL 
+
+https://openreview.net/forum?id=2mZSlQscj3 . Featured Certification. Milena Gazdieva, Alexander Korotin, Daniil Selikhanovych, and Evgeny Burnaev. Extremal domain translation with neural optimal transport. In Advances in Neural Information Processing Systems ,2023. Milena Gazdieva, Arip Asadulaev, Evgeny Burnaev, and Alexander Korotin. Light unbalanced optimal transport. Advances in Neural Information Processing Systems , 37:93907–93938, 2024. Milena Gazdieva, Jaemoo Choi, Alexander Kolesov, Jaewoong Choi, Petr Mokrov, and Aleksandr Korotin. Robust barycenter estimation using semi-unbalanced neural optimal transport. In 
+
+International Conference on Learning Representations , volume 2025, pp. 74233–74262, 2025. Dominik Klein, Théo Uscidda, Fabian Theis, and Marco Cuturi. Genot: A neural optimal transport framework for single cell genomics. In The Thirty-eighth Annual Conference on Neural Information Processing Systems , 2024. Alexander Kolesov, Petr Mokrov, Igor Udovichenko, Milena Gazdieva, Gudmund Pammer, Evgeny Burnaev, and Alexander Korotin. Estimating barycenters of distributions with neural optimal transport. In Forty-first International Conference on Machine Learning , 2024a. Alexander Kolesov, Petr Mokrov, Igor Udovichenko, Milena Gazdieva, Gudmund Pammer, Anastasis Kratsios, Evgeny Burnaev, and Alexander Korotin. Energy-guided continuous entropic barycenter estimation for general costs. In The Thirty-eighth Annual Conference on Neural Information Processing Systems , 2024b. Alexander Korotin, Daniil Selikhanovych, and Evgeny Burnaev. Kernel neural optimal transport. In 
+
+International Conference on Learning Representations , 2023a. URL https://openreview. net/forum?id=Zuc_MHtUma4 .Alexander Korotin, Daniil Selikhanovych, and Evgeny Burnaev. Neural optimal transport. In 
+
+International Conference on Learning Representations , 2023b. URL https://openreview. net/forum?id=d8CBRlWNkqH .Boyun Li, Xiao Liu, Peng Hu, Zhongqin Wu, Jiancheng Lv, and Xi Peng. All-in-one image restoration for unknown corruption. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , 2022. URL https: //openaccess.thecvf.com/content/CVPR2022/html/Li_All-in-One_ Image_Restoration_for_Unknown_Corruption_CVPR_2022_paper.html .Matthias Liero, Alexander Mielke, and Giuseppe Savaré. Optimal entropy-transport problems and a new hellinger–kantorovich distance between positive measures. Inventiones mathematicae , 211(3): 969–1117, 2018. Ashok Makkuva, Amirhossein Taghvaei, Sewoong Oh, and Jason Lee. Optimal transport mapping via input convex neural networks. In International Conference on Machine Learning , pp. 6672–6681. PMLR, 2020. Gabriel Peyré, Marco Cuturi, et al. Computational optimal transport: With applications to data science. Foundations and Trends® in Machine Learning , 11(5-6):355–607, 2019. Vaishnav Potlapalli, Syed Waqas Zamir, Salman H. Khan, and Fahad Shahbaz Khan. PromptIR: Prompting for all-in-one image restoration. In Advances in Neural Information Processing Systems ,volume 36, 2023. URL https://proceedings.neurips.cc/paper_files/paper/ 2023/hash/e187897ed7780a579a0d76fd4a35d107-Abstract-Conference. html .Litu Rout, Alexander Korotin, and Evgeny Burnaev. Generative modeling with optimal transport maps. In International Conference on Learning Representations , 2022. URL https://openreview. net/forum?id=5JdLZg346Lw .11 Preprint Xiaole Tang, Xiang Gu, Xiaoyi He, Xin Hu, and Jian Sun. Degradation-aware residual-conditioned optimal transport for unified image restoration. IEEE Transactions on Pattern Analysis and Machine Intelligence , 47(8):6764–6779, 2025. doi: 10.1109/TPAMI.2025.3562211. URL https: //doi.org/10.1109/TPAMI.2025.3562211 .Xiaole Tang, Xiaoyi He, Jiayi Xu, Xiang Gu, and Jian Sun. Learning continuous Wasserstein barycenter space for generalized all-in-one image restoration. IEEE Transactions on Pattern Analysis and Machine Intelligence , 2026. doi: 10.1109/TPAMI.2026.3669121. URL https: //doi.org/10.1109/TPAMI.2026.3669121 .Cédric Villani. Optimal transport: old and new , volume 338 of Grundlehren der mathematischen Wissenschaften . Springer, 2009. Ruodu Wang and Zhenyuan Zhang. Simultaneous optimal transport. Transactions of the American Mathematical Society , 378(8):5845–5898, 2025. doi: 10.1090/tran/9393. URL https://doi. org/10.1090/tran/9393 .Karren D Yang and Caroline Uhler. Scalable unbalanced optimal transport using generative adversarial networks. In International Conference on Learning Representations , 2018. Jun-Yan Zhu, Taesung Park, Phillip Isola, and Alexei A Efros. Unpaired image-to-image translation using cycle-consistent adversarial networks. In Proceedings of the IEEE international conference on computer vision , pp. 2223–2232, 2017. 
+
+# A PROOFS OF THE THEORETICAL RESULTS 
+
+A.1 PROOF OF THE SEMI -DUAL FORMULATION 
+
+Put 
+
+P = 1
+
+K
+
+> K
+
+X
+
+> k=1
+
+Pk, rk = dPk
+
+dP .
+
+We choose Borel versions such that 0 ≤ rk ≤ K and P 
+
+> k
+
+rk = K P-almost everywhere. For h = ψ or h = ϕ, we use the standard variational identity 
+
+Dh(μ∥ν) = sup  
+
+> f∈Cb(E)
+
+Z 
+
+> E
+
+f dμ −
+
+Z
+
+> E
+
+¯h(f ) dν 
+
+
+
+for finite nonnegative Borel measures on a Polish space E. Under the assumptions of Theorem 1, these divergences are jointly lower semicontinuous for narrow convergence and satisfy the data-processing inequality. For a probability kernel γ(· | x), define the probability measure 
+
+mγk (dx, dy ) = Pk(dx ) γ(dy | x).
+
+Consider the convex relaxation 
+
+R = inf  
+
+> γ, π 1,...,π K≥0
+
+1
+
+K
+
+> K
+
+X
+
+> k=1
+
+Z 
+
+c dπ k + Dψ (πk∥mγk ) + Dϕ(( πk)y ∥P∗)
+
+
+
+. (18) Every admissible point of equation 8 is admissible here: if 
+
+πk(dx, dy ) = αk(dx ) γ(dy | x),
+
+then 
+
+Dψ (πk∥mγk ) = Dψ (αk∥Pk).
+
+Hence R ≤ J∗.The relaxation allows the density of πk with respect to mγk to depend on both x and y. The following lemma shows that this additional freedom does not change the infimum. 12 Preprint 
+
+Lemma 1 (No relaxation gap) . Under the assumptions of Theorem 1, 
+
+R = J∗.
+
+Proof. Fix an admissible point of equation 18 with finite value and write 
+
+sk = dπ k
+
+dm γk
+
+.
+
+We first reduce to bounded finite-valued densities supported on a common compact rectangle. By tightness, choose increasing compact rectangles En = Cn × Dn such that mγk (Ecn) → 0 for every k,and set 
+
+sk,n = 2 −n ⌊2n min {sk, n }⌋ 1En .
+
+Then 0 ≤ sk,n ↑ sk mγk -almost everywhere. Monotone convergence gives convergence of the transport costs. Since for a nonnegative convex function h and 0 ≤ a ≤ b,
+
+h(a) ≤ h(0) + h(b),
+
+dominated convergence gives convergence of the source divergence terms. The target measures 
+
+(sk,n mγk )y increase to (πk)y , and the same bound applied to their densities with respect to P∗ gives convergence of the target divergences. It is therefore enough to treat finite-valued sk supported on one compact rectangle C × D.Fix δ > 0. Uniform continuity of c on C × D gives a finite Borel partition 
+
+D = B1 ⊔ · · · ⊔ BL
+
+such that 
+
+sup 
+
+> x∈C
+
+sup 
+
+> y,y ′∈Bℓ
+
+|c(x, y ) − c(x, y ′)| ≤ δ
+
+for every ℓ. Cells with P∗(Bℓ) = 0 carry no transported mass and may be ignored. For the remaining cells, put 
+
+νℓ = P∗|Bℓ
+
+P∗(Bℓ) , ¯cℓ(x) = 
+
+Z
+
+> Bℓ
+
+c(x, y ) dν ℓ(y).
+
+For fixed x, sample y ∼ γ(· | x) and record the finite action 
+
+(ℓ, s 1(x, y ), . . . , s K (x, y )) 
+
+when y ∈ Bℓ; points carrying no transported mass are assigned one additional zero action. This gives a randomized rule with a finite action space. Since P is atomless, it can be approximated by measurable deterministic rules while preserving, up to an arbitrarily small error, the finitely many integrals corresponding to 
+
+rk(x)ψ(zk), rk(x)zk1{ℓ=j}, rk(x)zk ¯cℓ(x).
+
+One may obtain this directly by approximating these payoffs by simple functions on a common finite partition of C and splitting each atomless partition cell according to the required action probabilities. Let 
+
+x 7 → (ℓn(x), z 1,n (x), . . . , z K,n (x)) 
+
+be such deterministic rules. Define 
+
+αk,n (dx ) = zk,n (x) Pk(dx )
+
+on C and set αk,n = 0 outside C. At a nonzero action, define the common kernel by 
+
+γn(dy | x) = νℓn(x)(dy ),
+
+and choose it arbitrarily at the zero action and outside C.By construction, the source divergence terms converge to Dψ (πk∥mγk ). The target measures have the form 
+
+(αk,n (dx )γn(dy | x)) y =
+
+> L
+
+X
+
+> ℓ=1
+
+bkℓ,n νℓ,
+
+13 Preprint where 
+
+bkℓ,n −→ bkℓ := ( πk)y (Bℓ).
+
+If ρk = d(πk)y /d P∗, then Jensen’s inequality gives 
+
+P∗(Bℓ)ϕ
+
+ bkℓ 
+
+P∗(Bℓ)
+
+
+
+≤
+
+Z
+
+> Bℓ
+
+ϕ(ρk) dP∗.
+
+Hence the limiting target divergence is no larger than Dϕ(( πk)y ∥P∗).Finally, the limiting transport cost differs from R c dπ k by at most 
+
+δ π k(X × Y ).
+
+Letting the purification error tend to zero, then δ ↓ 0, and finally removing the initial finite-valued compact approximation gives J∗ ≤ R. Together with R ≤ J∗, this proves the lemma. 
+
+Proof of Theorem 1. By Lemma 1, it remains to derive the dual of the convex problem equation 18. We first explain the argument for a compact target. Write a shared kernel as 
+
+q(dx, dy ) = P(dx ) γ(dy | x)
+
+and set 
+
+Q = q ∈ P (X × Y ) : qx = P .
+
+Then 
+
+mγk = rkq. 
+
+The set Q is convex and narrowly compact. Moreover, q 7 → rkq is narrowly continuous on Q:approximate the bounded Borel function rk in L1(P) by bounded continuous functions and use that every q ∈ Q has the same x-marginal. For finite nonnegative measures πk on X × Y and βk on Y, define 
+
+E(q, π, β) = 
+
+> K
+
+X
+
+> k=1
+
+Z 
+
+c dπ k + Dψ (πk∥rkq) + Dϕ(βk∥P∗)
+
+
+
+.
+
+Its sublevel sets are narrowly compact. Indeed, superlinearity of ψ gives uniform bounds on the masses and tails of πk relative to the uniformly tight family {rkq : q ∈ Q}; the same argument applies to βk relative to P∗. Lower semicontinuity follows from lower semicontinuity of the cost and divergences and from continuity of q 7 → rkq.For signed finite measures η1, . . . , η K on Y, define 
+
+W (η) = inf      
+
+> q∈Q, π k,β k≥0(πk)y−βk=ηk
+
+E(q, π, β).
+
+The function W is proper, convex and lower semicontinuous in the weak topology induced by C(Y)K .Its finite infima are attained by compactness of the energy sublevels, and 
+
+W (0) = KR. 
+
+Fenchel–Moreau therefore gives 
+
+KR = sup 
+
+> v∈C(Y)K
+
+{− W ∗(v)}.
+
+We compute the conjugate pointwise. For fixed q and v ∈ C(Y),
+
+sup 
+
+> π≥0
+
+Z 
+
+v(y) dπ −
+
+Z
+
+c dπ − Dψ (π∥rkq)
+
+
+
+=
+
+Z
+
+¯ψ(v(y) − c(x, y )) d(rkq)( x, y ).
+
+To justify the interchange of supremum and integration, note that v − c is bounded above. Super-linearity of ψ therefore bounds all pointwise maximizers in a common compact interval. Using a countable dense subset of the effective domain (including its finite endpoints), one obtains measurable finite-valued near-maximizers. Choosing them at least as good as t = 0 also gives a uniform bound 14 Preprint on c(x, y )t, so the corresponding measures have finite transport cost. The resulting integrals converge to the pointwise conjugate. Similarly, 
+
+sup 
+
+> β≥0
+
+
+
+−
+
+Z
+
+v dβ − Dϕ(β∥P∗)
+
+
+
+=
+
+Z
+
+¯ϕ(−v) dP∗.
+
+Substitution into the Fenchel–Moreau formula yields 
+
+R = sup 
+
+> v∈C(Y)K
+
+inf  
+
+> γ
+
+J (v, γ )
+
+when Y is compact. Now suppose that Y is noncompact. Since it is a closed subset of Euclidean space, its one-point compactification 
+
+bY = Y ∪ {∞} 
+
+is a compact metric space. Extend P∗ by zero at ∞ and set 
+
+bc(x, y ) = c(x, y ) for y ∈ Y , bc(x, ∞) = 0 .
+
+The extended cost is lower semicontinuous because c ≥ 0. Compactification does not change the relaxed value. Indeed, every finite-value candidate has πk(X × {∞} ) = 0 because (πk)y ≪ P∗.If the reference kernel places mass at ∞, send this mass to an arbitrary fixed point y0 ∈ Y . The transport plans and their target marginals are unchanged, while the data-processing inequality shows that the source divergence cannot increase. Applying the compact argument on bY and then restricting the potentials and kernels back to Y gives 
+
+R ≤ sup 
+
+> v∈Cb(Y)K
+
+inf  
+
+> γ
+
+J (v, γ ).
+
+Indeed, restrictions of functions in C( bY) belong to Cb(Y), while kernels supported on Y form a subclass of the compactified kernels. For the reverse bound, let vk ∈ Cb(Y) and use the pointwise Fenchel inequalities 
+
+Z
+
+c dπ k + Dψ (πk∥mγk ) ≥
+
+Z
+
+vk d(πk)y −
+
+Z
+
+¯ψ(vk − c) dm γk
+
+and 
+
+Dϕ(( πk)y ∥P∗) ≥ − 
+
+Z
+
+vk d(πk)y −
+
+Z
+
+¯ϕ(−vk) dP∗.
+
+After summing and taking infima, this gives 
+
+sup 
+
+> v∈Cb(Y)K
+
+inf  
+
+> γ
+
+J (v, γ ) ≤ R. 
+
+Together with the compactified lower bound and Lemma 1, 
+
+J∗ = sup 
+
+> v∈Cb(Y)K
+
+inf  
+
+> γ
+
+J (v, γ ).
+
+It remains to remove the inner randomization. Fix v ∈ Cb(Y)K and define 
+
+Hv(x, y ) = 1
+
+K
+
+> K
+
+X
+
+> k=1
+
+rk(x) ¯ψ(vk(y) − c(x, y )) .
+
+For each fixed x, the function y 7 → Hv(x, y ) is continuous, and Hv is bounded because 
+
+−ψ(0) ≤ ¯ψ(vk(y) − c(x, y )) ≤ ¯ψ(∥vk∥∞).
+
+Choose a countable dense set {yj : j ≥ 1} ⊆ Y . Then 
+
+h(x) = sup 
+
+> y∈Y
+
+Hv(x, y ) = sup 
+
+> j≥1
+
+Hv(x, y j )
+
+is Borel. For every ε > 0, choosing the first yj with 
+
+Hv(x, y j ) > h (x) − ε
+
+15 Preprint defines a Borel map Tε : X → Y . Hence 
+
+sup 
+
+> γ
+
+Z
+
+Hv(x, y ) γ(dy | x) dP(x) = sup 
+
+> T
+
+Z
+
+Hv(x, T (x)) dP(x),
+
+where the second supremum is over Borel maps. Since the target term in J does not depend on the kernel, 
+
+inf  
+
+> γ
+
+J (v, γ ) = inf  
+
+> T
+
+J (v, T ).
+
+This proves Theorem 1. A.2 PROOF OF THE APPROXIMATION RESULTS 
+
+Proof of Theorem 2. By the randomization lemma, there exists a measurable map 
+
+T : X × [0 , 1] → Y 
+
+such that 
+
+(T (x, ·)) #S = γ(· | x).
+
+Put 
+
+P = 1
+
+K
+
+> K
+
+X
+
+> k=1
+
+Pk, μ = P ⊗ S.
+
+Since Y = [ a, b ]Dy is bounded, T ∈ L2(μ; RDy ).We claim that T can be approximated arbitrarily well in L2(μ) by finite ReLU networks with output in Y. By Lusin’s theorem, for every η > 0 there is a compact set Kη ⊆ X × [0 , 1] such that T |Kη is continuous and μ(Kcη ) < η . The usual ReLU universal approximation theorem gives a finite network that approximates T uniformly on Kη . Clipping each output coordinate to [a, b ] is itself a ReLU operation and cannot increase the error to a point of Y. Since both T and the clipped network are uniformly bounded, the contribution of Kcη to the L2 error tends to zero with η. Thus, for any δ > 0,we can choose Tθ such that Z
+
+∥Tθ (x, z ) − T (x, z )∥2 dP(x) dS(z) < δ. 
+
+Because Pk ≤ KP, Z
+
+∥Tθ (x, z ) − T (x, z )∥2 dPk(x) dS(z) < Kδ 
+
+for every k. Choose δ < ε/K .For fixed x, the pair 
+
+(Tθ (x, Z ), T (x, Z )) , Z ∼ S,
+
+is a coupling of γθ (· | x) and γ(· | x). Therefore 
+
+W 22 (γθ (· | x), γ (· | x)) ≤ E∥Tθ (x, Z ) − T (x, Z )∥2.
+
+Integrating with respect to Pk proves equation 13. Sampling additionally X ∼ Pk gives a coupling of the two output laws with the same quadratic cost, which proves equation 14. 
+
+Proof of Corollary 1. For fixed v ∈ C(Y)K , set 
+
+dn(v) = inf  
+
+> T∈T n
+
+J (v, T ), d(v) = inf  
+
+> T
+
+J (v, T ),
+
+where the second infimum is over all measurable maps T : X × [0 , 1] → Y .The proof of Theorem 2 shows that every such measurable map can be approximated in L2(P ⊗ S)
+
+by maps from S 
+
+> n
+
+Tn. Hence the approximating maps converge in probability under every Pk ⊗ S.Since c and the potentials are continuous and 
+
+−ψ(0) ≤ ¯ψ(vk(y) − c(x, y )) ≤ ¯ψ(∥vk∥∞),
+
+16 Preprint the corresponding integrands are uniformly bounded. It follows that the expectations converge, and therefore 
+
+dn(v) ↓ d(v).
+
+Fix m. Compactness of Vm in the uniform norm gives a common bound on its potentials. Superlin-earity of ψ implies that ¯ψ is Lipschitz on every interval (−∞ , B ], while ¯ϕ is Lipschitz on bounded intervals. Consequently, dn and d are uniformly Lipschitz on Vm. Since dn ↓ d and Vm is compact, Dini’s theorem gives uniform convergence and therefore 
+
+lim  
+
+> n→∞
+
+Dm,n = sup 
+
+> v∈V m
+
+d(v).
+
+Finally, S 
+
+> m
+
+Vm is uniformly dense in C(Y)K and d is continuous. Hence 
+
+lim  
+
+> m→∞
+
+sup 
+
+> v∈V m
+
+d(v) = sup 
+
+> v∈C(Y)K
+
+d(v).
+
+Because Y is compact, C(Y) = Cb(Y), and Theorem 1 identifies the last quantity with J∗. This proves equation 16. A.3 PROOF OF THE DETERMINISTIC STRUCTURE THEOREM 
+
+Proof of Theorem 3. Write 
+
+αk = α∗
+
+> k
+
+, M =
+
+> K
+
+X
+
+> k=1
+
+Pk, σ =
+
+> K
+
+X
+
+> k=1
+
+αk.
+
+Finite KL divergence gives 
+
+σ ≪ M ≪ L d.
+
+If σ = 0 , the conclusion is vacuous. Assume σ̸ = 0 and define on Ω
+
+ak(x) = pk(x)
+
+P 
+
+> j
+
+pj (x) , λk(x) = dα k
+
+dσ (x).
+
+Then ak > 0, P 
+
+> k
+
+ak = 1 , and P 
+
+> k
+
+λk = 1 σ-almost everywhere. The functions ak are C2 on Ω.Let m = dσ/dM . Since 
+
+dα k
+
+dPk
+
+= mλ k
+
+ak
+
+,
+
+a direct calculation gives 
+
+> K
+
+X
+
+> k=1
+
+KL( αk∥Pk) = KL( σ∥M ) + 
+
+Z
+
+> Ω
+> K
+
+X
+
+> k=1
+
+λk(x) log λk(x)
+
+ak(x) dσ (x). (19) Let 
+
+∆K =
+
+(
+
+z ∈ [0 , 1] K :
+
+> K
+
+X
+
+> k=1
+
+zk = 1 
+
+)
+
+be the probability simplex, and write λ(x) = ( λ1(x), . . . , λ K (x)) . Define the finite measure 
+
+ζ(dx, dy, dz ) = σ(dx ) γ∗(dy | x) δλ(x)(dz )
+
+on Ω × Rd × ∆K , and let ξ be its (y, z )-marginal. Consider the cost 
+
+ec(x; y, z ) = ∥x − y∥2 +
+
+> K
+
+X
+
+> k=1
+
+zk log zk
+
+ak(x) , 0 log 0 := 0 .
+
+We first show that ζ is an optimal transport plan between σ and ξ for this cost. Let eζ ∈ Π( σ, ξ ) and let η be its (x, y )-marginal. Write 
+
+η(dx, dy ) = σ(dx ) eγ(dy | x)
+
+17 Preprint and define 
+
+eπk(dx, dy ) = 
+
+Z
+
+> ∆K
+
+zk eζ(dx, dy, dz ).
+
+If 
+
+zk(x, y ) = Eeζ [zk | x, y ],
+
+then 
+
+eπk(dx, dy ) = zk(x, y ) η(dx, dy ), X
+
+> k
+
+zk = 1 .
+
+Because the (y, z )-marginal of eζ is fixed, 
+
+(eπk)y (B) = 
+
+Z
+
+> B×∆K
+
+zk dξ (y, z ),
+
+so these target marginals are the same as those of the original optimal plans. Using the same density calculation as in equation 19, now on X × Rd, we obtain 
+
+> K
+
+X
+
+> k=1
+
+KL( eπk∥Pk(dx ) eγ(dy | x)) = KL( σ∥M ) + 
+
+Z KX
+
+> k=1
+
+zk(x, y ) log zk(x, y )
+
+ak(x) dη (x, y )
+
+≤ KL( σ∥M ) + 
+
+Z KX
+
+> k=1
+
+zk log zk
+
+ak(x) deζ(x, y, z ),
+
+where the inequality is conditional Jensen. Moreover, 
+
+> K
+
+X
+
+> k=1
+
+Z
+
+∥x − y∥2 deπk(x, y ) = 
+
+Z
+
+∥x − y∥2 deζ(x, y, z ).
+
+Thus, if eζ had strictly smaller ec-cost than ζ, the measures eπk together with the common kernel eγ
+
+would give an admissible point of the relaxed problem equation 18 with value strictly below J∗. This contradicts Lemma 1. Hence ζ is optimal. It remains to show that its y-coordinate is uniquely determined by x. Cover Ω by countably many open balls Bj with Bj ⊂ Ω, and choose larger open balls Uj such that 
+
+Bj ⊂ Uj , U j ⊂ Ω.
+
+For ℓ ≥ 1, let 
+
+Dℓ = {y ∈ Rd : ∥y∥ ≤ ℓ}.
+
+The restriction of ζ to 
+
+Bj × Dℓ × ∆K
+
+is optimal between its own marginals: otherwise it could be replaced by a cheaper coupling without changing the full marginals of ζ.On U j × Dℓ × ∆K , the cost ec is continuous and continuously differentiable in x, with bounded 
+
+x-gradient. Compact Kantorovich duality gives dual potentials. Taking the cost transform on the source side gives a source potential ujℓ that is Lipschitz on Uj , hence differentiable Lebesgue-almost everywhere. At a differentiability point where complementary slackness holds, 
+
+∇ujℓ (x) = 2( x − y) −
+
+> K
+
+X
+
+> k=1
+
+zk∇ log ak(x).
+
+For ζ we have z = λ(x) almost everywhere, so the conditional measure can charge only 
+
+y = x − 12
+
+"
+
+∇ujℓ (x) + 
+
+> K
+
+X
+
+> k=1
+
+λk(x)∇ log ak(x)
+
+#
+
+.
+
+18 Preprint Since σ ≪ L d, after removing one σ-null set for the countable family (j, ℓ ), this conclusion holds whenever the corresponding restricted conditional measure is nonzero. The sets Dℓ increase to Rd,and their restrictions are consistent. Therefore γ∗(· | x) is a Dirac mass for σ-almost every x.A Borel probability kernel that is almost everywhere a Dirac mass induced, after modification on a null set, by a Borel map. Hence there exists T ∗ : Rd → Rd satisfying equation 17, and the formula for the optimal plans follows immediately. 
+
+# B EXTENDED DISCUSSION OF RELATED WORK 
+
+OT barycenters. Barycenter methods also relate several distributions through OT. Continuous neural solvers estimate a common distribution by minimizing an average of transport costs (Fan et al., 2021; Kolesov et al., 2024b;a); semi-unbalanced extensions allow robust barycenter estimation (Gazdieva et al., 2025). In these problems, the common distribution is an unknown to be optimized. In our setting, the target distribution is prescribed and accessible through samples. Moreover, the simultaneous constraint requires a shared transformation, whereas the standard barycenter problem allows separate transport plans for different input distributions. 
+
+All-in-one image restoration. Learning a single model for multiple degradations is the aim of all-in-one image restoration. AirNet (Li et al., 2022) learns degradation representations, while PromptIR (Potlapalli et al., 2023) uses learned prompts to adapt restoration to the input. Their restoration networks are trained with paired degraded and clean images. OT-based approaches also address this task: DA-RCOT (Tang et al., 2025) considers both unpaired and paired restoration, using transport residuals to inform the cost and condition the restoration map. Our focus is on imposing separate distribution-matching objectives for the individual sources within a simultaneous formulation. Another closely related approach, BaryIR (Tang et al., 2026), learns a shared map and multiple potentials to construct a Wasserstein barycenter representation of degraded features. It combines this representation with residual features and uses paired supervision for restoration. SimNOT instead learns transport to a prescribed target distribution from unpaired samples. Thus, the key distinction from BaryIR lies in the transport problem and supervision, rather than in sharing a map across degradations. 
+
+# C ADDITIONAL EXPERIMENTAL RESULTS 
+
+C.1 RESULTS FOR INDIVIDUAL DEGRADATIONS 
+
+Table 3 provides the source-specific results underlying Table 1. It shows that SimNOT achieves lower FID and higher PSNR than Pooled UOT for JPEG compression, Gaussian blur, and Gaussian noise, although Pooled UOT performs slightly better for the downsampling degradations. Besides, SimNOT obtains the best FID and PSNR for Gaussian noise and the best PSNR for JPEG compression, while conditional UOT performs best in FID for the remaining four degradations. C.2 GENERALIZATION TO UNSEEN DEGRADATION STRENGTHS 
+
+We extend the bilinear experiments in Table 2 to altered bicubic downsampling factors, JPEG quality levels, blur standard deviations, and noise standard deviations. Tables 4 and 5 report results for milder and stronger degradations, respectively. Each setting uses all 20 ,259 test images and the same trained models, without fine-tuning. The results show that SimNOT achieves lower LPIPS than classifier-routed Conditional UOT in 9/10 
+
+conditions and Pooled UOT in 7/10 . SimNOT also has the highest mean PSNR among the blind methods, although Pooled UOT achieves a slightly lower mean FID. The known-family reference has better mean scores in all three metrics. Thus, among the blind methods, SimNOT’s most consistent advantage is in perceptual similarity measured by LPIPS. 19 Preprint 
+
+Method Bicubic Bilinear JPEG Blur Noise FID ↓
+
+Degraded input 124.86 178.94 31.19 46.47 56.54 Pooled UOT 10.96 8.54 9.15 6.75 14.39 Conditional UOT + classifier 8.33 8.18 5.92 3.48 6.02 SimNOT (ours) 11.28 11.88 6.59 6.27 5.14 
+
+PSNR (dB) ↑
+
+Degraded input 22.89 23.02 28.50 25.22 26.32 Pooled UOT 22.96 23.74 29.22 29.84 31.78 Conditional UOT + classifier 22.99 23.72 29.55 31.34 33.42 SimNOT (ours) 22.70 23.26 29.59 29.86 33.85 
+
+Table 3: Source-specific results on the original degradation settings. The evaluation protocol is described in Appendix D.2. The best and second-best results among restoration methods are bold and underlined, respectively. Rankings use unrounded values. 
+
+Method FID ↓ LPIPS ↓ PSNR ↑
+
+Bicubic ×3 (training: ×4)Degraded input 61.46 0.16835 25.24 Pooled UOT 21.06 0.07670 23.10 
+
+Conditional UOT + classifier 113.85 0.20161 20.25 SimNOT (ours) 18.72 0.06642 22.49 Conditional UOT + known family 9.27 0.04598 23.74 JPEG quality 30 (training: 25 )Degraded input 27.22 0.03445 29.11 Pooled UOT 8.30 0.01726 29.74 Conditional UOT + classifier 5.48 0.01546 30.00 SimNOT (ours) 6.40 0.01598 30.02 
+
+Conditional UOT + known family 5.48 0.01546 30.00 Gaussian blur σ = 1 .25 (training: 1.5)Degraded input 31.02 0.19583 26.62 Pooled UOT 6.80 0.01804 30.26 
+
+Conditional UOT + classifier 6.61 0.03509 29.09 SimNOT (ours) 8.95 0.03057 28.41 Conditional UOT + known family 6.61 0.03508 29.09 Gaussian noise σ = 0 .04 (training: 0.05 )Degraded input 48.45 0.02418 28.20 Pooled UOT 6.60 0.00867 32.85 Conditional UOT + classifier 2.85 0.00543 34.60 SimNOT (ours) 3.17 0.00510 35.08 
+
+Conditional UOT + known family 2.85 0.00543 34.60 
+
+Table 4: Generalization to milder degradations. All models are evaluated without retraining on 
+
+20 ,259 images per setting. The best and second-best results among blind restoration methods are bold and underlined, respectively. The known-family variant receives the true degradation family and is reported separately as a reference. Rankings use unrounded values. C.3 DEGRADATION CLASSIFICATION RESULTS 
+
+The degradation classifier achieves 100% accuracy on the test set with the original degradation param-eters. Table 6 reports its accuracy under parameter shifts, measured against the known degradation family. 20 Preprint 
+
+Method FID ↓ LPIPS ↓ PSNR ↑
+
+Bicubic ×5 (training: ×4)Degraded input 238.78 0.41126 20.67 Pooled UOT 40.31 0.16003 20.09 
+
+Conditional UOT + classifier 177.46 0.27675 19.69 SimNOT (ours) 151.24 0.24771 19.49 Conditional UOT + known family 21.89 0.09326 20.37 JPEG quality 20 (training: 25 )Degraded input 36.78 0.05387 27.73 Pooled UOT 10.94 0.02463 28.52 Conditional UOT + classifier 7.16 0.02094 28.89 SimNOT (ours) 7.30 0.02092 28.95 
+
+Conditional UOT + known family 7.16 0.02094 28.89 Gaussian blur σ = 1 .75 (training: 1.5)Degraded input 64.50 0.30943 24.13 Pooled UOT 10.91 0.03433 27.85 Conditional UOT + classifier 9.88 0.04010 28.86 
+
+SimNOT (ours) 11.82 0.03488 28.38 Conditional UOT + known family 9.88 0.04010 28.86 Gaussian noise σ = 0 .06 (training: 0.05 )Degraded input 65.16 0.06515 24.79 Pooled UOT 24.77 0.01584 30.65 Conditional UOT + classifier 14.42 0.00932 32.18 SimNOT (ours) 11.26 0.00867 32.60 
+
+Conditional UOT + known family 14.42 0.00932 32.18 
+
+Table 5: Generalization to stronger degradations. The evaluation protocol follows Table 4. 
+
+Degradation Test parameter Accuracy (%) ↑
+
+Bicubic ×3 0.035 Bicubic ×5 0.000 Bilinear ×3 0.000 Bilinear ×5 0.000 JPEG 30 100.000 JPEG 20 100.000 Gaussian blur 1.25 99.995 Gaussian blur 1.75 100.000 Gaussian noise 0.04 100.000 Gaussian noise 0.06 100.000 
+
+Table 6: Degradation classification accuracy under parameter shifts. Each setting contains 20 ,259 test images. The classifier is trained only on the fixed degradation parameters specified in Appendix D.2. Classification remains accurate for the tested JPEG, blur, and noise settings. In contrast, changing the downsampling factor substantially affects classification for both interpolation modes. For bilinear factors ×3 and ×5, no test image is classified as bilinear: approximately 80% and 85% of inputs, respectively, are classified as JPEG. For bicubic factor ×3, most inputs are classified as blur; at factor 
+
+×5, all inputs are classified as blur. This motivates reporting Conditional UOT with both predicted and known family labels to separate classification errors from restoration performance. 21 Preprint 
+
+# D EXPERIMENTAL DETAILS 
+
+D.1 GAUSSIAN -TO -S WISS -R OLL EXPERIMENT 
+
+Distributions. We use five Gaussian source distributions Pk = N (μk, I 2) with means 
+
+μ1 = (0 , 0) , μ2 = (3 , 0) , μ3 = (0 , 3) , μ4 = ( −3, 0) , μ5 = (0 , −3) .
+
+To construct the target distribution, we first sample 
+
+ey = ( t cos t, t sin t) + 0 .75 ϵ, t ∼ Unif[1 .5π, 4.5π], ϵ ∼ N (0 , I 2),
+
+where t and ϵ are independent. We then standardize each coordinate using the empirical mean and standard deviation computed from a fixed calibration sample of 20 ,000 points. These normalization statistics remain fixed throughout training and evaluation. Source and target samples are generated independently on demand. 
+
+Parametrization. The shared map Tθ : R2 → R2 and the five potentials vωk : R2 → R are fully connected networks with four hidden layers of width 256 , ReLU activations, and linear output layers. The map is deterministic and uses no residual connection. All networks use Kaiming initialization with zero biases. 
+
+Training. We use the scaled quadratic transport cost c(x, y ) = τ ∥x − y∥22 with τ = 10 −3 and the conjugate functions ¯ψ(u) = ¯ϕ(u) = 2 log(1 + exp( u)) − 2 log 2 .
+
+Training consists of 100 ,000 iterations, each comprising one update of the potentials followed by one update of the shared map. For the potential update, we independently sample 512 points from each source and a common batch of 512 target points. Fresh source batches of the same size are sampled for the map update. Contributions from the five sources are averaged with equal weights. We regularize the potentials using an R1 penalty on target samples with coefficient γ = 5 :
+
+γ
+
+2K
+
+> K
+
+X
+
+> k=1
+
+Ey∼P∗ ∥∇ y vωk (y)∥22, K = 5 .
+
+Visualization. We use fixed evaluation batches of 2,048 points from each source and 2,048 target points, sampled independently of the training batches. Figure 3 displays the outputs of the final map, applied directly to source samples without rejection sampling. The same target sample is shown in every panel. D.2 CELEB A R ESTORATION EXPERIMENT 
+
+Data split. We use 202 ,592 CelebA images at resolution 64 × 64 , pooling the original dataset partitions and constructing a new split with random seed 0. We allocate 91 ,166 images to the sources, 
+
+91 ,167 to the clean target, and 20 ,259 to the test set, corresponding approximately to a 45 /45 /10 
+
+split. The source images are further divided into five disjoint subsets: 18 ,234 images for bicubic downsampling and 18 ,233 for each remaining degradation. Each image belongs to only one subset. The split is performed at the image level. Only degraded source images and independently sampled clean target images are used for restoration training. The clean counterparts of source images are not provided as supervision. Paired degraded and clean test images are used exclusively for evaluation. 
+
+Degradations. We construct the five source distributions using the following transformations: • Bicubic downsampling. Images are resized from 64 × 64 to 16 × 16 and back to 64 × 64 ,using bicubic interpolation at both stages. • Bilinear downsampling. The same resizing procedure is applied using bilinear interpolation. • JPEG compression. Images are encoded and decoded using JPEG quality 25 .• Gaussian blur. We apply a Gaussian filter with standard deviation 1.5 and kernel size 
+
+13 × 13 .22 Preprint • Gaussian noise. Independent Gaussian noise with standard deviation 0.05 is added to pixel values in [0 , 1] , followed by clipping to [0 , 1] .Both resizing operations use align_corners=False without antialiasing. Network inputs are normalized to [−1, 1] . Noise realizations are sampled during training and fixed for evaluation. 
+
+Architectures. We parametrize the shared stochastic map Tθ (x, z ) using an NCSN++ generator, with independent auxiliary noise z ∼ N (0 , I 100 ). The generator uses a base channel width of 64 , channel multipliers (1 , 1, 2, 2, 4, 4) , two residual blocks per resolution, and attention at resolution 16 × 16 .The noise embedding has dimension 256 , and the output uses a hyperbolic tangent activation. The source index is not provided to the map. Each of the five potentials is an independently parametrized Discriminator_large network with base width 64 and LeakyReLU activations with negative slope 0.2.
+
+Training. We use the scaled quadratic cost c(x, y ) = τ ∥x − y∥22 with τ = 10 −3, where the squared differences are summed over all pixels and channels. The conjugate functions are 
+
+¯ψ(u) = ¯ϕ(u) = 2 log(1 + exp( u)) − 2 log 2 .
+
+We train for 100 ,000 iterations, alternating one potential update with one map update. Each potential update uses 16 images from each source and a common batch of 16 clean target images. The map update uses fresh batches of 16 images per source. Auxiliary noise is sampled independently for each input, and source contributions are averaged with equal weights. We regularize the potentials using an R1 penalty on clean target samples with coefficient 5. Adam optimizers use (β1, β 2) = (0 .5, 0.9) , with initial learning rates of 2 · 10 −4 for the map and 10 −4
+
+for the potentials. Cosine learning-rate schedulers are advanced every 500 training iterations, with 
+
+Tmax = 700 scheduler steps and ηmin = 10 −5. We initialize an exponential moving average of the map parameters at iteration 30 ,000 and subsequently update it with decay 0.999 . All reported restoration results use the final EMA checkpoints at iteration 100 ,000 .
+
+Baseline implementations. Pooled UOT uses one stochastic map and one potential for the equally weighted mixture of the five sources. Conditional UOT uses one map and one potential, both conditioned on the degradation label. A learned degradation embedding is added to the generator’s latent input and, for the potential, to the features after the first convolutional layer. The baselines use the same generator and potential backbones, source and target split, transport cost, and conjugate functions. They are trained for the same number of iterations, using 16 source images per degradation at each step. 
+
+Degradation classifier. For blind inference with Conditional UOT, we separately train a five-class classifier to predict the degradation family. We split the 91 ,166 source images into 82 ,049 training and 9,117 validation images using random seed 0. Each image is transformed using all five training degradations, yielding 410 ,245 training and 45 ,585 validation examples. The image split is performed before applying the degradations. The clean target subset and the 20 ,259 test images are not used to train or select the classifier. The classifier is a compact ResNet-18-style network with stage widths (32 , 64 , 128 , 256) , two residual blocks per stage, global average pooling, and dropout 0.1 before the final classification layer. It is trained from scratch for 100 ,000 steps using cross-entropy without label smoothing, AdamW with learning rate 3 · 10 −4 and weight decay 10 −4, and batch size 128 . The learning rate follows a cosine schedule with a final value of 3 · 10 −6. We use random horizontal flips, gradient clipping at norm 5,and mixed-precision training. Degradation parameters remain fixed throughout training. Validation is performed every 1,000 steps. We select the checkpoint with the highest validation accuracy, using the lowest validation loss to break ties. The selected checkpoint is from step 63 ,000 .At inference, the predicted class is supplied to the conditional restoration model. 
+
+Evaluation on training degradations. Each of the 20 ,259 test images is randomly assigned one degradation using seed 0, with 4,052 images per degradation except Gaussian noise, which has 4,051 .This assignment is shared across methods. We compute FID separately for the restored outputs of each degradation. Mean and maximum FID refer to the arithmetic mean and maximum of these five source-specific values. PSNR is evaluated against the corresponding clean reference images and averaged over all test images. 23 Preprint 
+
+Evaluation under parameter shifts. We keep all trained models fixed and change one degradation parameter at a time. For each setting, the corresponding degradation is applied to all 20 ,259 test images. The evaluated parameters are Degradation Training Evaluation Bicubic factor 4 3, 5
+
+Bilinear factor 4 3, 5
+
+JPEG quality 25 30 , 20 
+
+Blur standard deviation 1.5 1.25 , 1.75 
+
+Noise standard deviation 0.05 0.04 , 0.06 
+
+For downsampling factor s, the intermediate resolution is ⌊64 /s ⌋ × ⌊ 64 /s ⌋, followed by resizing back to 64 × 64 with the same interpolation mode. Thus, factors ×3 and ×5 correspond to intermediate resolutions 21 × 21 and 12 × 12 , respectively. We report FID, PSNR, and LPIPS. LPIPS is computed using the AlexNet backbone in TorchMetrics with inputs in [−1, 1] . For stochastic restoration, evaluation uses 100 -dimensional Gaussian latent vectors with fixed random seed. Conditional UOT is evaluated both with predicted labels and with the known degradation family. The latter supplies only the family label, not the modified degradation parameter. 
+
+# E LIMITATIONS AND FUTURE RESEARCH DIRECTIONS 
+
+Scaling to many sources. SimNOT uses a shared transport map and a separate potential for each source distribution. While the transport network remains unchanged as the number of sources grows, maintaining and updating the potentials increases the training memory and computational requirements. Sharing parameters between potentials or sampling a subset of sources at each training step could improve scalability. These modifications would affect training only: inference uses a single shared map regardless of the number of sources. 
+
+Source grouping during training. Although SimNOT does not require paired source-target samples, it assumes that training samples are grouped by source distribution, so that each sample can be associated with the corresponding potential. This information allows each potential to evaluate the matching objective for its corresponding source. Such grouping is available in our image restoration setup, where the degradation process is known during training, but may be incomplete or unavailable in other applications. Extending SimNOT to partially observed source membership is a promising direction for future research. Once trained, the map can be applied directly to new inputs without specifying their source. 24

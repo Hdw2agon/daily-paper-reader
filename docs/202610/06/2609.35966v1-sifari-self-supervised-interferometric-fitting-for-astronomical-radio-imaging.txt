@@ -1,0 +1,2064 @@
+Typeset using LATEX twocolumn style in AASTeX7.0.1
+SIFARI: Self-Supervised Interferometric Fitting for Astronomical Radio Imaging
+Shunyuan Mao (毛顺元)
+,1, 2, 3, 4 Andrea Isella
+,1, 2 Paris Perdikaris
+,5 Li-Ta Lo
+,6 and Hui Li
+7
+1Department of Physics and Astronomy, Rice University, 6100 Main St, Houston, TX 77005, USA
+2Rice Space Institute, Rice University, 6100 Main St, Houston, TX 77005, USA
+3National Radio Astronomy Observatory, 520 Edgemont Road, Charlottesville, VA 22903, USA
+4NSF-Simons AI Institute for Cosmic Origins, Austin, TX 78712, USA
+5Department of Mechanical Engineering and Applied Mechanics, University of Pennsylvania, 220 S 33rd St, Philadelphia, PA 19104, USA
+6Computing and Artificial Intelligence Division, Los Alamos National Laboratory, Los Alamos, NM 87545, USA
+7Theoretical Division, Los Alamos National Laboratory, Los Alamos, NM 87545, USA
+ABSTRACT
+Radio-interferometric images are reconstructed from sparsely sampled visibilities, and CLEAN-based
+imaging can struggle with spatial filtering, complex morphologies, and uncertainty quantification. Al-
+ternative methods that fit visibilities directly can address some of these limitations but often require
+manual choices of image priors and model hyperparameters. We present SIFARI (Self-Supervised In-
+terferometric Fitting for Astronomical Radio Imaging), a self-supervised neural network workflow that
+represents sky brightness as a continuous function of position and fits measured visibilities without
+an external image training set or explicit spatial regularizer. An empirical rule sets the Fourier fea-
+ture scale from the visibilities before training, controlling how readily the network fits fine structure.
+Sampling network weights with Stochastic Weight Averaging-Gaussian (SWAG) gives approximate
+brightness uncertainty estimates, which we combine with a thermal-noise floor to construct spatially
+resolved signal-to-noise maps. In synthetic ALMA tests, SIFARI yields an effective point-source re-
+sponse about eight times narrower than the natural-weighting CLEAN restoring beam and recovers
+more extended flux than CLEAN when short baselines are missing.
+It also achieves higher image
+fidelity than the restored CLEAN images in all three morphology benchmarks. Applied to ALMA
+observations of PDS 70, SIFARI recovers the bright outer ring together with faint compact emission
+in the central cavity. For long-baseline-only WISPIT 2 data, SIFARI supplies a sky model for phase
+self-calibration where the CLEAN model is inadequate. The restored, self-calibrated SIFARI image
+has approximately 30% lower RMS noise than the CLEAN image made from the original visibilities
+without self-calibration.
+Keywords: Astronomical methods (1043), Astronomy image processing (2306), Neural networks (1933),
+Observational astronomy (1145), Protoplanetary disks (1300), Radio interferometry (1346)
+1. INTRODUCTION
+Modern radio interferometers, including the Ata-
+cama Large Millimeter/submillimeter Array (ALMA),
+the Karl G. Jansky Very Large Array (VLA), MeerKAT,
+and the future Square Kilometre Array (SKA) and next-
+generation VLA (ngVLA), resolve faint and morpholog-
+ically complex sources at high angular resolution. These
+facilities routinely produce images with dynamic ranges
+greater than 1000, but their scientific return still de-
+Email: shunyuanm@gmail.com, isella@rice.edu
+pends on how well sparse visibility measurements are
+converted into images. Visibilities sample the Fourier
+transform of the sky brightness, so incomplete coverage
+leaves some spatial structure to be inferred during recon-
+struction. CLEAN and its extensions remain the domi-
+nant tools for image reconstruction and self-calibration.
+CLEAN has been successful across many applica-
+tions (J. H¨ogbom 1974; T. J. Cornwell 2008; U. Rau
+& T. J. Cornwell 2011), but several of its assumptions
+become restrictive for modern interferometric datasets.
+CLEAN’s fixed component shapes can make complex
+emission difficult to reconstruct.
+Standard H¨ogbom
+arXiv:2609.35966v1  [astro-ph.IM]  28 Sep 2026
+
+
+2
+CLEAN represents emission with point sources (Dirac
+delta functions; J. H¨ogbom 1974), whereas Multi-Scale
+CLEAN uses two-dimensional Gaussians over a set of
+scales (T. J. Cornwell 2008). These bases are effective
+for simple or marginally resolved emission, but they can
+struggle with well-resolved, non-Gaussian structures.
+For complex sources, users often run many low-gain it-
+erations inside hand or automatically defined masks, or
+CLEAN boxes, that restrict deconvolution to expected
+emission regions. The extent of the emission is unknown
+before imaging, so defining these masks may require sub-
+stantial user interaction and knowledge of the source.
+An incomplete or inaccurate mask can limit the image
+dynamic range.
+When short baselines are missing, CLEAN can under-
+estimate the integrated flux and distort the recovered
+morphology of extended sources. CLEAN begins from
+a dirty image formed by Fourier inversion of sparsely
+sampled visibilities.
+The missing short spacings sup-
+press large-scale emission in this image and can pro-
+duce strong artifacts, including “negative bowls” around
+bright structures.
+Adding the residual map to the convolved CLEAN
+model can bias flux measurements, especially for ex-
+tended sources or shallow deconvolutions. The restored
+image is the sum of the model convolved with a Gaussian
+restoring beam and the residual map. The dirty beam,
+the point-source response set by the sampled uv cover-
+age, can have a central lobe that differs substantially
+from this Gaussian beam. The convolved model is re-
+ported in units of Jansky per CLEAN beam, whereas
+the residual map remains in Jansky per dirty beam.
+Weighting and/or tapering the uv-data can make the
+dirty beam more Gaussian, but at the cost of sensitiv-
+ity. Post-deconvolution corrections such as the Jorsater
+& van Moorsel (JvM) correction can rescale residuals
+(S. Jorsater & G. A. van Moorsel 1995; I. Czekala et al.
+2021), but they must be applied carefully to avoid misin-
+terpreted fluxes and underestimated noise (S. Casassus
+& M. C´arcamo 2022).
+CLEAN does not directly quantify uncertainty in the
+reconstructed flux and morphology. CLEAN produces a
+single reconstructed model rather than a posterior distri-
+bution over images. The uncertainty is commonly sum-
+marized by the RMS noise measured in an apparently
+empty region of the restored image.
+That off-source
+RMS measures the thermal sensitivity away from tar-
+get emission, but it does not quantify the amplitude
+uncertainty of bright or complex emission itself (e.g.,
+I. Czekala et al. 2015; P. Arras et al. 2019). Residual
+sidelobes and unmodeled source structure can also con-
+taminate this background noise estimate.
+Finally, CLEAN depends on visibilities whose ampli-
+tudes and absolute phases can be Fourier inverted. In
+Very Long Baseline Interferometry and optical/infrared
+interferometry, atmospheric phase corruption often pre-
+cludes standard phase referencing. Imaging then relies
+on closure quantities, such as closure phases and ampli-
+tudes, that cancel antenna-based errors but cannot be
+directly Fourier-transformed into a dirty image.
+Forward modeling allows reconstruction methods to
+fit visibilities or closure quantities by predicting these
+measurements from a candidate sky model.
+Regu-
+larized Maximum Likelihood (RML) methods formu-
+late imaging as an optimization problem: a likelihood
+term measures the discrepancy between observed and
+model visibilities and/or closure quantities, and spa-
+tial regularizers encode assumptions about the source
+morphology.
+Common regularizers include image en-
+tropy (which favors global continuous smoothness, S. F.
+Gull & G. J. Daniell 1978), sparsity (which favors com-
+pactness, Y. Wiaux et al. 2009b), and total (squared)
+variation (which favors constant regions separated by
+sharp edges, K. Akiyama et al. 2017). Software libraries
+such as SMILI (K. Akiyama et al. 2019, and references
+therein), EHT-imaging (A. A. Chael et al. 2016), and
+MPoL (I. Czekala et al. 2021) have used RML to im-
+age sources ranging from supermassive black holes to
+protoplanetary disks.
+In pixel-based RML, each pixel intensity is a fitted
+parameter, so large, finely sampled images require many
+parameters. A single-pointing image can sometimes be
+restricted to a region smaller than the primary beam,
+but it must still cover the astronomical source.
+The
+grid must adequately sample the observed spatial fre-
+quencies, with pixels no larger than about one-third of
+the synthesized beamwidth. Neighboring pixel intensi-
+ties are correlated on the scale of the beam.
+For ex-
+ample, at 230 GHz, ALMA’s 12-meter antennas have a
+primary beam of approximately 22 arcseconds. In the
+most extended configuration, with a maximum baseline
+of roughly 15 km, the angular resolution is approxi-
+mately 18 mas.
+Nyquist-sampling that 18 mas beam
+with roughly 6 mas pixels across a large fraction of the
+primary beam requires millions of pixels.
+Fitting millions of correlated pixel intensities is an
+ill-posed inverse problem.
+Deterministic RML meth-
+ods constrain the solution with spatial regularizers such
+as Total Variation or Maximum Entropy (see, e.g., B.
+Zawadzki et al. 2023; M. C´arcamo et al. 2017), but
+choosing regularizer weights often requires extensive pa-
+rameter sweeps and can introduce confirmation bias (K.
+Akiyama et al. 2019). Even among statistically accept-
+able fits, the recovered structure depends on the cho-
+
+
+3
+sen regularizers and weights (K. Akiyama et al. 2019).
+These methods return a point estimate rather than a
+posterior distribution over images.
+Compressive sensing and Bayesian methods can also
+be computationally expensive on large image grids.
+Compressive sensing algorithms such as SARA (Y.
+Wiaux et al. 2009a; R. E. Carrillo et al. 2012) impose
+sparsity across a fixed, redundant multi-scale wavelet
+dictionary, but constrained convex optimization over
+millions of pixels and overlapping bases is computation-
+ally expensive.
+Bayesian methods such as RESOLVE
+(H. Junklewitz et al. 2016; P. Arras et al. 2019) model
+posterior uncertainty more directly, but sampling mil-
+lions of highly correlated spatial parameters is often pro-
+hibitive for modern interferometric datasets.
+Some deep-learning methods use trained neural net-
+works to regularize or update the reconstructed im-
+age.
+Hybrid Plug-and-Play (PnP) architectures, such
+as AIRI (M. Terris et al. 2023), replace analytic reg-
+ularizers with trained neural denoisers within iterative
+imaging algorithms. R2D2 (A. Aghabiglou et al. 2024)
+uses a sequence of iteration-specific neural networks to
+estimate residual images, analogous to learned CLEAN
+minor cycles. However, for supervised methods, accu-
+racy beyond the source and noise conditions covered
+by training and validation cannot be assumed. Radio
+ground truth is scarce, so training often uses simula-
+tions or processed images from other wavebands that
+may not capture radio-source morphologies and bright-
+ness contrasts (M. Terris et al. 2023; A. Aghabiglou et al.
+2024). For networks trained on simulated observations,
+including R2D2, this concern extends to uv coverage and
+instrument configuration (A. Aghabiglou et al. 2024).
+We introduce SIFARI, a self-supervised framework
+that uses a coordinate-based neural network to represent
+sky brightness as a continuous function of position. The
+same network parameters determine the brightness at
+every sky position, so their number does not grow with
+the image grid used to evaluate the model. We train
+the network by Fourier-transforming its predicted im-
+ages and fitting the resulting model visibilities directly
+to the observations. The network architecture provides
+an implicit image prior, and each target is reconstructed
+from its own measured visibilities without explicit spa-
+tial regularizers.
+An overly smooth model can suppress compact emis-
+sion, whereas an overly flexible model can introduce
+structure that the data poorly constrain.
+We control
+this flexibility using Fourier features: sinusoidal func-
+tions of sky position supplied as network inputs. Their
+frequency scale determines how readily the network fits
+fine structure. We estimate this scale from the measured
+visibilities before training.
+To assess uncertainty in the recovered emission, we use
+Stochastic Weight Averaging-Gaussian (SWAG) (P. Iz-
+mailov et al. 2018; W. J. Maddox et al. 2019) to approx-
+imate the posterior distribution over network weights.
+Sampling this distribution produces an ensemble of sky
+images, whose brightness variations provide spatially re-
+solved uncertainty estimates.
+We compare SIFARI with CLEAN on synthetic
+ALMA benchmarks that test compact-source resolu-
+tion, flux recovery under missing short spacings, and
+reconstruction of complex morphologies. We apply the
+method to PDS 70 to examine compact emission near
+bright extended structure, and to WISPIT 2 to test
+whether the reconstructed image can serve as a self-
+calibration model.
+2. METHOD
+SIFARI produces a reconstructed sky image and an
+uncertainty map in two stages (Figure 1).
+In Stage
+1, we fit the neural brightness model by comparing
+its Fourier-transformed images with the observed vis-
+ibilities, using a likelihood that accounts for measure-
+ment uncertainties.
+The best-fitting Stage 1 image is
+the reported SIFARI image reconstruction.
+Stage 2
+starts from this best-fitting model and uses Stochastic
+Weight Averaging–Gaussian (SWAG) to sample network
+weights and generate an ensemble of images. The bright-
+ness variations across these images provide a pixel-wise
+uncertainty map.
+2.1. Coordinate-Based Image Model
+We represent sky brightness with a coordinate-based
+neural network, also called a neural field (J. J. Park
+et al. 2019; L. Mescheder et al. 2019; V. Sitzmann et al.
+2020; B. Mildenhall et al. 2021; B. Wu et al. 2022; A.
+Levis et al. 2022, 2025; B. T. Feng et al. 2026).
+For
+any sky position (x, y), the network predicts a bright-
+ness I(x, y) using the same weights and biases across the
+image. We implement this continuous brightness func-
+tion as a Multi-Layer Perceptron (MLP). Its layers form
+weighted sums of their inputs, add biases, and apply
+nonlinear activation functions.
+2.1.1. Fourier Feature Mapping
+An MLP trained on coordinates alone tends to learn
+smooth, large-scale structure more readily than fine
+structure, a behavior known as spectral bias (N. Ra-
+haman et al. 2019). This bias makes it harder to re-
+construct compact emission alongside smooth extended
+structure. We use Fourier feature mapping (M. Tancik
+
+
+4
+Pixel Grid
+γ(x, y) =
+
+x, y,
+sin(2πν1 · r), cos(2πν1 · r),
+...
+sin(2πνK · r), cos(2πνK · r)
+
+r = (x, y)
+o1 = ϕ(w1γ + b1)
+o2 = ϕ(w2o1 + b2)
+I(x, y; {wℓ, bℓ}, s) = s Softplus(w3o2 + b3)
+Normalized Negative
+Log-Likelihood
+L({wℓ, bℓ}, s) =
+−PNvis
+l=1 ln p(Vl | Vnn,l)/(2Nvis)
+p(Vl | Vnn,l) =
+[Wl/(2π)] exp[−Wl|Vl −Vnn,l|2/2]
+Vnn,l({wℓ, bℓ}, s)
+Fourier
+Transform
+I →V
+ul, vl
+Vl, Wl
+Visibility Data
+Optimizer
+Stage 1
+Neural Network Training
+Optimizer: Muon + AdamW
+Stage 2
+Uncertainty Quantification
+Optimizer: SGD
+σν
+Update parameters
+{wℓ, bℓ}, s
+Trained model
+Batch Data
+Fourier Feature Mapping
+Multilayer Perceptron
+Neural Network
+Figure 1. Two-stage SIFARI workflow for visibility-domain image reconstruction and uncertainty quantification. A coordi-
+nate-based neural network maps sky coordinates (x, y) to brightness I(x, y). Before training, the visibility data set the frequency
+scale σν used to choose νk (dashed arrow). The model image is Fourier-transformed at the observed (ul, vl) coordinates to pre-
+dict visibilities, which are compared with the data through the likelihood. The weights Wl are inverse noise variances of the
+real and imaginary visibility components. Stage 1 uses Muon+AdamW to fit the network and yields the reported best-fitting
+reconstruction. Stage 2 starts from this fit, uses SGD to build the SWAG approximation, and samples network weights to
+estimate the pixel-wise brightness uncertainty.
+et al. 2020) to supply sinusoidal functions of position
+alongside the coordinates. These additional inputs pro-
+vide spatial variations on scales set by their frequencies,
+making fine structure easier for the network to fit.
+At each sky position r = (x, y), we concatenate the
+raw coordinates with K sine–cosine pairs, one for each
+spatial frequency vector νk:
+γ(x, y) =
+
+x, y, sin(2πν1 · r), cos(2πν1 · r), . . . ,
+sin(2πνK · r), cos(2πνK · r)
+
+(1)
+We use K = 512 frequency vectors, so the input vector
+γ(x, y) has 2 + 2K = 1026 components.
+We choose the frequency magnitudes from a half-
+normal distribution, which concentrates features at low
+spatial frequencies while retaining a high-frequency tail.
+The magnitudes qk = |νk|, in units of arcsec−1, have the
+probability density
+p(q) =
+r
+2
+π
+1
+σν
+exp
+
+−q2
+2σ2ν
+
+,
+q ≥0.
+(2)
+
+
+5
+where σν is the scale of the distribution. We obtain qk
+by treating Sobol’ sequence values (I. M. Sobol 1967) as
+cumulative probabilities and applying the inverse cumu-
+lative distribution function (CDF). For each magnitude,
+we independently draw a direction angle ϕk uniformly
+between 0 and 2π and set νk = (qk cos ϕk, qk sin ϕk).
+The uniform angles give the frequency distribution no
+preferred orientation.
+The frequency vectors {νk}K
+k=1
+remain fixed throughout training.
+Increasing σν gives higher frequency magnitudes and
+therefore more rapidly varying input features. We es-
+timate σν from the radial distribution of the sampled
+uv coverage and the visibility signal-to-noise ratio in
+each baseline-length interval. This SNR profile depends
+jointly on source morphology, source brightness, and the
+measurement noise level. Appendix A gives the estima-
+tor details.
+2.1.2. Network Architecture
+The MLP maps the input vector γ(x, y) to a bright-
+ness value through two fully connected hidden layers and
+a scalar output layer:
+o1 = ϕ(w1γ + b1)
+o2 = ϕ(w2o1 + b2)
+I(x, y) = s × Softplus(w3o2 + b3)
+(3)
+Here, o1, o2 ∈R128 are the hidden-layer outputs. We
+use the Exponential Linear Unit (ELU) as the activation
+function ϕ in both hidden layers for all reconstructions.
+During fitting, we adjust the weight matrices wℓand
+biases bℓ. For the adopted architecture, the three weight
+matrices have dimensions 128 × 1026, 128 × 128, and
+1 × 128, respectively. The corresponding biases are 128-
+dimensional vectors in the hidden layers and a scalar in
+the output layer. Including the brightness scale s, the
+network has 148,098 trainable parameters.
+The final layer applies Softplus(z) = ln(1 + ez) to the
+scalar z = w3o2 + b3, producing a positive value. The
+learnable parameter s multiplies this output to set the
+overall brightness scale. For initialization, we estimate
+the total flux from the mean of the 10 largest observed
+visibility amplitudes. This estimate need only provide a
+rough starting scale, since s is adjusted during fitting.
+2.2. Visibility-Domain Fitting
+To fit the brightness model to the observations, we
+first predict visibilities by Fourier-transforming the net-
+work’s output image and define a loss function that mea-
+sures their agreement with the data. We then describe
+how the network parameters are optimized to minimize
+this loss.
+2.2.1. Forward Model and Loss Function
+We evaluate I(x, y) on a regular Npix × Npix grid cov-
+ering the chosen field of view to form a model image.
+We then use a non-uniform fast Fourier transform to
+compute the model visibilities Vnn,l at the observed uv
+coordinates (ul, vl) (I. Czekala et al. 2025).
+We model each observed visibility Vl as its predicted
+value Vnn,l plus independent, zero-mean Gaussian noise
+in the real and imaginary components.
+Both compo-
+nents have variance 1/Wl, where Wl is the visibility
+weight shown in Figure 1. The resulting likelihood is
+p(Vl | Vnn,l) = Wl
+2π exp
+
+−Wl|Vl −Vnn,l|2
+2
+
+.
+(4)
+For Nvis independent visibility measurements, we min-
+imize the negative log-likelihood normalized by 2Nvis:
+L = −
+1
+2Nvis
+Nvis
+X
+l=1
+ln p(Vl | Vnn,l)
+= ln(2π)
+2
+−
+PNvis
+l=1 ln Wl
+2Nvis
++
+PNvis
+l=1 Wl|Vl −Vnn,l|2
+4Nvis
+.
+(5)
+The first two terms do not depend on the network pa-
+rameters, so minimizing L is equivalent to minimizing
+the weighted squared visibility residuals.
+To compare the residual amplitudes with the expected
+noise, we use the approximate reduced chi-squared:
+χ2
+r =
+PNvis
+l=1 Wl|Vl −Vnn,l|2
+2Nvis
+.
+(6)
+The normalization averages the weighted squared resid-
+uals over the 2Nvis real and imaginary components. For
+correctly specified noise, residuals at the expected noise
+level give χ2
+r ≃1.
+2.2.2. Training and Loss Minimization
+Initialization: We initialize the hidden-layer weights
+using Kaiming-normal initialization (K. He et al. 2015).
+We initialize the overall brightness scale s using the
+visibility-amplitude estimate described above.
+Before
+training, we sample and fix the Fourier feature frequen-
+cies {νk}K
+k=1 using the visibility-based scale described in
+Section 2.1.1.
+Iterative Fitting: We train the model in epochs, each
+consisting of one pass through the full visibility dataset.
+At the start of each epoch, we shuffle the full set of vis-
+ibility indices once and partition the resulting permuta-
+tion into disjoint mini-batches. For each mini-batch, we
+compute the model visibilities and the loss (Equation 5),
+
+
+6
+then obtain the gradients by backpropagation. Before
+each optimizer update, we clip the Euclidean norm of
+the full gradient vector to 1.0 (R. Pascanu et al. 2013).
+We train each case for 300 epochs in Stage 1.
+We use Muon (K. Jordan et al. 2024) to update the
+hidden-layer weight matrices (w1 and w2), and AdamW
+(I. Loshchilov & F. Hutter 2017) to update the output-
+layer weight matrix (w3), all biases, and the flux scale
+s. The initial learning rates are 2 × 10−2 for Muon and
+10−3 for AdamW. We apply decoupled weight decay with
+a coefficient of 10−5 (I. Loshchilov & F. Hutter 2017).
+Monitoring Convergence: At the end of each epoch,
+we evaluate the total loss using the entire visibility
+dataset. If this loss fails to improve for several epochs,
+we reduce the learning rates of both optimizers so they
+take smaller updates. We inspect the loss and recon-
+structed images across epochs to confirm that both sta-
+bilize by the end of training. We retain the model with
+the lowest loss across all epochs, report its image as the
+Stage 1 reconstruction, and use it to initialize Stage 2
+uncertainty estimation.
+2.3. Uncertainty Quantification
+Stage 2 uses the Stochastic Weight Averaging Gaus-
+sian (SWAG) method presented in P. Izmailov et al.
+(2018); W. J. Maddox et al. (2019) to assess uncertainty
+in the reconstructed brightness. This method generates
+an ensemble of images by sampling network weights,
+without training multiple independent networks.
+Starting from the best-fitting Stage 1 model, we con-
+tinue optimization with Stochastic Gradient Descent
+(SGD) at a constant learning rate for 500 epochs. After
+a fixed warm-up period, we save the network weights
+once per epoch. SWAG uses these weight snapshots to
+construct a Gaussian approximation to the distribution
+of plausible network weights (W. J. Maddox et al. 2019).
+We draw network weights from the SWAG approxi-
+mation and evaluate the corresponding images. Their
+pixel-wise standard deviation, σSWAG(x, y), quantifies
+the spread in reconstructed brightness across these sam-
+ples, which we use as an approximate uncertainty esti-
+mate.
+We define a spatially resolved signal-to-noise ratio
+(SNR) diagnostic using the SWAG dispersion and a
+thermal-noise floor:
+SNR(x, y) =
+ISIFARI(x, y)
+p
+σSWAG(x, y)2 + σ2
+th
+,
+(7)
+where ISIFARI(x, y) is the reported best-fitting Stage
+1 image and σth is the theoretical thermal noise in
+Jy arcsec−2,
+σth =
+1
+Abeam
+qPNvis
+l=1 Wl
+,
+(8)
+and Abeam is the beam area in arcsec2 beam−1.
+The
+thermal-noise term sets a lower bound on the SNR de-
+nominator when σSWAG becomes small in low-intensity
+regions.
+2.4. Hyperparameter Summary
+Table 1 summarizes the network architecture and
+training settings used throughout the experiments un-
+less stated otherwise. The Fourier feature scale is es-
+timated separately from each visibility dataset as de-
+scribed in Section 2.1.1. The SWAG settings are guided
+by W. J. Maddox et al. (2019).
+3. SYNTHETIC BENCHMARK MODELS
+We compare SIFARI with CLEAN to evaluate its
+performance in reconstructing and resolving compact
+sources (§3.1 and §3.2), recovering extended emission
+(§3.3), and imaging complex morphologies (§3.4). We
+also examine the image uncertainty maps for the com-
+plex morphology models (§3.5).
+We generate synthetic ALMA datasets with the CASA
+task simobserve, including thermal noise. All simula-
+tions use a central observing frequency of 340 GHz, a
+total bandwidth of 8 GHz, and an integration time of
+6 s, with the targets positioned at zenith. Table 2 sum-
+marizes the ALMA configurations, on-source times, and
+ground-truth grid dimensions and pixel scales. The tests
+that combine the C-3, C-5, and C-9 configurations have
+a total on-source time of 110 minutes.
+3.1. Effective Point-Source Response
+Unlike a CLEAN model built from Dirac δ compo-
+nents, SIFARI represents a point source with a finite-
+width brightness profile. To determine whether this rep-
+resentation broadens compact emission beyond the nom-
+inal angular scale of the observations, we reconstruct a
+point source at the phase center and measure its angu-
+lar extent and recovered flux. The injected point source
+has a flux of 10 mJy, and the simulated ALMA obser-
+vations cover a baseline range of 15–13 894 m, for which
+λ/Bmax = 0.0131′′.
+The CLEAN and SIFARI recon-
+structions use 1024 × 1024 grids with a pixel size of
+0.0005′′.
+For comparison, we reconstruct the same dataset with
+CLEAN using natural, Briggs robust=0.5, and uni-
+form weighting. The CLEAN restoring beam FWHMs
+are 0.034′′ × 0.031′′ for natural weighting, 0.025′′ ×
+0.022′′ for Briggs robust=0.5, and 0.015′′ × 0.012′′ for
+uniform weighting.
+The RMS noise in the CLEAN
+images is 0.0135 mJy/beam for natural weighting,
+0.0153 mJy/beam for Briggs robust=0.5, and 0.0215
+mJy/beam for uniform weighting.
+
+
+7
+Table 1. Default hyperparameters used in all experiments unless otherwise specified. Synthetic models and their observing
+setups are listed in Table 2.
+Category
+Hyperparameter
+Value
+Architecture
+Neurons per hidden layer M
+128
+Number of hidden layers
+2
+Hidden-layer activation
+ELU
+Fourier feature scale σν
+Estimated from visibilities
+Number of Fourier features K
+512
+Stage 1: Optimization
+Initial Muon learning rate
+2 × 10−2
+Initial AdamW learning rate
+10−3
+Weight decay
+10−5
+Gradient clipping
+1.0
+Number of epochs Nepoch
+300
+Stage 2: Uncertainty
+(SWA/SWAG)
+SGD learning rate ηSWA
+10−2
+SGD momentum
+0.9
+Training epochs NSWA
+500
+Epoch at which snapshot collection begins
+200
+Rank of the low-rank covariance component R
+20
+Number of SWAG weight samples S
+30
+Table 2. Synthetic benchmark models and their ALMA simobserve setups. The grid columns specify the ground-truth images
+used to generate the synthetic visibilities; reconstruction grids are specified separately in the text. The C-3, C-5, and C-9
+configurations span baseline ranges of 15–500 m, 15–1398 m, and 368–13 894 m, respectively. Rows with multiple configurations
+use their combined visibilities.
+Source Model
+ALMA configurations used
+Ground-truth
+pixels per side
+Ground-truth
+pixel size (′′)
+One point source
+C-3 (20 min) + C-5 (30 min) + C-9 (60 min)
+1024
+0.0005
+Two point sources (∆RA = 0.009′′)
+C-3 (20 min) + C-5 (30 min) + C-9 (60 min)
+1024
+0.0005
+Two point sources (∆RA = 0.010′′)
+Uniform disk (θUD = 0.2′′)
+C-9 (60 min)
+200
+0.0015
+Uniform disk (θUD = 0.6′′)
+680
+0.0015
+Uniform disk (θUD = 1.0′′)
+960
+0.0015
+Inclined ring
+C-3 (20 min) + C-5 (30 min) + C-9 (60 min)
+1160
+0.0015
+Multiple inclined rings
+1580
+0.0015
+Ophiuchus (L1688) irregular cloud
+1380
+0.0015
+Fitting the SIFARI reconstructed map with a 2D
+Gaussian yields an effective point-source response with
+a FWHM of 0.0040′′ × 0.0037′′, about 4 times narrower
+than the uniform-weighted CLEAN restoring beam and
+8 times narrower than the natural-weighted beam. The
+recovered flux is 10.1 mJy (1.01× the ground truth).
+Thus, in this test, the finite point-source response re-
+mains well below λ/Bmax = 0.0131′′, while the inte-
+grated flux is recovered to within 1%.
+The compact SIFARI response also shows no visible
+sidelobes in the RA slice in Figure 2. For comparison,
+the uniform-weighted dirty beam has sidelobes at the
+10% level, while the natural- and Briggs-weighted dirty
+beams have extended shoulders around their compact
+cores.
+3.2. Angular Resolution
+We next test whether the narrow response to a sin-
+gle point source allows SIFARI to separate two nearby
+sources. We generate two synthetic models, each con-
+taining a pair of 10 mJy point sources separated by ei-
+ther 0.009′′ or 0.010′′. We use the same observing setup
+and reconstruction grid as in §3.1. For this test, we de-
+
+
+8
+0.10
+0.05
+0.00
+0.05
+0.10
+∆ra [arcsec]
+0.0
+0.2
+0.4
+0.6
+0.8
+1.0
+Normalized PSF
+Natural
+Briggs
+Uniform
+λ/Bmax
+SIFARI
+Figure 2. Normalized 1D slices along RA of the dirty beams
+(gray) and the SIFARI point-source response (red). Natural,
+Briggs, and uniform weighting are shown with dashed, dash–
+dotted, and dotted curves, respectively; SIFARI is shown
+with a solid curve. The Briggs dirty beam uses a robust pa-
+rameter of 0.5. Each profile is normalized to its peak. The
+vertical dashed lines mark ±λ/Bmax.
+fine the angular resolution as the source separation at
+which the midpoint intensity falls to 50% of the peak
+intensity.
+In these tests, the natural-, Briggs-, and uniform-
+weighted CLEAN images blend each pair into a sin-
+gle broad peak.
+SIFARI, however, recovers two dis-
+tinct peaks in both cases (Figure 3).
+At a separa-
+tion of 0.009′′, the midpoint intensity is roughly 90%
+of the peak intensity, whereas at 0.010′′ it falls to about
+30%. Under the 50% criterion, the angular resolution for
+this observational configuration lies between 0.009′′ and
+0.010′′, below the λ/Bmax scale of 0.013′′. Guided by
+this angular-resolution estimate and the point-source re-
+sponse measured in §3.1, we adopt a reconstruction pixel
+size of 0.003′′ for SIFARI in the subsequent benchmarks.
+These grids retain the fields of view of the corresponding
+ground-truth images in Table 2.
+3.3. Flux Recovery under Spatial Filtering
+We next test whether SIFARI can recover extended
+emission when short baselines are missing. We generate
+synthetic ALMA data using only the C-9 configuration
+for uniform disks with angular diameters of θUD = 0.2′′,
+0.6′′, and 1.0′′, each with a total flux of 200 mJy. We
+reconstruct the CLEAN images using natural weighting.
+For the CLEAN and SIFARI reconstructions, we mea-
+sure the disk flux within a circular aperture matching
+the diameter of the corresponding disk model.
+Table 3. Flux recovery for uniform-disk models observed
+with the ALMA C-9 configuration.
+Recovered fluxes are
+measured within a circular aperture with the same diameter
+as the corresponding disk. The CLEAN images use natural
+weighting.
+Disk diameter
+Model Flux
+CLEAN
+SIFARI
+(′′)
+(mJy)
+(mJy)
+(mJy)
+0.2
+200
+200
+200
+0.6
+200
+41
+202
+1.0
+200
+20
+219
+Following the empirical ALMA Technical Handbook
+definition, the Maximum Recoverable Scale (MRS) of C-
+9 at λ = 0.88 mm is θMRS ≃0.983λ/L5 ≃0.24′′, where
+L5 is the fifth percentile of the baseline-length distri-
+bution (P. Cortes et al. 2026).
+This MRS provides a
+reference scale for spatial filtering rather than a sharp
+boundary for flux recovery.
+For θUD = 0.2′′ < θMRS, CLEAN and SIFARI re-
+cover the full 200 mJy (Table 3). For the θUD = 0.6′′
+and 1.0′′ disks, missing short baselines leave more of
+the large-scale emission unconstrained. CLEAN recov-
+ers only 20.5% and 10% of the injected flux, respectively,
+while SIFARI recovers 101% and 109.5%.
+The CLEAN flux deficit is evident in the short-
+baseline visibility profile of the 0.6′′ disk (Figure 4).
+We calculate the model visibility amplitudes by Fourier
+transforming the CLEAN and SIFARI image models.
+The visibility at zero baseline gives the total flux of each
+image model. Within the sampled uv range (light-gray
+shaded region), the two profiles are broadly consistent,
+although SIFARI follows the uniform-disk model more
+closely. At short baselines not covered by the data, the
+CLEAN amplitudes fall well below those of the uniform-
+disk model, while the SIFARI amplitudes remain close
+to the true values. SIFARI extrapolates into this un-
+sampled range using the implicit prior encoded in its
+positive, Fourier-feature-based representation of the sky
+brightness.
+The impact of spatial filtering is clearly visible in the
+CLEAN image: only the disk edges (high spatial fre-
+quencies) are recovered, and the intensity at the disk
+center is suppressed to nearly zero. The CLEAN image
+also contains strong spurious emission outside the disk.
+In contrast, the SIFARI image retains a nearly uniform
+brightness across the disk interior, with no prominent
+artifacts outside the disk.
+
+
+9
+0.04
+0.02
+0.00
+0.02
+0.04
+∆ra [arcsec]
+0.0
+0.2
+0.4
+0.6
+0.8
+1.0
+Normalized Flux (peak = 1)
+Natural
+Briggs
+Uniform
+Truth
+SIFARI
+0.04
+0.02
+0.00
+0.02
+0.04
+∆ra [arcsec]
+0.0
+0.2
+0.4
+0.6
+0.8
+1.0
+Normalized Flux (peak = 1)
+Natural
+Briggs
+Uniform
+Truth
+SIFARI
+Figure 3.
+Two-point-source tests: normalized 1D flux slices of CLEAN and SIFARI reconstructions along the RA axis
+connecting the sources (linear scale). Natural-, Briggs-, and uniform-weighted CLEAN images are shown with gray dashed,
+dash-dotted, and dotted curves, respectively; SIFARI is shown with a red solid curve. Each profile is normalized to its peak.
+The vertical dashed lines mark the injected source positions. Left: ∆RA = 0.009′′. Right: ∆RA = 0.010′′.
+0.0
+0.2
+0.4
+0.6
+0.8
+1.0
+UV distance [λ]
+×106
+0.00
+0.05
+0.10
+0.15
+0.20
+Visibility amplitude [Jy]
+Truth
+CLEAN
+NN
+-0.30
+0.00
+0.30
+∆ra [arcsec]
+−0.4
+−0.2
+0.0
+0.2
+0.4
+∆dec [arcsec]
+CLEAN
+-0.30
+0.00
+0.30
+∆ra [arcsec]
+SIFARI
+0.02
+0.10
+0.50
+Jy/arcsec2
+Figure 4. Visibility profiles and reconstructed images for the uniform disk with an angular diameter of 0.6′′ and total flux of
+0.2 Jy. Left: Visibility amplitudes of the uniform-disk model (green solid curve), CLEAN model (blue dash-dotted curve), and
+SIFARI model (red dotted curve). The light-gray region marks the baseline range sampled by the observations. Middle and
+Right: CLEAN and SIFARI reconstructed images, respectively, shown on a common logarithmic intensity scale.
+3.4. Image Fidelity
+Our final test evaluates how well SIFARI can re-
+construct images as their morphological complexity in-
+creases. To do this, we design three models: an inclined
+ring with an additional faint point source, an inclined
+system composed of multiple rings, and an extended,
+irregular structure resembling a molecular cloud.
+The first model is tailored to mimic 0.8 mm ALMA
+observations of the PDS 70 disk, including a point
+source at the position of PDS 70 c (A. Isella et al.
+2019; M. Benisty et al. 2021). The ring has a diame-
+ter of 1.2′′, a radial Gaussian profile with a width (σ)
+of 0.05′′, and a total flux of 175 mJy. As in PDS 70,
+the ring is viewed at an inclination of 51.7◦and a po-
+sition angle of 160.4◦measured East of North.
+The
+point source has a flux of 0.1115 mJy and is located
+at (∆RA, ∆Dec) = (−0.2151′′, 0.0378′′).
+The multiple-ring test model is inspired by ALMA
+DSHARP observations of HD 163296 (A. Isella et al.
+2018). It is represented as five concentric Gaussian rings
+with diameters ranging from 0.076′′ to 2.004′′ and peak
+surface brightnesses between 0.20 and 1.7 Jy arcsec−2,
+all sharing an inclination of 46.7◦and a position angle
+of 133.3◦. The total flux in the model is 0.57 Jy.
+The third model is derived from the L1688 column-
+density map of the Ophiuchus molecular complex (B.
+Ladjelate et al. 2020), obtained within the Herschel
+Gould Belt Survey (P. Andr´e et al. 2010). We restrict
+
+
+10
+ourselves to the central region of L1688, resample it to
+a ground-truth pixel scale of 0.0015′′, and renormalize
+the intensities to a total flux of 0.1 Jy.
+For each of these models, we produce synthetic
+datasets using the ALMA configurations summarized in
+Table 2, and then reconstruct the images with multi-
+scale CLEAN (Briggs weighting with robust=0.5) and
+SIFARI. We show both the CLEAN model and the re-
+stored CLEAN image.
+The latter is formed by con-
+volving the CLEAN model with the restoring beam and
+adding the residual image. For pixel-wise comparisons,
+we evaluate the fitted SIFARI model at the ground-
+truth coordinates and align the CLEAN images to the
+same grid, independently of the grid used during SIFARI
+training.
+We assess reconstruction quality using three metrics
+that compare pixel intensities, local structure, and to-
+tal flux. The first is the classical Image Fidelity Score
+(IFS), defined as the mean per-pixel signal-to-error ra-
+tio between the reconstructed image ˆI and the ground
+truth Itrue,
+IFS =
+1
+N 2
+gt
+Ngt
+X
+i,j=1
+ˆI(xi, yj)
+|ˆI(xi, yj) −Itrue(xi, yj)| + ϵ
+,
+(9)
+where Ngt is the number of pixels per side in the ground-
+truth image and ϵ = 10−7 guards against division by
+zero on near-identical pixels. The numerator is signed
+so that negative sidelobes in the reconstruction pull the
+IFS downward.
+Higher values indicate better fidelity.
+We average over all pixels.
+To complement the pixel-wise intensity comparison
+provided by IFS, we use the Structural Similarity In-
+dex Measure (SSIM), as defined in Section III.B of Z.
+Wang et al. (2004).
+SSIM compares local luminance,
+contrast, and structure. To avoid letting a small num-
+ber of very bright pixels determine the SSIM dynamic
+range, we clip the reconstructed and ground-truth im-
+ages to the range from zero to the 99th percentile of
+the ground-truth intensity before calculating SSIM. An
+SSIM of 1 indicates a perfect match between the clipped
+images. The third metric is the recovered total-flux ra-
+tio, defined as the total flux in the reconstructed image
+divided by the total flux in the ground-truth model.
+Across all three morphology benchmarks, SIFARI re-
+constructions achieve higher IFS and SSIM values than
+the restored CLEAN images, with recovered total flux
+ratios closer to unity (Figure 5).
+For all synthetic
+benchmarks in Section 3, the best-fitting SIFARI recon-
+structions yield χ2
+r values within 10−3 of unity, indicat-
+ing that the overall weighted visibility-residual power is
+close to the level expected from the adopted noise vari-
+ances.
+In the inclined-ring case, the faint point source is ap-
+parent against the low background in the SIFARI recon-
+struction, while it is marginally detected in the restored
+CLEAN image. In particular, the intensity at the point-
+source position in the CLEAN image is 0.06 mJy/beam,
+which is about half of the injected point source flux,
+and the rms noise is 0.02 mJy/beam, corresponding to
+an SNR of 3. The CLEAN model and restored CLEAN
+image also show point-like artifacts within the ring with
+fluxes exceeding that of the injected point source, but
+these features do not coincide with its position. SIFARI
+recovers the point source at the correct position with a
+total flux of 0.08 mJy (72% of the injected flux).
+The greatest improvement in terms of image fidelity
+and flux recovery occurs in the molecular cloud model,
+where the restored CLEAN image is affected by noise,
+deconvolution residuals, and beam smearing, whereas
+the SIFARI image better preserves the emission patterns
+and recovers the correct flux. In this case, the CLEAN
+model provides better image reconstruction than the re-
+stored CLEAN image across all three metrics. In par-
+ticular, the total flux in the restored CLEAN image is
+approximately 30% higher than that of the ground-truth
+model, whereas the CLEAN model contains 96% of the
+total flux. The flux excess arises when the substantial
+diffuse, faint emission in the CLEAN residual map is
+added to the convolved CLEAN model. As discussed
+in the Introduction, the residual image has units of Jy
+per dirty beam, while the convolved CLEAN model has
+units of Jy per clean beam. Because the Robust=0.5
+dirty beam is poorly reproduced by the Gaussian clean
+beam, this unit mismatch results in overestimating the
+residual flux and, in turn, the total flux.
+3.5. Uncertainty Maps
+Having
+compared
+the
+reconstructions
+with
+the
+ground-truth images, we next examine how much the
+reconstructed brightness varies across SWAG samples.
+Figure 6 shows the SIFARI reconstructions, their asso-
+ciated uncertainty maps, and the SNR maps defined by
+Eq. 7 for the three morphology benchmarks.
+In these examples, the absolute SWAG uncertainty
+is generally larger in brighter emitting regions and ap-
+proaches zero in the off-source background. In these off-
+source regions, the SNR denominator is therefore dom-
+inated by the thermal-noise term.
+The peak SIFARI SNR values are approximately 32
+and 28 for the multi-ring and molecular-cloud models,
+respectively.
+In the inclined-ring benchmark, the in-
+jected point source reaches a local peak SNR of approx-
+imately 12, compared with typical values of 60–70 along
+the bright ring. The SWAG term dominates the SNR de-
+
+
+11
+-0.50
+0.00
+0.50
+∆ra [arcsec]
+−0.5
+0.0
+0.5
+∆dec [arcsec]
+Truth
+-0.50
+0.00
+0.50
+∆ra [arcsec]
+CLEAN model
+13, 0.92, 1.00
+-0.50
+0.00
+0.50
+∆ra [arcsec]
+CLEAN image
+15, 0.72, 0.98
+-0.50
+0.00
+0.50
+∆ra [arcsec]
+SIFARI
+35, 0.98, 1.00
+0.01
+0.05
+0.30
+Jy/arcsec2
+-0.60
+0.00
+0.60
+∆ra [arcsec]
+−1.0
+−0.5
+0.0
+0.5
+1.0
+∆dec [arcsec]
+Truth
+-0.60
+0.00
+0.60
+∆ra [arcsec]
+CLEAN model
+21, 0.92, 1.00
+-0.60
+0.00
+0.60
+∆ra [arcsec]
+CLEAN image
+29, 0.81, 1.01
+-0.60
+0.00
+0.60
+∆ra [arcsec]
+SIFARI
+60, 0.99, 1.00
+0.01
+0.10
+1.00
+Jy/arcsec2
+-0.60
+0.00
+0.60
+∆ra [arcsec]
+−1.0
+−0.5
+0.0
+0.5
+1.0
+∆dec [arcsec]
+Truth
+-0.60
+0.00
+0.60
+∆ra [arcsec]
+CLEAN model
+23, 0.70, 0.96
+-0.60
+0.00
+0.60
+∆ra [arcsec]
+CLEAN image
+13, 0.36, 1.30
+-0.60
+0.00
+0.60
+∆ra [arcsec]
+SIFARI
+59, 0.96, 1.00
+0.03
+0.08
+0.30
+Jy/arcsec2
+Figure 5.
+CLEAN and SIFARI reconstructions of the three models described in Sec. 3.4. Rows show the inclined ring with a
+point source, the multiple-ring system, and the molecular cloud, from top to bottom. Columns show the ground truth, CLEAN
+model, restored CLEAN image, and SIFARI reconstruction, from left to right. Each row uses a common logarithmic intensity
+scale. In the inclined-ring model (top row), the cyan plus sign marks the injected point-source position. The three numbers
+above each reconstruction give IFS, SSIM, and the recovered total-flux ratio, respectively. The FWHM of the CLEAN beam is
+0.032′′ × 0.027′′.
+nominator in both regions, with the lower point-source
+SNR reflecting its larger uncertainty relative to the re-
+constructed intensity. We use these spatially resolved
+SNR maps in Section 4.1 to examine compact emission
+near the bright ring in PDS 70.
+4. APPLICATION TO REAL DATA
+We apply SIFARI to two ALMA datasets that test
+different aspects of the reconstruction. PDS 70 tests the
+recovery of faint, compact emission near a bright dust
+ring.
+The long-baseline WISPIT 2 data test whether
+a SIFARI reconstruction can provide a self-calibration
+model under strong spatial filtering.
+4.1. Protoplanetary Disk of PDS 70
+We apply CLEAN and SIFARI to the combined long-
+, intermediate-, and short-baseline ALMA continuum
+dataset (LB19+IB17+SB16) of PDS 70 presented by
+M. Benisty et al. (2021).
+The field contains a bright
+outer dust ring, weak inner-disk emission, and candidate
+circumplanetary emission at the locations of PDS 70 b
+and PDS 70 c. Recovering the faint compact emission
+requires separating it from the nearby bright ring.
+We produce the CLEAN reconstruction using multi-
+scale deconvolution with scales of 0, 1, 3, and 6 times the
+CLEAN beam and Briggs weighting with a robust pa-
+rameter of 0.5. We stop CLEAN at 0.03 mJy beam−1,
+
+
+12
+-0.50
+0.00
+0.50
+∆ra [arcsec]
+−0.5
+0.0
+0.5
+∆dec [arcsec]
+SIFARI
+-0.50
+0.00
+0.50
+∆ra [arcsec]
+Uncertainty
+-0.50
+0.00
+0.50
+∆ra [arcsec]
+SNR
+0.01
+0.05
+0.30
+Jy/arcsec2
+1
+4
+8
+Jy/arcsec2
+×10−3
+0
+40
+70
+SNR
+-0.60
+0.00
+0.60
+∆ra [arcsec]
+−1.0
+−0.5
+0.0
+0.5
+1.0
+∆dec [arcsec]
+SIFARI
+-0.60
+0.00
+0.60
+∆ra [arcsec]
+Uncertainty
+-0.60
+0.00
+0.60
+∆ra [arcsec]
+SNR
+0.01
+0.10
+1.00
+Jy/arcsec2
+0.5
+2.0
+5.0
+Jy/arcsec2
+×10−2
+0
+10
+20
+30
+SNR
+-0.60
+0.00
+0.60
+∆ra [arcsec]
+−1.0
+−0.5
+0.0
+0.5
+1.0
+∆dec [arcsec]
+SIFARI
+-0.60
+0.00
+0.60
+∆ra [arcsec]
+Uncertainty
+-0.60
+0.00
+0.60
+∆ra [arcsec]
+SNR
+0.03
+0.08
+0.30
+Jy/arcsec2
+0.1
+0.5
+1.0
+Jy/arcsec2
+×10−2
+0
+5
+10
+15
+20
+SNR
+Figure 6.
+SIFARI reconstructions and uncertainty diagnostics for the three morphology benchmarks in Figure 5. Rows show
+the inclined ring with a point source, the multiple-ring system, and the molecular cloud, from top to bottom. Columns show
+the SIFARI reconstruction, the pixel-wise standard deviation across SWAG samples (σSWAG), and the SNR defined by Eq. 7,
+from left to right. The white contours on the reconstruction and SNR panels mark SNR=5.
+approximately three times the expected thermal RMS
+of 0.0097 mJy beam−1. The CLEAN image shows pro-
+nounced background fluctuations inside the ring, par-
+ticularly near PDS 70 b, making it difficult to distin-
+guish faint compact emission there from the background
+(Figure 7, lower left panel).
+The local CLEAN RMS
+within the ring is 0.013 mJy beam−1, modestly above
+this thermal-noise estimate. At PDS 70 c, CLEAN re-
+covers a peak of 0.086 mJy beam−1, corresponding to
+a local peak-to-RMS ratio of 6.6, whereas no peak at
+PDS 70 b exceeds three times the local RMS.
+The CLEAN and SIFARI reconstructions recover the
+same total flux of 0.177 Jy. The SIFARI reconstruction
+has a visibly cleaner background inside the ring, making
+the compact emission at PDS 70 b easier to distinguish.
+The emission at PDS 70 c is also more sharply defined
+than in the CLEAN image.
+We then assess the reconstructed compact emission
+with the SWAG uncertainty and SNR maps defined in
+Section 2.3. The SIFARI SNR uses the spatially varying
+SWAG dispersion and the thermal-noise floor, whereas
+the CLEAN peak-to-RMS ratios above use the local
+background RMS. The SIFARI SNR peaks at 6.0 and
+5.9 at PDS 70 c and PDS 70 b, respectively, while the
+bright outer ring has an average SNR of 23. This appli-
+cation demonstrates that SIFARI can recover faint com-
+pact emission near a bright ring while providing spatially
+resolved estimates of reconstruction uncertainty.
+
+
+13
+-0.50
+0.00
+0.50
+∆ra [arcsec]
+−0.5
+0.0
+0.5
+∆dec [arcsec]
+CLEAN
+-0.50
+0.00
+0.50
+∆ra [arcsec]
+SIFARI
+-0.50
+0.00
+0.50
+∆ra [arcsec]
+SNR
+0.01
+0.04
+0.20
+Jy/arcsec2
+0
+5
+10
+15
+20
+25
+SNR
+-0.15
+0.00
+0.15
+∆ra [arcsec]
+−0.2
+−0.1
+0.0
+0.1
+0.2
+∆dec [arcsec]
+CLEAN
+-0.15
+0.00
+0.15
+∆ra [arcsec]
+SIFARI
+-0.15
+0.00
+0.15
+∆ra [arcsec]
+SNR
+0.01
+0.04
+0.20
+Jy/arcsec2
+0
+5
+10
+15
+20
+25
+SNR
+Figure 7. Comparison of reconstructed images and signal-to-noise ratio (SNR) diagnostics for real PDS 70 data. Top: global
+view. Bottom: zoomed-in view of the central region, including the central emission and the locations of PDS 70 b and PDS 70 c.
+In each row, the panels show, from left to right, the restored CLEAN image, the SIFARI reconstruction, and the SIFARI SNR
+map. The CLEAN and SIFARI images share a common intensity scale. The white contours on the SIFARI and SNR panels
+mark SNR=5, as defined in Eq. 7. The CLEAN beam is 0.045′′ × 0.034′′.
+-0.80
+0.00
+0.80
+∆ra [arcsec]
+−1.0
+−0.5
+0.0
+0.5
+1.0
+∆dec [arcsec]
+CLEAN
+-0.80
+0.00
+0.80
+∆ra [arcsec]
+SIFARI model
+-0.80
+0.00
+0.80
+∆ra [arcsec]
+SIFARI image
+0.00
+0.05
+0.10
+0.15
+0.20
+Jy/arcsec2
+Figure 8. Three image reconstructions of the WISPIT 2 continuum, shown with a common color scale. Left: naturally weighted
+CLEAN image from the original calibrated visibilities, before self-calibration. Middle: SIFARI model fitted to the self-calibrated
+visibilities, without beam convolution or added residuals. Right: restored SIFARI image, formed by convolving the middle-panel
+model with the restoring beam and adding the residual image from the self-calibrated visibilities.
+4.2. Self-calibration of WISPIT 2
+We apply SIFARI to the ALMA Band 7 (λ = 0.88
+mm) continuum observations of the planet-hosting sys-
+tem WISPIT 2 (R. F. van Capelleveen et al. 2025; S.
+Facchini et al. 2026). These observations reveal a nar-
+row dust ring at a deprojected radius of 144.4 au, with
+
+
+14
+no detected dust interior to it. The C-10 configuration
+provides baselines from 132 m to 15.2 km and an angu-
+lar resolution of 25 × 17 mas, but the scarcity of short
+baselines limits the maximum recoverable scale to 0.27′′,
+or roughly 36 au (S. Facchini et al. 2026). This scale is
+much smaller than the ring, leaving its large-scale emis-
+sion poorly constrained.
+Phase-only self-calibration uses a reconstructed sky
+model as a reference for correcting residual phase errors
+in the data. For WISPIT 2, the CLEAN reconstruction
+does not provide a suitable model for this step.
+Mo-
+tivated by SIFARI’s recovery of extended emission in
+the synthetic tests (Section 3.3), we test whether its
+reconstruction can supply the model needed for self-
+calibration of these spatially filtered data.
+We first create a CLEAN image using CASA tclean
+on the original, non-self-calibrated visibilities (Figure 8,
+left panel). This image is broadly consistent with that
+in S. Facchini et al. (2026), except that we use natural
+weighting, whereas they applied Briggs weighting with
+robust = 1.0. The resulting image exhibits substantial
+negative emission caused by spatial filtering and con-
+tains a total flux of 140 mJy calculated over an ellipti-
+cal area with a major axis of 3′′, a minor axis of 2′′, and
+PA = 0◦.
+We then train SIFARI on the original visibilities and
+use the resulting sky model to solve for antenna phase
+corrections with CASA gaincal. After applying these
+corrections to the data, we train a new network from
+scratch on the self-calibrated visibilities to obtain a self-
+calibrated SIFARI model (Figure 8, middle panel). To
+form a restored image, we supply the SIFARI model to
+CASA tclean as a startmodel with niter=0. This con-
+volves the model with the restoring beam and adds the
+residual image from the self-calibrated visibilities with-
+out further CLEAN iterations (Figure 8, right panel).
+Both the SIFARI model and the restored SIFARI
+image show fewer spatial-filtering artifacts than the
+CLEAN image made before self-calibration.
+The SI-
+FARI model recovers a total flux of 190 mJy, closer to
+the flux measured in recent ALMA observations incorpo-
+rating shorter baselines (210±21 mJy; M. Benisty et al.
+2026). This closer agreement supports improved recov-
+ery of the ring’s integrated emission despite the limited
+short-baseline coverage.
+The RMS noise in the restored, self-calibrated SIFARI
+image (right panel) is roughly 30% lower than in the
+original CLEAN image (left panel).
+This application
+demonstrates that a SIFARI reconstruction can sup-
+ply the sky model for phase self-calibration, extending
+the method’s role to the calibration of the observations
+themselves.
+5. DISCUSSION
+In the tests presented here, SIFARI resolves compact
+structure and recovers extended emission more faithfully
+than CLEAN. The point-source and two-source tests
+demonstrate its ability to represent fine structure, while
+the uniform-disk tests show improved flux recovery when
+short baselines are missing (Sections 3.1–3.3). The mor-
+phology benchmarks and PDS 70 application extend this
+comparison to complex emission and faint compact fea-
+tures near bright structure. The WISPIT 2 application
+demonstrates a further use of the reconstruction: sup-
+plying a sky model for phase self-calibration when the
+CLEAN model is inadequate.
+The coordinate-network representation reduces the
+number of quantities that must be fitted to describe a
+finely sampled image. In pixel-based RML, each pixel
+intensity is a fitted parameter, so a large field sampled
+at high angular resolution can require millions of param-
+eters. SIFARI instead fits network parameters shared
+across sky positions, whose number is independent of the
+grid used to evaluate the image. The architecture acts
+as an implicit morphological prior, guiding the recovery
+of emission on spatial scales that are weakly constrained
+by the measured visibilities. The same architecture rep-
+resents point sources, rings, and diffuse clouds in our
+tests without explicit spatial penalty terms such as To-
+tal Variation or Maximum Entropy.
+A small Fourier feature scale can suppress compact
+emission, whereas a large scale can introduce high-
+frequency artifacts. Our visibility-based estimator se-
+lects this scale without manual adjustment for each
+source, using an empirical mapping from the radial
+visibility-SNR profile. Applying the same rule to each
+dataset makes scale selection reproducible and removes
+a source-specific tuning step. This could help incorpo-
+rate SIFARI into automated imaging pipelines.
+The current estimator nevertheless remains an empir-
+ical prescription. The comparisons in Appendix A (Fig-
+ure 9) show that the automatic choice does not consis-
+tently maximize reconstruction scores, and that higher
+global scores do not necessarily imply clearer recovery
+of local features. Establishing how broadly the rule can
+be used requires testing across a wider range of source
+morphologies, uv coverages, and signal-to-noise levels.
+The chosen Fourier feature scale does not describe
+directional differences in uv coverage, because the es-
+timator uses a radial visibility-SNR profile and the
+feature directions are sampled isotropically.
+A single
+isotropic scale may therefore be inadequate for strongly
+anisotropic observations. A possible extension is to se-
+lect Fourier frequencies from the two-dimensional vis-
+
+
+15
+ibility distribution, allowing feature scales to vary by
+direction.
+Alongside the best-fitting image, SWAG provides a
+spatially resolved measure of brightness variation among
+sampled reconstructions, which we use as an approxi-
+mate uncertainty estimate.
+Together with a thermal-
+noise floor, this estimate defines the SNR maps used to
+examine extended and compact emission. The PDS 70
+application illustrates how these maps supplement a
+background RMS estimate with information about the
+variability of reconstructed emission at each position.
+Further validation should test how well these uncer-
+tainty estimates track reconstruction errors under dif-
+ferent observing conditions.
+Our findings indicate that machine-learning-driven
+image reconstruction has the potential to transform in-
+terferometric imaging, although several components of
+SIFARI still require refinement. The treatment of point-
+like sources is still largely empirical: we rely on the
+point-source response and two-source separation experi-
+ments to inform the grid selection for the other synthetic
+benchmarks (Sections 3.1 and 3.2). A clearer characteri-
+zation of the effective response is necessary to anticipate
+its width without running a dedicated point-source test.
+Connecting this response to the intrinsic source mor-
+phology and the uv coverage would enable the choice of
+a grid that adequately samples the reconstructed struc-
+ture while avoiding unnecessary computational expense.
+Training duration also remains an empirical choice.
+We use a fixed Stage 1 budget and select the model with
+the lowest full-data loss, while checking that the loss
+and reconstructed images stabilize (Section 2.2). The
+agreement with the known synthetic images supports
+this procedure for the cases studied here. More robust
+convergence diagnostics would help determine the train-
+ing needed for more complex fields.
+Although the parameter count is independent of the
+image grid, larger grids still increase training compu-
+tational cost.
+On a single NVIDIA A100 GPU, the
+multiple-ring benchmark with a 790 × 790 reconstruc-
+tion grid takes approximately 30 min for Stage 1 train-
+ing (300 epochs; Section 2.2) and 50 min for the Stage 2
+SWAG phase (500 epochs; Section 2.3), totaling about
+80 min. The inclined-ring and Ophiuchus benchmarks
+use smaller reconstruction grids and take less time.
+Preliminary tests not included in this paper suggest
+that reconstructing morphologies more complex than
+the L1688 cloud model requires larger networks. Avail-
+able GPU memory also limits the grid size and network
+capacity.
+The current implementation of SIFARI is restricted to
+2D, single-pointing, single-polarization continuum ob-
+servations.
+Its forward model does not include mo-
+saic observations or wide-field effects.
+Extending the
+method to those observations would require the corre-
+sponding measurement effects to be included in the for-
+ward model. Spectral-line cubes and polarization offer
+another direction: a joint reconstruction would require
+a sky model that accounts for frequency dependence or
+includes multiple Stokes components.
+Finally, it is worth mentioning that fitting visibilities
+directly also provides a route to interferometric applica-
+tions beyond the ALMA data studied here. For obser-
+vations that rely on closure quantities, such as those
+from the Event Horizon Telescope or JWST NIRISS
+aperture-masking interferometry, the forward model and
+loss would need to predict and compare these quantities.
+Such an extension could retain the continuous sky rep-
+resentation while adapting the fit to the measurements
+available from each instrument.
+6. CONCLUSION
+SIFARI
+models
+sky
+brightness
+as
+a
+continuous
+coordinate-based function,
+fits measured visibilities
+without an external image training set, and sets the
+Fourier feature scale from the visibility data before
+training. Sampling network weights with SWAG pro-
+vides approximate pixel-wise brightness uncertainty es-
+timates, which we combine with the thermal-noise term
+to construct SNR maps. Synthetic ALMA benchmarks
+and real observations demonstrate the following results:
+• Angular Resolution: In synthetic observations cov-
+ering baselines between 15 m and 13.9 km, SIFARI
+produces an effective point-source response with a
+FWHM of 0.0040′′ × 0.0037′′, about 8× and 4×
+narrower than the natural- and uniform-weighting
+CLEAN restoring beams, respectively.
+It recov-
+ers two peaks at separations of 0.009′′ and 0.010′′,
+with the 50%-midpoint criterion placing the effec-
+tive separation scale between these values (Sec-
+tion 3.2).
+• Flux Recovery and Image Fidelity: Under strong
+spatial filtering, SIFARI recovers 202 and 219 mJy
+from 200 mJy uniform disks with diameters of
+0.6′′ and 1.0′′, respectively, compared with 41 and
+20 mJy from CLEAN. For the three morphol-
+ogy benchmarks, SIFARI achieves higher IFS and
+SSIM than the restored CLEAN images.
+• High Dynamic Range Imaging (PDS 70): The SI-
+FARI reconstruction has a cleaner background in-
+side the ring than the CLEAN image, making com-
+pact emission at PDS 70 b and c easier to distin-
+guish. The SWAG-based maps give SNR values
+
+
+16
+above 5 for compact emission at the locations of
+PDS 70 b and PDS 70 c, and an average SNR of
+23 for the bright outer ring.
+• Self-Calibration Support (WISPIT 2):
+SIFARI
+provides a self-calibration model for this long-
+baseline dataset, for which the CLEAN recon-
+struction does not provide a suitable model. The
+restored, self-calibrated SIFARI image has fewer
+artifacts and an RMS noise approximately 30%
+lower than the CLEAN image made from the orig-
+inal visibilities without self-calibration.
+The visibility-based estimator provides a reproducible
+way to set the Fourier feature scale, although its em-
+pirical prescription does not consistently maximize re-
+construction scores. The tests support the use of neural
+visibility fitting to recover emission under strong spa-
+tial filtering, distinguish compact emission near bright
+extended structures, and construct models for self-
+calibration.
+CODE AVAILABILITY
+The source code used in this work will be publicly
+released on GitHub and archived on Zenodo upon pub-
+lication of this article.
+During peer review, the code
+can be made available confidentially to the editor and
+referees upon request.
+ACKNOWLEDGMENTS
+S.M. and A.I. acknowledge support from the National
+Aeronautics and Space Administration under grant No.
+80NSSC18K0828. Research presented in this article was
+supported by the Laboratory Directed Research and De-
+velopment program of Los Alamos National Laboratory
+under project number 20250553ER. This paper is pub-
+lished under LA-UR-26-28006. This research is partially
+supported by the National Nuclear Security Adminis-
+tration (NNSA) Advanced Simulation and Computing
+(ASC) Program under grant number DE-SCL0000089.
+This research was enabled in part by support provided
+by the National Energy Research Scientific Computing
+Center (NERSC) under award number FES-ERCAP-
+m4239 and ERCAP0035555. The National Radio As-
+tronomy Observatory and Green Bank Observatory are
+facilities of the U.S. National Science Foundation oper-
+ated under cooperative agreement by Associated Univer-
+sities, Inc. We thank Myriam Benisty for providing the
+calibrated PDS 70 data, Kwang Moo Yi for insightful
+discussions on AI methods and ideas, and Ka Wai Ho for
+making computational resources available for this work.
+We also thank Stefano Facchini, Jessica Speedie, Jae-
+han Bae, Christopher M. Johns-Krull, Charlie Gardner,
+Ryan Loomis, Eric Murphy, Brian Mason, Brian Kirk,
+Sifan Wang, Tianao Li, and Ruobing Dong for valuable
+discussions.
+OpenAI Codex was used to assist with language edit-
+ing of the manuscript. The authors take responsibility
+for the final content.
+Facilities: ALMA
+Software:
+PyTorch (J. Ansel et al. 2024), CLEAN
+and Multiscale CLEAN (J. H¨ogbom 1974; T. J. Cornwell
+2008)
+
+
+17
+APPENDIX
+A. A HEURISTIC ESTIMATOR FOR THE FOURIER FEATURE SCALE
+We set the Fourier feature scale from a radial visibility-SNR profile. The estimator smooths this profile, identifies a
+characteristic support radius, and converts that radius to the half-normal scale used in Section 2.1.1.
+We group visibilities into 40 logarithmic bins spanning the observed range of positive uv radii and evaluate the
+profile at the geometric bin centers, with radius r expressed in arcsec−1. For each bin, the weighted signal power is
+Psig(r) =
+
+|V |2 −2
+W
+
+W
+,
+(A1)
+where ⟨·⟩W denotes averaging with the visibility weights W, and the subtraction removes the expected real-plus-
+imaginary noise power. The corresponding per-visibility SNR is
+SNRvis(r) =
+p
+max(Psig(r), 0)
+σnoise(r)
+.
+(A2)
+For a bin containing n visibilities, we use σnoise(r) = n/ P
+l∈bin
+√Wl. This profile measures SNR per visibility rather
+than the detection significance of the whole bin.
+We smooth the profile to reduce fluctuations between neighboring radial bins. Bins with at least max(10, ⌈0.001Nvis⌉)
+visibilities contribute to a centered, five-bin moving average of this profile. The smoothing weight for each eligible bin
+is
+p
+n/median(n), clipped to [0.5, 2], where the median is taken over eligible bins.
+To avoid treating a local SNR minimum as the end of the signal support, we form an envelope equal to the largest
+smoothed SNR at each radius or any larger radius. The first crossing of this envelope below SNR=1 gives an initial
+estimate of the signal support radius rsignal.
+For bright sources, the SNR can remain above unity even after declining substantially from its low-uv value. We
+therefore also limit rsignal using a relative decrease in SNR. We define the low-uv SNR as the median smoothed value
+in the first three eligible bins, and cap rsignal at the first radius where the smoothed profile falls below 25% of this
+value. Where the bracketing SNR values are positive, we interpolate threshold crossings in log radius and log SNR.
+We further limit the support radius to the sampled uv coverage. For the datasets studied here, the final support
+radius is
+rsupport = min(rsignal, ruv,99),
+(A3)
+where ruv,99 is the 99th percentile of observed uv radius.8 We convert this radius to the half-normal Fourier feature
+scale using the empirical relation
+σν = rsupport
+2
+.
+(A4)
+Figure 9 compares reconstructions obtained with the automatic Fourier feature scale and fixed scales for the three
+morphology benchmarks. The automatic scale yields the highest or near-highest IFS among the tested scales for the
+multiple-ring and molecular-cloud benchmarks. For the inclined ring, smaller fixed scales yield higher IFS, but the
+injected point source is more clearly recovered with the automatic scale than with σν = 0.50. Thus, the automatic
+choice does not consistently maximize reconstruction scores, and a higher global score does not necessarily imply
+clearer recovery of a local feature.
+REFERENCES
+8 The implementation also caps rsupport at 1/(4∆x), where ∆x
+is the reconstruction pixel size; this safeguard is inactive in
+the experiments reported here.
+Aghabiglou, A., Chu, C. S., Dabbech, A., & Wiaux, Y.
+2024, The Astrophysical Journal Supplement Series, 273,
+3
+Akiyama, K., Kuramochi, K., Ikeda, S., et al. 2017, ApJ,
+838, 1, doi: 10.3847/1538-4357/aa6305
+
+
+18
+-0.50
+0.00
+0.50
+∆ra [arcsec]
+−0.5
+0.0
+0.5
+∆dec [arcsec]
+Truth
+-0.50
+0.00
+0.50
+∆ra [arcsec]
+σν = 0.20
+77, 0.99, 1.00
+-0.50
+0.00
+0.50
+∆ra [arcsec]
+σν = 0.50
+54, 0.98, 1.00
+-0.50
+0.00
+0.50
+∆ra [arcsec]
+σν = 0.81 (auto)
+35, 0.98, 1.00
+-0.50
+0.00
+0.50
+∆ra [arcsec]
+σν = 1.00
+29, 0.97, 1.00
+0.01
+0.05
+0.30
+Jy/arcsec2
+-0.60
+0.00
+0.60
+∆ra [arcsec]
+−1.0
+−0.5
+0.0
+0.5
+1.0
+∆dec [arcsec]
+Truth
+-0.60
+0.00
+0.60
+∆ra [arcsec]
+σν = 0.20
+50, 0.99, 1.00
+-0.60
+0.00
+0.60
+∆ra [arcsec]
+σν = 0.44 (auto)
+60, 0.99, 1.00
+-0.60
+0.00
+0.60
+∆ra [arcsec]
+σν = 0.50
+65, 0.99, 1.00
+-0.60
+0.00
+0.60
+∆ra [arcsec]
+σν = 1.00
+46, 0.97, 1.00
+0.01
+0.10
+1.00
+Jy/arcsec2
+-0.60
+0.00
+0.60
+∆ra [arcsec]
+−1.0
+−0.5
+0.0
+0.5
+1.0
+∆dec [arcsec]
+Truth
+-0.60
+0.00
+0.60
+∆ra [arcsec]
+σν = 0.20
+58, 0.96, 1.00
+-0.60
+0.00
+0.60
+∆ra [arcsec]
+σν = 0.36 (auto)
+59, 0.96, 1.00
+-0.60
+0.00
+0.60
+∆ra [arcsec]
+σν = 0.50
+56, 0.95, 1.00
+-0.60
+0.00
+0.60
+∆ra [arcsec]
+σν = 1.00
+38, 0.92, 1.00
+0.03
+0.08
+0.30
+Jy/arcsec2
+Figure 9.
+Comparison of SIFARI reconstructions for different Fourier feature scales.
+Rows (top to bottom) show the
+inclined-ring, multiple-ring, and molecular-cloud benchmarks, with a common logarithmic intensity scale within each row. The
+leftmost column shows the ground truth; the remaining panels show reconstructions at the Fourier feature scales σν indicated
+in their titles. The scale selected by the visibility-supported heuristic estimator is marked “(auto).” Panel-header annotations
+report image fidelity (IFS; left), SSIM (center), and recovered flux ratio (right).
+Akiyama, K., Alberdi, A., Alef, W., et al. 2019, The
+Astrophysical Journal Letters, 875, L4
+Andr´e, P., Men’shchikov, A., Bontemps, S., et al. 2010,
+Astronomy & Astrophysics, 518, L102
+Ansel, J., Yang, E., He, H., et al. 2024, in 29th ACM
+International Conference on Architectural Support for
+Programming Languages and Operating Systems, Volume
+2 (ASPLOS ’24) (ACM), doi: 10.1145/3620665.3640366
+Arras, P., Frank, P., Leike, R., Westermann, R., & Enßlin,
+T. A. 2019, Astronomy & Astrophysics, 627, A134
+Benisty, M., Bae, J., Facchini, S., et al. 2021, The
+Astrophysical Journal Letters, 916, L2
+Benisty, M., Facchini, S., Teague, R., et al. 2026, arXiv
+preprint arXiv:2609.04946
+Carrillo, R. E., McEwen, J. D., & Wiaux, Y. 2012, Monthly
+Notices of the Royal Astronomical Society, 426, 1223
+Casassus, S., & C´arcamo, M. 2022, Monthly Notices of the
+Royal Astronomical Society, 513, 5790
+Chael, A. A., Johnson, M. D., Narayan, R., et al. 2016, The
+Astrophysical Journal, 829, 11
+Cornwell, T. J. 2008, IEEE Journal of selected topics in
+signal processing, 2, 793
+Cortes, P., Carpenter, J., Kameno, S., et al. 2026, ALMA
+Cycle 13 Technical Handbook,
+doi: 10.5281/zenodo.18793803
+Czekala, I., Andrews, S. M., Jensen, E. L., et al. 2015, The
+Astrophysical Journal, 806, 154
+Czekala, I., Loomis, R. A., Teague, R., et al. 2021, The
+Astrophysical Journal Supplement Series, 257, 2
+Czekala, I., Jennings, J., Zawadzki, B., et al. 2025, arXiv
+preprint arXiv:2502.00100
+C´arcamo, M., Roman, P., Casassus, S., Moral, V., &
+Rannou, F. 2017, Astronomy and Computing, 22,
+doi: 10.1016/j.ascom.2017.11.003
+Facchini, S., Curone, P., Benisty, M., et al. 2026, The
+Astrophysical Journal Letters, 998, L16
+
+
+19
+Feng, B. T., Chael, A. A., Bromley, D., et al. 2026, arXiv
+preprint arXiv:2602.08029
+Gull, S. F., & Daniell, G. J. 1978, Nature, 272, 686
+He, K., Zhang, X., Ren, S., & Sun, J. 2015, in Proceedings
+of the IEEE international conference on computer vision,
+1026–1034
+H¨ogbom, J. 1974, Astronomy and Astrophysics
+Supplement, Vol. 15, p. 417, 15, 417
+Isella, A., Benisty, M., Teague, R., et al. 2019, The
+Astrophysical Journal Letters, 879, L25,
+doi: 10.3847/2041-8213/ab2a12
+Isella, A., Huang, J., Andrews, S. M., et al. 2018, The
+Astrophysical Journal Letters, 869, L49
+Izmailov, P., Podoprikhin, D., Garipov, T., Vetrov, D., &
+Wilson, A. G. 2018, arXiv preprint arXiv:1803.05407
+Jordan, K., Jin, Y., Boza, V., et al. 2024, Muon: An
+optimizer for hidden layers in neural networks,
+https://kellerjordan.github.io/posts/muon/
+Jorsater, S., & van Moorsel, G. A. 1995, Astronomical
+Journal v. 110, p. 2037, 110, 2037
+Junklewitz, H., Bell, M., Selig, M., & Enßlin, T. 2016,
+Astronomy & Astrophysics, 586, A76
+Ladjelate, B., Andr´e, P., K¨onyves, V., et al. 2020,
+Astronomy & Astrophysics, 638, A74
+Levis, A., Luong, N., Teague, R., et al. 2025, arXiv preprint
+arXiv:2509.03623
+Levis, A., Srinivasan, P. P., Chael, A. A., Ng, R., &
+Bouman, K. L. 2022, in Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern
+Recognition, 19841–19850
+Loshchilov, I., & Hutter, F. 2017, arXiv preprint
+arXiv:1711.05101
+Maddox, W. J., Izmailov, P., Garipov, T., Vetrov, D. P., &
+Wilson, A. G. 2019, Advances in neural information
+processing systems, 32
+Mescheder, L., Oechsle, M., Niemeyer, M., Nowozin, S., &
+Geiger, A. 2019, in Proceedings of the IEEE/CVF
+conference on computer vision and pattern recognition,
+4460–4470
+Mildenhall, B., Srinivasan, P. P., Tancik, M., et al. 2021,
+Communications of the ACM, 65, 99
+Park, J. J., Florence, P., Straub, J., Newcombe, R., &
+Lovegrove, S. 2019, in Proceedings of the IEEE/CVF
+conference on computer vision and pattern recognition,
+165–174
+Pascanu, R., Mikolov, T., & Bengio, Y. 2013, in
+International conference on machine learning, Pmlr,
+1310–1318
+Rahaman, N., Baratin, A., Arpit, D., et al. 2019, in
+International conference on machine learning, PMLR,
+5301–5310
+Rau, U., & Cornwell, T. J. 2011, Astronomy &
+Astrophysics, 532, A71
+Sitzmann, V., Martel, J., Bergman, A., Lindell, D., &
+Wetzstein, G. 2020, Advances in neural information
+processing systems, 33, 7462
+Sobol, I. M. 1967, USSR Computational mathematics and
+mathematical physics, 7, 86
+Tancik, M., Srinivasan, P., Mildenhall, B., et al. 2020,
+Advances in neural information processing systems, 33,
+7537
+Terris, M., Dabbech, A., Tang, C., & Wiaux, Y. 2023,
+Monthly Notices of the Royal Astronomical Society, 518,
+604
+van Capelleveen, R. F., Ginski, C., Kenworthy, M. A., et al.
+2025, The Astrophysical Journal Letters, 990, L8
+Wang, Z., Bovik, A. C., Sheikh, H. R., & Simoncelli, E. P.
+2004, IEEE transactions on image processing, 13, 600
+Wiaux, Y., Jacques, L., Puy, G., Scaife, A. M., &
+Vandergheynst, P. 2009a, Monthly Notices of the Royal
+Astronomical Society, 395, 1733
+Wiaux, Y., Jacques, L., Puy, G., Scaife, A. M. M., &
+Vandergheynst, P. 2009b, Monthly Notices of the Royal
+Astronomical Society, 395, 1733,
+doi: 10.1111/j.1365-2966.2009.14665.x
+Wu, B., Liu, C., Eckart, B., & Kautz, J. 2022, in
+Proceedings of the AAAI Conference on Artificial
+Intelligence, Vol. 36, 2685–2693
+Zawadzki, B., Czekala, I., Loomis, R. A., et al. 2023,
+Publications of the Astronomical Society of the Pacific,
+135, 064503

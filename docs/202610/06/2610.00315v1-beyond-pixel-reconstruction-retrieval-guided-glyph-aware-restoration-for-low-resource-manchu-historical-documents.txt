@@ -1,0 +1,1005 @@
+Beyond Pixel Reconstruction: Retrieval-Guided Glyph-Aware Restoration for
+Low-Resource Manchu Historical Documents
+Ting Huang1,*, Dongdong Wang2,*, Mingqiu Liang1, Siyang Lu1,†
+1School of Computer Science and Technology, Beijing Jiaotong University, Beijing, China
+2College of Design, Construction, and Planning, University of Florida, Gainesville, FL, USA
+Abstract
+Restoring low-resource historical documents, such as Manchu
+historical documents, is critical for preserving cultural her-
+itage but remains challenging due to severe data scarcity
+and complex degradation patterns. Although recent diffusion-
+based restoration methods have substantially improved visual
+reconstruction quality, the scarcity of annotated Manchu his-
+torical documents necessitates transferring pretrained models
+from natural-image or other writing-system domains. Such
+transferred models provide limited script-specific knowledge,
+while their pixel-centric optimization objectives fail to ex-
+plicitly preserve legitimate Manchu glyphs, let alone re-
+cover the correct ones. We tackle this challenge by refor-
+mulating historical document restoration from pixel recon-
+struction to glyph-aware recovery, leveraging a script-specific
+glyph inventory together with the semantic reasoning ca-
+pability of a large vision-language model, rather than di-
+rectly synthesizing missing pixels. Accordingly, we propose
+a Coarse-to-Fine Retrieval-Guided Glyph-Aware Restoration
+(CRGR) framework, in which a vision encoder retrieves struc-
+turally similar candidates and a large vision-language model
+identifies the most appropriate glyph. This retrieval-before-
+restoration paradigm enables glyph-aware restoration without
+task-specific training while promoting the recovery of legiti-
+mate Manchu glyphs. We further establish a Glyph-oriented
+Evaluation Protocol, demonstrating that faithful restoration
+should be evaluated beyond image fidelity by explicitly as-
+sessing glyph validity, identity preservation, and structural
+consistency. Extensive experiments demonstrate that CRGR
+achieves the highest glyph structural similarity (GSS = 0.9986)
+and superior restoration accuracy on intact content (GRA =
+0.9600), validating retrieval-before-restoration as an effective
+paradigm for improving glyph fidelity inlow-resource Manchu
+historical document restoration.
+1
+Introduction
+Historical document restoration is a fundamental task in
+cultural heritage preservation and digital humanities, aim-
+ing to recover degraded historical documents for subsequent
+archival conservation, scholarly analysis, and digital dissem-
+ination (Pal et al. 2017). Recent advances in deep learning
+have significantly improved historical document restoration
+across various degradation scenarios (Zhu et al. 2024). How-
+ever, the effectiveness of existing methods largely depends on
+∗Equal contribution.
+†Corresponding author: Siyang Lu (sylu@bjtu.edu.cn).
+the characteristics of target writing systems, including train-
+ing data availability, glyph diversity, and document degra-
+dation patterns. Existing restoration methods have achieved
+promising results on high-resource scripts,where relatively
+large-scale datasets and representative training samples are
+available. In contrast, many under-resourced writing systems,
+including Manchu, Khitan, and Jurchen, contain only lim-
+ited historical collections and exhibit substantial variations
+in glyph styles. Furthermore, long-term aging, insect dam-
+age, ink fading, and physical deterioration introduce complex
+degradation patterns, making restoration particularly chal-
+lenging for low-resource scripts. Consequently, restoration
+failures frequently arise not only from missing visual details
+but also from inaccurate recovery of glyph structures.
+Existing restoration methods mainly formulate histori-
+cal document restoration primarily as a pixel reconstruction
+problem. Their objective is to infer missing contents from sur-
+rounding image contexts and generate visually plausible re-
+sults (Suvorov et al. 2022). This pixel-centric formulation im-
+plicitly assume that visual similarity is a reliable surrogate for
+glyph correctness. However, this assumption becomes unreli-
+able for low-resource historical scripts containing highly sim-
+ilar glyph structures. Achieving robust restoration under this
+paradigm typically requires abundant annotated data, power-
+ful pretrained models, or task-specific adaptation, which are
+difficult to obtain for many endangered writing systems. Con-
+sequently, visually plausible reconstructions may still contain
+incorrect glyph structures or distorted stroke patterns. Since
+restoration errors can propagate to downstream tasks such as
+optical character recognition, historical interpretation, and
+linguistic analysis, preserving glyph structures and visual
+integrity is more important than pixel-level similarity alone.
+To address these challenges, we reformulate historical doc-
+ument restoration as a retrieval-guided glyph recovery prob-
+lem and propose Coarse-to-Fine Retrieval-Guided Glyph-
+Aware Restoration (CRGR), taking bilingual Manchu–
+Chinese woodblock-printed historical documents as a rep-
+resentative low-resource restoration benchmark. CRGR first
+employs a vision encoder to retrieve Top-K structurally sim-
+ilar glyph candidates from an intact glyph gallery, followed
+by fine-grained candidate verification using a frozen vision-
+language model. Directly applying VLM verification over
+the entire glyph inventory can introduce substantial com-
+putational overhead, CRGR progressively reduces the candi-
+arXiv:2610.00315v1  [cs.CV]  29 Sep 2026
+
+
+Top-K : Top-K retrieval results
+: Query feature
+q
+f
+YOLO coords
+Data Flow
+Paste (target)
+Connection
+Frozen (Pre-trained)
+Feature/Fusion
+Single Glyph 
+(Mask/Crop)
+Paste flow
+Align & Replace
+Top-1 Match
+YOLO coordinates
+Input
+Output
+Prompt
+VLM
+Query 
+(Masked)
+Top-5 Candidates
+Similarity 
+Matching
+Vision 
+Encoder
+qf
+Masked 
+Glyph
+...
+VLM-based Glyph Candidate Verification
+Coarse Glyph Retrieval
+Top-1
+Clean Glyph 
+Database
+...
+Feature
+Figure 1: Overview of the proposed CRGR framework. CRGR reformulates restoration from pixel synthesis to retrieval-guided
+glyph recovery by progressively reducing candidate ambiguity through coarse retrieval and VLM-based verification.
+date space before multimodal verification. The selected refer-
+ence glyph is then restored through reference-guided replace-
+ment. By combining coarse retrieval with semantic verifica-
+tion, CRGR mitigates ambiguities among structurally similar
+glyphs without requiring task-specific fine-tuning. This for-
+mulation shifts historical document restoration from open-
+ended pixel synthesis toward constrained reference selection,
+reducing the risk of hallucinating invalid glyph forms.
+The main contributions are summarized as follows:
+• We reformulate historical document restoration from
+pixel synthesis to structure-aware glyph reference se-
+lection. Based on this formulation, we propose CRGR,
+which integrates visual retrieval and frozen VLM veri-
+fication to achieve glyph-preserving restoration without
+task-specific fine-tuning.
+• We develop a hierarchical candidate refinement strategy
+that bridges coarse glyph retrieval and fine-grained VLM
+verification. By progressively reducing candidate ambi-
+guity, CRGR enables reliable identification among struc-
+turally similar glyphs.
+• We establish a glyph-oriented evaluation protocol that
+extends restoration assessment beyond pixel-level fidelity
+by explicitly measuring glyph identity preservation and
+structural consistency through GRA, CCR, and GSS.
+• Extensive experiments on a Manchu historical document
+dataset demonstrate that CRGR achieves superior glyph
+fidelity and document content preservation compared
+with representative restoration methods, validating the
+effectiveness of the proposed retrieval-guided restoration
+paradigm.
+2
+Related Work
+2.1
+Visual Reconstruction
+Most existing historical glyph restoration methods formulate
+restoration as a visual reconstruction problem, where miss-
+ing contents are inferred from surrounding image contexts
+and optimized for pixel-level fidelity (Pathak et al. 2016;
+Yu et al. 2019). Early deep learning approaches mainly
+rely on context-aware image inpainting to recover visually
+plausible contents, represented by adaptive attention-based
+models such as AOT-GAN (Zeng et al. 2023). To better
+handle large missing regions, large-receptive-field restora-
+tion methods, such as LaMa (Suvorov et al. 2022), exploit
+Fourier convolutions to capture long-range contextual de-
+pendencies and improve structural continuity. More recently,
+diffusion-based restoration methods, such as Unified Diffu-
+sion Transformer (UDT) (Kim et al. 2025), have demon-
+strated remarkable generation capability by progressively re-
+fining corrupted regions through iterative denoising. Mean-
+while, document-oriented restoration frameworks, such as
+TextDoctor (Lu et al. 2025), DocRevive (Purkayastha et al.
+2026), and GSDM (Zhu et al. 2024), further incorporate
+textual structures, degradation-aware priors, and document
+layouts to improve restoration quality on degraded historical
+documents. Despite their strong visual reconstruction capa-
+bility, these methods primarily optimize appearance consis-
+tency and implicitly assume that visually plausible restora-
+tion preserves glyph structures. This assumption becomes
+unreliable for low-resource historical scripts containing vi-
+sually similar glyph structures, where visual realism does not
+necessarily guarantee structural correctness.
+2.2
+Structure-aware Restoration
+To improve glyph integrity during restoration, recent stud-
+ies introduce explicit structural constraints beyond conven-
+tional image reconstruction. Stroke-aware restoration meth-
+ods preserve character topology by modeling stroke con-
+tinuity and structural dependencies, while Transformer-
+based approaches, such as LWTFormer (Ruan et al. 2026),
+further capture long-range relationships among character
+components. Diffusion-based structural restoration has also
+
+
+Stage
+Input
+Transformation
+Output
+Coarse Glyph Retrieval Masked glyph xq, gallery G
+Visual feature extraction + retrieval
+Top-K glyph candidates C
+Candidate Verification
+Masked glyph xq, candidates C
+VLM-based vision-language matching
+Reference glyph g∗
+Glyph Restoration
+Reference glyph g∗, target location Glyph alignment and regional replacement Restored documents
+Table 1: Data transformation across different stages of the proposed CRGR framework.
+been explored for ancient Han characters through explicit
+glyph generation constraints (Li et al. 2024). In paral-
+lel, adversarial learning remains an effective solution for
+structure-preserving restoration. Representative examples in-
+clude Three-Stage GAN (Shen et al. 2026), which progres-
+sively reconstructs broken strokes, and Dual Discriminator
+GAN (Chen et al. 2022), which jointly constrains global ap-
+pearance and local structural consistency. Another important
+direction is exemplar-guided restoration, where visually sim-
+ilar reference glyphs are introduced to guide reconstruction,
+as demonstrated by EA-GAN (Zheng et al. 2022). Although
+these methods significantly improve structural fidelity and
+glyph completeness, restoration decisions are still dominated
+by visual similarity. Structurally similar glyphs remain diffi-
+cult to distinguish based solely on visual appearance, particu-
+larly for low-resource historical scripts with limited training
+data. Preserving glyph structures alone cannot address the
+challenge of distinguishing visually similar glyph patterns.
+2.3
+Retrieval-guided and Vision-language
+Restoration
+Recent studies have begun moving beyond purely pixel-level
+image generation by incorporating glyph retrieval and vision-
+language models to improve glyph discrimination during his-
+torical document restoration. These methods can be broadly
+categorized according to how glyph retrieval and vision-
+language reasoning are incorporated into the restoration pro-
+cess. Early efforts focused on learning more discriminative
+glyph representations. Restoring Ancient Ideograph jointly
+optimizes image restoration, character recognition, and char-
+acter prediction within a unified multi-task framework, en-
+abling more discriminative glyph feature learning (Duan,
+Wang, and Su 2024). Subsequent studies introduced cross-
+modal representation alignment to jointly model visual glyph
+structures and auxiliary textual information for historical in-
+scription restoration (Liu et al. 2025). Benefiting from re-
+cent advances in multimodal learning, large vision-language
+models have also been introduced into historical document
+restoration. EpiAgent (Zhu et al. 2026) introduces mul-
+timodal reasoning for historical document understanding,
+while UniHIR (Zhang et al. 2026) further integrates unified
+multimodal modeling for historical inscription restoration.
+Despite these advances, most existing methods rely on abun-
+dant annotated data, task-specific adaptation, or end-to-end
+multimodal optimization. Many VLM-augmented restora-
+tion approaches aim to synthesize pixel content directly and
+require domain fine-tuning. Such requirements are difficult
+to satisfy for low-resource historical documents. However,
+existing methods generally do not explicitly decouple can-
+didate retrieval from candidate verification. Consequently,
+existing approaches either optimize pixel generation or rely
+on task-specific adaptation, while retrieval-guided semantic
+restoration utilizing authentic glyph references has not been
+sufficiently explored for low-resource historical documents.
+3
+Methodology
+3.1
+Framework Overview
+Following the retrieval-guided formulation, CRGR consists
+of two consecutive stages: coarse glyph retrieval and candi-
+date verification. The first stage retrieves a compact set of
+structurally similar glyph candidates using a vision encoder,
+while the second stage performs fine-grained candidate ver-
+ification using a frozen vision-language model (VLM) to
+identify the most appropriate reference glyph (Radford et al.
+2021). The selected reference glyph is then inserted into
+the corrupted region to complete document restoration. The
+overall architecture is illustrated in Fig. 1, and the data flow
+of the proposed framework is summarized in Table 1.
+3.2
+Glyph Knowledge Base
+Unlike generative restoration methods that synthesize miss-
+ing content from learned priors, our framework restores dam-
+aged glyphs by retrieving valid references from an authentic
+glyph knowledge base. The knowledge base is constructed
+offline from intact historical historical documents and serves
+as the search space for subsequent retrieval and verification.
+Specifically, each intact glyph is first localized and cropped
+using a pretrained glyph detector. The extracted glyphs are
+then normalized to a unified resolution while preserving their
+glyph identities. Collectively, these glyph instances form a
+reference gallery G = {g1, g2, . . . , gN}, where each gi de-
+notes an authentic glyph observed in historical documents.
+The knowledge base is fixed during inference and is shared
+across all restoration samples. Since every restored glyph
+is selected from G rather than synthesized pixel by pixel,
+the proposed framework naturally constrains restoration to
+valid historical glyphs, reducing the possibility of generating
+unsupported glyph forms.
+3.3
+Coarse Glyph Retrieval
+Given a damaged glyph, the first stage of CRGR retrieves a
+compact set of structurally similar reference glyphs from an
+intact glyph gallery using discriminative visual representa-
+tions. A vision encoder is employed to extract hierarchical
+glyph features from both damaged glyphs and intact reference
+glyphs. These representations encode hierarchical visual pat-
+terns of glyph structures, providing discriminative features
+for retrieval.
+
+
+For a damaged glyph xq, its feature representation is de-
+noted as fq = E(xq), where E(·) represents the vision en-
+coder. Likewise, each reference glyph gi in the glyph gallery
+is encoded as fi = E(gi).
+The similarity between the damaged glyph and each refer-
+ence glyph is measured using cosine similarity,
+si =
+f ⊤
+q fi
+∥fq∥∥fi∥.
+(1)
+All reference glyphs are ranked according to their similar-
+ity scores, and the Top-K candidates are retained to form the
+candidate set,
+C = TopK
+ rank(si), K
+
+.
+(2)
+The Top-K candidates are preserved for subsequent VLM-
+based verification instead of selecting the highest-ranked re-
+sult. This design substantially reduces the search space while
+ensuring that every restored glyph originates from an authen-
+tic historical reference. Moreover, restricting restoration to
+retrieved historical references naturally prevents generating
+glyph forms that do not exist in the writing system.
+3.4
+VLM-based Candidate Verification
+Visual similarity alone is insufficient because structurally
+similar glyphs may still exhibit subtle structural differences
+that are difficult to distinguish. The VLM compares the dam-
+aged glyph with each retrieved candidate under a predefined
+prompt and estimates their matching scores. The candidate
+with the highest matching score is selected as the reference
+glyph for restoration. The VLM receives the masked glyph
+and each retrieved candidate as input and outputs a matching
+score under a fixed prompt template.
+Given the candidate set C retrieved from the reference
+gallery G, the VLM assigns a verification score to each can-
+didate glyph gi ∈C:
+svlm
+i
+= V (xq, gi),
+(3)
+where V (·) denotes the VLM-based verification function and
+xq is the query. The final reference glyph is selected as
+g∗= arg max
+gi∈C svlm
+i
+.
+(4)
+The selected reference glyph is subsequently aligned to the
+target position and reference-guided replacement to complete
+restoration. The two-stage design combines efficient candi-
+date retrieval with fine-grained verification, enabling reliable
+glyph selection without task-specific fine-tuning.
+3.5
+Glyph-oriented Evaluation Protocol
+Existing restoration metrics, such as PSNR, SSIM, and
+LPIPS, primarily assess image fidelity and cannot distinguish
+structurally similar glyphs with different semantic identi-
+ties. As a result, visually plausible but semantically incorrect
+restorations may still receive high level scores. To address
+this limitation, we establish a Glyph-oriented Evaluation
+Protocol that explicitly evaluates restoration quality from the
+perspective of glyph correctness rather than pixel similarity.
+Our protocol consists of two stages. First, a pretrained
+glyph detector localizes individual glyph instances from
+restored historical documents and extracts discriminative
+glyph representations. Second, the detected glyphs are eval-
+uated using three complementary metrics that jointly assess
+glyph identity preservation and structural fidelity: Glyph
+Restoration Accuracy (GRA), Cross-category Confusion
+Rate (CCR), and Glyph Structure Similarity (GSS).
+GRA measures the proportion of correctly restored glyph
+identities:
+GRA = Ncorrect
+Ntotal
+,
+(5)
+where Ncorrect and Ntotal denote the numbers of correctly
+restored glyphs and evaluated glyphs, respectively.
+CCR quantifies semantic confusion between visually sim-
+ilar glyph categories:
+CCR = Ncross
+Ntotal
+,
+(6)
+where Ncross denotes the number of glyphs restored as an
+incorrect category.
+To further evaluate structural fidelity after identity verifi-
+cation, we define GSS based on deep glyph features. Given
+the feature extractor ϕ(·) and the intact glyph gallery G, GSS
+is computed as
+GSS =
+1
+Ncorrect
+Ncorrect
+X
+i=1
+max
+gj∈G
+ϕ(ri)⊤ϕ(gj)
+∥ϕ(ri)∥2 ∥ϕ(gj)∥2
+,
+(7)
+where ϕ(·) denotes the feature extractor used for structural
+comparison, and ri denotes the i-th restored glyph.
+Unlike conventional image-level evaluation, the proposed
+protocol explicitly separates glyph identity correctness from
+structural similarity, enabling faithful assessment of restora-
+tion quality at the semantic glyph level. Since glyph local-
+ization and representation learning are modular components,
+the protocol is detector-agnostic and can readily incorporate
+future advances in glyph detection and feature extraction.
+4
+Experiments
+4.1
+Experimental Setup
+Dataset.
+To the best of our knowledge, no public bench-
+mark targets retrieval-guided glyph restoration; therefore,
+we construct a benchmark of scanned Manchu-Han bilin-
+gual woodblock-printed documents from multiple sources.
+We evaluate CRGR under full-page and patch-level restora-
+tion settings. For patch-level evaluation, each page is divided
+into 3×3 sub-regions, and patches containing masked glyphs
+are retained. A pretrained YOLO detector constructs an intact
+glyph gallery, yielding over 15,000 reference glyph instances.
+The gallery serves as the retrieval database for CRGR.
+Baselines.
+We compare CRGR with five representa-
+tive restoration approaches covering different restoration
+paradigms, including CNN-based, GAN-based, diffusion-
+based, and document restoration methods. We select publicly
+available methods with released pretrained models and re-
+producible inference pipelines. Following the official imple-
+mentation setting, LDM adopts a 512 × 512 input resolution
+for full-page restoration (Rombach et al. 2021).
+
+
+Inpute
+LDM
+LAMA
+AOT-GAN
+GSDM
+Pixelhacker
+CRGR(Ours)
+GT
+Figure 2: Qualitative comparison of full-page document restoration.
+Evaluation Metrics.
+We primarily evaluate restoration
+performance using the proposed glyph-oriented metrics, in-
+cluding Glyph Restoration Accuracy (GRA), Cross-category
+Confusion Rate (CCR), and Glyph Structure Similarity
+(GSS). These metrics are reported on both masked and in-
+tact regions to evaluate glyph recovery and preservation of
+original document contents. In addition, image-level met-
+rics, including PSNR, SSIM, LPIPS, RMSE, and F1-score
+for foreground reconstruction, are additionally reported.
+Implementation Details.
+The proposed CRGR consists of
+a coarse glyph retrieval stage and a VLM-based candidate
+verification stage. We adopt Swin V2 as the visual encoder
+for glyph feature extraction and candidate retrieval, and em-
+ploy a frozen InternVL model for candidate verification (Liu
+et al. 2021; Chen et al. 2024). The VLM receives the damaged
+glyph and each retrieved candidate as input and produces a
+matching score under a fixed prompt template. The candi-
+date with the highest verification score is selected from the
+Top-K retrieved candidates as the reference glyph. We set
+K = 5 in all experiments. All experiments are conducted
+on a single NVIDIA RTX 4090 GPU (24 GB) using the
+PyTorch framework. All backbone models utilize pretrained
+weights without task-specific fine-tuning. Ablation studies
+further analyze the effects of different retrieval backbones,
+VLM verification models, and candidate numbers.
+4.2
+Comparison with Representative Restoration
+Methods
+Qualitative Comparison.
+We first compare CRGR with
+representative restoration methods under the same masking
+setting. Figure 2 presents qualitative comparisons on full-
+page document restoration. Specifically, LaMa and AOT-
+GAN may produce noticeable artifacts in masked regions, in-
+cluding local appearance inconsistencies and distorted stroke
+patterns, possibly due to the absence of explicit glyph-level
+constraints. Diffusion-based approaches, such as LDM and
+GSDM, generally achieve smoother visual reconstruction;
+however, the restored glyph appearances may still differ from
+the original glyph structures in some cases. PixelHacker fur-
+ther improves document-level restoration quality (Xu et al.
+2025); however, such reconstruction-based approaches may
+still face challenges when distinguishing visually similar his-
+torical glyphs. In contrast, CRGR performs reference-based
+glyph restoration by retrieving intact glyph instances from
+a gallery of historical documents and verifying candidate
+consistency with a frozen vision-language model. Instead
+of synthesizing missing pixels, CRGR directly restores cor-
+rupted regions using verified reference glyphs. This strategy
+effectively preserves original glyph structures, printed stroke
+characteristics, and document layout while avoiding incor-
+rect character reconstruction.
+Quantitative Comparison.
+Since historical document
+restoration requires preserving glyph structures and textual
+contents rather than merely reconstructing pixel appearances,
+we primarily evaluate all methods using the proposed glyph-
+oriented metrics. The results on masked and intact regions
+are summarized in Table 2. Here, GSSm and GSSh denote
+structural similarity evaluated on Manchu and Han glyph
+subsets, respectively.
+On masked regions, CRGR achieves the highest GSS
+score of 0.9986, together with the best GSSm and GSSh
+scores among all compared methods. This result suggests
+that reference-based restoration can better preserve authen-
+tic glyph structures by directly selecting existing glyph in-
+stances rather than synthesizing missing contents. Although
+PixelHacker obtains slightly better GRA and CCR on masked
+regions, its lower structural similarity suggests that category-
+level correctness does not necessarily guarantee complete
+glyph structure preservation.
+On intact regions, CRGR achieves the best overall glyph-
+
+
+Masked Regions
+Intact Regions
+Method
+GRA↑
+CCR↓
+GSS↑
+GSSm↑
+GSSh↑
+GRA↑
+CCR↓
+GSS↑
+GSSm↑
+GSSh↑
+LDM
+0.9354
+0.0456
+0.9966
+0.9969
+0.9959
+0.9439
+0.0448
+0.9974
+0.9976
+0.9970
+LaMa
+0.8992
+0.0684
+0.9974
+0.9977
+0.9967
+0.9589
+0.0383
+0.9997
+0.9998
+0.9997
+AOT-GAN
+0.8764
+0.1008
+0.9963
+0.9965
+0.9957
+0.9418
+0.0428
+0.9970
+0.9973
+0.9967
+GSDM
+0.5627
+0.0932
+0.9971
+0.9973
+0.9966
+0.5910
+0.0688
+0.9981
+0.9982
+0.9980
+PixelHacker
+0.9487
+0.0380
+0.9967
+0.9970
+0.9959
+0.9283
+0.0452
+0.9966
+0.9971
+0.9960
+CRGR (Ours)
+0.9354
+0.0456
+0.9986
+0.9989
+0.9979
+0.9600
+0.0377
+0.9997
+0.9998
+0.9996
+Table 2: Quantitative comparison of glyph-oriented restoration performance on masked and intact regions.
+oriented performance, obtaining the highest GRA (0.9600),
+the lowest CCR (0.0377), and competitive GSS performance.
+In contrast, generation-based methods may introduce modifi-
+cations beyond corrupted areas due to their image reconstruc-
+tion nature. By restricting restoration to verified damaged
+glyph regions, CRGR better preserves the original document
+contents while avoiding over-restoration.
+For completeness, conventional pixel-level metrics are
+also reported in Table 3. Since these metrics mainly mea-
+sure low-level appearance similarity, they cannot fully reflect
+glyph identity preservation and structural consistency. Nev-
+ertheless, CRGR achieves competitive visual quality with
+the lowest LPIPS score, while its main advantage is demon-
+strated by the glyph-oriented evaluation. This observation
+further suggests that pixel-level reconstruction quality may
+not fully reflect glyph correctness in historical document
+restoration, where semantic fidelity is often more important
+than appearance similarity alone.
+4.3
+Ablation Study
+We perform ablation studies to analyze the contribution of
+each component in CRGR, including the glyph retrieval back-
+bone, VLM-based verification, and the candidate number
+used for verification. All experiments are conducted under
+the same evaluation protocol, and results are reported using
+the proposed glyph-oriented metrics.
+Effect of Glyph Retrieval Backbone.
+We analyze the ef-
+fect of visual encoders for coarse glyph retrieval under the
+retrieval-only setting, we compare ConvNeXt (Liu et al.
+2022) and Swin V2 as representative modern visual back-
+bones. As shown in Table 4, Swin V2 outperforms Con-
+vNeXt by increasing GRA from 0.6186 to 0.6356 and reduc-
+ing CCR from 0.2542 to 0.2288. Despite comparable GSS
+results, Swin V2 achieves better glyph structural consistency,
+demonstrating that hierarchical features are more discrimi-
+Method
+PSNR↑
+SSIM↑
+LPIPS↓
+RMSE↓
+F1↑
+LDM
+34.671
+0.996
+0.004
+4.875
+0.999
+LaMa
+33.396
+0.997
+0.004
+5.707
+0.999
+AOT-GAN
+22.514
+0.874
+0.327
+19.144
+0.987
+GSDM
+20.464
+0.936
+0.123
+25.787
+0.987
+PixelHacker
+18.954
+0.788
+0.383
+28.839
+0.975
+CRGR (Ours)
+31.982
+0.994
+0.002
+7.135
+0.999
+Table 3: Quantitative comparison of restoration performance.
+Variant
+GRA↑CCR↓GSS↑GSSm↑GSSh↑
+ConvNeXt
+0.6186 0.2542 0.9977 0.9979 0.9969
+Swin V2
+0.6356 0.2288 0.9979 0.9980 0.9973
+ConvNeXt + Qwen-VL 0.5763 0.2458 0.9976 0.9975 0.9980
+ConvNeXt + InternVL 0.5678 0.2542 0.9976 0.9975 0.9980
+Swin V2 + Qwen-VL
+0.6356 0.2373 0.9980 0.9981 0.9976
+Swin V2 + InternVL
+0.6610 0.2203 0.9979 0.9980 0.9972
+Table 4: Ablation study of CRGR variants. Bold: best result;
+underlined: second-best result.
+native for visually similar historical glyphs.
+Effect of VLM-based Verification.
+We further evaluate
+the contribution of vision-language verification by compar-
+ing different VLM backbones, including Qwen-VL (Bai et al.
+2023) and InternVL. When integrated with Swin V2 re-
+trieval, VLM verification further improves restoration perfor-
+mance when reliable retrieval candidates are provided, yield-
+ing the best GRA (0.6610) and CCR (0.2203). In comparison,
+VLM verification does not consistently improve performance
+when the retrieval quality is insufficient, as observed in the
+ConvNeXt-based variants. This indicates that VLM verifi-
+cation benefits from high-quality retrieval candidates, while
+inaccurate candidate retrieval may limit fine-grained struc-
+tural reasoning.
+This result suggests that the two stages are complemen-
+tary: retrieval provides structurally relevant candidates, while
+VLM-based verification further improves candidate discrim-
+ination among visually similar glyphs.
+Effect of Candidate Number.
+We additionally analyze the
+impact of retrieved candidate number K in the verification
+stage. As shown in Table 5, increasing K expands the candi-
+date pool for VLM verification, yet excessive candidates may
+bringextraambiguities.Theresultsrevealatrade-offbetween
+K
+GRA↑
+CCR↓
+GSS↑
+GSSm↑
+GSSh↑
+K = 1
+0.6356
+0.2288
+0.9979
+0.9980
+0.9973
+K = 3
+0.6356
+0.2288
+0.9980
+0.9981
+0.9975
+K = 5
+0.6610
+0.2203
+0.9979
+0.9980
+0.9972
+K = 8
+0.6271
+0.2373
+0.9979
+0.9981
+0.9972
+K = 10
+0.6525
+0.2119
+0.9979
+0.9981
+0.9972
+Table 5: Effect of candidate number K in VLM verification.
+Bold: best result; underlined: second-best result.
+
+
+Inpute
+Swin v2
+CRGR(Ours)
+GT
+ConvNeXt
+ConvNeXt+Qwen
+Swin v2+Qwen
+ConvNeXt+InternVL
+Figure 3: Qualitative comparison of different CRGR variants.
+Top-K Retrieved 
+Candidates
+（K=5）
+Reason
+Query
+(Damaged Glyph)
+CRGR
+(Restored Result)
+GT
+(True Glyph)
+Case 3:
+Ambiguous 
+glyph 
+identity
+Case 1:
+Gallery 
+coverage 
+limitation
+①  ②  ③  ④  ⑤  
+Case 2:
+Structural 
+information 
+insufficient
+False
+False
+False
+①  ②  ③  ④  ⑤  
+①  ②  ③  ④  ⑤  
+Figure 4: Failure cases of CRGR caused by limited reference
+coverage, severe degradation, and glyph ambiguity.
+candidate diversity and verification reliability. A small K
+restricts the candidate space and risks excluding the ground-
+truth glyph, while an overly large K introduces additional
+candidates and increases verification complexity for VLM
+discrimination. CRGR achieves the highest GRA of 0.6610
+with competitive structural consistency at K = 5, providing
+a favorable balance between retrieval coverage and verifica-
+tion accuracy. Larger K values improve CCR in some cases
+but do not consistently improve overall performance while
+increasing verification cost. Accordingly, we adopt K = 5
+as the default configuration to balance retrieval coverage,
+verification reliability, computational efficiency and restora-
+tion quality. These results further validate the efficacy of our
+coarse-to-fine retrieval strategy.
+4.4
+Failure Analysis
+Although CRGR achieves strong restoration performance,
+failure cases may still occur in challenging scenarios where
+the reference evidence is insufficient for accurate glyph iden-
+tification. We analyze representative failure cases to in-
+vestigate the limitations of the proposed retrieval-guided
+paradigm. As shown in Fig. 4, failures can be categorized
+into three scenarios: (1) gallery coverage limitation, where
+the correct glyph is absent from the reference gallery and
+therefore cannot be retrieved; (2) insufficient structural in-
+formation, where severe degradation removes discriminative
+glyph cues and makes candidate retrieval unreliable; and
+(3)ambiguous glyph identity, where visually similar glyphs
+introduce uncertainty during candidate verification. These
+cases indicate that CRGR is mainly limited by reference
+coverage and the availability of discriminative structural ev-
+idence, rather than the restoration mechanism itself.
+5
+Conclusion
+This paper presented CRGR, a retrieval-guided glyph-aware
+restoration framework for low-resource historical document
+restoration. Instead of treating restoration as unconstrained
+pixel generation, CRGR reformulates the problem as coarse-
+to-fine glyph retrieval followed by VLM-based candidate
+verification. This formulation enables identity-aware and
+structure-preserving restoration using authentic historical
+references rather than synthesized glyphs. Experimental re-
+sults demonstrate that the proposed retrieval-and-verification
+paradigm improves glyph restoration fidelity while pre-
+serving intact document contents. More broadly, our study
+suggests that low-resource historical document restoration
+should move beyond unconstrained pixel generation toward
+retrieval-guided semantic restoration, where authentic ref-
+erences and multimodal reasoning jointly improve glyph
+structural preservation across diverse ancient writing low-
+resource historical document restoration scenarios.
+References
+Bai, J.; Bai, S.; Yang, S.; Wang, S.; Tan, S.; Wang, P.; Lin,
+J.; Zhou, C.; and Zhou, J. 2023.
+Qwen-VL: A Versatile
+
+
+Vision-Language Model for Understanding, Localization,
+Text Reading, and Beyond. arXiv:2308.12966.
+Chen, S.; Yang, Y.; Liu, X.; and Zhu, S. 2022. Dual Discrim-
+inator GAN: Restoring Ancient Yi Characters. ACM Trans.
+Asian Low-Resour. Lang. Inf. Process., 21(4).
+Chen, Z.; Wu, J.; Wang, W.; Su, W.; Chen, G.; Xing, S.;
+Zhong, M.; Zhang, Q.; Zhu, X.; Lu, L.; Li, B.; Luo, P.;
+Lu, T.; Qiao, Y.; and Dai, J. 2024. InternVL: Scaling up
+Vision Foundation Models and Aligning for Generic Visual-
+Linguistic Tasks. arXiv:2312.14238.
+Duan, S.; Wang, J.; and Su, Q. 2024. Restoring Ancient Ideo-
+graph: A Multimodal Multitask Neural Network Approach.
+In Calzolari, N.; Kan, M.-Y.; Hoste, V.; Lenci, A.; Sakti, S.;
+and Xue, N., eds., Proceedings of the 2024 Joint Interna-
+tional Conference on Computational Linguistics, Language
+Resources and Evaluation (LREC-COLING 2024), 14005–
+14015. Torino, Italia: ELRA and ICCL.
+Kim, J. H.; Cho, P. H.; Kim, C.; Min, J.; Lee, J.; Park, J.;
+Choi, Y.; and Kim, S. 2025. Unified Diffusion Transformer
+for High-fidelity Text-Aware Image Restoration.
+ArXiv,
+abs/2512.08922.
+Li, H.; Du, C.; Jiang, Z.; Zhang, Y.; Ma, J.; and Ye,
+C. 2024.
+Towards automated chinese ancient character
+restoration: a diffusion-based method with a new dataset.
+AAAI’24/IAAI’24/EAAI’24. AAAI Press.
+ISBN 978-1-
+57735-887-9.
+Liu, Y.; Zhang, E.; Lin, G.; and Duan, J. 2025. A struc-
+tural information-guided cross-modal method for damaged
+inscription inpainting via vision-language models. npj Her-
+itage Science, 13.
+Liu, Z.; Lin, Y.; Cao, Y.; Hu, H.; Wei, Y.; Zhang, Z.; Lin, S.;
+and Guo, B. 2021. Swin Transformer: Hierarchical Vision
+Transformer using Shifted Windows. In 2021 IEEE/CVF In-
+ternational Conference on Computer Vision (ICCV), 9992–
+10002.
+Liu, Z.; Mao, H.; Wu, C.-Y.; Feichtenhofer, C.; Darrell, T.;
+and Xie, S. 2022.
+A ConvNet for the 2020s.
+In 2022
+IEEE/CVF Conference on Computer Vision and Pattern
+Recognition (CVPR), 11966–11976.
+Lu, W.; Su, L.; Zheng, J.; de Melo, V. V.; Shoeleh, F.; Hawkin,
+J.; Tricco, T.; Zhao, H.; and Jiang, X. 2025. TextDoctor: Uni-
+fied Document Image Inpainting via Patch Pyramid Diffusion
+Models. ArXiv, abs/2503.04021.
+Pal, K.; Avery, N.; Boston, P.; Campagnolo, A.; De Stefani,
+C.; Matheson-Pollock, H.; Panozzo, D.; Payne, M.; Schüller,
+C.; Sanderson, C.; Scott, C.; Smith, P.; Smither, R.; Sorkine-
+Hornung, O.; Stewart, A.; Stewart, E.; Stewart, P.; Terras, M.;
+Walsh, B.; Ward, L.; Yamada, L.; and Weyrich, T. 2017. Dig-
+itally reconstructing the Great Parchment Book: 3D recovery
+of fire-damaged historical documents. Digital Scholarship
+in the Humanities, 32(4): 887–917.
+Pathak, D.; Krähenbühl, P.; Donahue, J.; Darrell, T.; and
+Efros, A. A. 2016. Context Encoders: Feature Learning by
+Inpainting. In 2016 IEEE Conference on Computer Vision
+and Pattern Recognition (CVPR), 2536–2544.
+Purkayastha, K.; Banerjee, A.; Lladós, J.; and Pal, U. 2026.
+DocRevive: A Unified Pipeline for Document Text Restora-
+tion. ArXiv, abs/2604.10077.
+Radford, A.; andChris Hallacy, J. W. K.; Ramesh, A.; Goh,
+G.; Agarwal, S.; Sastry, G.; Askell, A.; Mishkin, P.; Clark, J.;
+Krueger, G.; and Sutskever, I. 2021. Learning Transferable
+Visual Models From Natural Language Supervision. CoRR,
+abs/2103.00020.
+Rombach, R.; Blattmann, A.; Lorenz, D.; Esser, P.; and Om-
+mer, B. 2021. High-Resolution Image Synthesis with Latent
+Diffusion Models. arXiv:2112.10752.
+Ruan, W.; Li, X.; Cheng, Z.; Fan, C.; Tian, L.; and Lv,
+Z. 2026. LWTformer: A Detail-Aware, Learnable Wavelet-
+Transformer for Ancient Chinese Character Image Restora-
+tion. In Proceedings of the IEEE/CVF Conference on Com-
+puter Vision and Pattern Recognition (CVPR) Findings,
+4971–4981.
+Shen, W.; Xu, Y.; Zhang, C.; Yan, J.; and Wang, S. 2026.
+A Three-Stage Generative Adversarial Image Inpainting
+Framework for Broken-Stroke Restoration in Historical Rub-
+bings: A Case Study on Oracle Bone Rubbings. Applied
+Sciences, 16(9).
+Suvorov, R.; Logacheva, E.; Mashikhin, A.; Remizova, A.;
+Ashukha, A.; Silvestrov, A.; Kong, N.; Goka, H.; Park, K.;
+and Lempitsky, V. 2022. Resolution-robust Large Mask In-
+painting with Fourier Convolutions. In 2022 IEEE/CVF Win-
+ter Conference on Applications of Computer Vision (WACV),
+3172–3182.
+Xu, Z.; Duan, K.; Shen, X.; Ding, Z.; Liu, W.; Ruan, X.;
+Chen, X.; and Wang, X. 2025.
+PixelHacker: Image In-
+painting with Structural and Semantic Consistency. ArXiv,
+abs/2504.20438.
+Yu, J.; Lin, Z.; Yang, J.; Shen, X.; Lu, X.; and Huang, T.
+2019. Free-Form Image Inpainting With Gated Convolution.
+In 2019 IEEE/CVF International Conference on Computer
+Vision (ICCV), 4470–4479.
+Zeng, Y.; Fu, J.; Chao, H.; and Guo, B. 2023. Aggregated
+Contextual Transformations for High-Resolution Image In-
+painting. IEEE Transactions on Visualization and Computer
+Graphics, 29(7): 3266–3280.
+Zhang, Y.; Liu, J.; Zhang, P.; Liu, J.; Yang, Z.; and Jin, L.
+2026. Draft, Verify, Restore: Self-Refining Historical In-
+scription Restoration with a Unified MLLM. In Liakata, M.;
+Moreira, V. P.; Zhang, J.; and Jurgens, D., eds., Proceedings
+of the 64th Annual Meeting of the Association for Computa-
+tional Linguistics (Volume 1: Long Papers), 27216–27231.
+San Diego, California, United States: Association for Com-
+putational Linguistics. ISBN 979-8-89176-390-6.
+Zheng, W.; Su, B.; Feng, R.; Peng, X.; and Chen, S. 2022.
+EA-GAN: Ancient books text restoration model based on
+example attention.
+Zhu, S.; Chen, A.; Nie, N.; Fang, P.; Zhang, M.-L.; and Xue,
+H. 2026. EpiAgent: An Agent-Centric System for Ancient
+Inscription Restoration. ArXiv, abs/2604.09367.
+Zhu, S.; Fang, P.; Zhu, C.; Zhao, Z.; Xu, Q.; and Xue, H.
+2024. Text Image Inpainting via Global Structure-Guided
+Diffusion Models. ArXiv, abs/2401.14832.

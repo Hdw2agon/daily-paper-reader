@@ -1,0 +1,949 @@
+CrowdOcc: Monocular Semantic Scene Completion for Quadruped
+Robots in Crowded Indoor Environments
+Feiyang Chen1, Jincheng Hu1∗, Yiduo Chen1, Jihao Li2
+Yue Liang1, Bingzhao Gao1, Yanjun Huang1, Yuanjian Zhang1
+Abstract— Monocular semantic scene completion (SSC) for
+quadruped robots remains underexplored in real crowded
+indoor environments, where human-scene occlusion disrupts
+static geometry and human occupancy predictions are often
+incomplete or spatially misplaced. We present CrowdOcc, an
+RGB-D dataset and monocular SSC framework for this setting.
+CrowdOcc contains 25.1K frames from 11 indoor scenes, with
+semantic occupancy annotations constructed through static-
+dynamic decoupling. Our framework combines: (i) Normal-
+Guided Scene Geometry Fusion (NGSGF) to complement
+depth-aware lifting with surface-normal cues for occlusion-
+robust geometry; and (ii) Human-Centric Sparse Interaction
+(HCSI) to selectively model human-human and local human-
+scene relations in 3D. Our method achieves state-of-the-art SSC
+performance on CrowdOcc’s scene-disjoint test set, reaching
+15.80 IoU, 11.40 mIoU, and 46.23 Human IoU, demonstrating
+generalization to unseen indoor scenes.
+I. INTRODUCTION
+Semantic Scene Completion (SSC) predicts dense 3D
+occupancy and semantics from partial observations [1]–[7].
+Monocular SSC further reduces the sensing requirement to a
+single RGB image, making it attractive for onboard percep-
+tion on quadruped robots [8]. However, most existing SSC
+datasets are built around static indoor scenes or autonomous-
+driving settings, where the sensing viewpoint, scene dy-
+namics, and occupancy distribution differ substantially from
+those encountered by quadruped robots in crowded indoor
+environments [9]–[12]. In particular, existing datasets pro-
+vide limited coverage of low-viewpoint observations with
+dense human presence and dynamic human occupancy. As
+summarized in Table I, this leaves real crowded indoor SSC
+for quadruped robots largely underexplored.
+Crowded indoor scenes introduce two difficulties that
+are not well addressed by conventional monocular SSC
+pipelines. First, humans frequently occlude large portions
+of walls, floors, doors, and other static structures. The re-
+sulting incomplete observations weaken depth-based feature
+lifting and make the recovery of scene geometry less reli-
+able [13], [14]. Second, human occupancy remains difficult
+to recover reliably in crowded scenes. Partial observations
+and foreground-background ambiguity frequently lead to
+incomplete human geometry and erroneous spatial place-
+ment. These issues become more pronounced when the test
+1Tongji University, Shanghai, China.
+2Loughborough University, Loughborough, United Kingdom.
+∗Corresponding author. Jincheng hu@tongji.edu.cn
+Fig. 1.
+CrowdOcc Overview. Synchronized RGB-D, LiDAR, and IMU
+observations collected by a quadruped robot are used for the offline con-
+struction of semantic occupancy annotations. The resulting dataset provides
+RGB-D frames and semantic occupancy annotations for monocular SSC,
+where inference takes a single RGB image as input. The provided depth
+maps can optionally serve as auxiliary supervision during training. The red
+background denotes the sensing hardware, the blue background indicates
+the CrowdOcc dataset construction pipeline, while the turquoise dashed box
+shows the model prediction pipeline.
+environment differs from the training scenes, where scene-
+specific geometric priors no longer transfer reliably.
+To address this difficulties, we introduce CrowdOcc, an
+RGB-D dataset for monocular SSC in real crowded indoor
+environments, together with a model tailored to scene ge-
+ometry and human occupancy. CrowdOcc contains 25.1K
+frames collected from 11 independent indoor scenes using
+a quadruped robot. As illustrated in Fig. 1, synchronized
+RGB-D, LiDAR, and IMU measurements are used for of-
+fline occupancy construction, while inference takes only
+a single RGB image. For scene geometry, we propose
+Normal-Guided Scene Geometry Fusion (NGSGF) mod-
+ule, which complements depth-based lifting with surface-
+normal cues and improves the representation of partially ob-
+served static structures. For human occupancy, we introduce
+Human-Centric Sparse Interaction (HCSI) module, which
+selects human-related voxel candidates and explicitly models
+human-human and local human-scene interactions in 3D. We
+evaluate cross-scene generalization on test scenes excluded
+from both training and validation. Our method achieves state-
+of-the-art SSC performance under this protocol.
+Our key contributions are:
+arXiv:2610.03031v1  [cs.CV]  2 Oct 2026
+
+
+TABLE I: Typical datasets for Semantic Scene Completion (SSC). Abbreviations:
+(Monocular View),
+(Multi-
+camera Surround View),
+(Panoramic View),
+(Internet images/videos),
+(Autonomous Car),
+(Quadruped Robot),
+(Human),
+(Vision Foundation Model),
+(Synthetic Data),
+(Wheels),
+(Gait),
+(Stationary). Plat. (Platform), Crowd
+(Crowded Scenario), Move. (Movement), Env. (Environment), Anno. (Annotation), C (Camera), D (Depth), L (LiDAR).
+Dataset
+View
+Plat.
+Crowd
+Move.
+Env.
+Modality
+Volume Size
+Voxel (m)
+Frames
+Anno.
+NYUv2 [15]
+Indoor
+C&D
+144×240×240
+0.02
+1.4K
+Occ-ScanNet [9]
+Indoor
+C
+36×60×60
+0.08
+65.5K
+EmbodiedOcc-ScanNet† [16]
+Indoor
+C
+Variable
+0.08
+20.2K
+SemanticKITTI [10]
+Outdoor
+C&L
+32×256×256
+0.20
+9K
+SSCBench-KITTI-360 [17], [18]
+Outdoor
+C&L
+32×256×256
+0.20
+12.9K
+Occ3D-nuScenes [11], [19]
+Outdoor
+C&L
+16×200×200
+0.40
+40K
+WildOcc [20]
+Outdoor
+C&L
+40×100×100
+0.20
+10K
+Human360Occ [12]
+Outdoor
+C&D
+16×128×128
+0.20
+8K
+QuadOcc [12]
+Outdoor
+C&L
+8×64×64
+0.40
+24K
+CrowdOcc (ours)
+Indoor
+C&D
+50×60×96
+0.08
+25.1K
+†EmbodiedOcc-ScanNet uses 36×60×60 local occupancy annotations, while the global occupancy size varies with the spatial extent of each scene [16].
+• Dataset. We introduce CrowdOcc, an RGB-D dataset
+for monocular SSC in real crowded indoor environments
+from a quadruped viewpoint, comprising 25.1K frames
+from 11 independent scenes, 8 occupied semantic cate-
+gories, and 0.08 m voxels on a 50×60×96 grid.
+• Method. We propose NGSGF module and HCSI mod-
+ule to address the two main difficulties of crowded
+indoor SSC. NGSGF enhances static-scene geometry
+under human occlusion by coupling depth-based lifting
+with surface-normal cues, while HCSI refines human
+geometry and spatial placement through sparse human-
+centric 3D interaction.
+• Generalization.
+Extensive
+experiments
+on
+scene-
+disjoint test scenes show strong cross-scene general-
+ization, with our method achieving state-of-the-art SSC
+performance on unseen indoor environments.
+II. RELATED WORK
+A. Monocular Semantic Scene Completion
+Monocular SSC recovers dense 3D occupancy and seman-
+tics from a single RGB image [13], [21]. MonoScene [8] es-
+tablished a representative image-to-voxel pipeline by lifting
+2D features into a 3D volume and performing volumetric
+context reasoning. Subsequent methods improve either the
+lifting process or the resulting 3D representation [22]. Vox-
+Former [23] constructs depth-guided sparse voxel queries
+before dense completion, while NDC-Scene [24] performs
+feature projection in normalized device coordinates to reduce
+lifting ambiguity. ISO [9] further incorporates monocular
+depth into indoor SSC through depth-aware feature pro-
+jection and multi-scale fusion. Recent approaches explore
+instance-level context, scene-adaptive decoding, Gaussian
+representations, and additional geometric priors to improve
+monocular occupancy prediction [14], [25]–[30]. Despite
+these advances, depth remains the dominant geometric cue
+for image-to-voxel lifting. Under heavy occlusion, depth
+alone provides limited information about local surface ori-
+entation and structural continuity. Our NGSGF complements
+depth-based lifting with surface-normal cues to improve
+static-scene geometry in crowded environments.
+B. Human-Centric and Embodied Occupancy Perception
+Vision-based occupancy prediction has been extensively
+studied in autonomous-driving settings [31]–[33], with re-
+cent efforts extending it to embodied platforms. Em-
+bodiedOcc [16] studies online occupancy prediction for
+vision-based robotic scene understanding, while Embod-
+iedOcc++ [34] further improves geometric modeling for
+robotic perception. OneOcc [12] considers SSC for legged
+robots using panoramic vision and develops platform-specific
+designs for gait-induced motion and omnidirectional sensing.
+Human-aware occupancy has also been explored for model-
+ing human-scene spatial relations and dynamic agents [35].
+Existing instance-aware SSC methods model instance and
+scene context [25], [36]. Our focus is targeted human-
+centric 3D reasoning to improve the completeness and spatial
+placement of human occupancy in crowded indoor scenes.
+C. SSC Datasets and Occupancy Construction
+Existing SSC datasets cover a wide range of sensing
+platforms and environments [37]. NYUv2 [15] and Occ-
+ScanNet [9], [38] focus primarily on static indoor scenes,
+whereas SemanticKITTI [10], SSCBench-KITTI-360 [17],
+[18], and Occ3D [11], [19] are designed for autonomous-
+driving settings. WildOcc [20] extends occupancy prediction
+to off-road environments. More recent datasets consider em-
+bodied and panoramic perception: Human360Occ provides
+synthetic human-ego panoramic occupancy, while QuadOcc
+collects real panoramic data from a quadruped robot [12]. As
+summarized in Table I, none of these datasets jointly provide
+real crowded indoor scenes, low-viewpoint quadruped obser-
+vations, and dynamic human occupancy. Dense occupancy
+labels are commonly constructed by aggregating multi-frame
+
+
+Fig. 2.
+Pipeline of our CrowdOcc dataset generation. We adopt a dual-branch pipeline for human-free and human-present sequences. The human-free
+branch reconstructs a dense semantic static scene, while the human-present branch extracts human observations and aligns them with the static scene.
+During voxelization, the synchronized current-frame depth map is used to refine human occupancy labels, followed by uncertainty and validity masking to
+produce the final semantic occupancy annotations.
+observations. SurroundOcc [39] and OpenOccupancy [40]
+use temporal sensor accumulation to improve scene coverage,
+while Occ3D [11] additionally models visibility when defin-
+ing occupied, free, and unobserved regions. Such aggregation
+is well suited to static geometry but is less reliable for
+dynamic objects. PointSSC [41] therefore separates static
+and dynamic components and registers dynamic observa-
+tions across views. This assumption becomes problematic
+for humans, whose pose and shape vary continuously over
+time. CrowdOcc instead reconstructs the static scene from
+human-free sequences and derives human occupancy from
+synchronized current-frame observations, avoiding temporal
+accumulation of non-rigid human geometry.
+III. CROWDOCC DATASET
+CrowdOcc comprises 25,140 RGB-D frames captured at
+11 indoor scenes using a quadruped robot. Training and
+validation share eight scenes, containing 16,961 and 4,265
+frames, respectively. The test set contains 3,914 frames
+from three additional scenes disjoint from both training and
+validation, enabling cross-scene evaluation. Each frame is
+paired with a semantic occupancy grid of 50 × 60 × 96 at
+0.08 m resolution. LiDAR and IMU measurements are used
+only for offline annotation construction, while inference takes
+a single RGB image. Since static structures can be reliably
+aggregated across observations whereas non-rigid humans
+cannot, we construct them separately. As shown in Fig. 2,
+human-free sequences are aggregated to recover the static
+scene, while human occupancy is derived from synchronized
+current-frame observations and subsequently refined during
+voxelization.
+A. Static Semantic Scene Annotation
+We divide the static scene annotation pipeline into two
+stages. First, we perform multi-frame static scene reconstruc-
+tion from human-free sequences. Then, we transfer image-
+level semantic annotations to the reconstructed 3D scene to
+obtain dense semantic labels.
+Multi-frame
+Static
+Scene
+Reconstruction. We use
+human-free observations to avoid introducing transient hu-
+man geometry into the static background. Point clouds from
+different frames are registered into a unified coordinate
+system and aggregated to reconstruct a dense static scene.
+Compared with single-frame observations, multi-frame ag-
+gregation increases surface coverage and recovers static
+structures that are partially occluded or sparsely observed
+from individual viewpoints.
+Semantic Static Scene Annotation. Directly annotating
+dense 3D scenes is labor-intensive. We employ Grounded
+SAM 2 [42], [43] to generate semantic masks from the
+corresponding human-free RGB images, followed by cal-
+ibrated image-to-3D projection for semantic association.
+Since individual views may contain incomplete or noisy
+semantic observations, projected labels from multiple frames
+are integrated over the static scene and manually refined
+to obtain consistent 3D semantic annotations. By construct-
+ing geometry and semantics exclusively from human-free
+sequences, the static branch provides a stable and dense
+
+
+background representation for subsequent dynamic human
+occupancy generation.
+B. Dynamic Human Occupancy Construction
+Dynamic humans continuously change pose and shape,
+making direct multi-frame aggregation unsuitable. We there-
+fore construct human occupancy from synchronized current-
+frame observations and align it with the reconstructed static
+scene before voxelization.
+Current-frame Human Extraction and Alignment. We
+first use the same vision foundation model
+[42], [43] to
+obtain human masks from the current RGB image. The
+synchronized point cloud is projected onto the image plane,
+and points within the human regions are extracted as current-
+frame human observations. These observations are then
+transformed into the coordinate system of the reconstructed
+static scene through scene-human alignment, avoiding tem-
+poral accumulation of non-rigid human geometry.
+Depth-guided Human Occupancy Refinement. Human
+points extracted from a single frame can be sparse and
+provide only coarse spatial localization. During voxelization,
+the synchronized depth map is therefore used to refine the
+placement of human occupancy labels within the aligned
+scene.
+Human Uncertainty and Validity Masking. A human
+visible in the RGB image may have insufficient 3D support in
+the synchronized point cloud because of severe occlusion or
+sparse point observations. We mark such regions as uncertain
+and exclude them from supervision rather than assigning
+unsupported occupancy or free-space labels. A separate va-
+lidity mask removes geometrically invalid or ignored voxels
+according to the occupancy supervision protocol. These
+masks are applied after depth-guided refinement to produce
+the final semantic occupancy annotations.
+IV. METHODOLOGY
+Our evaluation of representative monocular SSC baselines
+on CrowdOcc reveals two recurring failure modes. First,
+human-scene occlusion leads to discontinuous static geome-
+try, particularly on wall and floor surfaces. We attribute this
+to the limited surface-orientation constraints of depth-based
+lifting and introduce Normal-Guided Scene Geometry Fusion
+(NGSGF) module to complement depth with surface-normal
+cues. Second, human occupancy is often incompletely re-
+constructed or misplaced relative to the surrounding scene,
+indicating ambiguity in human-scene spatial reasoning. This
+motivates Human-Centric Sparse Interaction (HCSI) module,
+which selects Top-K human candidates for human-human
+and local human-scene interaction.
+Inspired by the depth-aware lifting paradigm of ISO [9],
+we formulate the overall architecture in Fig. 3 around
+these two complementary designs. Given an RGB image,
+a 2D UNet extracts multi-scale features F2D
+s
+, while a
+frozen MoGe-2 [44] estimates depth and surface normals.
+A trainable DepthNet combines the image features with
+MoGe-2 depth estimates to produce the multi-scale depth
+representation used by D-FLoSP. NGSGF enhances the 2D
+features before D-FLoSP lifting. The lifted representation is
+processed by the 3D encoder and CRP, followed by HCSI
+for sparse human-centric refinement and a 3D decoder for
+semantic occupancy prediction.
+A. Normal-Guided Scene Geometry Fusion
+Given the image feature F2D
+s
+at scale s, we derive a normal
+validity mask from the MoGe-2 outputs [44] and numerical
+validity checks. The normal map and its validity mask are
+jointly processed by a masked Normal Encoder to obtain the
+geometry feature Ns. We then use F2D
+s
+and Ns to generate
+queries Qs, keys Ks, and values Vs, respectively:
+Qs = WQF2D
+s
+,
+Ks = WKNs,
+Vs = WVNs,
+(1)
+where WQ, WK, and WV are learnable projections. To preserve
+local geometric structures while avoiding the computational
+cost of global cross-attention, we partition Qs, Ks, and Vs
+into local windows. For the i-th window, the normal-guided
+interaction is formulated as
+∆F2D
+s,i = Softmax
+ 
+Qi
+s
+ Ki
+s
+T
+√
+d
+!
+V i
+s,
+(2)
+where d denotes the feature dimension. The window-wise
+outputs are merged to form the normal-guided residual ∆F2D
+s
+,
+which is then fused with the original image representation:
+ˆF2D
+s
+= F2D
+s
++γs∆F2D
+s
+,
+(3)
+where γs is a learnable scaling coefficient.
+B. Human-Centric Sparse Interaction
+Given the input feature F3D
+8 , a lightweight Human-Routing
+module first predicts voxel-wise human responses. We apply
+local 3D NMS followed by Top-K selection to obtain a sparse
+candidate set:
+Ph = Sigmoid
+ R(F3D
+8 )
+
+,
+(4)
+Ω= TopK(NMS(Ph),K),
+(5)
+where R(·) denotes the routing network and Ωcontains
+the selected candidate locations. The same prediction-based
+routing is used during both training and inference, while hu-
+man occupancy labels are used only to supervise the routing
+scores. The selected candidate features interact through self-
+attention, which incorporates positional encodings of their
+3D voxel locations:
+Fh = SA
+ F3D
+8 [Ω]
+
+.
+(6)
+For each selected candidate, we then perform cross-
+attention with its local 3D neighborhood sampled from the
+dense scene representation:
+∆Fh = CA
+ Fh, N (F3D
+8 )
+
+,
+(7)
+where N (·) denotes the local scene features centered at the
+candidate locations in Ω. Finally, the refined features are
+written back only to the selected locations:
+ˆF3D
+8
+= F3D
+8
++γh ScatterΩ(∆Fh),
+(8)
+
+
+Fig. 3.
+Pipeline of our CrowdOcc framework. Given a monocular RGB image, MoGe-2 estimates depth and surface normals from the same image.
+We use Normal-Guided Scene Geometry Fusion to enhance multi-scale 2D scene features before D-FLoSP lifting, and Human-Centric Sparse Interaction
+to selectively refine human-related 3D features. The enhanced representation is then decoded for semantic scene completion.
+where γh is a learnable residual scaling factor, and ScatterΩ(·)
+writes the residuals to the locations indexed by Ωand assigns
+zero residuals elsewhere.
+C. Training Loss
+Following ISO [9], we retain its scene-completion and
+auxiliary depth objectives for training. The semantic oc-
+cupancy annotations supervise scene completion, while the
+depth maps provided by CrowdOcc are used for the auxiliary
+depth objective. We denote these objectives together as Lbase.
+Human occupancy labels are additionally used to supervise
+the Human-Routing module. For human candidate predic-
+tion, binary cross-entropy loss LBCE and Dice loss LDice are
+jointly applied to supervise the predicted human probability
+Ph with the human occupancy labels Yh. Invalid voxels are
+excluded from the supervision. The overall training objective
+is formulated as:
+L = Lbase +λh [LBCE(Ph,Yh)+LDice(Ph,Yh)],
+(9)
+where λh is the balancing parameter for human-routing
+supervision.
+V. EXPERIMENTS
+The acquisition platform mounts an Intel RealSense D455
+RGB-D camera and a Helios-16P LiDAR on a Unitree Go1
+quadruped, as shown in Fig. 1. Our model is implemented
+in PyTorch with CUDA acceleration and trained on four
+NVIDIA GeForce RTX 4090-D GPUs. A frozen MoGe-2
+ViT-L [44] provides monocular depth and surface normals.
+We train for 10 epochs using AdamW [45] with a total
+batch size of 4 and a weight decay of 1 × 10−4. The main
+network and HCSI use a learning rate of 1 × 10−4, while
+DepthNet uses 5×10−6. For the normal branch, the learning
+rate is linearly warmed up from 1 × 10−5 to 3 × 10−5 in
+the first epoch and then cosine-decayed to 5×10−6. We set
+λh = 1.0. Unless otherwise stated, all methods follow the
+same CrowdOcc split, taxonomy, and evaluation protocol.
+A. Evaluation Metrics
+Following standard SSC protocols, we report Precision,
+Recall, and IoU for binary scene completion. All occupied
+semantic classes are merged into a single occupied cate-
+gory, while empty voxels form the free-space category. For
+semantic completion, we report the IoU of each occupied
+class and their mean IoU (mIoU) over the eight semantic
+categories. Since human occupancy is central to crowded
+indoor perception, Human IoU is additionally highlighted
+throughout the experiments. Class frequencies in Table II
+are computed over valid occupied voxels and are reported
+only to characterize the semantic distribution of CrowdOcc.
+Invalid and ignored voxels are excluded from both scene-
+completion and semantic-completion metrics.
+B. Quantitative Comparisons
+Table II reports quantitative results on the CrowdOcc test
+set, comprising three physical scenes disjoint from those
+used for training and validation. Our method achieves 15.80
+IoU and 11.40 mIoU, outperforming the strongest competing
+results by +1.31 IoU and +0.68 mIoU, respectively. The
+gain is particularly pronounced for human occupancy: our
+method reaches 46.23 Human IoU, exceeding NDC-Scene
+(44.12) and ISO (43.79) by +2.11 and +2.44 points [9], [24].
+It also attains the highest recall of 37.02, compared with
+34.00 for NDC-Scene and 31.32 for ISO, while maintaining
+competitive precision. These results establish state-of-the-art
+SSC performance on unseen scenes, demonstrating strong
+cross-scene generalization.
+The class-wise results show that the improvement extends
+beyond human occupancy. Our method achieves the best IoU
+on floor, wall, human, and door, reaching 21.12, 11.80, 46.23,
+and 4.64, respectively. In particular, wall IoU improves from
+9.88 with ISO to 11.80, while floor IoU increases from
+20.66 with NDC-Scene to 21.12. The consistent gains on
+both structural and human classes are aligned with the
+
+
+TABLE II: Quantitative comparison on CrowdOcc. Class frequencies, shown in parentheses, are computed over valid occupied voxels, excluding empty
+and ignored/invalid voxels. Bold indicates the best result and underline indicates the second-best result.
+Method
+Venue
+Floor
+(28.97%)
+Wall
+(35.19%)
+Ceiling
+(13.93%)
+Human
+(8.27%)
+Door
+(6.53%)
+Glass
+(6.30%)
+Hydrant
+(0.55%)
+Other
+(0.26%)
+Precision↑
+Recall↑
+IoU↑
+mIoU↑
+SplatSSC [29]
+AAAI 2026
+15.74
+5.36
+0.84
+21.11
+0.50
+3.00
+0.34
+0.13
+19.61
+15.92
+9.63
+5.88
+GPOcc [30]
+CVPR 2026
+16.99
+6.53
+0.93
+32.51
+1.80
+2.42
+1.67
+0.67
+20.21
+18.18
+10.58
+7.94
+EmbodiedOcc [16]
+ICCV 2025
+19.54
+6.76
+1.40
+30.89
+1.10
+2.13
+2.41
+0.10
+19.39
+21.60
+11.38
+8.04
+MonoScene [8]
+CVPR 2022
+19.17
+9.53
+1.52
+43.09
+1.57
+4.36
+1.69
+0.00
+21.67
+30.31
+14.47
+10.12
+NDC-Scene [24]
+ICCV 2023
+20.66
+9.68
+2.09
+44.12
+3.34
+1.22
+1.46
+1.21
+20.15
+34.00
+14.48
+10.47
+ISO [9]
+ECCV 2024
+20.02
+9.88
+0.97
+43.79
+2.69
+4.41
+2.87
+1.10
+21.25
+31.32
+14.49
+10.72
+CrowdOcc (ours)
+2026
+21.12
+11.80
+2.08
+46.23
+4.64
+3.31
+1.41
+0.63
+21.60
+37.02
+15.80
+11.40
+Input
+Ground Truth
+EmbodiedOcc
+MonoScene
+ISO
+CrowdOcc (Ours)
+Fig. 4.
+Qualitative comparison of CrowdOcc with other monocular SSC methods.
+complementary roles of NGSGF and HCSI in geometry
+enhancement and human occupancy reasoning.
+C. Ablations
+We conduct cumulative ablations on the CrowdOcc test
+set in Table III. Starting from the ISO baseline (Q0) [9],
+we progressively introduce MoGe-2 Depth [44], HCSI, and
+NGSGF. In Q1, MoGe-2 replaces the original Depth Any-
+thing [46] depth prior while keeping the remaining archi-
+tecture unchanged, improving IoU/mIoU from 14.49/10.72
+to 14.89/11.25. Adding HCSI in Q2 raises Human IoU from
+42.88 to 45.77 and further improves IoU to 15.34, confirming
+the benefit of targeted human-centric 3D interaction.
+Finally, NGSGF yields the full model (Q3), reaching 46.23
+Human IoU, 15.80 IoU, and 11.40 mIoU. Compared with Q0,
+the complete model gains +2.44 Human IoU, +1.31 IoU, and
++0.68 mIoU. The cumulative improvements are consistent
+with the intended roles of the three components: MoGe-
+2 provides a stronger depth prior, HCSI improves human
+occupancy reasoning, and NGSGF further enhances scene
+geometry through normal-guided fusion.
+D. Qualitative Comparisons
+Fig. 4 shows typical predictions on the CrowdOcc test set,
+where dense human presence introduces extensive human-
+scene occlusion and strong foreground interference. Embod-
+iedOcc [16] struggles to maintain structural continuity under
+these incomplete observations, producing fragmented wall
+and floor geometry together with poor human occupancy.
+MonoScene [8] better preserves the global layout, but the
+wall and floor remain discontinuous in heavily occluded
+regions. ISO [9] recovers more complete scene structure,
+yet local floor geometry remains discontinuous and fore-
+ground human occupancy is misplaced in the background.
+In contrast, our method maintains coherent wall and floor
+TABLE III: Ablation study on the CrowdOcc test set. Each variant progres-
+sively adds the component indicated to the preceding configuration. Bold
+indicates the best result and underline indicates the second-best result.
+Variant
+Human IoU↑
+IoU↑
+mIoU↑
+(Q0) Baseline
+43.79
+14.49
+10.72
+(Q1) + MoGe-2 Depth
+42.88
+14.89
+11.25
+(Q2) + HCSI
+45.77
+15.34
+11.26
+(Q3) + NGSGF
+46.23
+15.80
+11.40
+geometry while preserving human occupancy at the correct
+spatial scenes.
+VI. CONCLUSIONS
+In this paper, we introduced CrowdOcc, an RGB-D dataset
+for monocular SSC on quadruped robots in real crowded
+indoor environments. Our method targets two characteris-
+tic failures in this setting: discontinuous scene geometry
+under human-scene occlusion and incomplete or spatially
+misplaced human occupancy. NGSGF complements depth-
+aware lifting with surface-normal cues to improve structural
+geometry, while HCSI performs Top-K human-centric inter-
+action to refine human occupancy and its spatial relation to
+the surrounding scene. Together, these designs improve both
+geometric completion and human occupancy reasoning. Ex-
+periments on test scenes disjoint from training and validation
+establish state-of-the-art SSC performance on CrowdOcc and
+demonstrate strong cross-scene generalization.
+
+
+REFERENCES
+[1] S. Song, F. Yu, A. Zeng, A. X. Chang, M. Savva, and T. Funkhouser,
+“Semantic scene completion from a single depth image,” in Pro-
+ceedings of the IEEE Conference on Computer Vision and Pattern
+Recognition (CVPR), 2017.
+[2] Y. Wang, D. J. Tan, N. Navab, and F. Tombari, “ForkNet: Multi-
+branch volumetric semantic completion from a single depth image,” in
+Proceedings of the IEEE/CVF International Conference on Computer
+Vision (ICCV), 2019, pp. 8608–8617.
+[3] J. Li, Y. Liu, D. Gong, Q. Shi, X. Yuan, C. Zhao, and I. Reid, “RGBD
+based dimensional decomposition residual network for 3D semantic
+scene completion,” in Proceedings of the IEEE/CVF Conference on
+Computer Vision and Pattern Recognition (CVPR), 2019.
+[4] J. Li, Y. Liu, X. Yuan, C. Zhao, R. Siegwart, I. Reid, and C. Cadena,
+“Depth based semantic scene completion with position importance
+aware loss,” IEEE Robotics and Automation Letters, vol. 5, no. 1, pp.
+219–226, 2020.
+[5] J. Li, K. Han, P. Wang, Y. Liu, and X. Yuan, “Anisotropic convolutional
+networks for 3D semantic scene completion,” in Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pattern Recognition
+(CVPR), 2020, pp. 3351–3359.
+[6] X. Chen, K.-Y. Lin, C. Qian, G. Zeng, and H. Li, “3D sketch-aware
+semantic scene completion via semi-supervised structure prior,” in
+Proceedings of the IEEE/CVF Conference on Computer Vision and
+Pattern Recognition (CVPR), 2020, pp. 4193–4202.
+[7] Y. Cai, X. Chen, C. Zhang, K.-Y. Lin, X. Wang, and H. Li, “Semantic
+scene completion via integrating instances and scene in-the-loop,” in
+Proceedings of the IEEE/CVF Conference on Computer Vision and
+Pattern Recognition (CVPR), 2021, pp. 324–333.
+[8] A.-Q. Cao and R. de Charette, “MonoScene: Monocular 3D semantic
+scene completion,” in Proceedings of the IEEE/CVF Conference on
+Computer Vision and Pattern Recognition (CVPR), 2022, pp. 3991–
+4001.
+[9] H. Yu, Y. Wang, Y. Chen, and Z. Zhang, “Monocular occupancy
+prediction for scalable indoor scenes,” in Proceedings of the European
+Conference on Computer Vision (ECCV), 2024, pp. 38–54.
+[10] J. Behley, M. Garbade, A. Milioto, J. Quenzel, S. Behnke, C. Stach-
+niss, and J. Gall, “SemanticKITTI: A dataset for semantic scene
+understanding of LiDAR sequences,” in Proceedings of the IEEE/CVF
+International Conference on Computer Vision (ICCV), 2019, pp. 9297–
+9307.
+[11] X. Tian, T. Jiang, L. Yun, Y. Mao, H. Yang, Y. Wang, Y. Wang, and
+H. Zhao, “Occ3D: A large-scale 3D occupancy prediction benchmark
+for autonomous driving,” in Advances in Neural Information Process-
+ing Systems, vol. 36, 2023.
+[12] H. Shi, Z. Wang, S. Guo, M. Duan, S. Wang, T. Chen, K. Yang,
+L. Wang, and K. Wang, “OneOcc: Semantic occupancy prediction for
+legged robots with a single panoramic camera,” in Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pattern Recognition
+(CVPR), 2026, pp. 14 229–14 240.
+[13] J. Yao, J. Zhang, X. Pan, T. Wu, and C. Xiao, “DepthSSC: Monocular
+3D semantic scene completion via depth-spatial alignment and voxel
+adaptation,” in Proceedings of the Winter Conference on Applications
+of Computer Vision (WACV), 2025, pp. 2154–2163.
+[14] H.-J. Lee, Y. J. Koh, H. Kim, H. Kim, Y. Lee, and J. Lee, “SOAP:
+Vision-centric 3D semantic scene completion with scene-adaptive
+decoder and occluded region-aware view projection,” in Proceedings
+of the IEEE/CVF Conference on Computer Vision and Pattern Recog-
+nition (CVPR), 2025, pp. 17 145–17 154.
+[15] N. Silberman, D. Hoiem, P. Kohli, and R. Fergus, “Indoor segmen-
+tation and support inference from RGBD images,” in Proceedings of
+the European Conference on Computer Vision (ECCV), 2012.
+[16] Y. Wu, W. Zheng, S. Zuo, Y. Huang, J. Zhou, and J. Lu, “Embod-
+iedOcc: Embodied 3D occupancy prediction for vision-based online
+scene understanding,” in Proceedings of the IEEE/CVF International
+Conference on Computer Vision (ICCV), 2025, pp. 26 360–26 370.
+[17] Y. Li, S. Li, X. Liu, M. Gong, K. Li, N. Chen, Z. Wang, Z. Li,
+T. Jiang, F. Yu, Y. Wang, H. Zhao, Z. Yu, and C. Feng, “SSCBench: A
+large-scale 3D semantic scene completion benchmark for autonomous
+driving,” in 2024 IEEE/RSJ International Conference on Intelligent
+Robots and Systems (IROS), 2024.
+[18] Y. Liao, J. Xie, and A. Geiger, “KITTI-360: A novel dataset and
+benchmarks for urban scene understanding in 2D and 3D,” IEEE
+Transactions on Pattern Analysis and Machine Intelligence, vol. 45,
+no. 3, pp. 3292–3310, 2023.
+[19] H. Caesar, V. Bankiti, A. H. Lang, S. Vora, V. E. Liong, Q. Xu,
+A. Krishnan, Y. Pan, G. Baldan, and O. Beijbom, “nuScenes: A
+multimodal dataset for autonomous driving,” in Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pattern Recognition
+(CVPR), 2020, pp. 11 621–11 631.
+[20] H. Zhai, J. Mei, C. Min, L. Chen, F. Zhao, and Y. Hu, “WildOcc:
+A benchmark for off-road 3D semantic occupancy prediction,” arXiv
+preprint arXiv:2410.15792, 2024.
+[21] X. Wang, X. Wu, S. Wang, L. Kong, and Z. Zhao, “Monocular
+semantic scene completion via masked recurrent networks,” in Pro-
+ceedings of the IEEE/CVF International Conference on Computer
+Vision (ICCV), 2025, pp. 24 811–24 822.
+[22] H. Liu, Y. Chen, H. Wang, Z. Yang, T. Li, J. Zeng, L. Chen, H. Li,
+and L. Wang, “Fully sparse 3D occupancy prediction,” in Proceedings
+of the European Conference on Computer Vision (ECCV), 2024, pp.
+54–71.
+[23] Y. Li, Z. Yu, C. Choy, C. Xiao, J. M. Alvarez, S. Fidler, C. Feng,
+and A. Anandkumar, “VoxFormer: Sparse voxel transformer for
+camera-based 3D semantic scene completion,” in Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pattern Recognition
+(CVPR), 2023, pp. 9087–9098.
+[24] J. Yao, C. Li, K. Sun, Y. Cai, H. Li, W. Ouyang, and H. Li, “NDC-
+Scene: Boost monocular 3D semantic scene completion in normalized
+device coordinates space,” in Proceedings of the IEEE/CVF Interna-
+tional Conference on Computer Vision (ICCV), 2023, pp. 9455–9465.
+[25] H. Jiang, T. Cheng, N. Gao, H. Zhang, T. Lin, W. Liu, and X. Wang,
+“Symphonize 3D semantic scene completion with contextual instance
+queries,” in Proceedings of the IEEE/CVF Conference on Computer
+Vision and Pattern Recognition (CVPR), 2024, pp. 20 258–20 267.
+[26] A. Jevti´c, C. Reich, F. Wimbauer, O. Hahn, C. Rupprecht, S. Roth, and
+D. Cremers, “Feed-forward SceneDINO for unsupervised semantic
+scene completion,” in Proceedings of the IEEE/CVF International
+Conference on Computer Vision (ICCV), 2025, pp. 6784–6796.
+[27] Y. Huang, W. Zheng, Y. Zhang, J. Zhou, and J. Lu, “GaussianFormer:
+Scene as Gaussians for vision-based 3D semantic occupancy predic-
+tion,” in Proceedings of the European Conference on Computer Vision
+(ECCV), 2024.
+[28] Y. Huang, A. Thammatadatrakoon, W. Zheng, Y. Zhang, D. Du, and
+J. Lu, “GaussianFormer-2: Probabilistic Gaussian superposition for
+efficient 3D occupancy prediction,” in Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition (CVPR),
+2025, pp. 27 477–27 486.
+[29] R. Qian, H. Cao, T. Deng, S. Yuan, and L. Xie, “SplatSSC: Decou-
+pled depth-guided Gaussian splatting for semantic scene completion,”
+Proceedings of the AAAI Conference on Artificial Intelligence, vol. 40,
+no. 10, pp. 8520–8528, 2026.
+[30] C. Zhou, Y. Luo, and C. Chen, “Generalizing visual geometry priors
+to sparse Gaussian occupancy prediction,” in Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pattern Recognition
+(CVPR), 2026, pp. 28 578–28 587.
+[31] Y. Huang, W. Zheng, Y. Zhang, J. Zhou, and J. Lu, “Tri-perspective
+view for vision-based 3D semantic occupancy prediction,” in Proceed-
+ings of the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition (CVPR), 2023, pp. 9223–9232.
+[32] Y. Zhang, Z. Zhu, and D. Du, “OccFormer: Dual-path transformer for
+vision-based 3D semantic occupancy prediction,” in Proceedings of
+the IEEE/CVF International Conference on Computer Vision (ICCV),
+2023, pp. 9433–9443.
+[33] P. Tang, Z. Wang, G. Wang, J. Zheng, X. Ren, B. Feng, and C. Ma,
+“SparseOcc: Rethinking sparse latent representation for vision-based
+semantic occupancy prediction,” in Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition (CVPR),
+2024, pp. 15 035–15 044.
+[34] H. Wang, X. Wei, X. Zhang, J. Li, C. Bai, Y. Li, M. Lu, W. Zheng,
+and S. Zhang, “EmbodiedOcc++: Boosting embodied 3D occupancy
+prediction with plane regularization and uncertainty sampler,” in Pro-
+ceedings of the 33rd ACM International Conference on Multimedia,
+2025.
+[35] X. Liu, H. Hou, Y. Yang, Y.-L. Li, and C. Lu, “Revisit human-scene
+interaction via space occupancy,” in Proceedings of the European
+Conference on Computer Vision (ECCV), 2024, pp. 1–19.
+[36] E. Liu, E. Yu, S. Chen, and W. Tao, “Disentangling instance and
+scene contexts for 3D semantic scene completion,” in Proceedings of
+the IEEE/CVF International Conference on Computer Vision (ICCV),
+2025, pp. 26 999–27 009.
+
+
+[37] J. Ma, X. Chen, J. Huang, J. Xu, Z. Luo, J. Xu, W. Gu, R. Ai, and
+H. Wang, “Cam4DOcc: Benchmark for camera-only 4D occupancy
+forecasting in autonomous driving applications,” in Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pattern Recognition
+(CVPR), 2024, pp. 21 486–21 495.
+[38] A. Dai, A. X. Chang, M. Savva, M. Halber, T. Funkhouser, and
+M. Niessner, “ScanNet: Richly-annotated 3D reconstructions of indoor
+scenes,” in Proceedings of the IEEE Conference on Computer Vision
+and Pattern Recognition (CVPR), 2017, pp. 5828–5839.
+[39] Y. Wei, L. Zhao, W. Zheng, Z. Zhu, J. Zhou, and J. Lu, “SurroundOcc:
+Multi-camera 3D occupancy prediction for autonomous driving,” in
+Proceedings of the IEEE/CVF International Conference on Computer
+Vision (ICCV), 2023.
+[40] X. Wang, Z. Zhu, W. Xu, Y. Zhang, Y. Wei, X. Chi, Y. Ye, D. Du,
+J. Lu, and X. Wang, “OpenOccupancy: A large scale benchmark
+for surrounding semantic occupancy perception,” in Proceedings of
+the IEEE/CVF International Conference on Computer Vision (ICCV),
+2023, pp. 17 850–17 859.
+[41] Y. Yan, B. Liu, J. Ai, Q. Li, R. Wan, and J. Pu, “PointSSC: A cooper-
+ative vehicle-infrastructure point cloud benchmark for semantic scene
+completion,” in 2024 IEEE International Conference on Robotics and
+Automation (ICRA), 2024, pp. 17 027–17 034.
+[42] S. Liu, Z. Zeng, T. Ren, F. Li, H. Zhang, J. Yang, Q. Jiang, C. Li,
+J. Yang, H. Su, J. Zhu, and L. Zhang, “Grounding DINO: Marrying
+DINO with grounded pre-training for open-set object detection,” in
+Proceedings of the European Conference on Computer Vision (ECCV),
+2024.
+[43] N. Ravi, V. Gabeur, Y.-T. Hu, R. Hu, C. Ryali, T. Ma, H. Khedr,
+R. R¨adle, C. Rolland, L. Gustafson, E. Mintun, J. Pan, K. V. Alwala,
+N. Carion, C.-Y. Wu, R. Girshick, P. Doll´ar, and C. Feichtenhofer,
+“SAM 2: Segment anything in images and videos,” in International
+Conference on Learning Representations (ICLR), 2025.
+[44] R. Wang, S. Xu, Y. Dong, Y. Deng, J. Xiang, Z. Lv, G. Sun, X. Tong,
+and J. Yang, “MoGe-2: Accurate monocular geometry with metric
+scale and sharp details,” in Advances in Neural Information Processing
+Systems, vol. 38, 2025.
+[45] I. Loshchilov and F. Hutter, “Decoupled weight decay regularization,”
+in International Conference on Learning Representations (ICLR),
+2019.
+[46] L. Yang, B. Kang, Z. Huang, X. Xu, J. Feng, and H. Zhao, “Depth
+Anything: Unleashing the power of large-scale unlabeled data,” in
+Proceedings of the IEEE/CVF Conference on Computer Vision and
+Pattern Recognition (CVPR), 2024, pp. 10 371–10 381.

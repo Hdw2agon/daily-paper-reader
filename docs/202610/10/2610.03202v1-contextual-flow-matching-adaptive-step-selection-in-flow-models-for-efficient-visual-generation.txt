@@ -1,0 +1,863 @@
+Title: Contextual Flow Matching: Adaptive Step Selection in Flow Models for Efficient Visual Generation
+
+URL Source: https://arxiv.org/pdf/2610.03202v1
+
+Published Time: Mon, 05 Oct 2026 01:27:52 GMT
+
+Number of Pages: 30
+
+Markdown Content:
+# Contextual Flow Matching: Adaptive Step Selection in Flow Models for Efficient Visual Generation 
+
+Divya Jyoti Bajpai 
+
+Department of IEOR IIT Bombay, Mumbai, India 
+
+divyajyoti.bajpai@iitb.ac.in 
+
+Arun Verma 
+
+SMART Centre Singapore 
+
+arun.verma@smart.mit.edu 
+
+Manjesh K. Hanawal 
+
+Department of IEOR IIT Bombay, Mumbai, India 
+
+mhanawal@iitb.ac.in 
+
+## Abstract 
+
+Flow Matching enables high-quality visual generation via continuous-time dynam-ics, but inference remains costly due to multiple sequential function evaluations. Existing acceleration methods reduce the number of function evaluations but of-ten introduce additional training overhead, degrade quality, or fail to account for input-dependent variability. We propose C OFLOW , an inference-time method that adaptively selects the step counts each generation based on the prompt features. Our context-aware C OFLOW is trained online with an unsupervised reward that balances inference efficiency and generation fidelity. Our method is plug-and-play, requiring no retraining of the underlying generative model. It generalizes to image and video generation, achieving over 2.5× speedup while preserving perceptual and semantic quality. We further provide a theoretical analysis establishing an O(1 /K )
+
+forward-Euler discretization error bound under standard regularity conditions. 
+
+## 1 Introduction 
+
+Flow Matching (FM) [1] has recently emerged as a powerful paradigm for visual generation [2]. In this framework, a time-dependent vector field governs the evolution of samples, and integrating this dynamics produces high-quality outputs along smooth trajectories. Compared to diffusion-based approaches [3], FM can achieve comparable or superior perceptual fidelity with fewer function evaluations (steps), making it an attractive alternative for both image and video generation. Despite these advantages, inference efficiency remains a central challenge [4, 5, 6]. Generating a single sample requires sequential numerical integration of the learned dynamics, which involves multiple forward passes of the model over time. This inherent serial processing becomes increasingly expensive as model capacity scales and tasks demand higher spatial resolutions or longer temporal horizons, resulting in substantial inference latency in practical deployments. A range of methods have been proposed to reduce inference latency in visual generations. These methods include distillation [4, 5, 7], step truncation [8, 9], and consistency-based training [10, 11, 12]. While these approaches effectively reduce the number of function evaluations, they introduce non-trivial trade-offs, including additional training costs and reliance on teacher models or large-scale datasets. Such training overhead can offset the computational benefits gained at inference time. Several training-free methods have also been proposed that rely on heuristic step-skipping [13, 14, 15] based on intermediate signals. However, these training-free methods require accurate, expensive      
+
+> 40th Conference on Neural Information Processing Systems (NeurIPS 2026). arXiv:2610.03202v1 [cs.CV] 2 Oct 2026 5 Steps 10 Steps 15 Steps 20 Steps 25 Steps 40 Steps Our Method 50 Steps
+> A photo of a cat travelling to the moon in a UFO. A photo of a cat. Our Method
+
+Figure 1: Generation across integration step budgets. Different inputs can exhibit different behavior as the integration budget changes. The rightmost plots illustrate relative velocity variation along the corresponding trajectories. estimates of step importance, and any estimation errors can accumulate over time, irreversibly degrading generation quality. The difficulty of a generative task and associated computational requirements can vary substantially. For example, a simple prompt “A photo of a cat" requires less computation than a prompt like “A photo of a cat traveling to the moon in a UFO" (see Fig. 1) due to the need for fine-grained and prolonged trajectory refinement of the generative process. The complexity of prompts can then influence the number of steps. AdaDiff [16] adapts to such input-dependent complexity by using a pre-trained policy that decides the number of steps required to complete the generative task. However, pre-training such a policy is expensive, and the trained policy can be sensitive to distribution shifts at inference time. Our goal in this work is to develop an input-adaptive online strategy that eliminates the need for pre-training. We introduce C OFLOW : Contextual Flow Matching, an inference-time input-adaptive step selection method for Flow Models, thereby reducing inference cost. C OFLOW uses the contextual bandit [17] framework to learn the optimal number of steps for each generation task in an online fashion. It treats prompt-specific features, like semantic embeddings, complexity cues, and prior observations from similar inputs as context, and uses a neural network to predict the number of steps required. Once the number of steps is decided, it executes the corresponding full generation trajectory. The neural network is trained on the fly by optimizing a reward that balances computational cost and trajectory refinement. The reward is motivated by the observation that complex prompts induce larger variations in the velocity field across timesteps (see Fig 1 and 6). COFLOW is fully task-agnostic, adapts to multiple existing solvers (see Appendix A.9), and applies seamlessly to image generation, image editing, and video generation while maintaining high-fidelity outputs. We further provide theoretical grounding by deriving an upper bound on the discretization error induced by suboptimal step selection. Together, these components establish a principled adaptive inference framework that reduces unnecessary computation while preserving generation quality. We summarize the key contributions of this paper as follows: • We propose a novel adaptive inference paradigm that predicts an input-dependent step budget using a neural contextual bandits algorithm, conditioned solely on prompt-specific features. • We design an unsupervised reward mechanism based on trajectory dynamics, leveraging variations in the learned velocity field to balance computational cost and generation fidelity. • We provide a theoretical analysis establishing an O(1 /K ) discretization-error bound, high-lighting the role of input-dependent flow dynamics in adaptive inference. • Experimental results across image and video benchmarks show that our method achieves inference acceleration ( > 2.5×) while maintaining quality and outperforming baselines. 
+
+## 2 Related Work 
+
+Flow Matching (FM) [1, 18, 19, 20] has emerged as a strong alternative to diffusion models [3, 21, 22, 23]. FM achieves high-quality generation enabling applications such as image inversion [20], editing [24], and video synthesis [25, 26]. Recent advances further improves scalability and performance 2through multimodal extensions [27, 28], large-scale flow models such as FLUX [19], and hierarchical approaches such as pyramidal flow matching [29] for video generation. Despite these advances, iterative integration remains a fundamental bottleneck, limiting real-time and interactive deployment. Existing acceleration methods can be broadly categorized into retraining-based and inference-time approaches [30]. Retraining-based methods, including distillation ap-proaches such as InstaFlow [31], LeDiFlow [32], and Diff2Flow [33], compress multi-step generation into one or a few steps by transferring knowledge from pretrained models. Other methods, such as PeRFlow [5], instead modify the training objective to produce straighter transport trajectories. Although effective, these approaches require additional training, large-scale data, or specialized objectives, resulting in substantial computational overhead. Recent works further combine adversarial and consistency objectives to improve high-quality few-step generation [10, 11, 34]. Inference-time methods reduce computation by modifying the sampling procedure. Techniques such as TeaCache [13] and FastFlow [15] skip redundant evaluations using trajectory-based signals, while FlowCast [14] adapts speculative decoding to flow matching models. While effective, these approaches typically rely on heuristic signals or alter trajectories designed for fixed discretization schedules, which can introduce inconsistencies and degrade generation quality. Our setup is closely related to AdaDiff [16], but the solution approach differs in several fundamental aspects. The policy training in AdaDiff requires generating multiple images at various step budgets and assess their quality in each round of training, which require offline-data and introduces overheads. In contrast, our method is fully online and leverages intrinsic model dynamics (trajectory-level signals) as a proxy for generation complexity, thereby avoiding any additional generations and external evaluation. This yields a plug-and-play framework that preserves the consistency of the underlying discretization schdules of flow models resulting in efficient and high-quality visual outputs. 
+
+## 3 Methodology 
+
+We begin with a brief review of Flow Matching (FM) and describe how our approach builds on it to enable adaptive inference. 
+
+3.1 Flow Matching Overview 
+
+Let π0 and π1 denote probability distributions over Rd, corresponding to a simple source distribution and a complex target data distribution, respectively. Flow Matching formulates generation as learning a continuous transformation that maps samples from π0 to π1 via a time-dependent dynamical system. Specifically, a velocity field v : Rd × [0 , 1] → Rd defines the evolution of a sample xt through the ordinary differential equation (ODE) 
+
+dx t
+
+dt = v(xt, t ), x0 ∼ π0, t ∈ [0 , 1] . (1) The velocity field, typically parameterized by a neural network, is trained such that integrating this dynamics transports the initial distribution π0 to π1 at t = 1 . This induces a flow map that traces a continuous trajectory for each sample, ultimately producing data-consistent outputs. 
+
+Inference. Since the learned dynamics generally do not admit closed-form solutions, generating requires numerical integration of the ODE. In practice, simple solvers such as the forward Euler method are commonly used due to their efficiency. The time interval [0 , 1] is discretized into K steps 
+
+{t0 = 0 , t 1, . . . , t K = 1 }, and starting from x0 ∼ π0, the sample is iteratively updated as 
+
+xtk+1 = xtk + ∆ tk · v(xtk , t k), ∆tk = tk+1 − tk. (2) This procedure approximates the continuous trajectory using a sequence of discrete updates, where the number of steps K directly controls the trade-off between computational cost and generation quality. A finer discretization of the interval leads to lower Euler discretization error, denoted as 
+
+E(K) and vice versa. For a given K, the discretization points are fixed beforehand by the schedule of the solver. A key observation motivating our approach is that different conditional inputs can induce trajectories with different levels of variation and, consequently, different sensitivities to temporal discretization. Thus, a fixed step budget may be unnecessarily conservative for some inputs while insufficient for others, motivating an adaptive mechanism that selects the step budget conditioned on the input. 33.2 Algorithm Design 
+
+To accelerate generation, our goal is to determine an input-dependent integration step budget during inference. Crucially, this decision should account for both the global data distribution and input-specific context, as samples from the same distribution can exhibit different trajectory dynamics. We cast adaptive step-budget selection as an online sequential decision-making problem using a Neural Contextual Bandit (NCB). Neural Contextual Bandit (NCB) 
+
+> A photo of a dog.
+> 10 Steps A photo of a dog dressed as a doctor.
+> 25 Steps A high quality image of cat fighting with dog.
+> 40 Steps High Efficiency High Complexity Quality remains same
+
+Figure 2: Overview of our method. COFLOW uses prompt context to adaptively select the integration step budget, allocating computation according to the learned surrogate reward while retaining the original flow trajectory and solver schedule. In a contextual bandit framework, an agent selects actions conditioned on input context to maximize cumulative reward while balancing exploration and exploitation. Let A denote the set of step budgets, where each action α ∈ A corresponds to the number of discretization steps in [0 , 1] . For a given prompt x, let φ(x) denote the context features (e.g., semantic embeddings of prompt and complexity cues) enabling input-adaptive selection. A neural network models a policy π(α | φ(x)) , mapping features to action preferences, capturing complex input–decision relationships. At each prompt x,the policy outputs the number of discretization steps α based on φ(x), and the full trajectory with α
+
+steps is executed. The policy is updated online using a reward below. 
+
+Reward design. Let {x(α) 
+
+> tk
+
+}αk=0 denote the discretized trajectory obtained using step budget α ∈ A 
+
+for an input x, and let v(x(α) 
+
+> tk
+
+, t k) denote the corresponding model velocity. We quantify its trajectory-wise variation using the average ℓ1 relative velocity change 
+
+ˆv(x, α ) = 1
+
+α − 1
+
+> α−1
+
+X
+
+> k=1
+
+v(x(α) 
+
+> tk+1
+
+, t k+1 ) − v(x(α) 
+
+> tk
+
+, t k) 1
+
+max 
+
+
+
+v(x(α) 
+
+> tk
+
+, t k) 1
+
+, ε 
+
+ , (3) where ε > 0 ensures numerical stability. We use ˆv(x, α ) as an intrinsic, unsupervised surrogate for sensitivity to temporal discretization: larger velocity variations suggest dynamics that may be more sensitive to coarse discretization. Importantly, ˆv(x, α ) is a surrogate rather than a direct measure of discretization error or generation quality (see Appendix A.6). For a given input x and action α ∈ A , we define the reward as 
+
+r(x, α ) = max (0 , (1 − ˆv(x, α )) − μα ) , (4) where μ > 0 controls the trade-off between trajectory variation and computational cost. The term 
+
+1 − ˆv(x, α ) favors step budgets exhibiting smaller relative velocity variation, while μα penalizes additional computation. Since ˆv(x, α ) is evaluated along the trajectory induced by α, the reward provides an intrinsic surrogate objective for step selection without requiring an external quality signal. For a given prompt x, we define the reward-optimal step budget as 
+
+α⋆(x) ∈ arg max  
+
+> α∈A
+
+E[r(x, α ) | x] . (5) Here, “reward-optimal” refers specifically to optimality under the surrogate objective in Eq. 4, rather than direct optimality with respect to perceptual or semantic generation quality. Consequently, 4prompts exhibiting larger trajectory variation can receive larger step budgets when the corresponding reduction in variation outweighs the additional computational cost. We further examine the relation-ship between this surrogate signal, prompt complexity, and adaptive step selection in Appendix A.6. The goal is to learn a policy π∗ = arg max π E
+
+hPTt=1 r(xt, α t)
+
+i
+
+, where the expectation accounts for stochasticity in the generated trajectories. This formulation captures the exploration–exploitation trade-off while enabling input-adaptive decisions. The learned policy uses the contextual represen-tation and observed rewards to allocate computation according to the surrogate trade-off between trajectory variation and computational cost. 
+
+Context features: We define context features as a compact representation of the input prompt, capturing high-level semantic (embeddings), compositional (entity count), and structural (mean word length) information that guides adaptive step allocation. Intuitively, these properties may influence the variation of the conditional flow dynamics and therefore provide useful context for step selection. Appendix B provides further details on the feature design. 
+
+Policy optimization. We use a neural network fθ (φ(x), α ) to predict the reward for each pair of input context φ(x) and action α ∈ A (step budget) denoted as fθ : ( φ(x), α ) 7 → E[r(x, α )] . For the 
+
+t-th prompt, we obtain the context φ(xt), and decide the number of steps αt by optimizing the sum of predicted rewards obtained by the neural network and the associated confidence term as follows: 
+
+αt = arg max α∈A [fθ (φ(xt), α ) + βt · σt(φ(xt), α )] , where σt(φ(xt), α ) is the confidence term and βt > 0 controls the exploration strength. The term σt(φ(x), α ) is computed using the gradient features of the neural network as in [17]. Let gθ (x, α ) = ∇θ fθ (φ(x), α ) denote the gradient of the neural network output with respect to its parameters. We maintain a covariance matrix 
+
+Vt = λI + Pt−1 
+
+> i=1
+
+gθ (xi, α i) gθ (xi, α i)⊤, where λ > 0 is a regularization parameter. The uncertainty is then defined as σt(φ(x), α ) = 
+
+q
+
+gθ (x, α )⊤V −1 
+
+> t
+
+gθ (x, α ).
+
+Intuitively, gθ (x, α ) represents the sensitivity of the predicted reward to the model parameters. If a context-action pair is similar to previously observed samples, its gradient direction is well-covered in Vt, resulting in a small uncertainty. Conversely, if it lies in a poorly explored region of the feature space, the corresponding direction has low coverage in Vt, leading to higher uncertainty. Thus, σt(φ(x), α ) quantifies how well the model has learned the reward for that context-action pair, naturally encouraging exploration of uncertain regions. After executing the trajectory with αt steps, reward rt = r(xt, α t) is calculated as in Eq 4. The model parameters are updated using all observed data and decision Dt = {(φ(xi), α i, r i)}ti=1 . Specifically, the parameters are obtained by minimizing the empirical squared loss as follows: 
+
+θt = arg min 
+
+> θt
+
+X
+
+> i=1
+
+(fθ (φ(xi), α i) − ri)2 . (6) In practice, this optimization is performed periodically over a replay buffer of past interactions, allowing the model to progressively refine its reward estimates, leveraging both current context and historical data. We keep this buffer size as P .
+
+3.3 Algorithm: C OFLOW 
+
+We summarize our proposed method C OFLOW in Algorithm 1. It takes as input a pretrained flow matching model M, an action space A of step budgets, a neural reward model fθ, a regularization parameter λ, and an update interval P controlling the frequency of training. We initialize the neural network parameter θ, the covariance matrix V0 = λI for uncertainty estimation, and a replay buffer 
+
+D. At each iteration t, a prompt xt is received and encoded into a context feature φ(xt).For t ≤ P , actions are selected using an ε-greedy strategy over A to encourage sufficient early exploration (line 5). After this warm-up phase, we switch to a contextual bandit regime in which actions αt ∈ A are chosen based on neural network-based reward estimates and their optimistic upper confidence bounds (line 7). We observe the trajectory generated by the flow-matching model with a solver schedule involving αt steps. A reward is then computed from velocity variation across timesteps (Eq. 4), capturing the surrogate trade-off between trajectory variation and computational cost. The tuple (φ(xt), α t, r t) is stored in D.5Algorithm 1 COFLOW : Contextual Flow Matching 
+
+Input: Pretrained FM model M, action set A, neural reward model fθ , exploration schedule {βt}, regularization 
+
+λ, update interval P
+
+Initialize: Parameters θ, covariance matrix V0 = λI , replay buffer D ← ∅  
+
+> 1:
+
+for each iteration t = 1 , 2, . . . do  
+
+> 2:
+
+Receive input xt; extract context φ(xt); compute gθ (xt, α ) = ∇θ fθ (φ(xt), α ) 
+
+> 3:
+
+Action selection:  
+
+> 4:
+
+if t ≤ P then  
+
+> 5:
+
+Sample αt using an ε-greedy policy over A 
+
+> 6:
+
+else  
+
+> 7:
+
+αt = arg max 
+
+> α∈A
+
+
+
+fθ (φ(xt), α ) + βt
+
+q
+
+gθ (xt, α )⊤V −1
+
+> t−1
+
+gθ (xt, α )
+
+ 
+
+> 8:
+
+end if  
+
+> 9:
+
+Initialize xt0 ∼ π0 and generate the sample using M with αt integration steps  
+
+> 10:
+
+Trajectory variation: Compute ˆv(xt, α t) using Eq. 3  
+
+> 11:
+
+Reward: rt = max(0 , (1 − ˆv(xt, α t)) − μα t) 
+
+> 12:
+
+Update: Vt = Vt−1 + gθ (xt, α t)gθ (xt, α t)⊤ 
+
+> 13:
+
+Store: D ← D ∪ { (φ(xt), α t, r t)} 
+
+> 14:
+
+If t mod P = 0 then θ ← arg min 
+
+> θ
+
+X
+
+> (φ(xi),α i,r i)∈D
+
+(fθ (φ(xi), α i) − ri)2 
+
+> 15:
+
+end for 
+
+Theoretical Analysis. We characterize the dependence of numerical integration error on the step budget. Our analysis considers forward Euler under standard regularity conditions and shows that the error scales as O(1 /α ), with an input-dependent constant determined by variation of the conditional flow dynamics. 
+
+Theorem 1. For an input xi, consider the conditional flow ODE 
+
+dz i(s)
+
+ds = vi(zi(s), s ), zi(0) ∼ π0, s ∈ [0 , 1] ,
+
+where vi denotes the velocity field conditioned on xi. Let ˆz(α) 
+
+> i,α
+
+be the terminal state of its uniform 
+
+α-step forward-Euler approximation with h = 1 /α , and define Ei(α) := zi(1) − ˆz(α) 
+
+> i,α
+
+. Assume that vi(·, s ) is L-Lipschitz in its state argument and continuously differentiable along the exact trajectory, with ∥∂svi(zi(s), s ) + Jz vi(zi(s), s )vi(zi(s), s )∥ ≤ Mi, s ∈ [0 , 1] . Then, for L > 0,
+
+Ei(α) ≤ Mi(eL−1) 2Lα . Consequently, for any sequence {αi}Ti=1 ,
+
+> T
+
+X
+
+> i=1
+
+Ei(αi) ≤ eL − 12L
+
+> T
+
+X
+
+> i=1
+
+Mi
+
+αi
+
+.
+
+For L = 0 , the bound reduces to Ei(α) ≤ Mi/(2 α).
+
+The proof is provided in Appendix A.1. Theorem 1 establishes the O(1 /α ) Euler error dependence, with the input-dependent constant Mi bounding the rate of change of the velocity field along the exact trajectory. The statistic ˆv(x, α ) in Eq. 3 is an observable relative-variation surrogate motivated by this dependence; it is not assumed to directly estimate Mi or the discretization error. Empirically, 
+
+ˆv exhibits a strong within-trajectory association with deviation from a high-step reference across integration budgets (Appendix A.6). 
+
+Bandit Regret. Separately, the standard NeuralUCB analysis [17] provides a eO(√T ) pseudo-regret guarantee under its stated assumptions. We use this result as a conditional characterization of the UCB component of C OFLOW with respect to the surrogate reward in Eq. 4. This result concerns learning the surrogate step-selection objective, whereas Theorem 1 characterizes Euler discretization error as a function of the step budget. 
+
+Computational Overhead. The contextual-bandit module introduces additional computation for uncertainty estimation and model updates. It uses a lightweight neural network ( d ∼ 30 K parameters), with the covariance inverse updated incrementally using rank-one Sherman–Morrison updates. The resulting forward, backward, and uncertainty computations are small relative to evaluations of the 6generative flow model, and their latency is included in all reported inference times. Detailed overhead measurements are provided in Appendix A.3. 
+
+## 4 Experiments 
+
+We evaluate our method across three settings: text-to-image generation, image editing, and text-to-video synthesis. We first describe the datasets, followed by the baselines used for comparison. 
+
+Datasets. For text-to-image generation, we use the GenEval benchmark [35], consisting of 553 
+
+prompts designed to evaluate compositional reasoning. The prompts test capabilities such as object presence , spatial relations , attribute binding , and counting , providing a fine-grained measure of semantic alignment. For image editing, we adopt GEdit [36], which contains 606 real-world editing instructions spanning 
+
+object manipulation , appearance changes , layout modifications , and style transfer . This enables evaluation of both localized and global transformations. For video generation, we use VBench [37] and construct a subset of 80 prompts by uniformly sampling 5 prompts from each of its 16 evaluation dimensions. This ensures balanced coverage of factors such as motion consistency , object persistence ,
+
+camera dynamics , and scene composition .
+
+Baselines. We compare against representative methods spanning full-generation, training-based acceleration, and inference-time approaches. Full Generation performs standard sampling over the complete trajectory without approximation, serving as an upper bound on fidelity, while TeaCache 
+
+[13] improves efficiency by caching intermediate representations across timesteps at the cost of minor approximation error. 
+
+InstaFlow [31] compresses multi-step generation into one or few steps via distillation, achieving large speedups but reduced visual and compositional quality. PeRFlow [5] enforces piecewise-linear velocity trajectories through additional training for stable few-step generation. FlowCast [14] uses speculative decoding to predict future steps in parallel, reducing wall-clock time but increasing NFEs. 
+
+FastFlow [15] skips evaluations using a bandit-based smoothness heuristic, while AdaDiff [16] formulates step selection as reinforcement learning guided by external quality metrics, introducing overhead and potential misalignment with semantic fidelity. In contrast, COFLOW uses a neural contextual bandit to predict an input-adaptive step budget before sampling and executes the full trajectory accordingly, enabling context-aware computation while preserving discretization consistency; results include all samples encountered during exploration. All baselines are evaluated using their official implementations and hyperparameters (see Appendix 12). Table 1 reports results under released settings for all the baselines. We set μ = 1 / max α∈A α
+
+to normalize the computational-cost term relative to the available step budgets. The parameter μ
+
+controls the trade-off between trajectory variation and computational cost; its effect is examined in Figures 3 and 4. All the experiments were performed on a set of 2 NVIDIA A6000 GPUs. 
+
+Models. To demonstrate the versatility of our approach, we evaluate across multiple state-of-the-art models: for image generation, we use BAGEL [28], Flux-Kontext [19], PeRFlow [5] and StableDif-fusion models [38]; for image editing, we use BAGEL and Flux-Kontext; for video generation, we use the HunYuanVideo model [25]. 
+
+Training the neural contextual bandit. We model the expected reward using a two-layer MLP 
+
+fθ (φ(x), α ) with ReLU activations and hidden dimension 64 (adapting from NeuralUCB [17]). The context φ(x) combines 8-dimensional handcrafted complexity features (see Appendix B and Table 14) with projected semantic embeddings from a pretrained SentenceTransformer (all-MiniLM-L6-v2) [39] (more details in Appendix B.1). The Neural Bandit inputs the context and the action and predicts a reward for the given action. The model is trained online by storing (φ(xt), α t, r t) in a replay buffer D and performing updates every P iterations via MSE minimization over D, using Adam [40] with learning rate 5 × 10 −3 for 20 
+
+epochs. Exploration is handled via a cold-start phase (each arm pulled once), followed by a ε-greedy strategy, and subsequently a NeuralUCB-based action selection rule. 7Method BAGEL FLUX 
+
+Overall ↑ IQA ↑ NFE ↓ Time ↓ Overall ↑ IQA ↑ NFE ↓ Time ↓
+
+Full Model 
+
+Full-50 0.78 0.65 50 76.4 0.66 0.75 50 34.1 Full-25 0.75 0.62 25 40.9 0.64 0.71 25 17.3 Full-10 0.71 0.54 10 18.9 0.57 0.63 10 7.26 
+
+Static Baselines 
+
+InstaFlow 0.33 0.49 1 2.1 – – – –PerFlow 0.58 0.55 10 16.5 – – – –TeaCache 0.74 0.59 29.4 45.8 0.63 0.72 28.4 20.8 
+
+Adaptive Methods 
+
+AdaDiff 0.72 0.58 28.1 43.6 0.59 0.67 25.8 18.2 FlowCast 0.76 0.60 21.5 34.2 0.65 0.72 – 17.9 FastFlow 0.75 0.59 20.9 32.9 0.64 0.70 23.6 16.6 
+
+Ours 
+
+COFLOW 0.77 0.63 17.7 27.5 0.65 0.74 19.5 15.1 
+
+Table 1: Comparison of methods on BAGEL and FLUX. We report generation quality (GenEval, IQA) along with efficiency metrics (number of function evaluations and inference time). 1 2 3 4 5 6 7 8                                   
+
+> Speedup (x)
+> 5.0 5.5 6.0 6.5 7.0
+> Score (BAGEL) Semantic Consistency (G_SC)
+> 12345678
+> Speedup (x) Perceptual Quality (G_PQ)
+> 12345678
+> Speedup (x) Overall (G_O) 12345678
+> Speedup (×)
+> 4.0 4.5 5.0 5.5 6.0
+> Score (FLUX) Semantic Consistency (G_SC)
+> 12345678
+> Speedup (×) Perceptual Quality (G_PQ)
+> 12345678
+> Speedup (×) Overall (G_O)
+
+Full Model TeaCache FastFlow AdaDiff CoFlow 
+
+Figure 3: Comparison of edit quality across two models: BAGEL and FLUX. Each subfigure reports semantic consistency (G_SC), perceptual quality (G_PQ), and overall score (G_O) versus speedup. 1 2 3 4 5 6 7      
+
+> Speedup (×)
+> 62.5 65.0 67.5 70.0 72.5 75.0 77.5 80.0 82.5
+> Score Vbench
+> 1234567
+> Speedup (×)
+> 42 44 46 48 50 52 54 56
+> BRISQUE
+
+Full Model TeaCache FastFlow CoFlow 
+
+Figure 4: Comparison of video generation score and quality where we report the VBench score and the BRISQUE metric that assesses the quality of video. 84.1 Results Image generation. Table 1 reports results on GenEval for BAGEL and FLUX, with additional evaluation on the optimized PeRFlow model in Table 10. GenEval measures fine-grained semantic alignment across compositional dimensions, while CLIP-IQA evaluates perceptual quality. On BAGEL, C OFLOW achieves an overall score of 0.77 with 17 .7 NFE, compared with 0.78 at 50 NFE for full inference; on FLUX, it achieves 0.65 with 19 .5 NFE, compared with 0.66 at 50 NFE. These results demonstrate substantial computation reduction with a small change in aggregate generation quality. Category-wise results are provided in Appendix A.2. 
+
+Image editing. Figure 3 presents results on GEdit using BAGEL, FLUX, and Step-1X-Edit. We report G_SC (semantic consistency), G_PQ (perceptual quality), and G_O (overall edit quality), evaluated using GPT-4.1 [41] as an automatic judge. Across the evaluated operating points, C OFLOW 
+
+reduces the integration budget while maintaining competitive semantic consistency and perceptual quality, demonstrating that adaptive step selection also extends to instruction-based image editing. 
+
+Video generation. Figure 4 reports results on VBench, which evaluates motion dynamics, temporal consistency, and scene composition; we additionally report BRISQUE for frame-level perceptual quality. C OFLOW reduces the integration budget while maintaining competitive video-generation performance, indicating that input-adaptive step selection extends beyond image generation to temporally structured outputs. 
+
+Summary. Across image generation, editing, and video synthesis, C OFLOW consistently reduces inference computation while maintaining competitive output quality. The method selects an input-dependent integration budget and then executes the corresponding solver trajectory without modifying the pretrained generative model. Ablations further show that conditioning the policy on input context improves the observed quality–efficiency trade-off relative to a non-contextual variant (Appendix A.7). A finer-grained analysis further examines the contributions of MiniLM embeddings and handcrafted prompt features. Additional online ablations show that the policy stabilizes over the interaction sequence and is robust across prompt orderings, while uncertainty-aware UCB exploration improves both the surrogate objective and computational efficiency relative to an otherwise identical greedy policy (Appendix A.7). Finally, C OFLOW can be combined with existing inference-time acceleration methods such as FastFlow and FlowCast for additional runtime reductions (Appendix A.4). 
+
+Limitations. While C OFLOW is lightweight and fully online, it requires a brief exploration phase to learn the contextual policy; however, note that all reported results already include exploration samples. Its effectiveness also depends on the expressiveness of the prompt features, which are intentionally designed to be simple and efficient. More expressive features could further improve adaptation quality, but at the cost of additional computational overhead. In practice, both the exploration phase and lightweight feature design stabilize quickly and have minimal impact on overall performance. 
+
+## 5 Conclusion 
+
+We introduced C OFLOW , an online framework for input-adaptive step selection in flow-based generative models. C OFLOW formulates step-budget selection as a neural contextual bandit, using lightweight prompt representations and an intrinsic trajectory-variation surrogate to adapt computation without retraining the underlying generative model. Across image generation, image editing, and video synthesis, C OFLOW substantially reduces inference computation while maintaining competitive semantic and perceptual quality across multiple backbones. We further provide a forward-Euler analysis establishing an O(1 /K ) discretization-error dependence under standard regularity conditions, together with empirical evidence that the proposed velocity-variation statistic tracks within-trajectory sensitivity to temporal discretization. Our results demonstrate that online contextual step selection provides a practical mechanism for adapting inference computation across inputs while remaining compatible with pretrained flow models and existing inference-time acceleration techniques. 9References 
+
+[1] Yaron Lipman, Ricky TQ Chen, Heli Ben-Hamu, Maximilian Nickel, and Matt Le. Flow matching for generative modeling. arXiv preprint arXiv:2210.02747 , 2022. [2] Sam Bond-Taylor, Adam Leach, Yang Long, and Chris G Willcocks. Deep generative modelling: A comparative review of vaes, gans, normalizing flows, energy-based and autoregressive models. 
+
+IEEE transactions on pattern analysis and machine intelligence , 44(11):7327–7347, 2021. [3] Florinel-Alin Croitoru, Vlad Hondru, Radu Tudor Ionescu, and Mubarak Shah. Diffusion models in vision: A survey. IEEE transactions on pattern analysis and machine intelligence ,45(9):10850–10869, 2023. [4] Nikita Kornilov, Petr Mokrov, Alexander Gasnikov, and Aleksandr Korotin. Optimal flow matching: Learning straight trajectories in just one step. Advances in Neural Information Processing Systems , 37:104180–104204, 2024. [5] Hanshu Yan, Xingchao Liu, Jiachun Pan, Jun Hao Liew, Qiang Liu, and Jiashi Feng. Perflow: Piecewise rectified flow as universal plug-and-play accelerator. Advances in Neural Information Processing Systems , 37:78630–78652, 2024. [6] Aram Davtyan, Leello Tadesse Dadi, Volkan Cevher, and Paolo Favaro. Faster inference of flow-based generative models via improved data-noise coupling. arXiv preprint arXiv:2603.15279 ,2026. [7] Eric Luhman and Troy Luhman. Knowledge distillation in iterative generative models for improved sampling speed. arXiv preprint arXiv:2101.02388 , 2021. [8] Cheng Lu, Yuhao Zhou, Fan Bao, Jianfei Chen, Chongxuan Li, and Jun Zhu. Dpm-solver: A fast ode solver for diffusion probabilistic model sampling in around 10 steps. Advances in neural information processing systems , 35:5775–5787, 2022. [9] Jiaming Song, Chenlin Meng, and Stefano Ermon. Denoising diffusion implicit models. arXiv preprint arXiv:2010.02502 , 2020. [10] Ling Yang, Zixiang Zhang, Zhilong Zhang, Xingchao Liu, Minkai Xu, Wentao Zhang, Chenlin Meng, Stefano Ermon, and Bin Cui. Consistency flow matching: Defining straight flows with velocity consistency. arXiv preprint arXiv:2407.02398 , 2024. [11] Yuchen Zhang and Jian Zhou. Inverse flow and consistency models. In Forty-second Interna-tional Conference on Machine Learning , 2025. [12] Quan Dao, Hao Phung, Trung Tuan Dao, Dimitris N Metaxas, and Anh Tran. Self-corrected flow distillation for consistent one-step and few-step image generation. In Proceedings of the AAAI Conference on Artificial Intelligence , pages 2654–2662, 2025. [13] Feng Liu, Shiwei Zhang, Xiaofeng Wang, Yujie Wei, Haonan Qiu, Yuzhong Zhao, Yingya Zhang, Qixiang Ye, and Fang Wan. Timestep embedding tells: It’s time to cache for video diffusion model. In Proceedings of the Computer Vision and Pattern Recognition Conference ,pages 7353–7363, 2025. [14] Divya Jyoti Bajpai, Shubham Agarwal, Apoorv Saxena, Kuldeep Kulkarni, Subrata Mitra, and Manjesh Kumar Hanawal. Flowcast: Trajectory forecasting for scalable zero-cost speculative flow matching. arXiv preprint arXiv:2602.01329 , 2026. [15] Divya Jyoti Bajpai, Dhruv Bhardwaj, Soumya Roy, Tejas Duseja, Harsh Agarwal, Aashay Sandansing, and Manjesh Kumar Hanawal. Fastflow: Accelerating the generative flow matching models with bandit inference. arXiv preprint arXiv:2602.11105 , 2026. [16] Hui Zhang, Zuxuan Wu, Zhen Xing, Jie Shao, and Yu-Gang Jiang. Adadiff: adaptive step selection for fast diffusion models. In Proceedings of the AAAI Conference on Artificial Intelligence , pages 9914–9922, 2025. 10 [17] Dongruo Zhou, Lihong Li, and Quanquan Gu. Neural contextual bandits with ucb-based exploration. In International conference on machine learning , pages 11492–11502. PMLR, 2020. [18] Quan Dao, Hao Phung, Binh Nguyen, and Anh Tran. Flow matching in latent space. arXiv preprint arXiv:2307.08698 , 2023. [19] Black Forest Labs, Stephen Batifol, Andreas Blattmann, Frederic Boesel, Saksham Consul, Cyril Diagne, Tim Dockhorn, Jack English, Zion English, Patrick Esser, et al. Flux. 1 kontext: Flow matching for in-context image generation and editing in latent space. arXiv preprint arXiv:2506.15742 , 2025. [20] Yingying Deng, Xiangyu He, Changwang Mei, Peisong Wang, and Fan Tang. Fireflow: Fast inversion of rectified flow for image semantic editing. arXiv preprint arXiv:2412.07517 , 2024. [21] Zhen Xing, Qijun Feng, Haoran Chen, Qi Dai, Han Hu, Hang Xu, Zuxuan Wu, and Yu-Gang Jiang. A survey on video diffusion models. ACM Computing Surveys , 57(2):1–42, 2024. [22] Ling Yang, Zhilong Zhang, Yang Song, Shenda Hong, Runsheng Xu, Yue Zhao, Wentao Zhang, Bin Cui, and Ming-Hsuan Yang. Diffusion models: A comprehensive survey of methods and applications. ACM computing surveys , 56(4):1–39, 2023. [23] Yuanzhi Zhu, Zhaohai Li, Tianwei Wang, Mengchao He, and Cong Yao. Conditional text image generation with diffusion models. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pages 14235–14245, 2023. [24] Jiangshan Wang, Junfu Pu, Zhongang Qi, Jiayi Guo, Yue Ma, Nisha Huang, Yuxin Chen, Xiu Li, and Ying Shan. Taming rectified flow for inversion and editing. arXiv preprint arXiv:2411.04746 , 2024. [25] Weijie Kong, Qi Tian, Zijian Zhang, Rox Min, Zuozhuo Dai, Jin Zhou, Jiangfeng Xiong, Xin Li, Bo Wu, Jianwei Zhang, et al. Hunyuanvideo: A systematic framework for large video generative models. arXiv preprint arXiv:2412.03603 , 2024. [26] Team Wan, Ang Wang, Baole Ai, Bin Wen, Chaojie Mao, Chen-Wei Xie, Di Chen, Feiwu Yu, Haiming Zhao, Jianxiao Yang, et al. Wan: Open and advanced large-scale video generative models. arXiv preprint arXiv:2503.20314 , 2025. [27] Ju He, Qihang Yu, Qihao Liu, and Liang-Chieh Chen. Flowtok: Flowing seamlessly across text and image tokens. arXiv preprint arXiv:2503.10772 , 2025. [28] Chaorui Deng, Deyao Zhu, Kunchang Li, Chenhui Gou, Feng Li, Zeyu Wang, Shu Zhong, Weihao Yu, Xiaonan Nie, Ziang Song, et al. Emerging properties in unified multimodal pretraining. arXiv preprint arXiv:2505.14683 , 2025. [29] Yang Jin, Zhicheng Sun, Ningyuan Li, Kun Xu, Hao Jiang, Nan Zhuang, Quzhe Huang, Yang Song, Yadong Mu, and Zhouchen Lin. Pyramidal flow matching for efficient video generative modeling. arXiv preprint arXiv:2410.05954 , 2024. [30] Neta Shaul, Juan Perez, Ricky TQ Chen, Ali Thabet, Albert Pumarola, and Yaron Lipman. Bespoke solvers for generative flow models. arXiv preprint arXiv:2310.19075 , 2023. [31] Xingchao Liu, Xiwen Zhang, Jianzhu Ma, Jian Peng, et al. Instaflow: One step is enough for high-quality diffusion-based text-to-image generation. In The Twelfth International Conference on Learning Representations , 2023. [32] Pascal Zwick, Nils Friederich, Maximilian Beichter, Lennart Hilbert, Ralf Mikut, and Oliver Bringmann. Lediflow: Learned distribution-guided flow matching to accelerate image genera-tion. arXiv preprint arXiv:2505.20723 , 2025. [33] Johannes Schusterbauer, Ming Gui, Frank Fundel, and Björn Ommer. Diff2flow: Training flow matching models via diffusion model alignment. In Proceedings of the Computer Vision and Pattern Recognition Conference , pages 28347–28357, 2025. 11 [34] Eldad Haber, Shadab Ahamed, Md Shahriar Rahim Siddiqui, Niloufar Zakariaei, and Moshe Eliasof. Iterative flow matching–path correction and gradual refinement for enhanced generative modeling. arXiv preprint arXiv:2502.16445 , 2025. [35] Dhruba Ghosh, Hannaneh Hajishirzi, and Ludwig Schmidt. Geneval: An object-focused framework for evaluating text-to-image alignment. Advances in Neural Information Processing Systems , 36:52132–52152, 2023. [36] Shiyu Liu, Yucheng Han, Peng Xing, Fukun Yin, Rui Wang, Wei Cheng, Jiaqi Liao, Yingming Wang, Honghao Fu, Chunrui Han, et al. Step1x-edit: A practical framework for general image editing. arXiv preprint arXiv:2504.17761 , 2025. [37] Ziqi Huang, Yinan He, Jiashuo Yu, Fan Zhang, Chenyang Si, Yuming Jiang, Yuanhan Zhang, Tianxing Wu, Qingyang Jin, Nattapol Chanpaisit, et al. Vbench: Comprehensive benchmark suite for video generative models. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pages 21807–21818, 2024. [38] Dustin Podell, Zion English, Kyle Lacey, Andreas Blattmann, Tim Dockhorn, Jonas Müller, Joe Penna, and Robin Rombach. Sdxl: Improving latent diffusion models for high-resolution image synthesis. arXiv preprint arXiv:2307.01952 , 2023. [39] Wenhui Wang, Furu Wei, Li Dong, Hangbo Bao, Nan Yang, and Ming Zhou. Minilm: Deep self-attention distillation for task-agnostic compression of pre-trained transformers. Advances in neural information processing systems , 33:5776–5788, 2020. [40] Diederik P Kingma and Jimmy Ba. Adam: A method for stochastic optimization. arXiv preprint arXiv:1412.6980 , 2014. [41] Josh Achiam, Steven Adler, Sandhini Agarwal, Lama Ahmad, Ilge Akkaya, Florencia Leoni Aleman, Diogo Almeida, Janko Altenschmidt, Sam Altman, Shyamal Anadkat, et al. Gpt-4 technical report. arXiv preprint arXiv:2303.08774 , 2023. 12 A Appendix 
+
+A.1 Proof of Theorem 1 
+
+Proof. Fix an input xi and a step budget α. Let tk = kh , where h = 1 /α and k = 0 , . . . , α . Let 
+
+zi(s) denote the exact solution and ˆz(α) 
+
+> i,k
+
+the Euler iterate, 
+
+ˆz(α) 
+
+> i,k +1
+
+= ˆ z(α) 
+
+> i,k
+
++ h v i(ˆ z(α) 
+
+> i,k
+
+, t k).
+
+Define the error 
+
+ek := zi(tk) − ˆz(α) 
+
+> i,k
+
+.
+
+Since both trajectories start from the same initial state, e0 = 0 .By the fundamental theorem of calculus, 
+
+zi(tk+1 ) = zi(tk) + h v i(zi(tk), t k) + τk,
+
+where the local truncation error is 
+
+τk := 
+
+Z tk+1 
+
+> tk
+
+[vi(zi(s), s ) − vi(zi(tk), t k)] ds. 
+
+Along the exact trajectory, the chain rule gives 
+
+dds vi(zi(s), s ) = ∂svi(zi(s), s ) + Jz vi(zi(s), s )vi(zi(s), s ).
+
+By the assumption of Theorem 1, 
+
+dds vi(zi(s), s ) ≤ Mi.
+
+Hence, 
+
+∥vi(zi(s), s ) − vi(zi(tk), t k)∥ ≤ Mi(s − tk),
+
+and therefore 
+
+∥τk∥ ≤ 
+
+Z tk+1 
+
+> tk
+
+Mi(s − tk) ds = Mih2
+
+2 .
+
+Subtracting the Euler update from the exact update yields 
+
+ek+1 = ek + h
+
+h
+
+vi(zi(tk), t k) − vi(ˆ z(α) 
+
+> i,k
+
+, t k)
+
+i
+
++ τk.
+
+Using the L-Lipschitz property of vi,
+
+∥ek+1 ∥ ≤ (1 + Lh )∥ek∥ + Mih2
+
+2 .
+
+Since e0 = 0 , iterating the recursion gives 
+
+∥eα∥ ≤ Mih2
+
+2
+
+> α−1
+
+X
+
+> k=0
+
+(1 + Lh )k.
+
+For L > 0, α−1X
+
+> k=0
+
+(1 + Lh )k = (1 + Lh )α − 1
+
+Lh .
+
+Therefore, 
+
+∥eα∥ ≤ Mih
+
+2L [(1 + Lh )α − 1] .
+
+Since h = 1 /α and  1 + Lα
+
+α ≤ eL, we obtain 
+
+Ei(α) = ∥eα∥ ≤ Mi(eL − 1) 2Lα .
+
+13 1.0 1.5 2.0 2.5 3.0 3.5              
+
+> Speedup (×)
+> 6.4 6.6 6.8 7.0 7.2 7.4 7.6
+> Score (Step-1x-Edit)
+> 1.0 1.5 2.0 2.5 3.0 3.5
+> Speedup (×)
+> 1.0 1.5 2.0 2.5 3.0 3.5
+> Speedup (×)
+> Full Model TeaCache FastFlow CoFlow
+
+Figure 5: Comparison of edit quality on Step-1X-Edit model. Each subfigure reports semantic consistency (G_SC), perceptual quality (G_PQ), and overall score (G_O) versus speedup. Easy Prompt Hard Prompt 
+
+Figure 6: L1-relative velocity variation across integration trajectories. Velocity-change profiles vary across prompts and integration budgets, illustrating the trajectory-level signal used by C OFLOW ƒ. Quantitative analysis against a 100-step reference is provided in Appendix A.6. For L = 0 , the recursion reduces to 
+
+∥ek+1 ∥ ≤ ∥ ek∥ + Mih2
+
+2 ,
+
+and hence 
+
+Ei(α) ≤ αM ih2
+
+2 = Mi
+
+2α .
+
+Finally, summing over any sequence of step budgets {αi}Ti=1 gives, for L > 0,
+
+> T
+
+X
+
+> i=1
+
+Ei(αi) ≤ eL − 12L
+
+> T
+
+X
+
+> i=1
+
+Mi
+
+αi
+
+.
+
+This completes the proof. 
+
+Discussion of the assumptions. The result requires standard regularity conditions for forward Euler: Lipschitz continuity of the velocity field in the state variable and a uniform bound Mi on the derivative of the velocity field along the exact trajectory. The constant Mi captures input-dependent variation in the conditional flow dynamics. The theorem characterizes numerical integration error independently of the surrogate reward used by C OFLOW for adaptive step selection. 
+
+A.2 Expanded Results on the GenEval Dataset 
+
+Tables 3 and 4 provide a category-wise breakdown on GenEval across Single Object (SO), Two Object (TO), Counting (CO), Color (CL), Color Attribute (CA), and Position (PO). This analysis complements the aggregate results by examining semantic alignment and compositional performance across different prompt categories. Across both backbones, C OFLOW maintains competitive performance across the GenEval categories while using substantially fewer function evaluations than full-step inference. The category-wise 14 results further show that the efficiency gains are not restricted to a single type of prompt, with COFLOW retaining comparable performance across object composition, counting, attribute binding, and spatial-relation tasks. These results provide a more detailed view of the quality–efficiency trade-off observed in the aggregate evaluation. 
+
+A.3 Computational Overhead of the Contextual Bandit      
+
+> Method Time (s)
+> Full Model
+> Full-50 75.6 Full-25 40.1
+> Ours
+> NCB-50 76.4
+> NCB-25 40.9
+
+Table 2: Inference time compar-ison of C OFLOW .Table 2 reports the inference time for standard generation using fixed step budgets (50 and 25 steps) and compares it with our method under the same fixed budgets (NCB-50 and NCB-25). This controlled setup isolates the overhead introduced by the contextual bandit, independent of any step reduction. The results show that the additional latency incurred by our method is negligible ( < 1 second), demonstrating that the decision-making module introduces minimal runtime cost. Furthermore, training the neural bandit is computationally lightweight: even with a large number of interaction samples, the full training process completes within a few seconds ( ∼3-4 seconds in our setup). We include this time while calculating the average inference time reported in our result Tables. This efficiency stems from the simplicity of the underlying model, which consists of a small multilayer perceptron with ≈ 30 k parameters and low-dimensional inputs. Consequently, our approach achieves adaptive inference with virtually no computational overhead, making it practical for real-time deployment. 
+
+A.4 Complementarity of Our Approach 
+
+Table 11 evaluates C OFLOW in combination with existing inference-time acceleration methods. While these methods reduce computation within a given sampling procedure, C OFLOW operates at the level of selecting an input-dependent integration budget. The two mechanisms can therefore be applied jointly. For each combination, C OFLOW first selects the integration budget, after which the corresponding acceleration method is applied during generation. As shown in Table 11, combining adaptive step selection with TeaCache, FastFlow, and FlowCast further reduces runtime relative to using each acceleration method alone, although the magnitude of the gain and its effect on generation quality vary across methods. These results demonstrate that adaptive step-budget selection can be combined with existing inference-time acceleration techniques, providing an additional mechanism for reducing computation without requiring modifications to the underlying generative model. 
+
+A.5 Qualitative Analysis 
+
+Figure 7 presents qualitative comparisons between C OFLOW and AdaDiff together with their selected step budgets. AdaDiff uses a policy learned offline, whereas C OFLOW updates its step-selection policy online from observed interactions. The examples illustrate differences in step-allocation behavior between the two approaches. AdaDiff frequently selects either a relatively small budget or the maximum budget, while C OFLOW also assigns intermediate step budgets across inputs. This behavior is consistent with the contextual online formulation of C OFLOW , which allows its decisions to depend on the current prompt representation and accumulated observations. Across the examples, C OFLOW reduces the integration budget while retaining visually comparable outputs. These qualitative results complement the quantitative evaluations by illustrating how adaptive step selection can produce different computational allocations across individual inputs. 15 A boy playing soccer in a field. 
+
+A photo of a dog. 
+
+A beautiful field with 3 cows grazing in the field and a dog. 
+
+An alien having lunch on the surface of mars. 
+
+A boy on a motorbike is racing with a man on a camel in desert.      
+
+> AdaDiff CoFlow CoFlow CoFlow CoFlow, AdaDiff 5 Steps 10 Steps 20 Steps 30 Steps 40 Steps 50 Steps CoFlow AdaDiff AdaDiff AdaDiff
+
+Figure 7: Qualitative examples showcasing the choices of AdaDiff and C OFLOW .
+
+A.6 L1-Relative Velocity Change as a Surrogate for Trajectory Variation 
+
+We use the L1-relative velocity change in Eq. 3 as a lightweight, model-internal measure of variation along the generated flow trajectory. Larger values of ˆv(x, α ) indicate stronger changes in the learned velocity field across integration timesteps and may therefore reflect greater sensitivity to coarse temporal discretization. Importantly, ˆv(x, α ) is not a direct estimate of discretization error or perceptual quality, but an observable trajectory-level surrogate that requires neither a reference solution nor an external quality model. Figure 6 illustrates the velocity-change profiles across different prompts and integration budgets. To more directly examine the relationship with discretization sensitivity, we additionally compare generations obtained with step budgets {5, 10 , . . . , 50 } against a 100-step reference generated from the identical initial latent. We measure reference deviation using the ℓ2 distance between terminal latent states. Across eight representative GenEval prompts, ˆv is strongly associated with reference deviation as the integration budget varies, with a mean within-prompt Spearman correlation of 0.924 
+
+(median 0.970 ); pooled across all prompt–budget pairs, the correlation is ρ = 0 .822 (p < 10 −16 ). A similar association is observed using the perceptual LPIPS distance (Spearman ρ = 0 .676 ,
+
+p < 10 −11 ), indicating that the trend is not specific to latent-space distance. Both ˆv and reference deviation vary systematically with the integration budget, so these correlations should be interpreted as evidence that ˆv tracks within-trajectory discretization sensitivity , rather than as evidence that it independently ranks generation difficulty across prompts. Indeed, when controlling for the step budget and comparing prompts at fixed α, the mean cross-prompt Spearman correlation is 0.255 in this pilot. Thus, our analysis supports ˆv as an intrinsic indicator of trajectory variation while distinguishing this role from cross-prompt complexity estimation. 16 Method Compositional Dimensions Overall Metrics SO TO CO CL CA PO Overall CLIPIQA NFE                                                                                           
+
+> Full Model
+> Full-50 0.99 0.90 0.81 0.85 0.59 0.54 0.78 0.65 50 Full-25 0.99 0.90 0.76 0.81 0.60 0.49 0.75 0.62 25 Full-10 0.99 0.85 0.67 0.78 0.56 0.46 0.71 0.54 10
+> Static Baselines
+> InstaFlow 0.85 0.19 0.20 0.65 0.04 0.02 0.33 0.49 1PeRFlow 0.99 0.79 0.43 0.85 0.25 0.15 0.58 0.55 10 TeaCache 0.99 0.87 0.76 0.81 0.58 0.47 0.74 0.59 29.4
+> Adaptive Methods
+> AdaDiff 0.99 0.85 0.76 0.78 0.53 0.46 0.72 0.58 28.1 FlowCast 0.99 0.90 0.77 0.84 0.62 0.50 0.76 0.60 21.5 FastFlow 0.99 0.89 0.76 0.82 0.60 0.49 0.75 0.59 20.9
+> Ours
+> Ours-UCB 0.99 0.90 0.78 0.84 0.61 0.51 0.77 0.63 17.7
+
+Table 3: Comparison across various Compositional Dimensions and overall performance for the BAGEL model. Our method achieves strong performance while significantly reducing the number of function evaluations (NFE).                                                        
+
+> Method Compositional Dimensions Overall Metrics SO TO CO CL CA PO Overall CLIPIQA NFE
+> Full Model
+> Full-50 0.97 0.79 0.75 0.78 0.48 0.20 0.66 0.75 34.1 Full-25 0.97 0.78 0.71 0.75 0.45 0.18 0.64 0.71 17.3 Full-10 0.97 0.65 0.58 0.67 0.41 0.15 0.57 0.63 7.26 TeaCache 0.97 0.76 0.73 0.74 0.44 0.18 0.63 0.72 20.8
+> Ours
+> Ours-UCB 0.97 0.79 0.73 0.76 0.47 0.19 0.65 0.74 15.1
+
+Table 4: Comparison of the Compositional Dimensions for the FLUX model. Our method maintains competitive compositional performance while reducing computation (NFE). 
+
+A.7 Context Matters 
+
+Table 6 evaluates the role of input context in adaptive step selection. We compare the contextual UCB policy with a non-contextual UCB variant that uses the same bandit framework without conditioning decisions on prompt-specific features. We additionally evaluate Thompson Sampling (TS) as an alternative exploration strategy. The contextual variants achieve a better quality–efficiency trade-off than the non-contextual UCB baseline. In particular, contextual UCB improves the overall GenEval score from 0.74 to 0.77 while reducing the average NFE from 20 .2 to 17 .7. Thompson Sampling exhibits similar behavior, reaching an overall score of 0.76 at 17 .5 NFE. These results indicate that conditioning the decision policy on input-dependent information is useful beyond learning a single dataset-level step-selection strategy. 
+
+Effect of Context Representation. We further ablate the representation used to condition the step-selection policy by comparing no input context, handcrafted prompt features, MiniLM embeddings, 17 Analysis Spearman ρ
+
+Pooled prompt–budget pairs 0.822 Mean within-prompt 0.924 Median within-prompt 0.970 Mean cross-prompt at fixed budget 0.255 Table 5: Association between L1-relative velocity variation and deviation from a 100-step reference. All step budgets for each prompt use the identical initial latent.                     
+
+> Method Overall ↑IQA ↑NFE ↓Time ↓
+> Ours + UCB (No Context) 0.74 0.60 20.2 31.9
+> Ours + UCB 0.77 0.65 17.7 27.5 Ours + TS 0.76 0.65 17.5 26.9
+
+Table 6: Ablation of context and bandit strategy. Conditioning the policy on input context improves the quality–efficiency trade-off relative to the non-contextual UCB variant, while UCB and Thompson Sampling provide comparable contextual policies. and their combination. Table 7 reports results aggregated over three seeds. The full representation reduces the mean NFE from 39 .75 to 37 .67 and decreases the frequency of selecting the maximum step budget from 65 .4% to 47 .9% relative to the no-context variant. Handcrafted features achieve a similar reduction in NFE ( 37 .79 ), whereas MiniLM alone remains closer to the no-context policy (39 .58 NFE). These results indicate that contextual information influences computation allocation, with handcrafted features accounting for a substantial portion of the observed reduction. 
+
+Online Learning and Order Robustness. Since C OFLOW updates its step-selection policy online, we examine its behavior as a function of the number of observed interactions and its sensitivity to prompt ordering. We evaluate 100 GenEval prompts under five random prompt permutations and three independent seeds per permutation. As shown in Table 8, the policy improves during the initial interactions and subsequently stabilizes: the mean NFE decreases from 43 .2 over rounds 1–10 to 
+
+37 .4 over rounds 81 –100 , while the mean surrogate reward increases from 0.520 to 0.580 . Across prompt permutations, the final mean NFE is 37 .8 ± 1.1 and the corresponding mean surrogate reward is 0.579 ± 0.009 , indicating limited sensitivity to prompt ordering. 
+
+Effect of UCB Exploration. To isolate the contribution of uncertainty-aware exploration, we compare NeuralUCB with a greedy variant using the identical context representation, neural reward model, online updates, replay buffer, initialization, and cold-start procedure, but without the UCB con-fidence bonus after initialization. The greedy policy therefore selects αt = arg max α fθ (φ(xt), α ).As shown in Table 9, NeuralUCB achieves a higher mean surrogate reward ( 0.582 vs. 0.541 ) while reducing the mean NFE ( 37 .5 vs. 39 .6). It also selects the maximum step budget less frequently (49 .7% vs. 63 .4% ) and exhibits higher action entropy ( 1.54 vs. 1.21 ), indicating a more diverse allocation of computation. This controlled ablation shows that uncertainty-aware exploration provides a measurable benefit beyond greedy optimization of the learned reward predictor. 
+
+A.8 Direct Step Reduction vs. Trajectory Manipulation 
+
+Figure 8 compares direct step reduction with trajectory truncation. In the former, generation is performed using a timestep schedule constructed directly for the reduced integration budget. In the latter, a comparable speedup is obtained by skipping intermediate evaluations along a higher-step trajectory. In the examples shown, direct step reduction retains better visual quality than trajectory truncation at a comparable computational budget. One possible explanation is that direct reduction preserves a solver-consistent discretization for the selected number of steps, whereas trajectory truncation modifies the original sampling trajectory by omitting intermediate evaluations. 18 Context Mean NFE ↓ Max-step rate ↓        
+
+> No context 39.75 65.4% Handcrafted only 37.79 52.9% MiniLM only 39.58 60.0% Full 37.67 47.9%
+
+Table 7: Effect of context representation. Results are aggregated over three seeds. Max-step rate denotes the fraction of decisions selecting the largest available step budget.                        
+
+> Rounds Reward ↑NFE ↓Max-step rate
+> 1–10 0.520 43.2 72.0% 11–20 0.548 40.5 63.3% 21–40 0.566 38.7 55.8% 41–60 0.575 37.9 51.6% 61–80 0.578 37.6 50.4% 81–100 0.580 37.4 49.8%
+
+Table 8: Online adaptation and order robustness. Results are aggregated over five random prompt permutations and three independent seeds per permutation. Max-step rate denotes the fraction of decisions selecting the largest available step budget. This comparison motivates the design of C OFLOW , which selects an input-dependent step budget and then executes the corresponding solver schedule rather than selecting a high-step trajectory and subsequently removing intermediate evaluations. 
+
+A.9 Performance Across Solver Families 
+
+In Table 13, we evaluate C OFLOW across a diverse set of numerical solvers on the Stable Diffusion XL [38] backbone, including deterministic and stochastic variants, as well as first-order, second-order, and multistep integration schemes. We first report baseline performance under a fixed discretization budget (50 steps) to establish a consistent comparison across solvers. We then apply C OFLOW as an adaptive inference controller that selects a reduced, input-dependent number of steps while preserving the original solver dynamics. Across all solver families, C OFLOW achieves a consistent reduction in the number of function evaluations (NFEs) by approximately 2.5×, while maintaining competitive performance in both semantic alignment (GenEval) and perceptual quality (IQA). Notably, the relative ranking of solvers remains largely unchanged after applying C OFLOW , indicating that our method operates orthogonally to the choice of numerical solver. We also observe mild solver-dependent sensitivity to step reduction: multistep methods (e.g., DPM++ variants) exhibit slightly larger degradation in GenEval, likely due to their reliance on historical trajectory information, whereas higher-order solvers such as Heun demonstrate greater robustness under reduced discretization. Overall, these results highlight that C OFLOW provides a general, plug-and-play acceleration mechanism that is compatible with a wide range of solvers, enabling substantial speedups without sacrificing generation fidelity. 
+
+## B Context Features 
+
+We construct a context vector φ(x) ∈ Rd from complementary semantic, compositional, and structural properties of the input prompt. The representation combines a MiniLM sentence embedding with lightweight handcrafted features, providing input-dependent information to the contextual bandit while introducing minimal computational overhead. The individual handcrafted features are summarized in Table 14. 
+
+Feature Design: The handcrafted features capture complementary surface-level properties of the prompt that may provide useful cues for adaptive step selection: 19 Policy Reward ↑ NFE ↓ Max-step rate Action entropy ↑                
+
+> Greedy 0.541 ±0.011 39 .6±1.263 .4% 1.21
+> NeuralUCB 0.582 ±0.008 37 .5±0.849 .7% 1.54
+
+Table 9: Effect of UCB exploration. NeuralUCB is compared with an otherwise identical online greedy policy with the uncertainty bonus removed after initialization. We report mean ± standard deviation over three independent seeds. Action entropy denotes the entropy of the empirical distribu-tion of selected step budgets.                                               
+
+> Method Compositional Dimensions Overall Metrics SO TO CO CL CA PO Overall CLIPIQA NFE
+> Full Model
+> Full-10 0.99 0.79 0.37 0.88 0.21 0.15 0.57 0.72 10 Full-6 0.99 0.78 0.36 0.86 0.20 0.15 0.55 0.68 6Full-3 0.98 0.75 0.29 0.85 0.18 0.12 0.52 0.62 3
+> Ours
+> Ours-UCB 0.99 0.79 0.35 0.87 0.20 0.13 0.55 0.70 5.1
+
+Table 10: Comparison under low-step regimes where the PeRFlow model, which is trained for low step generation within 5, 8, 10 steps, where our method further improves this method by making the choice of number of steps adaptive. Our method achieves competitive performance while reducing the number of function evaluations (NFE). • Compositional scale: Word count captures prompt length and provides a lightweight cue for the amount of compositional information present. • Semantic richness: Subword type-token ratio (TTR), mean word length, and syllable complexity capture lexical diversity and linguistic specificity. • Entities and attributes: Object and attribute densities are obtained using lightweight part-of-speech tagging and provide cues about the presence of nouns and descriptive constraints. • Numerical constraints: The fraction of words containing digits captures explicit numerical or counting information. • Structural information: Punctuation density provides a lightweight description of prompt structure, including clauses, lists, and multi-part instructions. 
+
+Normalization: All features are normalized to the range [0 , 1] to ensure consistent scaling across different dimensions. This prevents any single feature from dominating the representation and stabilizes learning in the bandit model. 
+
+Efficiency: The proposed feature set is intentionally lightweight. All statistics are computed in linear time with respect to the prompt length, and POS-based features are extracted using a small, off-the-shelf tagger. In practice, this incurs only a few milliseconds of overhead per prompt, which is negligible compared to the cost of generative inference. 
+
+B.1 Choice of Context Representation as MiniLM 
+
+A key component of our approach is the construction of a lightweight yet expressive context represen-tation for each prompt. We employ a pretrained SentenceTransformer (all-MiniLM-L6-v2) to obtain semantic embeddings, which are combined with handcrafted complexity features. 
+
+Why SentenceTransformer (MiniLM)? We use all-MiniLM-L6-v2 as a compact semantic rep-resentation of the prompt. Its sentence-level embeddings complement the handcrafted lexical and structural features by encoding higher-level semantic information while remaining inexpensive to compute. Its compact representation is particularly suitable for the lightweight contextual decision module used by C OFLOW .20 Direct Reduction to 25 steps Trajectory Truncation forced to 25 steps Figure 8: Direct step reduction vs. trajectory truncation. Direct reduction generates with a timestep schedule constructed for the reduced step budget, whereas trajectory truncation obtains a comparable computational reduction by skipping intermediate evaluations from a higher-step trajectory.                                 
+
+> Method GenEval ↑CLIP-IQA ↑NFE ↓Time ↓
+> Baseline Methods
+> TeaCache 0.74 0.59 29.4 45.8 FastFlow 0.75 0.59 20.9 32.9 FlowCast 0.76 0.60 21.5 34.2
+> With Ours (Adaptive Step Selection)
+> TeaCache + Ours 0.71 0.55 16.8 25.7 FastFlow + Ours 0.73 0.59 16.0 24.5
+> FlowCast + Ours 0.75 0.59 –26.3
+
+Table 11: Combination with existing acceleration methods on BAGEL. Adaptive step-budget selection can be applied together with TeaCache, FastFlow, and FlowCast, providing additional runtime reductions with method-dependent changes in generation quality. 
+
+Why not use the model’s native text encoder? An alternative is to use the prompt encoder from the underlying generative model. However, we avoid this as it produces high-dimensional representations, leading to significantly larger input sizes for the bandit. This increases both computational cost and training instability, making it less suitable for a lightweight, real-time decision module. In contrast, our use of an external, pretrained sentence encoder provides a model-agnostic and reusable representation that generalizes across different generative backbones (e.g., BAGEL, FLUX) without modification. Overall, this design yields a compact, semantically meaningful, and model-agnostic context representation that is suited for adaptive decision-making under strict efficiency constraints. 21 Hyperparameter FLUX BAGEL Generation Editing Generation Editing 
+
+Image resolution 1360 × 768 – 1024 × 1024 –Guidance scale 2.5 2.5 4.0 4.0
+
+Guidance rescale 0 0 1.0 2.0
+
+μ 150 160 150 160 
+
+CFG interval – – [0 .4, 1.0] [0 .0, 1.0] 
+
+Timestep shift – – 3 3
+
+CFG renorm min – – 0 0
+
+CFG renorm type – – global text-channel Arms {10 , 15 , 20 , . . . , 50 } Same as FLUX 
+
+Table 12: Hyperparameter settings for FLUX and BAGEL across generation and editing tasks. 
+
+Method Characteristics GenEval IQA NFE 
+
+Base Solvers (50 Steps) 
+
+Euler Deterministic, 1st-order 0.60 0.71 50 Euler-anc Stochastic, 1st-order 0.57 0.72 50 DPM++2M Deterministic, multistep 0.59 0.70 50 DPM++2S-anc Stochastic, multistep 0.57 0.71 50 Heun Deterministic, 2nd-order 0.59 0.70 50 LMS Deterministic, multistep 0.58 0.56 50 
+
+CoFlow (Adaptive Steps) 
+
+CoFlow-Euler Deterministic, 1st-order 0.59 0.70 19.4 CoFlow-Euler-anc Stochastic, 1st-order 0.56 0.68 18.9 CoFlow-DPM++2M Deterministic, multistep 0.57 0.68 18.5 CoFlow-DPM++2S-anc Stochastic, multistep 0.55 0.70 18.3 CoFlow-Heun Deterministic, 2nd-order 0.59 0.68 19.8 CoFlow-LMS Deterministic, multistep 0.57 0.54 19.1 
+
+Table 13: Comparison across solver families on a Stable Diffusion backbone. We categorize solvers by stochasticity and numerical integration type. CoFlow consistently reduces the number of function evaluations (NFE) by ∼2.5 × while maintaining comparable generation quality. 22 Feature Definition Description 
+
+Word count min   #words  
+
+> 50
+
+, 1 Captures prompt length and composi-tional richness. Longer prompts typi-cally involve more entities, relations, or attributes, increasing reasoning complex-ity. Subword diversity (TTR) |unique tokens | 
+
+> #tokens
+
+Measures lexical diversity. Higher di-versity indicates richer semantics and re-duced redundancy, often correlating with more complex generation requirements. Mean word length min 
+
+ 110 · P |w| 
+
+> #words
+
+, 1
+
+
+
+Acts as a proxy for linguistic specificity. Longer words often correspond to more descriptive or specialized concepts. Numeric fraction #words containing digits  
+
+> #words
+
+Captures numerical constraints (e.g., counts or quantities), which increase com-positional difficulty and require precise control in generation. Object density (POS-based) min 
+
+ #nouns  
+
+> #words
+
+, 1
+
+
+
+Measures the number of entities in the prompt. Higher density implies more ob-jects and interactions, increasing spatial and compositional complexity. Attribute density (POS-based) min 
+
+ #adjectives  
+
+> #words
+
+, 1
+
+
+
+Captures descriptive richness. More attributes introduce finer-grained con-straints (e.g., color, size), making genera-tion more demanding. Punctuation density min 
+
+ #punctuation  
+
+> 2·#words
+
+, 1
+
+
+
+Reflects structural complexity such as clauses or multi-part instructions. Higher density often corresponds to more intri-cate prompt structure. Syllable complexity min   avg syllables per word  
+
+> 4
+
+, 1 Approximates linguistic complexity and descriptiveness. Higher syllable counts correlate with more detailed or specialized language. 
+
+Table 14: Handcrafted prompt features used alongside MiniLM embeddings to construct the context vector φ(x). The features provide lightweight compositional, lexical, numerical, and structural cues for contextual step selection. 23 NeurIPS Paper Checklist 
+
+1. Claims 
+
+Question: Do the main claims made in the abstract and introduction accurately reflect the paper’s contributions and scope? Answer: [Yes] Justification: Yes, the main claims in the abstract and introduction accurately reflect the paper’s contribution and scope. Guidelines: • The answer [N/A] means that the abstract and introduction do not include the claims made in the paper. • The abstract and/or introduction should clearly state the claims made, including the contributions made in the paper and important assumptions and limitations. A [No] or [N/A] answer to this question will not be perceived well by the reviewers. • The claims made should match theoretical and experimental results, and reflect how much the results can be expected to generalize to other settings. • It is fine to include aspirational goals as motivation as long as it is clear that these goals are not attained by the paper. 2. Limitations 
+
+Question: Does the paper discuss the limitations of the work performed by the authors? Answer: [Yes] Justification: Added the limitation of our work in 4.1 Guidelines: • The answer [N/A] means that the paper has no limitation while the answer [No] means that the paper has limitations, but those are not discussed in the paper. • The authors are encouraged to create a separate “Limitations” section in their paper. • The paper should point out any strong assumptions and how robust the results are to violations of these assumptions (e.g., independence assumptions, noiseless settings, model well-specification, asymptotic approximations only holding locally). The authors should reflect on how these assumptions might be violated in practice and what the implications would be. • The authors should reflect on the scope of the claims made, e.g., if the approach was only tested on a few datasets or with a few runs. In general, empirical results often depend on implicit assumptions, which should be articulated. • The authors should reflect on the factors that influence the performance of the approach. For example, a facial recognition algorithm may perform poorly when image resolution is low or images are taken in low lighting. Or a speech-to-text system might not be used reliably to provide closed captions for online lectures because it fails to handle technical jargon. • The authors should discuss the computational efficiency of the proposed algorithms and how they scale with dataset size. • If applicable, the authors should discuss possible limitations of their approach to address problems of privacy and fairness. • While the authors might fear that complete honesty about limitations might be used by reviewers as grounds for rejection, a worse outcome might be that reviewers discover limitations that aren’t acknowledged in the paper. The authors should use their best judgment and recognize that individual actions in favor of transparency play an impor-tant role in developing norms that preserve the integrity of the community. Reviewers will be specifically instructed to not penalize honesty concerning limitations. 3. Theory assumptions and proofs 
+
+Question: For each theoretical result, does the paper provide the full set of assumptions and a complete (and correct) proof? Answer: [Yes] 24 Justification: In the Appendix A.1, we add the proof of Theorem 1. Guidelines: • The answer [N/A] means that the paper does not include theoretical results. • All the theorems, formulas, and proofs in the paper should be numbered and cross-referenced. • All assumptions should be clearly stated or referenced in the statement of any theorems. • The proofs can either appear in the main paper or the supplemental material, but if they appear in the supplemental material, the authors are encouraged to provide a short proof sketch to provide intuition. • Inversely, any informal proof provided in the core of the paper should be complemented by formal proofs provided in appendix or supplemental material. • Theorems and Lemmas that the proof relies upon should be properly referenced. 4. Experimental result reproducibility 
+
+Question: Does the paper fully disclose all the information needed to reproduce the main ex-perimental results of the paper to the extent that it affects the main claims and/or conclusions of the paper (regardless of whether the code and data are provided or not)? Answer: [Yes] Justification: We provided the source code in the abstract, all the hyperparameter details in 12 to reproduce the results. Guidelines: • The answer [N/A] means that the paper does not include experiments. • If the paper includes experiments, a [No] answer to this question will not be perceived well by the reviewers: Making the paper reproducible is important, regardless of whether the code and data are provided or not. • If the contribution is a dataset and/or model, the authors should describe the steps taken to make their results reproducible or verifiable. • Depending on the contribution, reproducibility can be accomplished in various ways. For example, if the contribution is a novel architecture, describing the architecture fully might suffice, or if the contribution is a specific model and empirical evaluation, it may be necessary to either make it possible for others to replicate the model with the same dataset, or provide access to the model. In general. releasing code and data is often one good way to accomplish this, but reproducibility can also be provided via detailed instructions for how to replicate the results, access to a hosted model (e.g., in the case of a large language model), releasing of a model checkpoint, or other means that are appropriate to the research performed. • While NeurIPS does not require releasing code, the conference does require all submis-sions to provide some reasonable avenue for reproducibility, which may depend on the nature of the contribution. For example (a) If the contribution is primarily a new algorithm, the paper should make it clear how to reproduce that algorithm. (b) If the contribution is primarily a new model architecture, the paper should describe the architecture clearly and fully. (c) If the contribution is a new model (e.g., a large language model), then there should either be a way to access this model for reproducing the results or a way to reproduce the model (e.g., with an open-source dataset or instructions for how to construct the dataset). (d) We recognize that reproducibility may be tricky in some cases, in which case authors are welcome to describe the particular way they provide for reproducibility. In the case of closed-source models, it may be that access to the model is limited in some way (e.g., to registered users), but it should be possible for other researchers to have some path to reproducing or verifying the results. 5. Open access to data and code 
+
+Question: Does the paper provide open access to the data and code, with sufficient instruc-tions to faithfully reproduce the main experimental results, as described in supplemental material? 25 Answer: [Yes] Justification: We provide an anonymized repository for the source code to reproduce the experimental results. The link of the repository is provided in the abstract of the paper. Guidelines: • The answer [N/A] means that paper does not include experiments requiring code. • Please see the NeurIPS code and data submission guidelines ( https://neurips. cc/public/guides/CodeSubmissionPolicy ) for more details. • While we encourage the release of code and data, we understand that this might not be possible, so [No] is an acceptable answer. Papers cannot be rejected simply for not including code, unless this is central to the contribution (e.g., for a new open-source benchmark). • The instructions should contain the exact command and environment needed to run to reproduce the results. See the NeurIPS code and data submission guidelines ( https: //neurips.cc/public/guides/CodeSubmissionPolicy ) for more de-tails. • The authors should provide instructions on data access and preparation, including how to access the raw data, preprocessed data, intermediate data, and generated data, etc. • The authors should provide scripts to reproduce all experimental results for the new proposed method and baselines. If only a subset of experiments are reproducible, they should state which ones are omitted from the script and why. • At submission time, to preserve anonymity, the authors should release anonymized versions (if applicable). • Providing as much information as possible in supplemental material (appended to the paper) is recommended, but including URLs to data and code is permitted. 6. Experimental setting/details 
+
+Question: Does the paper specify all the training and test details (e.g., data splits, hyperpa-rameters, how they were chosen, type of optimizer) necessary to understand the results? Answer: [Yes] Justification: Our method is fully inference time, so no train splits are present, and we provide all hyperparameter settings in Table 12 and in the experimental section 4 Guidelines: • The answer [N/A] means that the paper does not include experiments. • The experimental setting should be presented in the core of the paper to a level of detail that is necessary to appreciate the results and make sense of them. • The full details can be provided either with the code, in appendix, or as supplemental material. 7. Experiment statistical significance 
+
+Question: Does the paper report error bars suitably and correctly defined or other appropriate information about the statistical significance of the experiments? Answer: [No] Justification: Consistent with prior work in visual generation, evaluation is primarily based on standard benchmark metrics and qualitative comparisons. Guidelines: • The answer [N/A] means that the paper does not include experiments. • The authors should answer [Yes] if the results are accompanied by error bars, confidence intervals, or statistical significance tests, at least for the experiments that support the main claims of the paper. • The factors of variability that the error bars are capturing should be clearly stated (for example, train/test split, initialization, random drawing of some parameter, or overall run with given experimental conditions). • The method for calculating the error bars should be explained (closed form formula, call to a library function, bootstrap, etc.) 26 • The assumptions made should be given (e.g., Normally distributed errors). • It should be clear whether the error bar is the standard deviation or the standard error of the mean. • It is OK to report 1-sigma error bars, but one should state it. The authors should preferably report a 2-sigma error bar than state that they have a 96% CI, if the hypothesis of Normality of errors is not verified. • For asymmetric distributions, the authors should be careful not to show in tables or figures symmetric error bars that would yield results that are out of range (e.g., negative error rates). • If error bars are reported in tables or plots, the authors should explain in the text how they were calculated and reference the corresponding figures or tables in the text. 8. Experiments compute resources 
+
+Question: For each experiment, does the paper provide sufficient information on the com-puter resources (type of compute workers, memory, time of execution) needed to reproduce the experiments? Answer: [Yes] Justification: In the experimental section 4, we provide the compute resources used and the time for running experiments is discussed in all the result tables, as our method works on inference time reduction. Guidelines: • The answer [N/A] means that the paper does not include experiments. • The paper should indicate the type of compute workers CPU or GPU, internal cluster, or cloud provider, including relevant memory and storage. • The paper should provide the amount of compute required for each of the individual experimental runs as well as estimate the total compute. • The paper should disclose whether the full research project required more compute than the experiments reported in the paper (e.g., preliminary or failed experiments that didn’t make it into the paper). 9. Code of ethics 
+
+Question: Does the research conducted in the paper conform, in every respect, with the NeurIPS Code of Ethics https://neurips.cc/public/EthicsGuidelines ?Answer: [Yes] Justification: Our paper conforms, in every aspect, with NeurIPS Code of Ethics. Guidelines: • The answer [N/A] means that the authors have not reviewed the NeurIPS Code of Ethics. • If the authors answer [No], they should explain the special circumstances that require a deviation from the Code of Ethics. • The authors should make sure to preserve anonymity (e.g., if there is a special consid-eration due to laws or regulations in their jurisdiction). 10. Broader impacts 
+
+Question: Does the paper discuss both potential positive societal impacts and negative societal impacts of the work performed? Answer: [N/A] Justification: Our work is focused on inference time speedup of existing methods, hence it does not have any societal impact. Guidelines: • The answer [N/A] means that there is no societal impact of the work performed. • If the authors answer [N/A] or [No], they should explain why their work has no societal impact or why the paper does not address societal impact. 27 • Examples of negative societal impacts include potential malicious or unintended uses (e.g., disinformation, generating fake profiles, surveillance), fairness considerations (e.g., deployment of technologies that could make decisions that unfairly impact specific groups), privacy considerations, and security considerations. • The conference expects that many papers will be foundational research and not tied to particular applications, let alone deployments. However, if there is a direct path to any negative applications, the authors should point it out. For example, it is legitimate to point out that an improvement in the quality of generative models could be used to generate Deepfakes for disinformation. On the other hand, it is not needed to point out that a generic algorithm for optimizing neural networks could enable people to train models that generate Deepfakes faster. • The authors should consider possible harms that could arise when the technology is being used as intended and functioning correctly, harms that could arise when the technology is being used as intended but gives incorrect results, and harms following from (intentional or unintentional) misuse of the technology. • If there are negative societal impacts, the authors could also discuss possible mitigation strategies (e.g., gated release of models, providing defenses in addition to attacks, mechanisms for monitoring misuse, mechanisms to monitor how a system learns from feedback over time, improving the efficiency and accessibility of ML). 11. Safeguards 
+
+Question: Does the paper describe safeguards that have been put in place for responsible release of data or models that have a high risk for misuse (e.g., pre-trained language models, image generators, or scraped datasets)? Answer: [N/A] Justification: As our method is an inference-time speedup method, we do not require any additional safeguards to be put. Guidelines: • The answer [N/A] means that the paper poses no such risks. • Released models that have a high risk for misuse or dual-use should be released with necessary safeguards to allow for controlled use of the model, for example by requiring that users adhere to usage guidelines or restrictions to access the model or implementing safety filters. • Datasets that have been scraped from the Internet could pose safety risks. The authors should describe how they avoided releasing unsafe images. • We recognize that providing effective safeguards is challenging, and many papers do not require this, but we encourage authors to take this into account and make a best faith effort. 12. Licenses for existing assets 
+
+Question: Are the creators or original owners of assets (e.g., code, data, models), used in the paper, properly credited and are the license and terms of use explicitly mentioned and properly respected? Answer: [Yes] Justification: We use some of the existing models in the visual generation domain, and we have properly cited them and adhered to their terms of use. Guidelines: • The answer [N/A] means that the paper does not use existing assets. • The authors should cite the original paper that produced the code package or dataset. • The authors should state which version of the asset is used and, if possible, include a URL. • The name of the license (e.g., CC-BY 4.0) should be included for each asset. • For scraped data from a particular source (e.g., website), the copyright and terms of service of that source should be provided. 28 • If assets are released, the license, copyright information, and terms of use in the package should be provided. For popular datasets, paperswithcode.com/datasets has curated licenses for some datasets. Their licensing guide can help determine the license of a dataset. • For existing datasets that are re-packaged, both the original license and the license of the derived asset (if it has changed) should be provided. • If this information is not available online, the authors are encouraged to reach out to the asset’s creators. 13. New assets 
+
+Question: Are new assets introduced in the paper well documented and is the documentation provided alongside the assets? Answer: [N/A] Justification: We do not provide any new assets. Guidelines: • The answer [N/A] means that the paper does not release new assets. • Researchers should communicate the details of the dataset/code/model as part of their submissions via structured templates. This includes details about training, license, limitations, etc. • The paper should discuss whether and how consent was obtained from people whose asset is used. • At submission time, remember to anonymize your assets (if applicable). You can either create an anonymized URL or include an anonymized zip file. 14. Crowdsourcing and research with human subjects 
+
+Question: For crowdsourcing experiments and research with human subjects, does the paper include the full text of instructions given to participants and screenshots, if applicable, as well as details about compensation (if any)? Answer: [N/A] Justification: There are no crowdsourcing experiments in our work. Guidelines: • The answer [N/A] means that the paper does not involve crowdsourcing nor research with human subjects. • Including this information in the supplemental material is fine, but if the main contribu-tion of the paper involves human subjects, then as much detail as possible should be included in the main paper. • According to the NeurIPS Code of Ethics, workers involved in data collection, curation, or other labor should be paid at least the minimum wage in the country of the data collector. 15. Institutional review board (IRB) approvals or equivalent for research with human subjects 
+
+Question: Does the paper describe potential risks incurred by study participants, whether such risks were disclosed to the subjects, and whether Institutional Review Board (IRB) approvals (or an equivalent approval/review based on the requirements of your country or institution) were obtained? Answer: [N/A] Justification: There are no potential risks of our work. Our work is focused on inference time speedup. Guidelines: • The answer [N/A] means that the paper does not involve crowdsourcing nor research with human subjects. • Depending on the country in which research is conducted, IRB approval (or equivalent) may be required for any human subjects research. If you obtained IRB approval, you should clearly state this in the paper. 29 • We recognize that the procedures for this may vary significantly between institutions and locations, and we expect authors to adhere to the NeurIPS Code of Ethics and the guidelines for their institution. • For initial submissions, do not include any information that would break anonymity (if applicable), such as the institution conducting the review. 16. Declaration of LLM usage 
+
+Question: Does the paper describe the usage of LLMs if it is an important, original, or non-standard component of the core methods in this research? Note that if the LLM is used only for writing, editing, or formatting purposes and does not impact the core methodology, scientific rigor, or originality of the research, declaration is not required. Answer: [N/A] Justification: We use the LLM only for editing and formatting. Guidelines: • The answer [N/A] means that the core method development in this research does not involve LLMs as any important, original, or non-standard components. • Please refer to our LLM policy in the NeurIPS handbook for what should or should not be described. 30

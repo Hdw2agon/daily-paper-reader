@@ -6,38 +6,44 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-10-11
-- 运行时间：2026-10-11 22:18:56 UTC
+- 最新运行日期：2026-10-13
+- 运行时间：2026-10-13 01:04:08 UTC
 - 运行状态：成功
-- 本次总论文数：5
+- 本次总论文数：7
 - 精读区：0
-- 速读区：5
+- 速读区：7
 
 ### 今日简报（AI）
-今日速读 5 篇前沿论文，涵盖多区域风格化、图像篡改定位及 4D 生成技术。
-重点关注基于内部引导的边界修复与成对编辑关系在图像取证中的应用，这些方法有效提升了视觉生成的精细度。
-建议优先关注图像风格化与 4D 生成的最新进展，以了解 AI 在复杂视觉任务中的边界处理能力。
-- 详情：[/202610/11/README](/202610/11/README)
+今日速读 7 篇前沿论文，涵盖反问题求解、遥感超分及图像本征分解等视觉领域。
+重点关注 Twist Flow 在反问题中的应用，以及多尺度对象中心化（MOSAIC）在遥感图像超分中的性能提升。
+建议优先关注图像生成与底层视觉任务的结合趋势，通过对比不同架构的适应性来深化对模型泛化能力的理解。
+- 详情：[/202610/13/README](/202610/13/README)
 
 ### 精读区论文标签
 - 本次无精读推荐。
 
 ### 速读区论文标签
-1. [Enhancing Multi-Region Stylization with Interior-Guided Boundary Repair](/202610/11/2610.09706v1-enhancing-multi-region-stylization-with-interior-guided-boundary-repair)  
-   标签：评分：7.0/10、query:q1
-   evidence：使用内部引导传播修复边界像素以进行图像补全
-2. [Can We Model the Artifacts Explicitly? Disentangle Artifacts via Pairwise Edit Relations for Image Manipulation Localization](/202610/11/2610.07916v1-can-we-model-the-artifacts-explicitly-disentangle-artifacts-via-pairwise-edit-relations-for-image-manipulation-localization)  
-   标签：评分：6.0/10、query:q3
-   evidence：无直接标签的图像篡改显式伪影建模
-3. [MATE4D: Matrix-Guided Editable 4D Generation from a Single Image](/202610/11/2610.11181v1-mate4d-matrix-guided-editable-4d-generation-from-a-single-image)  
+1. [Twist Flow for Inverse Problems](/202610/13/2610.09281v1-twist-flow-for-inverse-problems)  
+   标签：评分：7.0/10、query:q4
+   evidence：用于包括图像补全在内的逆问题的生成模型
+2. [MOSAIC: Multi-Scale Object-Centric Slot Adaptation with Image-Guided Prototype Conditioning for Remote Sensing Image Super-Resolution](/202610/13/2610.13547v1-mosaic-multi-scale-object-centric-slot-adaptation-with-image-guided-prototype-conditioning-for-remote-sensing-image-super-resolution)  
+   标签：评分：7.0/10、query:q4
+   evidence：用于图像修复的生成先验和以对象为中心的表示学习
+3. [IntrinSync: Joint Intrinsic Decomposition and Reciprocal Rendering](/202610/13/2610.11138v1-intrinsync-joint-intrinsic-decomposition-and-reciprocal-rendering)  
+   标签：评分：6.0/10、query:q7
+   evidence：联合内在分解与相互渲染用于修复
+4. [GenIA: Generative Reconstruction with Test-Time Input Alignment](/202610/13/2610.12388v1-genia-generative-reconstruction-with-test-time-input-alignment)  
    标签：评分：6.0/10、query:q4
-   evidence：动态场景合成与背景处理的生成模型
-4. [GATOR: Generative and Agentic 3D Object Reconstruction From Casual Images](/202610/11/2610.11215v1-gator-generative-and-agentic-3d-object-reconstruction-from-casual-images)  
+   evidence：用于补全物体几何形状的生成式3D基础模型
+5. [UniDeblur: Unified Motion Deblurring via Fourier Convolution Learning](/202610/13/2610.12941v1-unideblur-unified-motion-deblurring-via-fourier-convolution-learning)  
+   标签：评分：6.0/10、query:q7
+   evidence：统一运动去模糊与图像修复
+6. [Learning Representations to Guide Pixel Diffusion Transformers](/202610/13/2610.12978v1-learning-representations-to-guide-pixel-diffusion-transformers)  
    标签：评分：6.0/10、query:q4
-   evidence：被遮挡3D表面的生成式重建
-5. [LVS: Local View Synthesis from Relative Camera Pose by Reusing Previous Views](/202610/11/2610.12127v1-lvs-local-view-synthesis-from-relative-camera-pose-by-reusing-previous-views)  
-   标签：评分：6.0/10、query:q1
-   evidence：在视图合成中推断缺失的外观
+   evidence：像素扩散Transformer生成模型的表示引导
+7. [State-Isolated Vision Mamba via Update-Tendency Routing for Underwater Image Enhancement](/202610/13/2610.13720v1-state-isolated-vision-mamba-via-update-tendency-routing-for-underwater-image-enhancement)  
+   标签：评分：6.0/10、query:q7
+   evidence：用于视觉修复的循环建模
 
 
 <div class="dpr-home-promo-card">
